@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+logs/
+# 实际使用的配置可能含密钥，模板文件 config.example.yaml 保留
+config.yaml
+uv.lock
+
+*.exe
+build/task-arranger

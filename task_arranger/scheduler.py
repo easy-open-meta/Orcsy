@@ -1,0 +1,162 @@
+"""调度器：按配置周期驱动各项目的 Agent 扫描任务。
+
+多 Agent 支持：
+- 串行模式（max_parallel_agents=1）：一轮里逐个项目执行，稳定省资源；
+- 并行模式（max_parallel_agents>1）：用线程池同时驱动多个项目的 Agent，
+  每个项目仍是一个独立 Agent，互不干扰（各自有独立的 worktree 与对话历史）。
+
+线程安全：run_cycle() 由周期线程与 Web 手动触发共用，全局互斥（同一时刻只有
+一轮扫描在执行）；运行状态（is_running / last_cycle 等）供 Web 看板查询。
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from .agent import ProjectAgent
+from .config import AppConfig
+from .logging_setup import get_logger
+
+log = get_logger("scheduler")
+
+
+def _now_str() -> str:
+    return _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+class Scheduler:
+    def __init__(self, config: AppConfig) -> None:
+        self.config = config
+        self.agents = [
+            ProjectAgent(p, config.llm)
+            for p in config.projects
+            if p.enabled
+        ]
+        if not self.agents:
+            log.warning("配置中没有启用的项目")
+        self._cycle_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self.is_running = False          # 当前是否有一轮扫描在执行
+        self.last_cycle_stats: dict[str, int] = {}
+        self.last_cycle_at: str = ""
+        self.next_cycle_at: str = ""
+        self.cycles_done: int = 0
+
+    # ---- 状态查询（供 Web 看板） ----
+
+    def status(self) -> dict:
+        return {
+            "running": self.is_running,
+            "cycles_done": self.cycles_done,
+            "last_cycle_at": self.last_cycle_at,
+            "next_cycle_at": self.next_cycle_at,
+            "interval_seconds": max(30, self.config.scheduler.interval_seconds),
+            "last_cycle_stats": self.last_cycle_stats,
+        }
+
+    # ---- 配置热重载（Web 修改配置/项目后调用） ----
+
+    def reload_config(self, new_config: AppConfig) -> None:
+        """用新配置重建 Agent 列表。正在执行的一轮跑完前不重建（锁保护）。"""
+        with self._cycle_lock:
+            self.config = new_config
+            self.agents = [
+                ProjectAgent(p, new_config.llm)
+                for p in new_config.projects
+                if p.enabled
+            ]
+        log.info("配置已热重载：%d 个启用项目", len(self.agents))
+
+    # ---- 单轮 ----
+
+    def run_cycle(self) -> dict[str, int]:
+        """执行一轮扫描，返回 {项目名: 本轮处理任务数}。
+
+        已有一轮在执行时直接返回空结果（不排队，避免任务重复领取）。
+        """
+        if not self._cycle_lock.acquire(blocking=False):
+            log.warning("上一轮扫描尚未结束，跳过本轮触发")
+            return {}
+        self.is_running = True
+        try:
+            log.info("========== 调度周期开始 ==========")
+            stats: dict[str, int] = {}
+            max_parallel = max(1, self.config.scheduler.max_parallel_agents)
+
+            if max_parallel == 1 or len(self.agents) == 1:
+                for agent in self.agents:
+                    stats[agent.project.name] = self._run_agent(agent)
+            else:
+                stats = self._run_parallel(max_parallel)
+
+            self.last_cycle_stats = stats
+            self.last_cycle_at = _now_str()
+            self.cycles_done += 1
+            log.info("========== 调度周期结束：%s ==========", stats or "无任务处理")
+            return stats
+        finally:
+            self.is_running = False
+            self._cycle_lock.release()
+
+    def _run_agent(self, agent: ProjectAgent) -> int:
+        try:
+            results = agent.scan_and_work()
+            return len(results)
+        except Exception:  # noqa: BLE001 — 单项目异常不能拖垮整体调度
+            agent.log.exception("项目 Agent 本轮执行异常")
+            return 0
+
+    def _run_parallel(self, max_parallel: int) -> dict[str, int]:
+        stats: dict[str, int] = {}
+        with ThreadPoolExecutor(max_workers=max_parallel) as pool:
+            futures = {pool.submit(self._run_agent, agent): agent for agent in self.agents}
+            for future in as_completed(futures):
+                agent = futures[future]
+                try:
+                    stats[agent.project.name] = future.result()
+                except Exception:  # noqa: BLE001
+                    agent.log.exception("并行执行异常")
+                    stats[agent.project.name] = 0
+        return stats
+
+    # ---- 持续循环（后台线程模式，供 Web 服务调用） ----
+
+    def run_forever_background(self) -> threading.Thread:
+        t = threading.Thread(target=self._loop, name="scheduler-loop", daemon=True)
+        t.start()
+        return t
+
+    def _loop(self) -> None:
+        interval = max(30, self.config.scheduler.interval_seconds)
+        log.info("调度循环启动：每 %d 秒扫描 %d 个项目", interval, len(self.agents))
+        while not self._stop_event.is_set():
+            self.run_cycle()
+            # 分片等待，期间响应配置变更（间隔变短能提前醒来）与 stop
+            waited = 0.0
+            interval = max(30, self.config.scheduler.interval_seconds)
+            while waited < interval and not self._stop_event.is_set():
+                step = min(1.0, interval - waited)
+                self._stop_event.wait(step)
+                waited += step
+                interval = max(30, self.config.scheduler.interval_seconds)
+            if not self._stop_event.is_set():
+                self.next_cycle_at = _dt.datetime.now().strftime("%H:%M:%S")
+        log.info("调度循环已退出")
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    # ---- 前台阻塞模式（CLI run 命令） ----
+
+    def run_forever(self) -> None:
+        log.info(
+            "进入持续调度：每 %d 秒扫描 %d 个项目（Ctrl+C 退出）",
+            max(30, self.config.scheduler.interval_seconds), len(self.agents),
+        )
+        try:
+            self._loop()
+        except KeyboardInterrupt:
+            log.info("收到退出信号，调度器停止")
