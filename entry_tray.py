@@ -1,7 +1,8 @@
 """托盘版入口（windowed 打包，无控制台窗口）。
 
-与 console 版同一套 CLI；--tray 参数启动系统托盘模式。
-冻结环境下把模板与看板页面定位到 _MEIPASS。
+与 console 版同一套 CLI；托盘图标由 cmd_web 默认启动（后台线程，
+与控制台版行为一致），--tray 参数仅为自启动注册表兼容保留。
+冻结环境下把模板目录定位到 _MEIPASS。
 """
 
 import sys
@@ -9,7 +10,7 @@ from pathlib import Path
 
 import task_arranger.templates as _tpl
 
-_bundled = Path(getattr(sys, "_MEIPASS", ".")) / "task_arranger"
+_bundled = Path(getattr(sys, "_MEIPASS", ".")) / "task_arranger" / "templates"
 if _bundled.is_dir():
     _tpl.TEMPLATES_DIR = _bundled
 

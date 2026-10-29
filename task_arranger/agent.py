@@ -16,7 +16,7 @@ from pathlib import Path
 from .config import ProjectConfig
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
-from .task_model import Task, scan_tasks
+from .task_model import Task, _parse_frontmatter, append_progress, scan_tasks, set_task_file_status
 
 DEFAULT_GUIDE = """\
 # 默认开发指引
@@ -38,6 +38,39 @@ _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 
 def _now_str() -> str:
     return _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def recover_interrupted_tasks(project: ProjectConfig) -> list[str]:
+    """进程启动时恢复上次意外退出遗留的 in_progress 任务。
+
+    强杀/断电等场景下任务文件停在 in_progress，而扫描只认 open——不处理
+    就永远卡死。这里把遗留任务重置为 open 重新入队，并在「执行进度」节
+    写入中断说明（最后活动时间取自文件 mtime，即最后一次进度落盘时刻）。
+    返回被重置的任务 ID 列表。只在进程启动时调用一次（配置热重载不触发，
+    避免误伤正在执行中的任务）。
+    """
+    tasks_dir = project.path / project.tasks_dir
+    if not tasks_dir.is_dir():
+        return []
+    reset: list[str] = []
+    for path in sorted(tasks_dir.glob("*.md")):
+        try:
+            meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if str(meta.get("status") or "").strip().lower() != "in_progress":
+            continue
+        try:
+            last = _dt.datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        except OSError:
+            last = "未知时间"
+        append_progress(
+            path,
+            f"**进程意外退出，任务被中断**（最后活动 {last}）。"
+            "已重置为待办重新执行；git 项目 worktree 里未提交的改动会在下次执行时重置丢弃。")
+        if set_task_file_status(path, "open"):
+            reset.append(path.stem)
+    return reset
 
 
 class ProjectAgent:

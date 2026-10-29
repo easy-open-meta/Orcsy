@@ -2,6 +2,7 @@
 # PyInstaller spec：task-arranger 双产物
 #   dist/task-arranger-web.exe   console 版（web/run/init/validate）
 #   dist/task-arranger-tray.exe  windowed 托盘版（无黑窗口，开机自启用）
+# 版本资源来自 build/exe-version.txt（由 build/build.py 从 __version__ 生成）
 
 import os
 from pathlib import Path
@@ -29,6 +30,7 @@ def build(name, script, console):
         pyz, a.scripts, a.binaries, a.zipfiles, a.datas,
         name=name,
         icon='build/icon.ico',
+        version='build/exe-version.txt',
         console=console,
         upx=False,
     )

@@ -8,3 +8,8 @@ uv.lock
 
 *.exe
 build/task-arranger
+
+# 前端工程（Vue3 + Vite）
+dashboard/node_modules/
+dashboard/dist/
+.zcode/

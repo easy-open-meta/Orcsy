@@ -37,6 +37,9 @@ class LLMConfig:
     model: str = "gpt-4o-mini"
     temperature: float = 0.2
     max_tokens: int = 8192
+    # 模型上下文窗口（tokens）：看板选择模型时可自动填充；接近上限时
+    # Agent 循环会裁剪早期工具结果，避免长任务撞 400
+    max_context_tokens: int = 131072
     timeout_seconds: int = 300
 
 
@@ -95,6 +98,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         model=llm_raw.get("model", LLMConfig.model),
         temperature=float(llm_raw.get("temperature", 0.2)),
         max_tokens=int(llm_raw.get("max_tokens", 8192)),
+        max_context_tokens=int(llm_raw.get("max_context_tokens", 131072)),
         timeout_seconds=int(llm_raw.get("timeout_seconds", 300)),
     )
     if require_api_key and not llm.api_key:

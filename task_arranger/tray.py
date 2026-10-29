@@ -1,7 +1,10 @@
-"""系统托盘模式：看板服务在后台运行，托盘图标提供快捷操作。
+"""系统托盘图标：与控制台并存（由 cmd_web 放在后台线程启动）。
 
-菜单项：打开看板 / 立即扫描 / 开机自启动（勾选）/ 退出。
+菜单项：显示主界面 / 立即扫描 / 开机自启动（勾选）/ 退出。
 托盘图标状态：扫描执行中显示黄色点，空闲为默认蓝。
+退出统一路径：菜单「退出」调 server.shutdown() 唤醒主线程的
+serve_forever，由 cmd_web 的 _cleanup 统一收尾；Ctrl+C 退出时
+cmd_web 反向调 stop_tray() 摘掉图标。
 """
 
 from __future__ import annotations
@@ -14,8 +17,11 @@ from .logging_setup import get_logger
 
 log = get_logger("tray")
 
-# 托盘图标（生成自 build/icon 同款配色，内嵌 base64 避免 ICO 文件依赖）
+# 托盘图标（生成自 build/icon 同款配色，内嵌绘制避免 ICO 文件依赖）
 from PIL import Image, ImageDraw
+
+# 运行中的 pystray.Icon 引用（pystray 延迟导入，用 object 规避类型依赖）
+_ICON_HOLDER: dict[str, object] = {}
 
 _ICON_CACHE: dict[str, "Image.Image"] = {}
 
@@ -37,8 +43,23 @@ def _make_icon(running: bool = False) -> "Image.Image":
     return img
 
 
-def run_tray(state, scheduler, url: str) -> None:
-    """阻塞运行托盘图标循环（在主线程调用）。state/scheduler 供菜单操作。"""
+def stop_tray() -> None:
+    """从任意线程摘掉托盘图标（Ctrl+C 退出路径调用）。未启动时静默跳过。"""
+    icon = _ICON_HOLDER.get("icon")
+    if icon is None:
+        return
+    try:
+        icon.stop()
+    except Exception:  # noqa: BLE001 图标摘不掉不影响退出收尾
+        pass
+
+
+def run_tray(state, scheduler, url: str, server=None) -> None:
+    """阻塞运行托盘图标循环（由 cmd_web 放在后台线程调用）。
+
+    server 用于「退出」菜单：shutdown() 让主线程 serve_forever 返回，
+    收尾统一走 cmd_web 的 _cleanup，托盘不重复清理。
+    """
     import pystray
 
     from .autostart import is_enabled, toggle
@@ -57,11 +78,13 @@ def run_tray(state, scheduler, url: str) -> None:
     def quit_app(icon, item):
         log.info("托盘退出")
         icon.stop()
-        scheduler.stop()
-        # icon.run() 解除阻塞后，cmd_web 的 _cleanup 收尾（停 HTTP、收子进程）
+        if server is not None:
+            # 不能在图标线程直接等 shutdown()：主线程收尾时还要回到
+            # 这里处理消息循环，丢到独立线程唤醒即可
+            threading.Thread(target=server.shutdown, daemon=True).start()
 
     menu = pystray.Menu(
-        pystray.MenuItem("打开看板", open_dashboard, default=True),
+        pystray.MenuItem("显示主界面", open_dashboard, default=True),
         pystray.MenuItem("立即扫描", trigger_scan),
         pystray.MenuItem("开机自启动", toggle_autostart, checked=lambda item: is_enabled()),
         pystray.Menu.SEPARATOR,
@@ -69,13 +92,14 @@ def run_tray(state, scheduler, url: str) -> None:
     )
 
     icon = pystray.Icon("task-arranger", _make_icon(False), "任务编排系统", menu)
+    _ICON_HOLDER["icon"] = icon
 
     def _updater():
         """随调度状态换图标（执行中黄点）。"""
         import time
 
         last = None
-        while icon.visible or True:
+        while True:
             try:
                 running = scheduler.is_running
                 if running != last:
@@ -88,11 +112,5 @@ def run_tray(state, scheduler, url: str) -> None:
 
     threading.Thread(target=_updater, daemon=True).start()
 
-    def _open_on_start():
-        import time
-
-        time.sleep(1.0)
-        webbrowser.open(url)
-
-    threading.Thread(target=_open_on_start, daemon=True).start()
     icon.run()
+    _ICON_HOLDER.pop("icon", None)

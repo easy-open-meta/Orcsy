@@ -32,7 +32,7 @@ class FakeLLMClient:
     def reset(self, system_prompt: str) -> None:
         self.system_prompt = system_prompt
 
-    def run_task_loop(self, task_prompt, ctx, max_turns=40):
+    def run_task_loop(self, task_prompt, ctx, max_turns=40, on_progress=None):
         from task_arranger.tools import FinishSignal, dispatch_tool
 
         # 校验系统提示词里注入了 AGENT.md 指引
@@ -44,6 +44,8 @@ class FakeLLMClient:
             if name == "finish":
                 raise FinishSignal(args)
             out = dispatch_tool(ctx, name, json.dumps(args, ensure_ascii=False))
+            if on_progress is not None:
+                on_progress(f"第0轮 · {name} · 测试")
             print(f"  [tool] {name} {json.dumps(args, ensure_ascii=False)[:80]}")
             print(f"         -> {out[:150].replace(chr(10), ' / ')}")
             assert not out.startswith("错误"), f"工具返回错误：{out}"
@@ -135,7 +137,12 @@ def main() -> int:
         g = Git(proj_cfg.path)
         merged = (proj_cfg.path / "app.py").read_text(encoding="utf-8")
         assert "stranger" in merged, "主分支未包含修复内容"
-        assert g.is_dirty() is False, "主工作区应是干净的"
+        # tasks/ 内的任务文件允许有变更（进度/状态回写是设计行为），其余必须干净
+        def _in_tasks(ln: str) -> bool:
+            p = ln.split(maxsplit=1)[-1].strip('"')
+            return p.startswith("tasks/") or p.startswith("tasks\\")
+        dirty_outside_tasks = [ln for ln in g.status_porcelain() if not _in_tasks(ln)]
+        assert not dirty_outside_tasks, f"主工作区（tasks 外）应干净：{dirty_outside_tasks}"
 
         # worktree 已清理
         wt = proj_cfg.path / ".worktree-arranger"
@@ -151,6 +158,7 @@ def main() -> int:
         archived = (proj_cfg.path / "tasks" / "done" / task.path.name).read_text(encoding="utf-8")
         assert "status: done" in archived, "归档任务状态应为 done"
         assert "Agent 处理结果" in archived, "归档任务应含处理结果小节"
+        assert "执行进度" in archived, "归档任务应含执行进度（中断可恢复的依据）"
 
         print("\n全部断言通过 ✅")
         return 0

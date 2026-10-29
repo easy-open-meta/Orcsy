@@ -16,7 +16,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .agent import ProjectAgent
+from .agent import ProjectAgent, recover_interrupted_tasks
 from .config import AppConfig
 from .logging_setup import get_logger
 
@@ -44,6 +44,27 @@ class Scheduler:
         self.last_cycle_at: str = ""
         self.next_cycle_at: str = ""
         self.cycles_done: int = 0
+        self._recover_interrupted()
+
+    def _recover_interrupted(self) -> None:
+        """启动恢复：上次进程意外退出遗留的 in_progress 任务重置为待办。
+
+        只在进程启动时执行一次（本构造函数不会被热重载走到），正在执行中
+        的任务不受影响。
+        """
+        reset: list[str] = []
+        for agent in self.agents:
+            try:
+                ids = recover_interrupted_tasks(agent.project)
+            except Exception:  # noqa: BLE001 — 恢复失败不能阻止启动
+                agent.log.exception("中断任务恢复检查失败")
+                continue
+            if ids:
+                agent.log.warning("检测到 %d 个被中断的任务，已重置为待办：%s",
+                                  len(ids), ", ".join(ids))
+                reset.append(f"{agent.project.name}[{len(ids)}]")
+        if reset:
+            log.warning("上次运行意外退出，重置中断任务待重跑：%s", "; ".join(reset))
 
     # ---- 状态查询（供 Web 看板） ----
 

@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,10 @@ from .config import TaskStatus
 
 # 优先级 P0 最高，数字越大越低；无法解析时视为 P9
 _PRIORITY_RE = re.compile(r"^P(\d+)$", re.IGNORECASE)
+
+# 任务正文里的执行进度节：执行中每轮追加，进程意外退出后由启动恢复流程接力
+PROGRESS_HEADING = "## 执行进度"
+_FRONTMATTER_SPLIT_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 
 
 def priority_rank(priority: str) -> int:
@@ -144,3 +149,63 @@ def scan_tasks(tasks_dir: Path) -> tuple[list[Task], list[Task]]:
 
     tasks.sort(key=lambda t: (t.rank, t.id))
     return tasks, errors
+
+
+def _progress_now() -> str:
+    return _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def append_progress(path: Path, entry: str, keep_last: int = 40) -> None:
+    """向任务文件正文追加一行执行进度（时间戳自动加在行首）。
+
+    进度写在正文末尾的「## 执行进度」节，每轮工具调用都落盘一次——
+    进程被强杀时最多丢失正在进行的这一轮，之前的进度都在文件里。
+    只保留最近 keep_last 条，避免反复中断重跑把文件撑爆。
+    任何 I/O 问题静默忽略：进度记录失败不能影响任务执行本身。
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    m = _FRONTMATTER_SPLIT_RE.match(text)
+    head, body = (m.group(0), text[m.end():]) if m else ("", text)
+
+    heading = PROGRESS_HEADING
+    marker = f"\n{heading}\n"
+    idx = body.find(marker)
+    line = f"- {_progress_now()} {entry}"
+    if idx >= 0:
+        start = idx + 1                              # 指向标题行首
+        rest_at = start + len(heading) + 1
+        nxt = re.search(r"\n## ", body[rest_at:])
+        end = rest_at + nxt.start() if nxt else len(body)
+        lines = [ln for ln in body[start:end].splitlines() if ln.strip()]
+        lines = lines[:1] + lines[1:][-keep_last:] + [line]
+        body = body[:start] + "\n".join(lines) + "\n" + body[end:]
+    else:
+        body = body.rstrip("\n") + f"\n\n{heading}\n\n{line}\n"
+    try:
+        path.write_text(head + body, encoding="utf-8")
+    except OSError:
+        pass
+
+
+def set_task_file_status(path: Path, status: str) -> bool:
+    """改写任务文件 frontmatter 的 status 字段（无 frontmatter 时补一个）。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    m = _FRONTMATTER_SPLIT_RE.match(text)
+    if not m:
+        text = f"---\nstatus: {status}\n---\n\n{text}"
+    elif re.search(r"^status:.*$", m.group(0), re.MULTILINE):
+        front = re.sub(r"^status:.*$", f"status: {status}", m.group(0), flags=re.MULTILINE)
+        text = front + text[m.end():]
+    else:
+        text = m.group(0).rstrip("\n") + f"\nstatus: {status}\n---\n" + text[m.end():]
+    try:
+        path.write_text(text, encoding="utf-8")
+        return True
+    except OSError:
+        return False

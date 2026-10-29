@@ -3,9 +3,11 @@
 API（均为 GET/POST JSON）：
   GET  /api/state        全量状态：调度器、各项目、任务列表、日志尾部
   POST /api/scan         手动触发一轮扫描（立即返回，后台执行）
+  GET  /api/task         单个任务完整内容 ?project=&id=（编辑弹窗用，不截断）
   POST /api/task         创建/更新任务  {project, id, title, priority, status, description}
   POST /api/task/delete  删除任务       {project, id}
   POST /api/task/status  修改任务状态   {project, id, status}（blocked→open 重新入队等）
+  POST /api/models       拉取大模型列表 {provider?, base_url?, api_key?}（缺省用已存配置）
 
 项目管理（可视化配置）：
   POST /api/browse       浏览本地目录    {path}，返回子目录列表（供新建项目选路径）
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 import yaml
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +34,7 @@ from urllib.parse import urlparse
 from . import __version__
 from .agent import ProjectAgent
 from .config import AppConfig, LLMConfig, ProjectConfig, SchedulerConfig, TaskStatus, WebConfig
+from .llm import LLMError, list_models
 from .logging_setup import get_logger
 from .scheduler import Scheduler
 from .task_model import Task, parse_task_file, priority_rank, scan_tasks
@@ -102,7 +106,7 @@ class AppState:
         self.config = config
         self.scheduler = scheduler
         self.agents: dict[str, ProjectAgent] = {
-            a.project.name: a for a in scheduler.agents
+            p.name: ProjectAgent(p, config.llm) for p in config.projects
         }
 
     # ---- 查询 ----
@@ -127,8 +131,14 @@ class AppState:
                 "name": name,
                 "path": str(p.path),
                 "enabled": p.enabled,
+                "tasks_dir": p.tasks_dir,
+                "guide_file": p.guide_file,
+                "max_tasks_per_cycle": p.max_tasks_per_cycle,
+                "max_agent_turns": p.max_agent_turns,
+                "allowed_branch": p.allowed_branch,
+                "allowed_commands": p.allowed_commands,
                 "is_git_repo": agent.executor.is_git_repo,
-                "guide_file": str(p.path / p.guide_file),
+                "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),
                 "tasks": all_tasks,
                 "parse_errors": [{"id": t.id, "path": str(t.path), "error": t.error}
@@ -146,6 +156,7 @@ class AppState:
                 "api_key": self.config.llm.api_key,       # 设置页回显（本机使用，无外发）
                 "temperature": self.config.llm.temperature,
                 "max_tokens": self.config.llm.max_tokens,
+                "max_context_tokens": self.config.llm.max_context_tokens,
                 "timeout_seconds": self.config.llm.timeout_seconds,
             },
             "scheduler": self.scheduler.status(),
@@ -158,6 +169,7 @@ class AppState:
                 "port": self.config.web.port,
                 "open_browser": self.config.web.open_browser,
             },
+            "app_autostart": self.app_autostart_status(),
             "projects": projects,
             "log_tail": read_log_tail(self.config.logging.file),
         }
@@ -208,6 +220,10 @@ class AppState:
         if status not in VALID_STATUS:
             raise ValueError(f"状态不合法：{status}")
 
+        # id 留空 = 自动生成「优先级-标题slug」，与模板的 P1-example-bugfix 命名一致
+        if not task_id:
+            task_id = self._auto_task_id(project, priority, title)
+
         path = self._task_path(project, task_id)
         labels = data.get("labels") or []
         labels_line = ", ".join(str(x) for x in labels) if isinstance(labels, list) else ""
@@ -224,9 +240,26 @@ class AppState:
             fm.append(f"assignee: {assignee}")
         fm.append("---")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(fm) + "\n\n" + description + "\n", encoding="utf-8")
+        # 描述留空用标题兜底：空正文会被解析器判为格式错误任务
+        body = description or title
+        path.write_text("\n".join(fm) + "\n\n" + body + "\n", encoding="utf-8")
         log.info("Web 创建/更新任务 %s/%s [%s]", project, task_id, priority)
-        return {"ok": True, "file": str(path)}
+        return {"ok": True, "file": str(path), "id": task_id}
+
+    def _auto_task_id(self, project: str, priority: str, title: str) -> str:
+        """从优先级 + 标题生成唯一任务 ID：P2-修复登录超时 / P1-fix-login。"""
+        agent = self.agents.get(project)
+        if agent is None:
+            raise ValueError(f"未知项目：{project}")
+        slug = re.sub(r"\s+", "-", title.strip())
+        slug = re.sub(r"[^\w\-]", "", slug).strip("-")[:40].strip("-") or "task"
+        existing = {p.stem for p in agent.tasks_dir.glob("*.md")} if agent.tasks_dir.is_dir() else set()
+        base = f"{priority}-{slug}"
+        task_id, n = base, 2
+        while task_id in existing:
+            task_id = f"{base}-{n}"
+            n += 1
+        return task_id
 
     def set_task_status(self, data: dict) -> dict:
         project = str(data.get("project", ""))
@@ -259,6 +292,49 @@ class AppState:
         path.unlink()
         log.info("Web 删除任务 %s/%s", project, task_id)
         return {"ok": True}
+
+    def get_task(self, params: dict) -> dict:
+        """读取单个任务的完整内容（编辑弹窗用；/api/state 的描述截断到 2000 字）。"""
+        project = str(params.get("project", ""))
+        task_id = str(params.get("id", ""))
+        path = self._task_path(project, task_id)
+        if not path.exists():
+            raise ValueError(f"任务不存在：{task_id}")
+        from .task_model import parse_task_file
+
+        t = parse_task_file(path)
+        if t.error:
+            return {"ok": True, "id": task_id, "title": t.title,
+                    "priority": "P2", "labels": [], "assignee": "",
+                    "description": "", "error": t.error}
+        return {"ok": True, "id": t.id, "title": t.title, "priority": t.priority,
+                "status": t.status, "labels": t.labels, "assignee": t.assignee,
+                "description": t.description}
+
+    def fetch_models(self, data: dict) -> dict:
+        """拉取大模型服务的模型列表（请求体缺省时回退到已保存的接入配置）。"""
+        llm = self.config.llm
+        provider = str(data.get("provider") or llm.provider).strip().lower()
+        base_url = str(data.get("base_url") or llm.base_url).strip()
+        api_key = str(data.get("api_key") or llm.api_key).strip()
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError("API 地址必须以 http(s):// 开头")
+        try:
+            models = list_models(provider, base_url, api_key, llm.timeout_seconds)
+        except LLMError as e:
+            return {"ok": False, "message": str(e)}
+        if not models:
+            return {"ok": False, "message": "服务返回了空模型列表，请检查 API 地址与密钥"}
+        # OpenAI 兼容服务通常不带窗口元数据，用内置规格表补全（未命中保持 None）
+        from .llm import model_spec
+
+        for m in models:
+            if m["context_window"] is None or m["max_output_tokens"] is None:
+                spec = model_spec(m["id"])
+                if spec:
+                    m["context_window"] = m["context_window"] or spec[0]
+                    m["max_output_tokens"] = m["max_output_tokens"] or spec[1]
+        return {"ok": True, "models": models}
 
     # ---- 项目管理 ----
 
@@ -334,6 +410,7 @@ class AppState:
                 "provider": cfg.llm.provider, "api_key": cfg.llm.api_key,
                 "base_url": cfg.llm.base_url, "model": cfg.llm.model,
                 "temperature": cfg.llm.temperature, "max_tokens": cfg.llm.max_tokens,
+                "max_context_tokens": cfg.llm.max_context_tokens,
                 "timeout_seconds": cfg.llm.timeout_seconds,
             },
             "scheduler": {
@@ -364,7 +441,10 @@ class AppState:
 
     def _apply_config(self, new_cfg: AppConfig) -> None:
         self.config = new_cfg
-        self.agents = {a.project.name: a for a in self.scheduler.agents}
+        # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
+        # 调度器只留启用的（reload_config 已按 enabled 过滤）
+        self.agents = {p.name: ProjectAgent(p, new_cfg.llm)
+                       for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
         """新建或修改项目并持久化 + 热重载。original_name 用于重命名。"""
@@ -419,6 +499,22 @@ class AppState:
 
     # ---- AGENT.md 编辑 ----
 
+    def app_autostart_status(self) -> dict:
+        from .autostart import is_enabled
+
+        return {"ok": True, "enabled": is_enabled(),
+                "supported": sys.platform == "win32"}
+
+    def set_app_autostart(self, data: dict) -> dict:
+        from .autostart import disable, enable
+
+        want = bool(data.get("enabled"))
+        changed = enable() if want else disable()
+        log.info("Web 开机自启动 -> %s", "开" if want else "关")
+        return {"ok": True, "enabled": want,
+                "message": "开机自启动已" + ("开启" if want else "关闭")
+                if changed else "设置未变化"}
+
     def get_guide(self, data: dict) -> dict:
         project = str(data.get("project", "")).strip()
         agent = self.agents.get(project)
@@ -454,37 +550,48 @@ class AppState:
     # ---- 模型/调度/看板配置 ----
 
     def save_settings(self, data: dict) -> dict:
-        llm = data.get("llm") or {}
         sched = data.get("scheduler") or {}
         web = data.get("web") or {}
 
+        # 分块保存：只带 scheduler/web/logging 的请求不校验/覆盖 llm
+        llm = data.get("llm") or {}
+        save_llm = "llm" in data
         provider = str(llm.get("provider", self.config.llm.provider)).strip().lower()
-        if provider not in ("openai", "anthropic"):
+        if save_llm and provider not in ("openai", "anthropic"):
             raise ValueError(f"provider 不合法：{provider}（openai / anthropic）")
         model = str(llm.get("model", "")).strip()
-        if not model:
+        if save_llm and not model:
             raise ValueError("model 不能为空")
         base_url = str(llm.get("base_url", "")).strip()
-        if not base_url.startswith(("http://", "https://")):
+        if save_llm and not base_url.startswith(("http://", "https://")):
             raise ValueError("base_url 必须以 http(s):// 开头")
-        interval = int(sched.get("interval_seconds") or 300)
+        interval = int(sched.get("interval_seconds") or self.config.scheduler.interval_seconds)
         if not (30 <= interval <= 86400):
             raise ValueError("扫描间隔应为 30~86400 秒")
-        parallel = int(sched.get("max_parallel_agents") or 1)
+        parallel = int(sched.get("max_parallel_agents") or self.config.scheduler.max_parallel_agents)
         if not (1 <= parallel <= 16):
             raise ValueError("并行 Agent 数应为 1~16")
         port = int(web.get("port") or self.config.web.port)
         if not (1 <= port <= 65535):
             raise ValueError("端口应为 1~65535")
 
-        self.config.llm = LLMConfig(
-            provider=provider,
-            api_key=str(llm.get("api_key", "")).strip(),
-            base_url=base_url, model=model,
-            temperature=float(llm.get("temperature", 0.2)),
-            max_tokens=int(llm.get("max_tokens") or 8192),
-            timeout_seconds=int(llm.get("timeout_seconds") or 300),
-        )
+        max_tokens = int(llm.get("max_tokens") or self.config.llm.max_tokens or 8192)
+        max_context = int(llm.get("max_context_tokens")
+                          or self.config.llm.max_context_tokens or 131072)
+        if save_llm:
+            if not (256 <= max_tokens <= 200000):
+                raise ValueError("最大输出 max_tokens 应为 256~200000")
+            if not (4096 <= max_context <= 2_000_000):
+                raise ValueError("上下文窗口 max_context_tokens 应为 4096~2000000")
+            self.config.llm = LLMConfig(
+                provider=provider,
+                api_key=str(llm.get("api_key", "")).strip(),
+                base_url=base_url, model=model,
+                temperature=float(llm.get("temperature", 0.2)),
+                max_tokens=max_tokens,
+                max_context_tokens=max_context,
+                timeout_seconds=int(llm.get("timeout_seconds") or 300),
+            )
         self.config.scheduler = SchedulerConfig(
             interval_seconds=interval, max_parallel_agents=parallel,
             run_once=self.config.scheduler.run_once,
@@ -505,6 +612,9 @@ class AppState:
 
 class WebHandler(BaseHTTPRequestHandler):
     state: AppState  # 由 make_server 注入
+    # HTTP/1.1：启用 keep-alive（看板 5s 轮询少建连），前提是所有响应都带
+    # Content-Length —— _json/_html 均已设置
+    protocol_version = "HTTP/1.1"
 
     # ---- 基础设施 ----
 
@@ -542,6 +652,13 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.get_guide(self._query_params()))
             except (ValueError, OSError) as e:
                 self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/task":
+            try:
+                self._json(self.state.get_task(self._query_params()))
+            except (ValueError, OSError) as e:
+                self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/app-autostart":
+            self._json(self.state.app_autostart_status())
         else:
             self._json({"error": "not found"}, 404)
 
@@ -562,6 +679,11 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.set_task_status(body))
             elif path == "/api/task/delete":
                 self._json(self.state.delete_task(body))
+            elif path == "/api/models":
+                try:
+                    self._json(self.state.fetch_models(body))
+                except (ValueError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/browse":
                 self._json(self.state.browse_dir(body))
             elif path == "/api/project":
@@ -570,6 +692,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.delete_project(body))
             elif path == "/api/guide":
                 self._json(self.state.save_guide(body))
+            elif path == "/api/app-autostart":
+                self._json(self.state.set_app_autostart(body))
             elif path == "/api/config":
                 self._json(self.state.save_settings(body))
             else:

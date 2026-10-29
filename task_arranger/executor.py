@@ -21,7 +21,7 @@ from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
 from .logging_setup import get_logger
 from .prompts import build_system_prompt
-from .task_model import Task
+from .task_model import Task, append_progress
 from .tools import FinishSignal, ToolContext
 
 WORKTREE_DIR = ".worktree-arranger"
@@ -56,10 +56,13 @@ class TaskExecutor:
         """执行一个任务，返回结果。本方法不抛异常——所有失败都体现在结果里。"""
         started = time.monotonic()
         self.log.info("开始执行任务 %s [%s] %s", task.id, task.priority, task.title)
+        # 进度实时落盘到任务文件：进程被强杀时，已完成的轮次都留在文件里
+        append_progress(task.path,
+                        f"开始执行（{task.priority}，最多 {self.project.max_agent_turns} 轮）")
 
         result = TaskResult(task_id=task.id, outcome="blocked")
         try:
-            response = self._agent_loop(task, guide_content)
+            response = self._agent_loop(task, guide_content, on_progress=lambda line: append_progress(task.path, line))
             result.summary = response.summary
             result.notes = response.notes
             result.files_changed = response.files_changed
@@ -97,7 +100,8 @@ class TaskExecutor:
 
     # ---- Agent 循环 ----
 
-    def _agent_loop(self, task: Task, guide_content: str) -> AgentResponse:
+    def _agent_loop(self, task: Task, guide_content: str,
+                    on_progress=None) -> AgentResponse:
         work_root = self.worktree if self.is_git_repo else self.project.path
         if self.is_git_repo:
             branch = self._prepare_worktree()
@@ -109,7 +113,8 @@ class TaskExecutor:
 
         try:
             return client.run_task_loop(self._build_task_prompt(task), ctx,
-                                        max_turns=self.project.max_agent_turns)
+                                        max_turns=self.project.max_agent_turns,
+                                        on_progress=on_progress)
         except FinishSignal as sig:
             # run_task_loop 内部会捕获并转换；这里兜底处理（替身/异常路径）
             return finish_response(sig.payload)

@@ -28,8 +28,9 @@ DEFAULT_ALLOWED_COMMANDS = [
     "uv", "pip",
 ]
 
-MAX_OUTPUT_CHARS = 8000
-MAX_FILE_READ_CHARS = 40000
+MAX_OUTPUT_CHARS = 6000
+MAX_FILE_READ_CHARS = 12000
+DEFAULT_READ_LINES = 250
 
 
 @dataclass
@@ -57,13 +58,30 @@ def _resolve_in_root(ctx: ToolContext, rel_path: str) -> Path:
 # ---- 工具实现：每个函数 (ctx, args) -> str ----
 
 def tool_read_file(ctx: ToolContext, args: dict) -> str:
+    """按行分页读取文件：大文件用 offset/limit 取需要的区段，避免整读进上下文。"""
     path = _resolve_in_root(ctx, str(args["path"]))
     if not path.is_file():
         return f"错误：文件不存在 {args['path']}"
     text = path.read_text(encoding="utf-8", errors="replace")
-    if len(text) > MAX_FILE_READ_CHARS:
-        return text[:MAX_FILE_READ_CHARS] + f"\n\n…（文件过长，截断至 {MAX_FILE_READ_CHARS} 字符）"
-    return text
+    lines = text.splitlines()
+    total = len(lines)
+    offset = max(1, int(args.get("offset", 1) or 1))
+    limit = max(1, min(int(args.get("limit", DEFAULT_READ_LINES) or DEFAULT_READ_LINES), 1000))
+    sel = lines[offset - 1:offset - 1 + limit]
+    out = "\n".join(sel)
+    if len(out) > MAX_FILE_READ_CHARS:
+        out = out[:MAX_FILE_READ_CHARS]
+        end = offset - 1 + out.count("\n") + 1
+        return (out + f"\n\n…（已达单次读取上限；本次第 {offset}-{end} 行 / 共 {total} 行，"
+                f"继续读取用 offset={end + 1}）")
+    end = offset - 1 + len(sel)
+    notes = []
+    if offset > 1 or end < total:
+        notes.append(f"第 {offset}-{end} 行 / 共 {total} 行")
+        if end < total:
+            notes.append(f"继续读取用 offset={end + 1}")
+    head = f"[{args['path']}]\n" if offset > 1 else ""
+    return head + out + (f"\n\n…（{ '；'.join(notes) }）" if notes else "")
 
 
 def tool_write_file(ctx: ToolContext, args: dict) -> str:
@@ -101,8 +119,8 @@ def tool_list_dir(ctx: ToolContext, args: dict) -> str:
         if any(part in ignores for part in p.parts):
             continue
         rel_display = p.relative_to(ctx.root).as_posix()
-        lines.append(("d " if p.is_dir() else "f ") + rel_display)
-        if len(lines) >= 300:
+        lines.append(("d " if p.is_dir() else "f ") + rel_display[:120])
+        if len(lines) >= 200:
             lines.append("…（目录条目过多，已截断）")
             break
     return "\n".join(lines) or "（空目录）"
@@ -162,7 +180,9 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
             _CHILD_PROCS.discard(proc)
     out = (stdout or "") + (("\n[stderr]\n" + stderr) if stderr else "")
     if len(out) > MAX_OUTPUT_CHARS:
-        out = out[:MAX_OUTPUT_CHARS] + f"\n…（输出过长，截断，退出码 {code}）"
+        # 头尾保留：命令回显/进度在头部，报错摘要多在尾部
+        out = out[:4000] + "\n…（中间输出过长，已省略）\n" + out[-2000:] + \
+            f"\n…（输出过长，截断，退出码 {code}）"
     return f"退出码 {code}\n{out or '（无输出）'}"
 
 
@@ -223,10 +243,15 @@ TOOLS: dict[str, tuple[str, dict, object]] = {
         tool_list_dir,
     ),
     "read_file": (
-        "读取项目内一个文本文件的内容。",
+        "读取项目内一个文本文件的内容（按行分页）。大文件先用 grep 定位，"
+        "再用 offset/limit 读取需要的区段，避免整读。",
         {
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "相对项目根的文件路径"}},
+            "properties": {
+                "path": {"type": "string", "description": "相对项目根的文件路径"},
+                "offset": {"type": "integer", "description": "起始行（1-based），默认 1"},
+                "limit": {"type": "integer", "description": "本次读取行数，默认 250，上限 1000"},
+            },
             "required": ["path"],
         },
         tool_read_file,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import os
 import sys
 from pathlib import Path
 
@@ -30,6 +31,7 @@ llm:
   model: deepseek-chat
   temperature: 0.2
   max_tokens: 8192
+  max_context_tokens: 131072 # 模型上下文窗口（tokens）；看板选模型时可自动填充
   timeout_seconds: 300
 
 scheduler:
@@ -150,7 +152,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     if config.scheduler.run_once or args.once:
         config.scheduler.run_once = True
 
-    setup_logging(config.logging.level, config.logging.file)
+    log_file = Path(config.logging.file)
+    if not log_file.is_absolute():
+        log_file = config_path.parent / log_file
+    setup_logging(config.logging.level, str(log_file))
     scheduler = Scheduler(config)
 
     import atexit
@@ -163,19 +168,46 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _candidate_config_dirs() -> list[Path]:
+    """配置可能出现的目录：安装器初始化约定位置（文档目录）等。"""
+    dirs: list[Path] = []
+    docs = Path(os.path.expandvars(r"%USERPROFILE%\Documents"))
+    # OneDrive 可能重定向"文档"（如 Z:\OneDrive\文档），注册表读真身
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+            ) as k:
+                raw, _ = winreg.QueryValueEx(k, "Personal")
+                docs = Path(os.path.expandvars(raw))
+        except OSError:
+            pass
+    dirs.append(docs / "TaskArranger")
+    if getattr(sys, "frozen", False):
+        dirs.append(Path(sys.executable).parent)
+    return dirs
+
+
 def find_config(explicit: str | None) -> Path:
-    """web 命令的配置查找：显式路径 > ./config.yaml > run/config.yaml > 示例配置。"""
+    """配置查找顺序：显式路径 > ./config.yaml > run/config.yaml > 文档\\TaskArranger > exe 目录。"""
     if explicit:
         p = Path(explicit).resolve()
         if not p.exists():
             print(f"配置文件不存在：{p}")
             raise SystemExit(1)
         return p
-    for cand in (Path("config.yaml"), Path("run/config.yaml")):
+    candidates = [Path("config.yaml"), Path("run/config.yaml")]
+    candidates += [d / "config.yaml" for d in _candidate_config_dirs()]
+    for cand in candidates:
         if cand.exists():
             return cand.resolve()
-    print("未找到 config.yaml（已尝试 ./config.yaml 与 ./run/config.yaml）。")
-    print("请先运行 task-arranger init 生成，或用 --config 指定路径。")
+    searched = ", ".join(str(c) for c in candidates[:3])
+    print(f"未找到 config.yaml（已尝试：{searched} 等）。")
+    print("请运行 task-arranger init 生成，或用 --config 指定路径；")
+    print("推荐直接在看板「项目与设置」页可视化管理。")
     raise SystemExit(1)
 
 
@@ -253,7 +285,11 @@ def cmd_web(args: argparse.Namespace) -> int:
             return 1
 
     config.web.host, config.web.port = host, port
-    setup_logging(config.logging.level, config.logging.file)
+    # 相对日志路径锚定到配置文件所在目录：工作目录可能在 Program Files（不可写）
+    log_file = Path(config.logging.file)
+    if not log_file.is_absolute() and config.source_path:
+        log_file = config.source_path.parent / log_file
+    setup_logging(config.logging.level, str(log_file))
 
     scheduler = Scheduler(config)
     state = AppState(config, scheduler)
@@ -264,7 +300,7 @@ def cmd_web(args: argparse.Namespace) -> int:
     log = __import__("logging").getLogger("task_arranger.web")
     log.info("看板服务启动：%s（配置：%s）", url, config_path)
     # 提示信息同时打到 stderr，避免被 logging 配置吞掉或缓冲
-    print(f"任务编排看板已启动：{url} （Ctrl+C 停止）", file=sys.stderr, flush=True)
+    print(f"任务编排看板已启动：{url} （Ctrl+C 或右键托盘图标退出）", file=sys.stderr, flush=True)
     if fallback_notice:
         print(fallback_notice, file=sys.stderr, flush=True)
     print(f"配置文件：{config_path}", file=sys.stderr, flush=True)
@@ -278,15 +314,21 @@ def cmd_web(args: argparse.Namespace) -> int:
     else:
         scheduler.run_forever_background()
 
-    if config.web.open_browser and not args.no_browser and not args.tray:
+    if config.web.open_browser and not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
 
-    # 退出清理：无论 Ctrl+C、窗口关闭还是异常，都停调度、关端口、收子进程
+    # 退出清理：无论 Ctrl+C、窗口关闭、托盘退出还是异常，都摘图标、停调度、关端口、收子进程
     def _cleanup() -> None:
         scheduler.stop()
         try:
             server.shutdown()
             server.server_close()
+        except Exception:
+            pass
+        try:
+            from .tray import stop_tray
+
+            stop_tray()
         except Exception:
             pass
         from .tools import kill_running_children
@@ -311,18 +353,20 @@ def cmd_web(args: argparse.Namespace) -> int:
         _HANDLER_REF = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)(_console_handler)
         ctypes.windll.kernel32.SetConsoleCtrlHandler(_HANDLER_REF, True)
 
-    if args.tray:
-        # 托盘模式：无控制台交互，图标菜单承担打开看板/扫描/退出。
-        # HTTP 服务放后台线程（主线程被 icon.run() 占用）。
-        threading.Thread(target=server.serve_forever,
-                         kwargs={"poll_interval": 0.2},
-                         name="http-server", daemon=True).start()
-        from .tray import run_tray
+    # 托盘图标与控制台并存：图标放后台线程常驻，主线程留在 serve_forever 上，
+    # 控制台 Ctrl+C 才能以 KeyboardInterrupt 打断。托盘「退出」菜单反向调
+    # server.shutdown() 唤醒主线程，两种退出统一走 _cleanup。
+    if not args.no_tray:
+        def _run_tray() -> None:
+            from .tray import run_tray
 
-        run_tray(state, scheduler, url)
-        _cleanup()
-        atexit.unregister(_cleanup)
-        return 0
+            try:
+                run_tray(state, scheduler, url, server)
+            except Exception:  # noqa: BLE001 托盘起不来不应拖垮看板服务
+                __import__("logging").getLogger("task_arranger.web").exception(
+                    "托盘图标启动失败（看板服务不受影响）")
+
+        threading.Thread(target=_run_tray, name="tray", daemon=True).start()
 
     try:
         server.serve_forever(poll_interval=0.2)
@@ -338,8 +382,8 @@ def cmd_web(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    # 托盘模式允许省略子命令：`task-arranger-tray.exe --tray --config ...`
-    # 等价于 `web --tray ...`（自启动注册表与快捷方式都这样写）
+    # 托盘 exe 允许省略子命令：`task-arranger-tray.exe --tray --config ...`
+    # 等价于 `web --tray ...`（自启动注册表与快捷方式都这样写；--tray 现为兼容参数）
     if argv and "--tray" in argv and argv[0] not in ("init", "validate", "run", "web"):
         argv = ["web", *argv]
     parser = argparse.ArgumentParser(
@@ -372,7 +416,9 @@ def main(argv: list[str] | None = None) -> int:
     p_web.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     p_web.add_argument("--no-sched", action="store_true", help="不启动定时调度（仅手动触发）")
     p_web.add_argument("--tray", action="store_true",
-                       help="托盘模式：无控制台窗口，系统托盘图标操作（开机自启动使用）")
+                       help="兼容参数：托盘图标已默认随看板启动（开机自启动仍带此参数）")
+    p_web.add_argument("--no-tray", action="store_true",
+                       help="不启动托盘图标（纯控制台运行）")
     p_web.add_argument("--tray-autostart-on", action="store_true",
                        help=argparse.SUPPRESS)  # 安装器专用：写自启注册表后退出
     p_web.set_defaults(func=cmd_web)
