@@ -44,7 +44,7 @@ onUnmounted(() => window.clearInterval(timer))
             <rect x="3" y="5" width="4.5" height="14" rx="1.2"/><rect x="9.75" y="5" width="4.5" height="9" rx="1.2" opacity=".6"/><rect x="16.5" y="5" width="4.5" height="6" rx="1.2" opacity=".35"/>
           </svg>
           <div>
-            <h1>任务编排中心</h1>
+            <h1>Orcsy 任务编排中心</h1>
             <div class="sub" v-if="store.state">
               v{{ store.state.version }} · 模型 {{ store.state.llm.model }}（{{ store.state.llm.provider }}）{{ store.state.llm.key_configured ? '' : ' · 未配置 api_key' }} · 配置 {{ store.state.config_path }}
             </div>

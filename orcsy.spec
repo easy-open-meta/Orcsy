@@ -1,14 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec：task-arranger 双产物
-#   dist/task-arranger-web.exe   console 版（web/run/init/validate）
-#   dist/task-arranger-tray.exe  windowed 托盘版（无黑窗口，开机自启用）
+# PyInstaller spec：orcsy 双产物
+#   dist/orcsy-web.exe   console 版（web/run/init/validate）
+#   dist/orcsy-tray.exe  windowed 托盘版（无黑窗口，开机自启用）
 # 版本资源来自 build/exe-version.txt（由 build/build.py 从 __version__ 生成）
 
 import os
 from pathlib import Path
 
-_common_datas = [('task_arranger/templates', 'task_arranger/templates')]
-# dashboard.html 已编译进 task_arranger/dashboard_html.py，无需数据文件
+_common_datas = [('orcsy/templates', 'orcsy/templates')]
+# dashboard.html 已编译进 orcsy/dashboard_html.py，无需数据文件
 
 _common_excludes = ['tkinter', 'matplotlib', 'numpy']
 
@@ -19,7 +19,7 @@ def build(name, script, console):
         pathex=[str(Path('.').resolve())],
         binaries=[],
         datas=list(_common_datas),
-        hiddenimports=['task_arranger.web', 'task_arranger.tray', 'task_arranger.autostart'],
+        hiddenimports=['orcsy.web', 'orcsy.tray', 'orcsy.autostart'],
         hookspath=[],
         runtime_hooks=[],
         excludes=_common_excludes,
@@ -36,5 +36,5 @@ def build(name, script, console):
     )
 
 
-build('task-arranger-web', 'entry_web.py', console=True)
-build('task-arranger-tray', 'entry_tray.py', console=False)
+build('orcsy-web', 'entry_web.py', console=True)
+build('orcsy-tray', 'entry_tray.py', console=False)

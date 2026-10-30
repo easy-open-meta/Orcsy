@@ -58,7 +58,7 @@ class SchedulerConfig:
 @dataclass
 class LoggingConfig:
     level: str = "INFO"
-    file: str = "logs/task-arranger.log"
+    file: str = "logs/orcsy.log"
 
 
 @dataclass
@@ -118,7 +118,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     log_raw = raw.get("logging") or {}
     logging_cfg = LoggingConfig(
         level=str(log_raw.get("level", "INFO")).upper(),
-        file=log_raw.get("file", "logs/task-arranger.log"),
+        file=log_raw.get("file", "logs/orcsy.log"),
     )
 
     web_raw = raw.get("web") or {}

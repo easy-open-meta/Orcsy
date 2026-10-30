@@ -3,13 +3,13 @@
 import sys
 from pathlib import Path
 
-import task_arranger.templates as _tpl
+import orcsy.templates as _tpl
 
-_bundled = Path(getattr(sys, "_MEIPASS", ".")) / "task_arranger" / "templates"
+_bundled = Path(getattr(sys, "_MEIPASS", ".")) / "orcsy" / "templates"
 if _bundled.is_dir():
     _tpl.TEMPLATES_DIR = _bundled
 
-from task_arranger.__main__ import main
+from orcsy.__main__ import main
 
 if __name__ == "__main__":
     sys.exit(main())

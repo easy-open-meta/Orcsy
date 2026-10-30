@@ -14,10 +14,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
 
-from task_arranger.config import LLMConfig, ProjectConfig
-from task_arranger.executor import TaskExecutor
-from task_arranger.git_ops import Git
-from task_arranger.task_model import parse_task_file
+from orcsy.config import LLMConfig, ProjectConfig
+from orcsy.executor import TaskExecutor
+from orcsy.git_ops import Git
+from orcsy.task_model import parse_task_file
 
 
 class FakeLLMClient:
@@ -33,7 +33,7 @@ class FakeLLMClient:
         self.system_prompt = system_prompt
 
     def run_task_loop(self, task_prompt, ctx, max_turns=40, on_progress=None):
-        from task_arranger.tools import FinishSignal, dispatch_tool
+        from orcsy.tools import FinishSignal, dispatch_tool
 
         # 校验系统提示词里注入了 AGENT.md 指引
         assert "项目指引" in self.system_prompt, \
@@ -89,7 +89,7 @@ def make_task(proj: Path) -> None:
 
 
 def main() -> int:
-    tmp = Path(tempfile.mkdtemp(prefix="task-arranger-e2e-"))
+    tmp = Path(tempfile.mkdtemp(prefix="orcsy-e2e-"))
     try:
         proj_cfg = make_project(tmp)
         make_task(proj_cfg.path)
@@ -149,7 +149,7 @@ def main() -> int:
         assert not wt.exists(), "worktree 应已移除"
 
         # 通过 ProjectAgent 验证任务状态回写与归档
-        from task_arranger.agent import ProjectAgent
+        from orcsy.agent import ProjectAgent
         agent = ProjectAgent(proj_cfg, llm_cfg)
         agent.executor.run_task = executor.run_task  # 复用同一个替身注入的执行器
         # 直接手工回写验证（避免重复跑一遍循环）

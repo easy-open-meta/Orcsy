@@ -1,6 +1,6 @@
 """一键构建：版本号单源化 → PyInstaller 双产物 → Inno Setup 安装包。
 
-版本号唯一来源：task_arranger/__init__.py 的 __version__。
+版本号唯一来源：orcsy/__init__.py 的 __version__。
 本脚本由它生成两份构建期文件（勿手改）：
   - build/exe-version.txt : PyInstaller exe 的 Windows 版本资源
   - build/version.ini     : installer.iss 的 MyAppVersion（ReadIni 读取）
@@ -19,15 +19,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
-COMPANY = "TaskArranger"
-PRODUCT_EN = "Task Arranger"
+COMPANY = "Orcsy"
+PRODUCT_EN = "Orcsy"
 
 
 def read_version() -> tuple[int, int, int]:
-    text = (ROOT / "task_arranger" / "__init__.py").read_text(encoding="utf-8")
+    text = (ROOT / "orcsy" / "__init__.py").read_text(encoding="utf-8")
     m = re.search(r'__version__\s*=\s*"(\d+)\.(\d+)\.(\d+)"', text)
     if not m:
-        sys.exit("无法从 task_arranger/__init__.py 解析 __version__")
+        sys.exit("无法从 orcsy/__init__.py 解析 __version__")
     return tuple(int(g) for g in m.groups())  # type: ignore[return-value]
 
 
@@ -45,7 +45,7 @@ VSVersionInfo(
     StringFileInfo([
       StringTable('080404b0', [
         StringStruct('CompanyName', '{COMPANY}'),
-        StringStruct('FileDescription', '任务编排系统'),
+        StringStruct('FileDescription', 'Orcsy — Agent 任务编排系统'),
         StringStruct('FileVersion', '{ver_str}'),
         StringStruct('ProductName', '{PRODUCT_EN}'),
         StringStruct('ProductVersion', '{ver[0]}.{ver[1]}.{ver[2]}'),
@@ -92,13 +92,13 @@ def build_frontend() -> None:
 
 def main() -> int:
     ver = read_version()
-    print(f"版本号来源 task_arranger/__init__.py：{'.'.join(map(str, ver))}")
+    print(f"版本号来源 orcsy/__init__.py：{'.'.join(map(str, ver))}")
     BUILD.mkdir(exist_ok=True)
     write_exe_version_file(ver)
     write_version_ini(ver)
     build_frontend()
 
-    run([sys.executable, "-m", "PyInstaller", "task-arranger.spec", "--noconfirm"],
+    run([sys.executable, "-m", "PyInstaller", "orcsy.spec", "--noconfirm"],
         cwd=ROOT)
 
     iscc = Path(sys.executable).parents[1] / "Programs" / "Inno Setup 6" / "ISCC.exe"
@@ -108,7 +108,7 @@ def main() -> int:
         sys.exit("未找到 ISCC.exe（Inno Setup 6），请先安装")
     run([iscc, "installer.iss"], cwd=BUILD)
 
-    setup = BUILD / "Setup" / f"task-arranger-setup-{ver[0]}.{ver[1]}.{ver[2]}.exe"
+    setup = BUILD / "Setup" / f"orcsy-setup-{ver[0]}.{ver[1]}.{ver[2]}.exe"
     print(f"\n完成：{setup}")
     print("校验：dist exe --version 与安装包文件版本应同为 "
           f"{ver[0]}.{ver[1]}.{ver[2]}")

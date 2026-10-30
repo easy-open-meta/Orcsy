@@ -69,11 +69,11 @@ def run_tray(state, scheduler, url: str, server=None) -> None:
 
     def trigger_scan(icon, item):
         threading.Thread(target=scheduler.run_cycle, daemon=True).start()
-        icon.notify("已触发一轮扫描", "任务编排系统")
+        icon.notify("已触发一轮扫描", "Orcsy")
 
     def toggle_autostart(icon, item):
         on = toggle()
-        icon.notify("开机自启动已" + ("开启" if on else "关闭"), "任务编排系统")
+        icon.notify("开机自启动已" + ("开启" if on else "关闭"), "Orcsy")
 
     def quit_app(icon, item):
         log.info("托盘退出")
@@ -91,7 +91,7 @@ def run_tray(state, scheduler, url: str, server=None) -> None:
         pystray.MenuItem("退出", quit_app),
     )
 
-    icon = pystray.Icon("task-arranger", _make_icon(False), "任务编排系统", menu)
+    icon = pystray.Icon("orcsy", _make_icon(False), "Orcsy", menu)
     _ICON_HOLDER["icon"] = icon
 
     def _updater():
@@ -105,7 +105,7 @@ def run_tray(state, scheduler, url: str, server=None) -> None:
                 if running != last:
                     last = running
                     icon.icon = _make_icon(running)
-                    icon.title = "任务编排系统（扫描执行中…）" if running else "任务编排系统"
+                    icon.title = "Orcsy（扫描执行中…）" if running else "Orcsy"
             except Exception:  # noqa: BLE001
                 pass
             time.sleep(2)

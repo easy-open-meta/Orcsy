@@ -9,8 +9,8 @@ from pathlib import Path
 _FMT = "%(asctime)s %(levelname)-7s [%(name)s] %(message)s"
 
 
-def setup_logging(level: str = "INFO", file: str = "logs/task-arranger.log") -> logging.Logger:
-    logger = logging.getLogger("task_arranger")
+def setup_logging(level: str = "INFO", file: str = "logs/orcsy.log") -> logging.Logger:
+    logger = logging.getLogger("orcsy")
     logger.setLevel(logging.DEBUG)
     logger.handlers.clear()
     logger.propagate = False
@@ -33,4 +33,4 @@ def setup_logging(level: str = "INFO", file: str = "logs/task-arranger.log") -> 
 
 
 def get_logger(name: str) -> logging.Logger:
-    return logging.getLogger(f"task_arranger.{name}")
+    return logging.getLogger(f"orcsy.{name}")

@@ -18,3 +18,5 @@ build/exe-version.txt
 build/version.ini
 # unplugin-vue-components 构建时自动生成的组件声明
 dashboard/components.d.ts
+# PyInstaller 中间产物目录（orcsy.spec 产物工作区）
+build/orcsy/

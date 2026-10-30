@@ -1,4 +1,4 @@
-"""CLI 入口：task-arranger init | validate | run | scan"""
+"""CLI 入口：orcsy init | validate | run | scan"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .templates import TEMPLATES_DIR
 CONFIG_NAME = "config.yaml"
 
 CONFIG_EXAMPLE = """\
-# task-arranger 配置文件
+# orcsy 配置文件
 # 复制为 config.yaml 后按需修改；含 api_key 的文件不要提交到仓库。
 
 llm:
@@ -42,7 +42,7 @@ scheduler:
 
 logging:
   level: INFO
-  file: logs/task-arranger.log
+  file: logs/orcsy.log
 
 web:
   host: 127.0.0.1            # 看板监听地址
@@ -85,7 +85,7 @@ def _write_templates(target_root: Path) -> None:
 def cmd_init(args: argparse.Namespace) -> int:
     root = Path(args.dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    print(f"初始化 task-arranger 目录：{root}")
+    print(f"初始化 orcsy 目录：{root}")
 
     config_path = root / CONFIG_NAME
     if config_path.exists():
@@ -186,6 +186,8 @@ def _candidate_config_dirs() -> list[Path]:
                 docs = Path(os.path.expandvars(raw))
         except OSError:
             pass
+    dirs.append(docs / "Orcsy")
+    # 改名前的旧数据目录：老用户配置仍能被找到
     dirs.append(docs / "TaskArranger")
     if getattr(sys, "frozen", False):
         dirs.append(Path(sys.executable).parent)
@@ -193,7 +195,7 @@ def _candidate_config_dirs() -> list[Path]:
 
 
 def find_config(explicit: str | None) -> Path:
-    """配置查找顺序：显式路径 > ./config.yaml > run/config.yaml > 文档\\TaskArranger > exe 目录。"""
+    """配置查找顺序：显式路径 > ./config.yaml > run/config.yaml > 文档\\Orcsy > 文档\\TaskArranger（旧） > exe 目录。"""
     if explicit:
         p = Path(explicit).resolve()
         if not p.exists():
@@ -207,7 +209,7 @@ def find_config(explicit: str | None) -> Path:
             return cand.resolve()
     searched = ", ".join(str(c) for c in candidates[:3])
     print(f"未找到 config.yaml（已尝试：{searched} 等）。")
-    print("请运行 task-arranger init 生成，或用 --config 指定路径；")
+    print("请运行 orcsy init 生成，或用 --config 指定路径；")
     print("推荐直接在看板「项目与设置」页可视化管理。")
     raise SystemExit(1)
 
@@ -261,12 +263,12 @@ def cmd_web(args: argparse.Namespace) -> int:
         except Exception:
             existing = False
         if existing and not args.port:
-            print(f"端口 {port} 上已有任务编排看板在运行：http://{host}:{port}")
+            print(f"端口 {port} 上已有 Orcsy 看板在运行：http://{host}:{port}")
             print("如需另起一个实例，用 --port 指定其它端口。")
             return 0
         if args.port:
             print(f"端口 {port} 被其它程序占用，无法使用。")
-            print(f"请换一个端口（如 task-arranger web --port {port + 1}），"
+            print(f"请换一个端口（如 orcsy web --port {port + 1}），"
                   f"或结束占用该端口的程序。")
             return 1
         # 配置文件里的端口被占且不是本系统：自动挑一个空闲端口
@@ -298,10 +300,10 @@ def cmd_web(args: argparse.Namespace) -> int:
     server = make_server(state, host, port)
     url = f"http://{host}:{port}"
 
-    log = __import__("logging").getLogger("task_arranger.web")
+    log = __import__("logging").getLogger("orcsy.web")
     log.info("看板服务启动：%s（配置：%s）", url, config_path)
     # 提示信息同时打到 stderr，避免被 logging 配置吞掉或缓冲
-    print(f"任务编排看板已启动：{url} （Ctrl+C 或右键托盘图标退出）", file=sys.stderr, flush=True)
+    print(f"Orcsy 看板已启动：{url} （Ctrl+C 或右键托盘图标退出）", file=sys.stderr, flush=True)
     if fallback_notice:
         print(fallback_notice, file=sys.stderr, flush=True)
     print(f"配置文件：{config_path}", file=sys.stderr, flush=True)
@@ -364,7 +366,7 @@ def cmd_web(args: argparse.Namespace) -> int:
             try:
                 run_tray(state, scheduler, url, server)
             except Exception:  # noqa: BLE001 托盘起不来不应拖垮看板服务
-                __import__("logging").getLogger("task_arranger.web").exception(
+                __import__("logging").getLogger("orcsy.web").exception(
                     "托盘图标启动失败（看板服务不受影响）")
 
         threading.Thread(target=_run_tray, name="tray", daemon=True).start()
@@ -383,13 +385,13 @@ def cmd_web(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    # 托盘 exe 允许省略子命令：`task-arranger-tray.exe --tray --config ...`
+    # 托盘 exe 允许省略子命令：`orcsy-tray.exe --tray --config ...`
     # 等价于 `web --tray ...`（自启动注册表与快捷方式都这样写；--tray 现为兼容参数）
     if argv and "--tray" in argv and argv[0] not in ("init", "validate", "run", "web"):
         argv = ["web", *argv]
     parser = argparse.ArgumentParser(
-        prog="task-arranger",
-        description="项目任务编排系统：定时扫描各项目任务列表，由大模型 Agent 按优先级完成功能开发与 bug 修复。",
+        prog="orcsy",
+        description="Orcsy — Agent 任务编排系统：定时扫描各项目任务列表，由大模型 Agent 按优先级完成功能开发与 bug 修复。",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")

@@ -1,4 +1,4 @@
-// 后端 API 的类型化封装。端点与 task_arranger/web.py 的 do_GET/do_POST 一一对应。
+// 后端 API 的类型化封装。端点与 orcsy/web.py 的 do_GET/do_POST 一一对应。
 
 export type ThemeName = 'dark' | 'light'
 export type TaskStatus = 'open' | 'in_progress' | 'done' | 'blocked' | 'cancelled'

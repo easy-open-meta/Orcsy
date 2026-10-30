@@ -9,13 +9,13 @@ import sys
 from pathlib import Path
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_VALUE_NAME = "TaskArranger"
+_VALUE_NAME = "Orcsy"
 
 
 def _tray_exe() -> str | None:
     """冻结目录下优先找专用托盘 exe。"""
     if getattr(sys, "frozen", False):
-        candidate = Path(sys.executable).parent / "task-arranger-tray.exe"
+        candidate = Path(sys.executable).parent / "orcsy-tray.exe"
         if candidate.exists():
             return str(candidate)
     return None
@@ -25,7 +25,7 @@ def _current_command() -> str:
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}" --tray'
     # 源码运行：退化到 python -m
-    import task_arranger.__main__ as m
+    import orcsy.__main__ as m
 
     return f'"{sys.executable}" "{Path(m.__file__)}" --tray'
 

@@ -38,13 +38,13 @@
 
 ### 方式一：Windows 安装包（推荐）
 
-1. 运行 `build/Setup/task-arranger-setup-<版本>.exe`，按向导安装；
-2. 勾选「初始化配置与示例任务」会在 `文档\TaskArranger` 生成 `config.yaml`；
+1. 运行 `build/Setup/orcsy-setup-<版本>.exe`，按向导安装；
+2. 勾选「初始化配置与示例任务」会在 `文档\Orcsy` 生成 `config.yaml`；
 3. 编辑该文件：填 `llm.api_key`、`base_url`、`model`，把 `projects[].path` 改成**绝对路径**指向你的项目；
 4. 从开始菜单/桌面打开「任务编排系统」→ 浏览器自动打开看板；
 5. 在看板上新建任务（或往项目 `tasks/` 目录里放任务文件），点「立即扫描一轮」或等定时调度。
 
-安装包自带卸载器；卸载时可选是否删除用户数据（`文档\TaskArranger`）。
+安装包自带卸载器；卸载时可选是否删除用户数据（`文档\Orcsy`）。
 
 ### 方式二：源码运行
 
@@ -54,22 +54,22 @@ git clone <repo-url> orcsy && cd orcsy
 uv sync
 
 # 2. 初始化运行目录（生成 config.yaml 与模板）
-uv run task-arranger init --dir run
+uv run orcsy init --dir run
 
 # 3. 编辑 run/config.yaml：填 api_key、base_url、model，把 projects 指向你的项目
 #    并在每个受管项目里放 AGENT.md 与 tasks/*.md（可从模板复制）
 
 # 4. 校验配置与任务清单
-uv run task-arranger validate --config run/config.yaml
+uv run orcsy validate --config run/config.yaml
 
 # 5. 启动 Web 看板（含定时调度，自动打开浏览器）
-uv run task-arranger web --config run/config.yaml
+uv run orcsy web --config run/config.yaml
 
 # 也可以纯 CLI 持续调度（无看板）
-uv run task-arranger run --config run/config.yaml
+uv run orcsy run --config run/config.yaml
 
 # 试运行一轮（不进入持续调度）
-uv run task-arranger run --config run/config.yaml --once
+uv run orcsy run --config run/config.yaml --once
 ```
 
 也可以用外部调度器触发单轮（Windows 计划任务 / cron）：配置 `scheduler.run_once: true` 或命令行 `--once`。
@@ -102,7 +102,7 @@ assignee:           # 留空任意 Agent 可领；填写 Agent 名则只有该 A
 
 ### AGENT.md 开发指引
 
-每个项目根目录一份 `AGENT.md`（可通过 `guide_file` 配置改用其它文件名）。Agent 执行任务时把它注入系统提示词，作为该项目的最高行为准则。看板新建/导入项目时自动生成英文模板，并自动探测技术栈填入 Stack / Run / Test；模板见 `task_arranger/templates/AGENT.md`。
+每个项目根目录一份 `AGENT.md`（可通过 `guide_file` 配置改用其它文件名）。Agent 执行任务时把它注入系统提示词，作为该项目的最高行为准则。看板新建/导入项目时自动生成英文模板，并自动探测技术栈填入 Stack / Run / Test；模板见 `orcsy/templates/AGENT.md`。
 
 ### 多 Agent
 
@@ -156,7 +156,7 @@ Agent 执行任务时通过一组**禁锢在项目内的工具**真实地工作�
 
 ## 🖥 Web 看板
 
-`task-arranger web` 启动后访问 [http://127.0.0.1:5116](http://127.0.0.1:5116)：
+`orcsy web` 启动后访问 [http://127.0.0.1:5116](http://127.0.0.1:5116)：
 
 - **总览**：模型接入信息、调度状态（空闲/执行中、已完成周期、上次扫描、各项目本轮处理数）；
 - **项目卡片**：git 状态、AGENT.md 是否就位、任务列表（优先级色标、状态、描述）、格式错误标注、已归档任务；一键打开项目文件夹、移除项目（仅移出配置，不删文件）；
@@ -173,13 +173,13 @@ Agent 执行任务时通过一组**禁锢在项目内的工具**真实地工作�
 - **显式指定** `--port` 而它被其它程序占用：报错退出（尊重显式选择，不悄悄换口）。
 
 ```bash
-task-arranger web --port 8080          # 冲突时换这个端口
-task-arranger web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权）
+orcsy web --port 8080          # 冲突时换这个端口
+orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权）
 ```
 
 ## ⚙️ 配置参考
 
-见 `task_arranger/__main__.py` 中的 `CONFIG_EXAMPLE`，或运行 `init` 生成的 `config.yaml`。关键项：
+见 `orcsy/__main__.py` 中的 `CONFIG_EXAMPLE`，或运行 `init` 生成的 `config.yaml`。关键项：
 
 | 配置 | 说明 |
 |---|---|
@@ -199,7 +199,7 @@ task-arranger web --host 0.0.0.0       # 允许局域网访问（注意自行加
 
 ## 📊 日志与观测
 
-- 控制台 + `logs/task-arranger.log`（滚动，5MB × 5 份），每轮调度、每个任务的开始/结束、提交号、受阻原因均有记录；
+- 控制台 + `logs/orcsy.log`（滚动，5MB × 5 份），每轮调度、每个任务的开始/结束、提交号、受阻原因均有记录；
 - 任务文件本身也是"报表"：每个执行过的任务都带「Agent 处理结果」小节；
 - 校验命令 `validate` 可在跑之前确认配置、任务格式、指引文件是否就位。
 
@@ -211,7 +211,7 @@ build.bat
 
 # 或手动分步：
 # 1. 打包 exe（需要 dev 依赖：uv sync --dev；产物 dist/*.exe）
-uv run pyinstaller task-arranger.spec --noconfirm
+uv run pyinstaller orcsy.spec --noconfirm
 
 # 2. 编译安装包（需要 Inno Setup 6，产物 build/Setup/*.exe）
 cd build && ISCC.exe installer.iss
@@ -220,7 +220,7 @@ cd build && ISCC.exe installer.iss
 ## 📁 项目结构
 
 ```
-task_arranger/
+orcsy/
   __main__.py      CLI（init / validate / run / web）
   config.py        配置模型与加载
   scheduler.py     定时调度（串行 / 并行多 Agent，线程安全，供 Web 触发）
@@ -242,14 +242,14 @@ build/
   build.py         一键构建流水线（版本号单源化 → PyInstaller → Inno Setup）
   installer.iss    Inno Setup 安装包脚本
   icon.ico/.png    应用图标
-  Setup/           编译产物 task-arranger-setup-*.exe
+  Setup/           编译产物 orcsy-setup-*.exe
 tests/             端到端自检（模拟 LLM / 真实 HTTP）
-task-arranger.spec PyInstaller 打包配置（产物 dist/*.exe）
+orcsy.spec PyInstaller 打包配置（产物 dist/*.exe）
 ```
 
 ## 🔒 安全与边界
 
-- 含 `api_key` 的 `config.yaml` 已在 `.gitignore`，不要提交或分享；安装版配置放在 `文档\TaskArranger\config.yaml`，不在程序目录；
+- 含 `api_key` 的 `config.yaml` 已在 `.gitignore`，不要提交或分享；安装版配置放在 `文档\Orcsy\config.yaml`，不在程序目录；
 - Web 看板默认只监听 `127.0.0.1`，不对局域网开放；如需远程访问自行改 `web.host` 并自行加鉴权（当前版本无登录功能）；
 - Agent 的改动范围限定在受管项目内；合并冲突会转为 blocked 而不是强推；
 - `blocked` / `cannot_do` 的任务会写明原因，等人工确认后在看板点「重新入队」（或把 status 改回 open）即可重新进入队列；

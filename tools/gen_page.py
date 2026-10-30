@@ -1,4 +1,4 @@
-"""把 Vite 构建产物（单文件 index.html）转成 task_arranger/dashboard_html.py 常量。
+"""把 Vite 构建产物（单文件 index.html）转成 orcsy/dashboard_html.py 常量。
 
 沿用"页面编译进 exe"机制，规避 PyInstaller _MEI 数据文件读取坑。
 用法：uv run python tools/gen_page.py
@@ -10,7 +10,7 @@ import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "dashboard" / "dist" / "index.html"
-DST = ROOT / "task_arranger" / "dashboard_html.py"
+DST = ROOT / "orcsy" / "dashboard_html.py"
 
 html = SRC.read_text(encoding="utf-8")
 DST.write_text(

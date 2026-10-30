@@ -214,8 +214,8 @@ class ProjectAgent:
                 text = task.path.read_text(encoding="utf-8")
             except OSError:
                 continue
-            comment = f"<!-- task-arranger: 任务文件解析失败：{task.error} -->\n"
-            if "task-arranger: 任务文件解析失败" not in text:
+            comment = f"<!-- orcsy: 任务文件解析失败：{task.error} -->\n"
+            if "orcsy: 任务文件解析失败" not in text and "task-arranger: 任务文件解析失败" not in text:
                 try:
                     task.path.write_text(comment + text, encoding="utf-8")
                 except OSError as e:

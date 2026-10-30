@@ -22,11 +22,11 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):  # GBK 控制台打不出 ✅ 等字符
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from task_arranger.config import LLMConfig, load_config
-from task_arranger.llm import FinishSignal, LLMClient, finish_response
-from task_arranger.scheduler import Scheduler
-from task_arranger.tools import ToolContext
-from task_arranger.web import AppState, make_server
+from orcsy.config import LLMConfig, load_config
+from orcsy.llm import FinishSignal, LLMClient, finish_response
+from orcsy.scheduler import Scheduler
+from orcsy.tools import ToolContext
+from orcsy.web import AppState, make_server
 
 BASE = "http://127.0.0.1:0"  # 实际端口由 server.server_address 决定
 
@@ -144,7 +144,7 @@ def check_open_folder(root: Path, port: int) -> None:
     assert not r.get("ok") and "未知项目" in r.get("message", ""), r
     print("4. 打开文件夹：未知项目被拦截 ✅")
 
-    import task_arranger.web as web_mod
+    import orcsy.web as web_mod
 
     opened: list[str] = []
     real_startfile = getattr(web_mod.os, "startfile", None)
@@ -174,7 +174,7 @@ def check_open_folder(root: Path, port: int) -> None:
 def check_thinking_log(root: Path) -> None:
     cap = CaptureHandler()
     cap.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    llm_logger = logging.getLogger("task_arranger.llm")
+    llm_logger = logging.getLogger("orcsy.llm")
     llm_logger.setLevel(logging.INFO)
     llm_logger.addHandler(cap)
 

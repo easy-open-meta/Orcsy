@@ -442,7 +442,7 @@ class AppState:
             ],
         }
         src.write_text(
-            "# task-arranger 配置（由看板自动保存）\n"
+            "# orcsy 配置（由看板自动保存）\n"
             + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False),
             encoding="utf-8",
         )

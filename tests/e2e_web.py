@@ -17,12 +17,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from task_arranger.config import AppConfig, LLMConfig, ProjectConfig, WebConfig
-from task_arranger.executor import TaskExecutor
-from task_arranger.git_ops import Git
-from task_arranger.logging_setup import setup_logging
-from task_arranger.scheduler import Scheduler
-from task_arranger.web import AppState, make_server
+from orcsy.config import AppConfig, LLMConfig, ProjectConfig, WebConfig
+from orcsy.executor import TaskExecutor
+from orcsy.git_ops import Git
+from orcsy.logging_setup import setup_logging
+from orcsy.scheduler import Scheduler
+from orcsy.web import AppState, make_server
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from e2e_fake_llm import FakeLLMClient  # noqa: E402
@@ -79,10 +79,10 @@ def main() -> int:
         ]
 
         def run_task_mock(self, task, guide_content):
-            from task_arranger.llm import finish_response
-            from task_arranger.executor import TaskResult
+            from orcsy.llm import finish_response
+            from orcsy.executor import TaskResult
             import json as _json
-            from task_arranger.tools import ToolContext, dispatch_tool
+            from orcsy.tools import ToolContext, dispatch_tool
             ctx = ToolContext(root=self.worktree if self.is_git_repo else self.project.path)
             if self.is_git_repo:
                 self._prepare_worktree()
