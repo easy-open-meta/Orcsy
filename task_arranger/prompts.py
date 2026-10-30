@@ -32,6 +32,16 @@ OUTPUT_CONTRACT = """\
 - notes：补充说明、未尽事项；无则留空
 
 不要用纯文本回复结论；不要自己执行 git commit / git push（系统统一处理）。
+
+## 资源约定（上下文成本控制，必须遵守）
+
+对话历史每一轮都会整体重发，冗长的工具结果会按轮次重复计费：
+
+- 大文件先用 grep 定位行号，再用 read_file 的 offset/limit 只读需要的区段；
+  禁止为了"看看结构"整读大文件，禁止重复读取未变化的内容。
+- list_dir 用于初次了解结构，不要反复调用。
+- run_command 优先窄范围执行（跑单个测试文件、加 tail/--quiet 等参数）；
+  超长输出会被截断，需要更多信息时收窄命令而不是重跑。
 """
 
 
@@ -72,7 +82,7 @@ def build_system_prompt(
     return (
         f"# 角色\n\n"
         f"你是「{project.name}」项目的开发 Agent，负责按任务清单完成功能开发与 bug 修复。\n\n"
-        f"# 项目开发指引（AGENT.md）\n\n"
+        f"# Development Guide (AGENT.md)\n\n"
         f"以下是该项目的开发指引，是你在本项目工作的最高行为准则，必须遵守：\n\n"
         f"<agent_guide>\n{guide}\n</agent_guide>\n\n"
         f"{workspace}\n"

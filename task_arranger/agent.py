@@ -17,18 +17,7 @@ from .config import ProjectConfig
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
 from .task_model import Task, _parse_frontmatter, append_progress, scan_tasks, set_task_file_status
-
-DEFAULT_GUIDE = """\
-# 默认开发指引
-
-本项目的 AGENT.md 尚未编写，以下为通用约定：
-
-- 动手前先通读项目结构与相关代码，保持与现有代码风格一致。
-- 小步修改：只做当前任务要求的事，不顺手重构。
-- 修改后尽量运行项目已有的测试/构建命令验证；无法验证时在 notes 里说明。
-- 提交信息遵循 Conventional Commits（feat: / fix: / docs: / refactor: / test: / chore:）。
-- 依赖、配置、密钥等敏感变更一律 blocked 并说明，等待人工确认。
-"""
+from .templates import default_guide
 
 # 回写到任务文件的结果节
 _RESULT_HEADING = "## Agent 处理结果"
@@ -138,10 +127,11 @@ class ProjectAgent:
             content = guide_path.read_text(encoding="utf-8")
             if content.strip():
                 return content
-            self.log.warning("指引文件为空：%s，使用默认指引", guide_path)
+            self.log.warning("指引文件为空：%s，使用内置模板生成", guide_path)
         except OSError:
-            self.log.warning("未找到指引文件 %s，使用默认指引", guide_path)
-        return DEFAULT_GUIDE
+            self.log.warning("未找到指引文件 %s，使用内置模板生成", guide_path)
+        # 与看板新建项目落盘的初始内容同源（templates.default_guide），不留第二份文案
+        return default_guide(self.project.name, self.project.path)
 
     def _set_status(self, path: Path, status: str, result_section: str | None = None) -> None:
         """改写任务文件 frontmatter 的 status，可选追加结果节。"""
@@ -192,6 +182,9 @@ class ProjectAgent:
                  f"- 结果：{result.outcome}"]
         if result.commit:
             lines.append(f"- 提交：{result.commit}{'（已推送）' if result.pushed else ''}")
+        if result.turns:
+            lines.append(f"- 轮数：{result.turns}（输入 {result.prompt_tokens} / "
+                         f"输出 {result.completion_tokens} tokens）")
         if result.summary:
             lines.append(f"- 摘要：{result.summary}")
         if result.files_changed:

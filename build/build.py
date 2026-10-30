@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -68,8 +69,13 @@ def run(cmd: list[str], cwd: Path) -> None:
 
 
 def _npm(cwd: Path, *args: str) -> None:
-    """Windows 上 npm 是 npm.cmd，直接 CreateProcess 找不到，经 shell 调起。"""
-    npm = "npm.cmd" if sys.platform == "win32" else "npm"
+    """Windows 上 npm 是 npm.cmd，CreateProcess 只认全路径，先用 which 解析。"""
+    if sys.platform == "win32":
+        npm = shutil.which("npm.cmd") or shutil.which("npm")
+    else:
+        npm = shutil.which("npm")
+    if npm is None:
+        sys.exit("未找到 npm，请先安装 Node.js（系统 PATH 需包含 nodejs 目录）")
     run([npm, *args], cwd=cwd)
 
 

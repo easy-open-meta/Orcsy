@@ -7,6 +7,9 @@
 Agent 循环（run_task_loop）：
   任务提示 → 模型 → （工具调用 → 执行 → 结果回传）* N → 模型调用 finish 工具 → 结构化结论
 
+模型的思考内容（OpenAI 兼容的 reasoning_content / Anthropic 的 thinking 块）在
+模型返回时原样写入运行日志（💭 前缀条目），看板里可展开查看；不回传给服务端。
+
 安全：文件工具被 ToolContext 禁锢在项目根内；命令工具有白名单；循环有轮数上限。
 """
 
@@ -128,6 +131,17 @@ def _est_tokens_msg(m: dict) -> int:
         return 1
 
 
+# 思考内容写入运行日志的单轮上限：思考动辄数千字，不截断会把日志尾
+# （看板只读文件尾部）刷满，反而看不见执行主线
+_THINKING_LOG_CHARS = 6000
+
+
+def _clip_thinking(text: str) -> str:
+    if len(text) <= _THINKING_LOG_CHARS:
+        return text
+    return text[:_THINKING_LOG_CHARS] + f"\n…（思考内容超过 {_THINKING_LOG_CHARS} 字，已截断）"
+
+
 class LLMError(RuntimeError):
     pass
 
@@ -235,11 +249,16 @@ class LLMClient:
 
         for turn in range(1, max_turns + 1):
             if self.cfg.provider == "anthropic":
-                assistant_msg, tool_calls = self._step_anthropic(use_tools)
+                assistant_msg, tool_calls, reasoning = self._step_anthropic(use_tools)
             else:
-                assistant_msg, tool_calls = self._step_openai(use_tools)
+                assistant_msg, tool_calls, reasoning = self._step_openai(use_tools)
 
             self.messages.append(assistant_msg)
+            # 模型返回了思考内容（DeepSeek-R1/GLM 等的 reasoning_content，
+            # Anthropic 的 thinking 块）时写入运行日志，看板可展开查看；
+            # 思考内容不回传给服务（多数协议禁止），只本地留档
+            if reasoning:
+                log.info("💭 模型思考（第 %d 轮）：\n%s", turn, _clip_thinking(reasoning))
 
             if not tool_calls:
                 # 模型直接输出文字而非调用工具：提醒其走 finish 协议
@@ -282,9 +301,11 @@ class LLMClient:
         ))
         try:
             if self.cfg.provider == "anthropic":
-                assistant_msg, tool_calls = self._step_anthropic(True)
+                assistant_msg, tool_calls, reasoning = self._step_anthropic(True)
             else:
-                assistant_msg, tool_calls = self._step_openai(True)
+                assistant_msg, tool_calls, reasoning = self._step_openai(True)
+            if reasoning:
+                log.info("💭 模型思考（收尾轮）：\n%s", _clip_thinking(reasoning))
             self.messages.append(assistant_msg)
             for call_id, name, args_json in tool_calls:
                 if name == "finish":
@@ -298,29 +319,41 @@ class LLMClient:
         return parse_finish_args(args_json)
 
     def _trim_context(self) -> None:
-        """消息总量逼近模型上下文上限时，把最早的工具结果替换为占位符。
+        """控制对话历史的常驻成本，避免 token 浪费（每轮工具结果落库后执行）。
 
-        只动 role=tool 的文本内容——assistant 的 tool_calls 结构原样保留，
-        tool_call/tool_result 配对不会被裁断。首条 system 与最后 6 条消息
-        不参与裁剪。token 估算取 len//3（中英混合偏保守），用途是防撞墙
-        而非精确计费。
+        两级策略：
+        1. 滚动压缩：历史估算超过软预算（默认 24K tokens，与模型窗口无关——
+           历史每轮都要重发，小就是省）时，把「最近 N 条消息之外」的长工具
+           结果占位化。这些信息模型已经消费过，保留原文纯属每轮重复计费。
+        2. 紧急裁剪：估算逼近模型窗口 90% 时（长任务/小窗口），对剩余旧工具
+           结果进一步占位化，防止 400 撞墙。
+        system 与最近消息保持原文；tool_call/tool_result 配对不被破坏。
         """
         limit = int(getattr(self.cfg, "max_context_tokens", 0) or 0)
-        if limit <= 0 or len(self.messages) <= 8:
+        if len(self.messages) <= _KEEP_RECENT_MSGS + 2:
             return
         total = sum(_est_tokens_msg(m) for m in self.messages)
-        if total < int(limit * 0.9):
-            return
-        target = int(limit * 0.7)
-        for i in range(1, max(1, len(self.messages) - 6)):
-            if total <= target:
-                break
-            m = self.messages[i]
-            content = m.get("content")
-            if m.get("role") == "tool" and isinstance(content, str) and len(content) > 200:
-                total -= _est_tokens_msg(m) - len(_TRIMMED_PLACEHOLDER) // 3
-                m["content"] = _TRIMMED_PLACEHOLDER
-        log.info("上下文接近上限（limit=%d），已裁剪早期工具结果", limit)
+        soft = min(_SOFT_BUDGET_TOKENS, int(limit * 0.9)) if limit > 0 else _SOFT_BUDGET_TOKENS
+        if total > soft:
+            target = int(soft * 0.7)
+            for i in range(1, len(self.messages) - _KEEP_RECENT_MSGS):
+                if total <= target:
+                    break
+                m = self.messages[i]
+                c = m.get("content")
+                if m.get("role") == "tool" and isinstance(c, str) \
+                        and len(c) > _TOOL_KEEP_CHARS and not c.endswith("已省略）"):
+                    total -= _est_tokens_msg(m) - 12
+                    m["content"] = _TRIM_PLACEHOLDER
+        if limit > 0 and total > int(limit * 0.9):
+            for i in range(1, len(self.messages) - 6):
+                m = self.messages[i]
+                c = m.get("content")
+                if m.get("role") == "tool" and isinstance(c, str) \
+                        and len(c) > 100 and not c.endswith("已省略）"):
+                    total -= _est_tokens_msg(m) - 12
+                    m["content"] = _TRIM_PLACEHOLDER
+            log.info("上下文逼近模型窗口（limit=%d tokens），已强制裁剪早期工具结果", limit)
 
     @staticmethod
     def _finish_response(payload: dict) -> AgentResponse:
@@ -335,29 +368,38 @@ class LLMClient:
             "temperature": self.cfg.temperature,
             "max_tokens": self.cfg.max_tokens,
         }
+        if self.cfg.enable_thinking:
+            # 开关打开时才带上思考参数：Qwen/通义系认 enable_thinking，
+            # GLM 系认 thinking 对象；严格校验未知字段的服务（如 OpenAI 官方）
+            # 对不支持思考的模型请勿开此开关
+            payload["enable_thinking"] = True
+            payload["thinking"] = {"type": "enabled"}
         if use_tools:
             payload["tools"] = tool_definitions_openai()
         return payload
 
-    def _step_openai(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]]]:
+    def _step_openai(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]], str]:
         data = self._post(
             self.cfg.base_url.rstrip("/") + "/chat/completions",
             self._payload_openai(use_tools),
             _auth_headers("openai", self.cfg.api_key),
         )
+        self._acc_usage(data, "openai")
         try:
             msg = data["choices"][0]["message"]
         except (KeyError, IndexError) as e:
             raise LLMError(f"OpenAI 响应结构异常：{json.dumps(data, ensure_ascii=False)[:500]}") from e
         content = msg.get("content") or ""
+        # 推理模型的思考内容：DeepSeek/GLM 等走 reasoning_content，个别服务叫 reasoning
+        reasoning = str(msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
         tool_calls = []
         for tc in msg.get("tool_calls") or []:
             fn = tc.get("function", {})
             tool_calls.append((tc.get("id") or f"call_{len(tool_calls)}",
                                fn.get("name", ""), fn.get("arguments") or "{}"))
-        if not content and not tool_calls:
+        if not content and not tool_calls and not reasoning:
             raise LLMError("大模型返回了空内容")
-        return {"role": "assistant", "content": content or None}, tool_calls
+        return {"role": "assistant", "content": content or None}, tool_calls, reasoning
 
     # ---- Anthropic 协议 ----
 
@@ -396,29 +438,44 @@ class LLMClient:
             "max_tokens": self.cfg.max_tokens,
             "temperature": self.cfg.temperature,
         }
+        if self.cfg.enable_thinking:
+            # extended thinking 必须显式开启，模型才会返回 thinking 块；
+            # 官方约束：budget_tokens ≥ 1024 且 < max_tokens，temperature 固定 1
+            # （直接省略 temperature，API 默认即为 1）
+            if self.cfg.max_tokens < 2048:
+                raise LLMError("开启模型思考需要 max_tokens ≥ 2048（思考预留至少 1024）")
+            payload["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": max(1024, self.cfg.max_tokens // 2),
+            }
+            del payload["temperature"]
         if use_tools:
             payload["tools"] = tool_definitions_anthropic()
         return payload
 
-    def _step_anthropic(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]]]:
+    def _step_anthropic(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]], str]:
         data = self._post(
             self.cfg.base_url.rstrip("/") + "/messages",
             self._payload_anthropic(use_tools),
             _auth_headers("anthropic", self.cfg.api_key),
         )
+        self._acc_usage(data, "anthropic")
         try:
             blocks = data["content"]
         except (KeyError, TypeError) as e:
             raise LLMError(f"Anthropic 响应结构异常：{json.dumps(data, ensure_ascii=False)[:500]}") from e
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        # 扩展思考开启时（模型支持的前提下），thinking 块里是模型的思考过程
+        reasoning = "".join(b.get("thinking", "") for b in blocks
+                            if b.get("type") == "thinking").strip()
         tool_calls = [
             (b.get("id") or f"call_{i}", b.get("name", ""),
              json.dumps(b.get("input") or {}, ensure_ascii=False))
             for i, b in enumerate(blocks) if b.get("type") == "tool_use"
         ]
-        if not text and not tool_calls:
+        if not text and not tool_calls and not reasoning:
             raise LLMError("大模型返回了空内容")
-        return {"role": "assistant", "content": text or None}, tool_calls
+        return {"role": "assistant", "content": text or None}, tool_calls, reasoning
 
     # ---- HTTP ----
 

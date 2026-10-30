@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { NAutoComplete, NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
+import { NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import { api, type ModelInfo } from '../api'
 import { openGuide, openProjectEdit, openProjectNew, openTaskNew, store } from '../store'
+import { fmtTokens } from '../utils'
 
 const message = () => window.$message
 
@@ -10,7 +11,8 @@ const message = () => window.$message
 const draft = reactive({
   provider: 'openai' as 'openai' | 'anthropic',
   model: '', base_url: '', api_key: '',
-  temperature: 0.2, max_tokens: 8192, max_context_tokens: 131072, timeout_seconds: 300,
+  temperature: 0.2, max_tokens: 8192, max_context_tokens: 131072,
+  enable_thinking: false, timeout_seconds: 300,
   interval: 300, parallel: 1, port: 5116,
 })
 let inited = false
@@ -25,6 +27,7 @@ watch(() => store.state, (s) => {
   draft.temperature = s.llm.temperature
   draft.max_tokens = s.llm.max_tokens
   draft.max_context_tokens = s.llm.max_context_tokens
+  draft.enable_thinking = s.llm.enable_thinking
   draft.timeout_seconds = s.llm.timeout_seconds
   draft.interval = s.scheduler_cfg.interval_seconds
   draft.parallel = s.scheduler_cfg.max_parallel_agents
@@ -37,6 +40,7 @@ async function saveLlm(): Promise<void> {
       provider: draft.provider, model: draft.model, base_url: draft.base_url,
       api_key: draft.api_key, temperature: draft.temperature,
       max_tokens: draft.max_tokens, max_context_tokens: draft.max_context_tokens,
+      enable_thinking: draft.enable_thinking,
       timeout_seconds: draft.timeout_seconds,
     } })
     message()?.('已保存并生效')
@@ -77,6 +81,14 @@ async function delProject(name: string): Promise<void> {
   })
 }
 
+// 用系统文件管理器打开项目根目录（后端调起，浏览器自身无此权限）
+async function openFolder(p: { name: string; path: string }): Promise<void> {
+  try {
+    await api.projectOpenFolder(p.name)
+    message()?.(`已打开 ${p.path}`)
+  } catch (e: any) { message()?.(e.message, 'error') }
+}
+
 // ---- 模型列表与规格自动填充 ----
 const fetching = ref(false)
 const modelSpecs = ref<ModelInfo[]>([])
@@ -84,6 +96,9 @@ const modelSpecs = ref<ModelInfo[]>([])
 // 会被当成模型名存进配置（曾导致「step-5-preview（977K）」404）
 const modelOptions = computed(() =>
   modelSpecs.value.map(m => ({ label: m.id, value: m.id })))
+// 选中模型的规格摘要（厂商风格单位显示，如「上下文 1M · 最大输出 32K」）
+const selectedSpec = computed(() =>
+  modelSpecs.value.find(m => m.id.toLowerCase() === draft.model.trim().toLowerCase()))
 
 async function fetchModels(): Promise<void> {
   fetching.value = true
@@ -97,9 +112,10 @@ async function fetchModels(): Promise<void> {
   finally { fetching.value = false }
 }
 
-function onModelPick(v: string): void {
-  draft.model = v
-  const m = modelSpecs.value.find(x => x.id.toLowerCase() === v.toLowerCase())
+function onModelPick(v: string | null): void {
+  draft.model = (v || '').trim()
+  if (!draft.model) return
+  const m = modelSpecs.value.find(x => x.id.toLowerCase() === draft.model.toLowerCase())
   if (!m) return
   if (m.context_window) draft.max_context_tokens = m.context_window
   if (m.max_output_tokens) draft.max_tokens = m.max_output_tokens
@@ -120,11 +136,15 @@ const providerOptions = [
       <div class="frow">
         <div class="f1"><label>协议 provider</label>
           <NSelect v-model:value="draft.provider" :options="providerOptions" /></div>
-        <div class="f2"><label>模型 model（点输入框从列表选择，可输入过滤）</label>
-          <NAutoComplete v-model:value="draft.model" :options="modelOptions" placeholder="deepseek-chat 或获取列表后选择"
-                         @select="onModelPick" @input="onModelPick" /></div>
+        <div class="f2"><label>模型 model（下拉选择或输入过滤，支持自定义 id）</label>
+          <NSelect v-model:value="draft.model" :options="modelOptions" filterable tag
+                   placeholder="deepseek-chat 或获取列表后选择" @update:value="onModelPick" /></div>
         <div class="f0"><label>&nbsp;</label>
           <NButton :loading="fetching" @click="fetchModels">获取列表</NButton></div>
+      </div>
+      <div class="modelspec" v-if="selectedSpec && (selectedSpec.context_window || selectedSpec.max_output_tokens)">
+        该模型规格：上下文 {{ fmtTokens(selectedSpec.context_window) || '未知' }} ·
+        最大输出 {{ fmtTokens(selectedSpec.max_output_tokens) || '未知' }}（已自动填充到下方，可手改）
       </div>
       <div class="frow">
         <div class="f2"><label>API 地址 base_url</label><NInput v-model:value="draft.base_url" placeholder="https://api.deepseek.com/v1" /></div>
@@ -138,6 +158,11 @@ const providerOptions = [
         <div class="f1"><label>上下文窗口 max_context_tokens</label><NInputNumber v-model:value="draft.max_context_tokens" :step="1024" :min="4096" :max="2000000" /></div>
         <div class="f1"><label>请求超时（秒）</label><NInputNumber v-model:value="draft.timeout_seconds" :min="30" :max="1800" /></div>
       </div>
+      <label class="checkline" style="margin-bottom: 10px">
+        <NSwitch v-model:value="draft.enable_thinking" />
+        请求侧开启模型思考
+        <span class="hint">默认关闭：DeepSeek-R1 等推理模型会自动返回思考内容，无需开启。anthropic 需此项才会返回 thinking 块（预留一半 max_tokens 作思考预算）；OpenAI 兼容服务按 Qwen（enable_thinking）/ GLM（thinking）约定传参，不支持的服务请勿开启。</span>
+      </label>
       <div class="sfoot">
         <NButton type="primary" @click="saveLlm">保存模型配置</NButton>
       </div>
@@ -175,6 +200,7 @@ const providerOptions = [
           {{ p.path }} · 任务目录 {{ p.tasks_dir || 'tasks' }} · 每轮 {{ p.max_tasks_per_cycle || 1 }} 任务
         </div>
         <div class="ops-row">
+          <NButton size="tiny" @click="openFolder(p)">打开文件夹</NButton>
           <NButton size="tiny" @click="openTaskNew(p.name)">新建任务</NButton>
           <NButton size="tiny" @click="openGuide(p.name)">编辑 AGENT.md</NButton>
           <NButton size="tiny" @click="openProjectEdit(p.name)">设置</NButton>
@@ -188,6 +214,7 @@ const providerOptions = [
 
 <style scoped>
 .settings { padding: 0 20px; max-width: 1080px; display: flex; flex-direction: column; gap: 14px; }
+.modelspec { font-size: 12px; color: var(--dim); margin: -4px 0 8px; }
 .hint { font-size: 12px; color: var(--faint); font-weight: 400; }
 .frow { display: flex; gap: 10px; margin-bottom: 10px; }
 .frow > div { display: flex; flex-direction: column; gap: 4px; }

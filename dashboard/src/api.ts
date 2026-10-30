@@ -46,6 +46,7 @@ export interface AppStateT {
     temperature: number
     max_tokens: number
     max_context_tokens: number
+    enable_thinking: boolean
     timeout_seconds: number
   }
   scheduler: {
@@ -110,8 +111,12 @@ export const api = {
   models: (p: { provider: string; base_url: string; api_key: string }) =>
     post('/api/models', p) as Promise<{ models: ModelInfo[] }>,
   browse: (path: string) => post('/api/browse', { path }) as Promise<DirListing>,
+  probe: (path: string) =>
+    post('/api/probe', { path }) as Promise<{ ok: boolean; stack: string; run: string; test: string }>,
+  mkdir: (path: string) => post('/api/mkdir', { path }) as Promise<{ ok: boolean; path: string }>,
   projectSave: (p: Record<string, unknown>) => post('/api/project', p),
   projectDelete: (name: string) => post('/api/project/delete', { name }),
+  projectOpenFolder: (name: string) => post('/api/project/open-folder', { name }),
   guide: (project: string) =>
     get(`/api/guide?project=${encodeURIComponent(project)}`) as Promise<{ file: string; content: string }>,
   guideSave: (project: string, content: string) => post('/api/guide', { project, content }),

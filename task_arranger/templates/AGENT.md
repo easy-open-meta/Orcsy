@@ -1,45 +1,41 @@
-# AGENT.md — 项目开发指引模板
+# AGENT.md — Development Guide Template
 
-> 把本文件放到受管项目的根目录（或在 config.yaml 里改 `guide_file` 指向其它文件）。
-> Agent 每次执行任务前都会读取它，这里写的是 Agent 在本项目的最高行为准则。
+> Place this file at the managed project root (or point `guide_file` in config.yaml at another file).
+> The Agent reads it before every task — these are the top rules for working in this repo.
 
-## 项目简介
+## Project
 
-<!-- 一两段话说清这个项目是什么、技术栈、运行方式。Agent 没有项目背景，全靠这里。 -->
+<!-- Optional: fill in to save the Agent time and tokens; it can also explore the repo itself. -->
 
-- 技术栈：
-- 本地运行：
-- 测试命令：
+- Stack:
+- Run:
+- Test:
 
-## 目录结构约定
+## Code Style
 
-<!-- 描述关键目录，例如：src/ 业务代码，tests/ 测试，docs/ 文档 -->
+- Follow the repo's existing style; never introduce a new formatting style.
+- Add a dependency only when clearly necessary.
+- Comments/docstrings stay brief and explain "why", not "what".
 
-## 编码规范
+## Workflow
 
-- 遵循项目现有代码风格，不引入新的格式化风格。
-- 新增第三方依赖前必须评估必要性；能不引就不引。
-- 公共函数写简明的 docstring/注释，说明"为什么"而不是"做了什么"。
+1. **Read before write**: study the relevant modules first; confirm you understand the current implementation.
+2. **Small steps**: do only what the task asks; no drive-by refactoring of unrelated code.
+3. **Always verify**:
+   - Bug fix: reproduce with a failing test first, then make it pass.
+   - New feature: add basic tests. If automated verification is impossible, state the manual steps in notes.
+4. **Commits**: follow Conventional Commits (feat: / fix: / docs: / refactor: / test: / chore:); the body states motivation and scope of impact.
 
-## 工作流程要求
+## Never Do
 
-1. **先读后改**：动手前先通读相关模块，确认理解了现有实现。
-2. **小步提交**：只做当前任务要求的事，不顺手重构无关代码。
-3. **必须验证**：
-   - bug 修复：先写或改一个能复现问题的测试，修复后测试通过。
-   - 新功能：附上基本测试；无法自动化验证时在 notes 里说明人工验证步骤。
-4. **提交信息**：遵循 Conventional Commits（feat: / fix: / docs: / refactor: / test: / chore:），正文说明动机与影响面。
+- Do not modify or delete anything under the tasks directory (`tasks/`).
+- Do not touch CI/CD configs, dependency lock files, secrets or env files; return blocked if the task needs them.
+- No major dependency upgrades or framework swaps beyond the task's scope.
+- Never hardcode secrets, passwords or internal addresses in code.
 
-## 禁止事项
+## Return blocked When
 
-- 不要修改或删除任务清单目录（`tasks/`）下的任何文件。
-- 不要改 CI/CD 配置、依赖锁文件、密钥或环境变量文件；如任务需要，返回 blocked 并说明。
-- 不要进行大版本升级依赖、更换框架等超出任务范围的动作。
-- 不要在代码里硬编码密钥、密码、内网地址。
-
-## 遇到这些情况直接 blocked
-
-- 任务描述含糊，无法从代码中确定意图。
-- 需要人工决策（产品行为、UI 取舍、数据库结构变更）。
-- 验证不通过且两次尝试后仍失败。
-- 需要访问外部系统（数据库凭据、第三方后台）而项目里没有配置。
+- The task description is ambiguous and the intent cannot be inferred from the code.
+- A human decision is required (product behavior, UI trade-offs, database schema changes).
+- Verification fails after two attempts.
+- External systems are needed (database credentials, third-party consoles) but not configured in the project.

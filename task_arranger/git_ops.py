@@ -12,6 +12,13 @@ from .logging_setup import get_logger
 
 log = get_logger("git")
 
+# 无窗口实例（托盘 exe）派生控制台程序时，Windows 会自动分配新控制台导致
+# 任务执行期间黑窗闪现；CREATE_NO_WINDOW 抑制之（非 Windows 平台为 0）
+_SUBPROCESS_FLAGS = (
+    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+)
+
 
 class GitError(RuntimeError):
     pass
@@ -28,6 +35,7 @@ class Git:
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=_SUBPROCESS_FLAGS,
         )
         if check and proc.returncode != 0:
             raise GitError(f"git {' '.join(args)} 失败：{proc.stderr.strip() or proc.stdout.strip()}")
@@ -42,7 +50,7 @@ class Git:
     def is_repo(self) -> bool:
         proc = subprocess.run(
             ["git", "-C", str(self.repo), "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS,
         )
         return proc.returncode == 0 and proc.stdout.strip() == "true"
 

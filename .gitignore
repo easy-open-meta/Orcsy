@@ -13,3 +13,8 @@ build/task-arranger
 dashboard/node_modules/
 dashboard/dist/
 .zcode/
+# build.py 每次构建自动生成的版本文件（单一来源是 task_arranger/__init__.py）
+build/exe-version.txt
+build/version.ini
+# unplugin-vue-components 构建时自动生成的组件声明
+dashboard/components.d.ts

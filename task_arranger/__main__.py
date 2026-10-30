@@ -32,6 +32,7 @@ llm:
   temperature: 0.2
   max_tokens: 8192
   max_context_tokens: 131072 # 模型上下文窗口（tokens）；看板选模型时可自动填充
+  enable_thinking: false     # 请求侧开启模型思考（anthropic 必须；多数兼容服务默认返回）
   timeout_seconds: 300
 
 scheduler:
@@ -292,7 +293,7 @@ def cmd_web(args: argparse.Namespace) -> int:
     setup_logging(config.logging.level, str(log_file))
 
     scheduler = Scheduler(config)
-    state = AppState(config, scheduler)
+    state = AppState(config, scheduler, log_path=str(log_file))
     _load_page()  # 启动即缓存看板页面（冻结环境下 _MEI 文件可能稍后不可读）
     server = make_server(state, host, port)
     url = f"http://{host}:{port}"

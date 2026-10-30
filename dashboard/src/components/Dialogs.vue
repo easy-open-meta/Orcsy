@@ -5,20 +5,21 @@ import { api, type DirListing } from '../api'
 import { refresh, ui, store } from '../store'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
-// bridge 兼容两种用法：window.$message('文本') 默认 info；window.$message.success('文本') 等。
+// bridge 兼容两种用法：message('文本') 默认 info；message.success('文本') 等——
+// 本组件内统一用 message.xxx，window.$message 供其它组件直呼
 const messageApi = useMessage()
-const messageBridge = ((content: string, type: 'success' | 'warning' | 'error' | 'info' = 'info') => {
+const message = ((content: string, type: 'success' | 'warning' | 'error' | 'info' = 'info') => {
   (messageApi as any)[type]?.(content)
 }) as any
-Object.assign(messageBridge, messageApi)
-window.$message = messageBridge
+Object.assign(message, messageApi)
+window.$message = message
 window.$dialog = useDialog() as any
 
 // ---------- 项目对话框 ----------
 const pDraft = reactive({
   name: '', path: '', tasks_dir: 'tasks', guide_file: 'AGENT.md',
   max_tasks: 1, max_turns: 40, branch: '', cmds: '', enabled: true,
-  err: '',
+  stack: '', run: '', test: '', err: '',
 })
 const pVisible = computed({
   get: () => !!ui.projectDlg,
@@ -37,6 +38,23 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.branch = p?.allowed_branch ?? ''
   pDraft.cmds = p?.allowed_commands?.join(', ') ?? ''
   pDraft.enabled = p?.enabled ?? true
+  pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
+})
+
+// 新建项目时按路径自动探测技术栈预填（防抖 400ms，输入完整路径后触发）；
+// 编辑项目不探测——AGENT.md 已存在，保存时不会重写
+let probeTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => pDraft.path, (path) => {
+  if (ui.projectDlg?.original) return
+  clearTimeout(probeTimer)
+  const p = path.trim()
+  if (!p) return
+  probeTimer = setTimeout(async () => {
+    try {
+      const r = await api.probe(p)
+      pDraft.stack = r.stack; pDraft.run = r.run; pDraft.test = r.test
+    } catch { /* 目录不存在等情况：留空等用户手填 */ }
+  }, 400)
 })
 
 function browsePath(): void {
@@ -58,6 +76,10 @@ async function saveProject(): Promise<void> {
       allowed_commands: pDraft.cmds.split(/[,，]/).map(s => s.trim()).filter(Boolean) || undefined,
       enabled: pDraft.enabled,
       original_name: ui.projectDlg.original ?? undefined,
+      // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
+      ...(ui.projectDlg.original ? {} : {
+        stack: pDraft.stack.trim(), run: pDraft.run.trim(), test: pDraft.test.trim(),
+      }),
     })
     message.success(ui.projectDlg.original ? '已修改项目' : '已新建项目')
     ui.projectDlg = null
@@ -156,6 +178,7 @@ const bVisible = computed({
 })
 const bStack = ref<DirListing | null>(null)
 const bManual = ref('')
+const bNewFolder = ref('')
 const bErr = ref('')
 
 async function browseTo(path: string): Promise<void> {
@@ -165,12 +188,27 @@ async function browseTo(path: string): Promise<void> {
   } catch (e: any) { bErr.value = e.message }
 }
 watch(bVisible, (v) => {
-  if (v) { bManual.value = ui.browserStart; void browseTo(ui.browserStart || '') }
+  if (v) { bManual.value = ui.browserStart; bNewFolder.value = ''; void browseTo(ui.browserStart || '') }
 })
 function pickPath(): void {
   const v = bManual.value.trim() || bStack.value?.path || ''
   if (v) ui.browserPick?.(v)
   ui.browserDlg = false
+}
+
+// 在当前浏览的目录下新建文件夹，成功后自动进入
+async function newFolder(): Promise<void> {
+  const name = bNewFolder.value.trim()
+  if (!name) { message.warning('请输入文件夹名称'); return }
+  const base = bStack.value?.path || ''
+  if (!base) { message.warning('请先进入一个盘符或目录'); return }
+  const sep = base.endsWith('\\') || base.endsWith('/') ? '' : '\\'
+  try {
+    const r = await api.mkdir(base + sep + name)
+    message.success('已创建 ' + r.path)
+    bNewFolder.value = ''
+    await browseTo(r.path)
+  } catch (e: any) { message.error(e.message) }
 }
 </script>
 
@@ -198,6 +236,16 @@ function pickPath(): void {
     </div>
     <label>命令白名单（逗号分隔，留空用默认：python/pytest/node/npm/git…）</label>
     <NInput v-model:value="pDraft.cmds" placeholder="python, pytest, npm, dotnet" />
+    <template v-if="!ui.projectDlg?.original">
+      <label style="margin-top:10px">
+        技术栈（按路径自动探测预填，可修改；保存时写入 AGENT.md 的 Project 节，留空不填）
+      </label>
+      <div class="duo">
+        <div class="f1"><label>技术栈 Stack</label><NInput v-model:value="pDraft.stack" placeholder="Node.js (Vue)" /></div>
+        <div class="f1"><label>本地运行 Run</label><NInput v-model:value="pDraft.run" placeholder="npm run dev" /></div>
+        <div class="f1"><label>测试 Test</label><NInput v-model:value="pDraft.test" placeholder="npm test" /></div>
+      </div>
+    </template>
     <label class="checkline" style="margin-top:4px">
       <NSwitch v-model:value="pDraft.enabled" />
       启用该项目（停用后调度器跳过，配置保留）
@@ -256,6 +304,11 @@ function pickPath(): void {
     <div class="blist">
       <div v-for="d in bStack?.dirs || []" :key="d" class="bitem" @click="browseTo(d)">{{ d }}</div>
       <div v-if="bStack && !bStack.dirs.length" class="bempty">{{ bStack.note || '（没有子目录，可直接用下面的路径框）' }}</div>
+    </div>
+    <div class="pathline" style="margin-bottom:8px">
+      <NInput v-model:value="bNewFolder" size="small" placeholder="在当前目录下新建文件夹，输入名称"
+              @keydown.enter="newFolder" />
+      <NButton size="small" @click="newFolder">＋ 新建文件夹</NButton>
     </div>
     <div class="pathline">
       <NInput v-model:value="bManual" placeholder="或直接粘贴完整路径" @keydown.enter="pickPath" />

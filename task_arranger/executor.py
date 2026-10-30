@@ -38,6 +38,9 @@ class TaskResult:
     duration_seconds: float = 0.0
     llm_error: str = ""            # LLM/网络层面的错误（区别于业务 blocked）
     files_changed: list[str] = field(default_factory=list)
+    turns: int = 0                 # Agent 工具循环轮数
+    prompt_tokens: int = 0         # 输入 token 累计（各轮之和，含历史重发）
+    completion_tokens: int = 0     # 输出 token 累计
 
 
 class TaskExecutor:
@@ -61,8 +64,14 @@ class TaskExecutor:
                         f"开始执行（{task.priority}，最多 {self.project.max_agent_turns} 轮）")
 
         result = TaskResult(task_id=task.id, outcome="blocked")
+        usage: dict = {}
         try:
-            response = self._agent_loop(task, guide_content, on_progress=lambda line: append_progress(task.path, line))
+            response = self._agent_loop(
+                task, guide_content, usage_out=usage,
+                on_progress=lambda line: append_progress(task.path, line))
+            result.turns = int(usage.get("turns", 0))
+            result.prompt_tokens = int(usage.get("prompt_tokens", 0))
+            result.completion_tokens = int(usage.get("completion_tokens", 0))
             result.summary = response.summary
             result.notes = response.notes
             result.files_changed = response.files_changed
@@ -79,11 +88,17 @@ class TaskExecutor:
             self.log.error("任务 %s 调用大模型失败：%s", task.id, e)
             result.llm_error = str(e)
             result.notes = f"调用大模型失败：{e}"
+            result.turns = int(usage.get("turns", 0))
+            result.prompt_tokens = int(usage.get("prompt_tokens", 0))
+            result.completion_tokens = int(usage.get("completion_tokens", 0))
             self._cleanup_worktree_changes()
         except Exception as e:  # noqa: BLE001 — 单任务失败不能拖垮调度循环
             self.log.exception("任务 %s 执行出现未预期异常", task.id)
             result.llm_error = str(e)
             result.notes = f"执行异常：{e}"
+            result.turns = int(usage.get("turns", 0))
+            result.prompt_tokens = int(usage.get("prompt_tokens", 0))
+            result.completion_tokens = int(usage.get("completion_tokens", 0))
             self._cleanup_worktree_changes()
 
         # 任务结束后移除 worktree：改动要么已合并要么已放弃，避免残留未跟踪目录
@@ -101,7 +116,7 @@ class TaskExecutor:
     # ---- Agent 循环 ----
 
     def _agent_loop(self, task: Task, guide_content: str,
-                    on_progress=None) -> AgentResponse:
+                    on_progress=None, usage_out: dict | None = None) -> AgentResponse:
         work_root = self.worktree if self.is_git_repo else self.project.path
         if self.is_git_repo:
             branch = self._prepare_worktree()
@@ -112,12 +127,17 @@ class TaskExecutor:
         client.reset(build_system_prompt(self.project, guide_content, self.is_git_repo))
 
         try:
-            return client.run_task_loop(self._build_task_prompt(task), ctx,
+            resp = client.run_task_loop(self._build_task_prompt(task), ctx,
                                         max_turns=self.project.max_agent_turns,
                                         on_progress=on_progress)
         except FinishSignal as sig:
             # run_task_loop 内部会捕获并转换；这里兜底处理（替身/异常路径）
-            return finish_response(sig.payload)
+            resp = finish_response(sig.payload)
+        finally:
+            # 任何结束路径（含 LLM 异常）都回收 token 计量
+            if usage_out is not None:
+                usage_out.update(getattr(client, "usage", {}) or {})
+        return resp
 
     # ---- worktree 管理 ----
 

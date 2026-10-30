@@ -11,10 +11,14 @@ API（均为 GET/POST JSON）：
 
 项目管理（可视化配置）：
   POST /api/browse       浏览本地目录    {path}，返回子目录列表（供新建项目选路径）
+  POST /api/probe        静态探测技术栈  {path}，返回 stack/run/test（新建项目预填）
+  POST /api/mkdir        新建文件夹      {path}（目录选择器内创建，父目录须存在）
   POST /api/project      新建/修改项目   {name, path, tasks_dir, guide_file,
                                           max_tasks_per_cycle, max_agent_turns,
-                                          allowed_branch, allowed_commands, enabled}
+                                          allowed_branch, allowed_commands, enabled,
+                                          stack/run/test 可选：写入 AGENT.md 的 Project 节}
   POST /api/project/delete        删除项目（仅从配置移除，不动磁盘）
+  POST /api/project/open-folder   用系统文件管理器打开项目根目录 {name}
   GET/POST /api/guide    读取/保存项目 AGENT.md {project, content?}
   POST /api/config       保存模型/调度/看板配置 {llm:{...}, scheduler:{...}, web:{...}}
                          保存后写回 config.yaml 并热重载调度器
@@ -23,7 +27,9 @@ API（均为 GET/POST JSON）：
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import sys
 import threading
 import yaml
@@ -50,45 +56,12 @@ _DIR_IGNORE = {"$Recycle.Bin", "System Volume Information", "Windows", "AppData"
                "node_modules", ".git", ".venv", "__pycache__", ".worktree-arranger"}
 
 
-def _default_guide(project_name: str) -> str:
-    """新项目的 AGENT.md 初始内容（与内置模板一致的精简版）。"""
-    return f"""# {project_name} 开发指引
-
-> 由任务编排看板生成，请按项目实际情况修改。Agent 执行任务时会读取本文件作为行为准则。
-
-## 项目简介
-
-- 技术栈：
-- 本地运行：
-- 测试命令：
-
-## 编码规范
-
-- 遵循项目现有代码风格，不引入新的格式化风格。
-- 新增第三方依赖前必须评估必要性；能不引就不引。
-
-## 工作流程要求
-
-1. **先读后改**：动手前先通读相关模块，确认理解了现有实现。
-2. **小步提交**：只做当前任务要求的事，不顺手重构无关代码。
-3. **必须验证**：修改后运行测试/构建；无法验证时在 notes 里说明。
-4. **提交信息**：遵循 Conventional Commits（feat: / fix: / docs: / refactor: / test: / chore:）。
-
-## 禁止事项
-
-- 不要修改 `tasks/` 目录下的任何文件。
-- 不要改 CI/CD 配置、依赖锁文件、密钥文件；如任务需要，返回 blocked 并说明。
-- 不要在代码里硬编码密钥、密码、内网地址。
-
-## 遇到这些情况直接 blocked
-
-- 任务描述含糊，无法从代码中确定意图。
-- 需要人工决策（产品行为、UI 取舍、数据库结构变更）。
-- 验证不通过且两次尝试后仍失败。
-"""
+# 新项目/导入项目的 AGENT.md 初始内容：统一走 templates.default_guide（唯一来源）
 
 
-def read_log_tail(path: str, max_bytes: int = 20000) -> str:
+def read_log_tail(path: str, max_bytes: int = 60000) -> str:
+    # 尾部窗口取 60KB：日志里现在有模型思考内容（每轮可达数千字），
+    # 窗口太小会只剩最近一两条，看板里看不到执行主线
     try:
         with open(path, "rb") as f:
             f.seek(0, 2)
@@ -102,9 +75,13 @@ def read_log_tail(path: str, max_bytes: int = 20000) -> str:
 class AppState:
     """Web 层共享的应用状态与操作。"""
 
-    def __init__(self, config: AppConfig, scheduler: Scheduler) -> None:
+    def __init__(self, config: AppConfig, scheduler: Scheduler,
+                 log_path: str | None = None) -> None:
         self.config = config
         self.scheduler = scheduler
+        # 解析后的日志绝对路径（cmd_web 传入）；不传则退回原始配置值
+        # ——config.logging.file 常是相对路径，直接按进程 CWD 读会读错位置
+        self.log_path = log_path
         self.agents: dict[str, ProjectAgent] = {
             p.name: ProjectAgent(p, config.llm) for p in config.projects
         }
@@ -157,6 +134,7 @@ class AppState:
                 "temperature": self.config.llm.temperature,
                 "max_tokens": self.config.llm.max_tokens,
                 "max_context_tokens": self.config.llm.max_context_tokens,
+                "enable_thinking": self.config.llm.enable_thinking,
                 "timeout_seconds": self.config.llm.timeout_seconds,
             },
             "scheduler": self.scheduler.status(),
@@ -171,7 +149,7 @@ class AppState:
             },
             "app_autostart": self.app_autostart_status(),
             "projects": projects,
-            "log_tail": read_log_tail(self.config.logging.file),
+            "log_tail": read_log_tail(self.log_path or self.config.logging.file),
         }
 
     @staticmethod
@@ -311,6 +289,26 @@ class AppState:
                 "status": t.status, "labels": t.labels, "assignee": t.assignee,
                 "description": t.description}
 
+    def make_dir(self, data: dict) -> dict:
+        """在指定位置创建新文件夹（目录选择器「新建项目」流程用）。"""
+        path = str(data.get("path", "")).strip().strip('"')
+        if not path:
+            raise ValueError("路径不能为空")
+        p = Path(path)
+        if p.parent == p or not p.parent.is_dir():
+            raise ValueError(f"父目录不存在：{p.parent}")
+        name = p.name
+        if not name or re.search(r'[\\/:*?"<>|]', name):
+            raise ValueError(f"文件夹名不合法：{name!r}（不能包含 \\/:*?\"<>|）")
+        try:
+            p.mkdir(parents=False, exist_ok=False)
+        except FileExistsError:
+            raise ValueError(f"文件夹已存在：{path}")
+        except OSError as e:
+            raise ValueError(f"创建失败：{e}")
+        log.info("Web 创建目录 %s", p)
+        return {"ok": True, "path": str(p)}
+
     def fetch_models(self, data: dict) -> dict:
         """拉取大模型服务的模型列表（请求体缺省时回退到已保存的接入配置）。"""
         llm = self.config.llm
@@ -375,6 +373,15 @@ class AppState:
         parent = str(p.parent) if p.parent != p else None
         return {"ok": True, "path": str(p), "parent": parent, "dirs": dirs}
 
+    def probe_project_api(self, data: dict) -> dict:
+        """静态探测目录的技术栈与常用命令（新建项目对话框自动预填用）。"""
+        raw = str(data.get("path", "")).strip()
+        p = Path(raw).expanduser() if raw else None
+        if p is None or not p.is_dir():
+            raise ValueError(f"目录不存在：{raw}")
+        from .probe import probe_project
+        return {"ok": True, **probe_project(p)}
+
     def _project_payload(self, data: dict, original_name: str | None = None) -> ProjectConfig:
         name = self._safe_project_name(data.get("name", original_name or ""))
         path = Path(str(data.get("path", "")).strip()).expanduser()
@@ -411,6 +418,7 @@ class AppState:
                 "base_url": cfg.llm.base_url, "model": cfg.llm.model,
                 "temperature": cfg.llm.temperature, "max_tokens": cfg.llm.max_tokens,
                 "max_context_tokens": cfg.llm.max_context_tokens,
+                "enable_thinking": cfg.llm.enable_thinking,
                 "timeout_seconds": cfg.llm.timeout_seconds,
             },
             "scheduler": {
@@ -467,7 +475,8 @@ class AppState:
             self.config.projects[idx] = proj
             action = "修改"
 
-        # 新项目：初始化任务目录与 AGENT.md（已存在则不动）
+        # 新项目（含导入现有项目）：只初始化任务目录与 AGENT.md，均不覆盖已有；
+        # 不再生成示例任务等其它文件，已有代码的项目根目录保持干净
         created = []
         tasks_dir = proj.path / proj.tasks_dir
         if not tasks_dir.exists():
@@ -475,7 +484,17 @@ class AppState:
             created.append(f"{proj.tasks_dir}/")
         guide = proj.path / proj.guide_file
         if not guide.exists():
-            guide.write_text(_default_guide(proj.name), encoding="utf-8")
+            from .templates import default_guide
+            # 请求里带了 stack/run/test 键（新建项目对话框）就按用户填的来，
+            # 没带（CLI init / 老调用方）才走自动探测
+            if any(k in data for k in ("stack", "run", "test")):
+                overrides = {k: str(data.get(k) or "").strip()
+                             for k in ("stack", "run", "test")}
+            else:
+                overrides = None
+            guide.write_text(
+                default_guide(proj.name, proj.path, overrides=overrides),
+                encoding="utf-8")
             created.append(proj.guide_file)
 
         self.scheduler.reload_config(self.config)
@@ -496,6 +515,23 @@ class AppState:
         self._save_config(self.config)
         log.info("Web 删除项目 %s（仅移出配置，未删磁盘文件）", name)
         return {"ok": True, "message": f"已移除项目 {name}（项目目录未删除）"}
+
+    def open_project_folder(self, data: dict) -> dict:
+        """用系统文件管理器打开项目根目录（看板「打开文件夹」按钮）。"""
+        name = str(data.get("name", "")).strip()
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"未知项目：{name}")
+        path = agent.project.path
+        if not path.is_dir():
+            raise ValueError(f"项目目录不存在：{path}")
+        if sys.platform == "win32":
+            os.startfile(path)  # noqa: S606 — 本机用户主动打开自己的项目目录
+        else:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.Popen([opener, str(path)])
+        log.info("Web 打开项目文件夹 %s（%s）", name, path)
+        return {"ok": True, "path": str(path)}
 
     # ---- AGENT.md 编辑 ----
 
@@ -590,6 +626,8 @@ class AppState:
                 temperature=float(llm.get("temperature", 0.2)),
                 max_tokens=max_tokens,
                 max_context_tokens=max_context,
+                enable_thinking=bool(llm.get("enable_thinking",
+                                             self.config.llm.enable_thinking)),
                 timeout_seconds=int(llm.get("timeout_seconds") or 300),
             )
         self.config.scheduler = SchedulerConfig(
@@ -686,10 +724,19 @@ class WebHandler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/browse":
                 self._json(self.state.browse_dir(body))
+            elif path == "/api/probe":
+                self._json(self.state.probe_project_api(body))
+            elif path == "/api/mkdir":
+                try:
+                    self._json(self.state.make_dir(body))
+                except (ValueError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/project":
                 self._json(self.state.save_project(body))
             elif path == "/api/project/delete":
                 self._json(self.state.delete_project(body))
+            elif path == "/api/project/open-folder":
+                self._json(self.state.open_project_folder(body))
             elif path == "/api/guide":
                 self._json(self.state.save_guide(body))
             elif path == "/api/app-autostart":

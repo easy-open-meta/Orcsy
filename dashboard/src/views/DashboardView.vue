@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { NButton, NCard, NInput, NSelect, NSwitch, NTag } from 'naive-ui'
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { openGuide, openProjectEdit, openTaskNew, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
-import { relTime } from '../utils'
+import { parseLogEntries, relTime } from '../utils'
 import type { ProjectT, TaskT } from '../api'
 import { api } from '../api'
+
+// 运行日志按从新到旧展示；💭 思考条目在渲染层折叠成可展开块
+const logEntries = computed(() => parseLogEntries(store.state?.log_tail || ''))
 
 function stats(p: ProjectT): string {
   const c: Record<string, number> = {}
@@ -61,6 +64,29 @@ async function delTask(p: ProjectT, t: TaskT): Promise<void> {
       void import('../store').then(m => m.refresh(true))
     },
   })
+}
+
+// 只从系统移除项目（配置移除，磁盘文件与任务全部保留）；彻底删除请手动删目录
+async function delProject(p: ProjectT): Promise<void> {
+  window.$dialog?.warning({
+    title: '移除项目',
+    content: `确定从系统移除项目 ${p.name}？（仅移出配置，目录与任务文件不会删除）`,
+    positiveText: '移除',
+    negativeText: '取消',
+    async onPositiveClick() {
+      try { await api.projectDelete(p.name); window.$message?.('已移除（文件已保留）') }
+      catch (e: any) { window.$message?.(e.message, 'error') }
+      void import('../store').then(m => m.refresh(true))
+    },
+  })
+}
+
+// 用系统文件管理器打开项目根目录（后端调起，浏览器自身无此权限）
+async function openFolder(p: ProjectT): Promise<void> {
+  try {
+    await api.projectOpenFolder(p.name)
+    window.$message?.(`已打开 ${p.path}`)
+  } catch (e: any) { window.$message?.(e.message, 'error') }
 }
 
 async function setStatus(p: ProjectT, t: TaskT, st: string): Promise<void> {
@@ -124,9 +150,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </template>
         <template #footer>
           <div class="ops-row">
+            <NButton size="tiny" @click="openFolder(p)">打开文件夹</NButton>
             <NButton size="tiny" @click="openTaskNew(p.name)">新建任务</NButton>
             <NButton size="tiny" @click="openGuide(p.name)">AGENT.md</NButton>
             <NButton size="tiny" @click="openProjectEdit(p.name)">设置</NButton>
+            <NButton size="tiny" quaternary type="error" @click="delProject(p)">移除</NButton>
           </div>
         </template>
 
@@ -194,8 +222,18 @@ async function quickAdd(p: ProjectT): Promise<void> {
     </div>
 
     <details v-if="store.state" class="logsec" open>
-      <summary>运行日志（尾部，点击收起）</summary>
-      <pre>{{ store.state.log_tail || '（暂无日志）' }}</pre>
+      <summary>运行日志（从新到旧，点击收起）</summary>
+      <div class="logbox">
+        <div v-if="!logEntries.length" class="logempty">（暂无日志）</div>
+        <template v-for="(e, i) in logEntries" :key="i">
+          <!-- 模型思考条目：默认折叠，展开查看完整思考过程 -->
+          <details v-if="e.thinking" class="think">
+            <summary>{{ e.head }}</summary>
+            <pre>{{ e.body || '（无正文）' }}</pre>
+          </details>
+          <div v-else class="logentry">{{ e.head }}<template v-if="e.body">{{ '\n' + e.body }}</template></div>
+        </template>
+      </div>
     </details>
   </div>
 </template>
@@ -225,9 +263,17 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .arch summary { cursor: pointer; color: var(--dim); }
 .logsec { margin: 16px 0; font-size: 13px; }
 .logsec summary { cursor: pointer; color: var(--dim); }
-.logsec pre {
+.logbox {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 10px 12px; max-height: 380px; overflow: auto;
   font: 12px/1.6 Consolas, "Cascadia Mono", monospace; white-space: pre-wrap; word-break: break-all;
+}
+.logempty { color: var(--faint); }
+.logentry { margin-bottom: 2px; }
+.think { margin: 4px 0; }
+.think summary { cursor: pointer; color: #a78bfa; user-select: none; }
+.think pre {
+  margin: 4px 0 0; font: inherit; white-space: pre-wrap; word-break: break-word;
+  opacity: 0.85; border-left: 2px solid var(--line2); padding-left: 8px;
 }
 </style>

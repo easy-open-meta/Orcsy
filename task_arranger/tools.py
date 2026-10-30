@@ -20,6 +20,9 @@ from .logging_setup import get_logger
 
 log = get_logger("tools")
 
+# 无窗口实例（托盘 exe）派生控制台程序会闪黑窗，CREATE_NO_WINDOW 抑制之
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 # 只读命令白名单：测试、构建、lint 等 Agent 自验证所需的常见命令。
 # 通配符按 argv[0] 的文件名匹配；不在表内的命令一律拒绝。
 DEFAULT_ALLOWED_COMMANDS = [
@@ -160,7 +163,7 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
         proc = subprocess.Popen(
             command, cwd=str(ctx.root), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", shell=False,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _NO_WINDOW,
         )
     except FileNotFoundError:
         return f"错误：命令不存在：{command[0]}"
