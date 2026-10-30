@@ -33,6 +33,7 @@ DEFAULT_ALLOWED_COMMANDS = [
 
 MAX_OUTPUT_CHARS = 6000
 MAX_FILE_READ_CHARS = 12000
+MAX_SKILL_CHARS = 24000  # 技能全文上限，对齐 prompts 的 guide_max_chars
 DEFAULT_READ_LINES = 250
 
 
@@ -42,6 +43,9 @@ class ToolContext:
 
     root: Path
     allowed_commands: list[str] | None = None  # None 用默认白名单
+    # 技能名 → SKILL.md 正文（执行器从技能库预载；read_skill 工具专用，
+    # 不受项目根沙箱限制——技能存放在配置目录，不在项目内）
+    skills: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()
@@ -219,6 +223,19 @@ def tool_grep(ctx: ToolContext, args: dict) -> str:
     return "\n".join(hits) or "（无匹配）"
 
 
+def tool_read_skill(ctx: ToolContext, args: dict) -> str:
+    """读取一个适用技能的 SKILL.md 全文（内容由执行器从技能库预载）。"""
+    name = str(args.get("name", "")).strip()
+    if not ctx.skills:
+        return "错误：当前项目没有可用的技能"
+    if name not in ctx.skills:
+        return f"错误：技能 {name!r} 不存在或对当前项目不生效。可用技能：{', '.join(ctx.skills)}"
+    body = ctx.skills[name]
+    if len(body) > MAX_SKILL_CHARS:
+        body = body[:MAX_SKILL_CHARS] + f"\n\n…（技能过长，已截断至前 {MAX_SKILL_CHARS} 字符）"
+    return body
+
+
 def tool_finish(ctx: ToolContext, args: dict) -> str:
     """Agent 主动结束任务并给出结构化结论；由执行器捕获处理。"""
     raise FinishSignal(args)
@@ -309,6 +326,18 @@ TOOLS: dict[str, tuple[str, dict, object]] = {
             "required": ["command"],
         },
         tool_run_command,
+    ),
+    "read_skill": (
+        "读取一个技能（Skill）的全文。系统提示词的技能索引里列出的技能适用时，"
+        "先读取全文再严格按其内容执行；与任务无关的技能不要读取。",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "技能名，见系统提示词的技能索引"},
+            },
+            "required": ["name"],
+        },
+        tool_read_skill,
     ),
     "finish": (
         "任务完成或受阻时调用，给出最终结论。必须提供 action/summary 等字段。",

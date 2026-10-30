@@ -16,6 +16,7 @@ from pathlib import Path
 from .config import ProjectConfig
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
+from .skills import Skill, load_skills, skills_for_project
 from .task_model import Task, _parse_frontmatter, append_progress, scan_tasks, set_task_file_status
 from .templates import default_guide
 
@@ -65,9 +66,10 @@ def recover_interrupted_tasks(project: ProjectConfig) -> list[str]:
 class ProjectAgent:
     """一个项目一个实例；scan() 由调度器周期性调用。"""
 
-    def __init__(self, project: ProjectConfig, llm) -> None:
+    def __init__(self, project: ProjectConfig, llm, skills_base=None) -> None:
         self.project = project
         self.executor = TaskExecutor(project, llm)
+        self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
         self.log = get_logger(f"agent.{project.name}")
 
     # ---- 对外 ----
@@ -84,6 +86,7 @@ class ProjectAgent:
             return []
 
         guide = self._load_guide()
+        skills = self._load_skills()
         tasks, errors = scan_tasks(self.tasks_dir)
 
         if errors:
@@ -112,7 +115,7 @@ class ProjectAgent:
                 continue
 
             self._mark_in_progress(task)
-            result = self.executor.run_task(task, guide)
+            result = self.executor.run_task(task, guide, skills)
             self._write_back_result(task, result)
             results.append(result)
             claimed += 1
@@ -132,6 +135,19 @@ class ProjectAgent:
             self.log.warning("未找到指引文件 %s，使用内置模板生成", guide_path)
         # 与看板新建项目落盘的初始内容同源（templates.default_guide），不留第二份文案
         return default_guide(self.project.name, self.project.path)
+
+    def _load_skills(self) -> list[Skill]:
+        """加载对本项目生效的技能（每轮新鲜读取，看板的增删改即时生效）。"""
+        if self.skills_base is None:
+            return []
+        try:
+            skills = skills_for_project(load_skills(self.skills_base), self.project.name)
+        except OSError as e:
+            self.log.warning("技能库读取失败：%s", e)
+            return []
+        if skills:
+            self.log.debug("适用技能：%s", ", ".join(s.name for s in skills))
+        return skills
 
     def _set_status(self, path: Path, status: str, result_section: str | None = None) -> None:
         """改写任务文件 frontmatter 的 status，可选追加结果节。"""

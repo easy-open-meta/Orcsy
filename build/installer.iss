@@ -63,11 +63,13 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppNameTray}"; Paramete
 Name: "closeapp"; Description: "退出正在运行的 Orcsy（结束后自动继续安装）"; GroupDescription: "检测到旧版本正在运行："; Check: IsOldAppRunning
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
 Name: "autostart"; Description: "开机自动启动（可随时在托盘菜单开关）"; GroupDescription: "附加任务："; Flags: unchecked
-Name: "initdata"; Description: "初始化配置与示例任务（首次安装）"; GroupDescription: "附加任务："; Flags: unchecked
+Name: "initdata"; Description: "初始化示例任务（首次安装）；config.yaml 由应用首次启动自动生成"; GroupDescription: "附加任务："; Flags: unchecked
 
 [Run]
-; 首次使用：在真实文档目录（与应用同源解析）下生成 config.yaml 与示例任务模板
-Filename: "{app}\{#MyAppExeName}"; Parameters: "init --dir ""{code:RealUserDocs}\Orcsy"""; Tasks: initdata; Flags: runhidden
+; 勾选「初始化示例任务」：只在数据目录 %APPDATA%\Orcsy（与应用同源解析）放置
+; 示例任务/指引模板。config.yaml 不在这里初始化——0.9.1 起应用首次启动会在
+; 默认数据目录自动生成（Roaming 本地实体，不受 OneDrive 干扰），看板里填 api_key 即可
+Filename: "{app}\{#MyAppExeName}"; Parameters: "init --no-config --dir ""{code:RealUserAppData}\Orcsy"""; Tasks: initdata; Flags: runhidden
 ; 勾选自启动：写 HKCU Run 键（托盘 exe 静默后台）
 Filename: "{app}\{#MyAppNameTray}"; Parameters: "web --tray-autostart-on"; Tasks: autostart; Flags: runhidden
 Filename: "{app}\{#MyAppNameTray}"; Parameters: "--tray"; Description: "启动任务编排系统（托盘后台）"; Flags: nowait postinstall skipifsilent
@@ -79,7 +81,8 @@ Filename: "{sys}\reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows
 Filename: "{sys}\reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v TaskArranger /f"; Flags: runhidden; RunOnceId: "DelAutoStartLegacy"
 
 [UninstallDelete]
-; 程序目录里的文件由卸载日志自动删除；用户配置与任务（文档\Orcsy）保留。
+; 程序目录里的文件由卸载日志自动删除；用户配置与任务（%APPDATA%\Orcsy）保留
+; （勾选「同时删除用户数据」时在 [Code] 卸载末尾按注册表真实路径删除）。
 ; 快捷方式本应由卸载日志回收，但跨版本更名（任务编排系统 → Orcsy）后旧名
 ; 残留、桌面被 OneDrive 重定向等场景会漏删，公共区域按名字显式兜底清理；
 ; 用户桌面在下方 [Code] 里按注册表真实路径处理（提权上下文 {userdesktop} 可能错位）。
@@ -88,7 +91,7 @@ Type: files; Name: "{autodesktop}\任务编排系统.lnk"
 Type: filesandordirs; Name: "{autoprograms}\任务编排系统"
 
 [Code]
-// 卸载时询问是否删除用户数据（文档\Orcsy：配置、日志、任务模板）
+// 卸载时询问是否删除用户数据（%APPDATA%\Orcsy：配置、日志、任务模板、技能库）
 var DeleteUserData: Boolean;
 
 // ===== 安装前结束正在运行的旧版本 =====
@@ -154,24 +157,25 @@ begin
   end;
 end;
 
-// 文档目录解析与应用（orcsy/__main__.py 的 _candidate_config_dirs）保持同源：
-// 读注册表 User Shell Folders\Personal，而不是 Inno 的 {userdocs}——
-// OneDrive 重定向/映射盘场景下两者可能指向不同目录，导致初始化/卸载错位
-function RealUserDocs(Param: String): String;
+// 数据目录解析与应用（orcsy/__main__.py 的 default_data_dir）保持同源：
+// 读注册表 User Shell Folders\AppData（Roaming），而不是 Inno 的 {userappdata}——
+// 提权上下文里 Inno 的 user 常量可能错位（参考下方桌面快捷方式处理）。
+// 0.9.0 起数据目录从「文档」改到 %APPDATA%\Orcsy：本地实体、不受 OneDrive 干扰
+function RealUserAppData(Param: String): String;
 var
   Raw: String;
 begin
   Result := '';
   if RegQueryStringValue(HKEY_CURRENT_USER,
       'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders',
-      'Personal', Raw) and (Trim(Raw) <> '') then
+      'AppData', Raw) and (Trim(Raw) <> '') then
   begin
     StringChangeEx(Raw, '%USERPROFILE%', GetEnv('USERPROFILE'), True);
     if Pos('%', Raw) = 0 then
       Result := Raw;
   end;
   if Trim(Result) = '' then
-    Result := ExpandConstant('{userdocs}');
+    Result := ExpandConstant('{userappdata}');
 end;
 
 function ShowDataDeletePrompt: Boolean;
@@ -261,7 +265,9 @@ begin
   if CurUninstallStep = usPostUninstall then begin
     DeleteUserDesktopShortcuts();
     if DeleteUserData then begin
-      DataDir := RealUserDocs('') + '\Orcsy';
+      // 0.9.0 起数据在 %APPDATA%\Orcsy；旧版「文档」目录里的遗留文件不代删
+      // （可能仍有用户手动保留的数据，交还用户处理）
+      DataDir := RealUserAppData('') + '\Orcsy';
       if DirExists(DataDir) then
         DelTree(DataDir, True, True, True);
     end;

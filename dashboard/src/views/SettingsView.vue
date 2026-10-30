@@ -13,7 +13,7 @@ const draft = reactive({
   model: '', base_url: '', api_key: '',
   temperature: 0.2, max_tokens: 8192, max_context_tokens: 131072,
   enable_thinking: false, timeout_seconds: 300,
-  interval: 300, parallel: 1, port: 5116,
+  interval: 300, parallel: 1, port: 5116, retention: 7,
 })
 let inited = false
 watch(() => store.state, (s) => {
@@ -32,6 +32,7 @@ watch(() => store.state, (s) => {
   draft.interval = s.scheduler_cfg.interval_seconds
   draft.parallel = s.scheduler_cfg.max_parallel_agents
   draft.port = s.web_cfg.port
+  draft.retention = s.logging?.retention_days ?? 7
 })
 
 async function saveLlm(): Promise<void> {
@@ -53,8 +54,9 @@ async function saveSched(): Promise<void> {
     await api.config({
       scheduler: { interval_seconds: draft.interval, max_parallel_agents: draft.parallel },
       web: { port: draft.port },
+      logging: { retention_days: draft.retention },
     })
-    message()?.('已保存（端口下次启动生效）')
+    message()?.('已保存（端口下次启动生效；日志归档清理立即按新天数执行）')
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
@@ -91,6 +93,7 @@ async function openFolder(p: { name: string; path: string }): Promise<void> {
 
 // ---- 模型列表与规格自动填充 ----
 const fetching = ref(false)
+const testing = ref(false)
 const modelSpecs = ref<ModelInfo[]>([])
 // label 必须与 value 一致：naive 选中后按 label 回填输入框，带标注的 label
 // 会被当成模型名存进配置（曾导致「step-5-preview（977K）」404）
@@ -110,6 +113,19 @@ async function fetchModels(): Promise<void> {
     message()?.(`已获取 ${r.models.length} 个模型：在「模型」框下拉选择，规格自动填充`)
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { fetching.value = false }
+}
+
+// 测试模型连通性：优先用表单草稿值（未保存也能测），缺省字段由后端回退已存配置
+async function testModel(): Promise<void> {
+  testing.value = true
+  try {
+    const r = await api.testModel({
+      provider: draft.provider, base_url: draft.base_url.trim(),
+      api_key: draft.api_key.trim(), model: draft.model.trim(),
+    })
+    message()?.(r.message || '连接成功', 'success')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { testing.value = false }
 }
 
 function onModelPick(v: string | null): void {
@@ -140,7 +156,10 @@ const providerOptions = [
           <NSelect v-model:value="draft.model" :options="modelOptions" filterable tag
                    placeholder="deepseek-chat 或获取列表后选择" @update:value="onModelPick" /></div>
         <div class="f0"><label>&nbsp;</label>
-          <NButton :loading="fetching" @click="fetchModels">获取列表</NButton></div>
+          <div class="btnrow">
+            <NButton :loading="fetching" @click="fetchModels">获取列表</NButton>
+            <NButton :loading="testing" title="发送一条极短对话，验证网络/密钥/模型名是否可用" @click="testModel">测试连接</NButton>
+          </div></div>
       </div>
       <div class="modelspec" v-if="selectedSpec && (selectedSpec.context_window || selectedSpec.max_output_tokens)">
         该模型规格：上下文 {{ fmtTokens(selectedSpec.context_window) || '未知' }} ·
@@ -151,7 +170,7 @@ const providerOptions = [
         <div class="f14"><label>API Key</label><NInput v-model:value="draft.api_key" type="password" show-password-on="click" placeholder="sk-..." /></div>
       </div>
       <div class="frow">
-        <div class="f1"><label>temperature</label><NInputNumber v-model:value="draft.temperature" :step="0.1" :min="0" :max="2" /></div>
+        <div class="f1"><label>采样温度 temperature</label><NInputNumber v-model:value="draft.temperature" :step="0.1" :min="0" :max="2" /></div>
         <div class="f1"><label>最大输出 max_tokens</label><NInputNumber v-model:value="draft.max_tokens" :step="256" :min="256" :max="200000" /></div>
       </div>
       <div class="frow">
@@ -174,6 +193,11 @@ const providerOptions = [
         <div class="f1"><label>扫描间隔（秒，30~86400）</label><NInputNumber v-model:value="draft.interval" :min="30" :max="86400" /></div>
         <div class="f1"><label>并行 Agent 数（1~16）</label><NInputNumber v-model:value="draft.parallel" :min="1" :max="16" /></div>
         <div class="f1"><label>看板端口（下次启动生效）</label><NInputNumber v-model:value="draft.port" :min="1" :max="65535" /></div>
+      </div>
+      <div class="frow">
+        <div class="f1"><label>日志保留（天，0 为关闭自动归档清理，保存后立即执行）</label>
+          <NInputNumber v-model:value="draft.retention" :min="0" :max="365" /></div>
+        <div class="f2" />
       </div>
       <div class="sfoot"><NButton type="primary" @click="saveSched">保存调度配置</NButton></div>
     </NCard>
@@ -220,6 +244,7 @@ const providerOptions = [
 .frow > div { display: flex; flex-direction: column; gap: 4px; }
 .frow label, .checkline { font-size: 12.5px; color: var(--dim); }
 .f1 { flex: 1; } .f14 { flex: 1.4; } .f2 { flex: 2; } .f0 { flex: none; }
+.btnrow { display: flex; gap: 8px; }
 .sfoot { display: flex; justify-content: flex-end; }
 .checkline { display: flex; gap: 10px; align-items: center; }
 .prow { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }

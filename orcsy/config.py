@@ -59,6 +59,9 @@ class SchedulerConfig:
 class LoggingConfig:
     level: str = "INFO"
     file: str = "logs/orcsy.log"
+    # 日志归档与清理的保留天数：活动日志写满 N 天归档进 logs/archive/，
+    # 归档及大小滚动的旧日志超过 N 天删除；0 表示关闭自动归档与清理
+    retention_days: int = 7
 
 
 @dataclass
@@ -91,7 +94,17 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
             f"请先复制 config.example.yaml 为 config.yaml 并填写模型 API 信息。"
         )
 
-    raw: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        # OneDrive「文档」目录的云端占位文件在 OneDrive 未运行/离线时
+        # exists() 为真但读取报 EINVAL——给出可行动的提示而非裸 traceback
+        raise FileNotFoundError(
+            f"配置文件无法读取：{path}\n错误：{e}\n"
+            f"若该文件位于 OneDrive「文档」目录，请确认 OneDrive 正在运行且文件已下载到本地。"
+        ) from e
+
+    raw: dict[str, Any] = yaml.safe_load(text) or {}
 
     llm_raw = raw.get("llm") or {}
     llm = LLMConfig(
@@ -119,6 +132,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     logging_cfg = LoggingConfig(
         level=str(log_raw.get("level", "INFO")).upper(),
         file=log_raw.get("file", "logs/orcsy.log"),
+        retention_days=max(0, min(int(log_raw.get("retention_days", 7)), 365)),
     )
 
     web_raw = raw.get("web") or {}

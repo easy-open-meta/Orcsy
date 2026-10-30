@@ -1,0 +1,51 @@
+# orcsy 配置文件
+# 复制为 config.yaml 后按需修改；含 api_key 的文件不要提交到仓库。
+
+llm:
+  # 协议类型：openai（OpenAI 兼容，覆盖 DeepSeek/GLM/Kimi/通义/Ollama/vLLM 等）或 anthropic
+  provider: openai
+  api_key: "sk-xxxx"
+  # OpenAI 兼容服务示例：
+  #   DeepSeek:  https://api.deepseek.com/v1        model: deepseek-chat
+  #   GLM智谱:   https://open.bigmodel.cn/api/paas/v4  model: glm-4-plus
+  #   Kimi:      https://api.moonshot.cn/v1         model: moonshot-v1-32k
+  #   OpenAI:    https://api.openai.com/v1          model: gpt-4o
+  #   Ollama:    http://127.0.0.1:11434/v1          model: qwen2.5-coder:14b
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  temperature: 0.2
+  max_tokens: 8192
+  max_context_tokens: 131072 # 模型上下文窗口（tokens）；看板选模型时可自动填充
+  enable_thinking: false     # 请求侧开启模型思考（anthropic 必须；多数兼容服务默认返回）
+  timeout_seconds: 300
+
+scheduler:
+  interval_seconds: 300      # 每轮扫描间隔（秒）
+  max_parallel_agents: 1     # 并行 Agent 数：1 串行；>1 时多项目同时执行
+  run_once: false            # true 时只执行一轮就退出（适合手动触发/定时任务外部调度）
+
+logging:
+  level: INFO
+  file: logs/orcsy.log
+  retention_days: 7          # 日志保留天数：写满 N 天归档进 logs/archive/，超过 N 天的旧日志清理；0 关闭
+
+web:
+  host: 127.0.0.1            # 看板监听地址
+  port: 5116                 # 看板端口（被占用时可改这里，或启动时用 --port 覆盖）
+  open_browser: true         # 启动时自动打开浏览器
+
+# 受管项目列表：每个项目由一个独立 Agent 负责。
+# 推荐直接在看板「项目与设置」页可视化新建（会自动创建任务目录与 AGENT.md）；
+# 也可手动添加，格式如下：
+projects: []
+#  - name: my-app                      # Agent 名称，日志与分支名使用
+#    path: D:/Repos/my-app             # 项目根目录（绝对路径）
+#    enabled: true
+#    tasks_dir: tasks                  # 项目内任务清单目录（相对项目根）
+#    guide_file: AGENT.md              # 项目内开发指引文件（相对项目根）
+#    max_tasks_per_cycle: 1            # 每轮最多处理的任务数
+#    max_agent_turns: 40               # 单个任务的 Agent 工具循环轮数上限
+#    # allowed_commands:               # Agent 可执行的命令白名单（缺省用内置默认：
+#    #   - python                      #   python/pytest/node/npm/cargo/go/dotnet/git/uv 等）
+#    #   - pytest
+#    # allowed_branch: main            # 只在该分支上工作；缺省用项目当前分支

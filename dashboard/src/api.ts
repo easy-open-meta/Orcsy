@@ -34,6 +34,16 @@ export interface ProjectT {
   archived: TaskT[]
 }
 
+export interface SkillT {
+  name: string
+  description: string
+  scope: string      // 'global' 或项目名
+  enabled: boolean
+  path: string
+  origin: string     // 'created'=本程序新建（可硬删除）；'imported'=外部导入（只能移除）
+  error: string
+}
+
 export interface AppStateT {
   version: string
   config_path: string
@@ -59,7 +69,10 @@ export interface AppStateT {
   }
   scheduler_cfg: { interval_seconds: number; max_parallel_agents: number }
   web_cfg: { host: string; port: number; open_browser: boolean }
+  logging: { retention_days: number }
   app_autostart: { enabled: boolean }
+  skills_dir: string
+  skills: SkillT[]
   projects: ProjectT[]
   log_tail: string
 }
@@ -78,22 +91,45 @@ export interface DirListing {
   note?: string
 }
 
+// Windows 回环偶发连接重置 / 看板重启瞬间，fetch 会抛 TypeError("Failed to
+// fetch")——网络层失败转成人话；GET 是幂等读，自动重试一次
+const NET_ERR = '无法连接看板服务（可能正在重启），请刷新页面重试'
+
+function isNetErr(e: unknown): boolean {
+  return e instanceof TypeError  // fetch 的网络层失败统一是 TypeError
+}
+
 async function post(path: string, body: unknown): Promise<any> {
-  const r = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+  let r: Response
+  try {
+    r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new Error(NET_ERR)
+  }
   const j = await r.json().catch(() => ({}))
   if (!r.ok || j.ok === false) throw new Error(j.message || j.error || `HTTP ${r.status}`)
   return j
 }
 
 async function get(path: string): Promise<any> {
-  const r = await fetch(path)
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok || j.ok === false) throw new Error(j.message || j.error || `HTTP ${r.status}`)
-  return j
+  let last: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(path)
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || j.ok === false) throw new Error(j.message || j.error || `HTTP ${r.status}`)
+      return j
+    } catch (e: unknown) {
+      if (!isNetErr(e)) throw e  // 业务错误直接抛，不重试
+      last = e
+      await new Promise(res => setTimeout(res, 250))
+    }
+  }
+  throw new Error(NET_ERR)
 }
 
 export const api = {
@@ -110,6 +146,10 @@ export const api = {
   taskDelete: (project: string, id: string) => post('/api/task/delete', { project, id }),
   models: (p: { provider: string; base_url: string; api_key: string }) =>
     post('/api/models', p) as Promise<{ models: ModelInfo[] }>,
+  testModel: (p: { provider: string; base_url: string; api_key: string; model: string }) =>
+    post('/api/llm/test', p) as Promise<{
+      ok: boolean; message: string; reply: string; elapsed_seconds: number
+    }>,
   browse: (path: string) => post('/api/browse', { path }) as Promise<DirListing>,
   probe: (path: string) =>
     post('/api/probe', { path }) as Promise<{ ok: boolean; stack: string; run: string; test: string }>,
@@ -120,6 +160,31 @@ export const api = {
   guide: (project: string) =>
     get(`/api/guide?project=${encodeURIComponent(project)}`) as Promise<{ file: string; content: string }>,
   guideSave: (project: string, content: string) => post('/api/guide', { project, content }),
+  skillGet: (name: string) =>
+    get(`/api/skill?name=${encodeURIComponent(name)}`) as Promise<SkillT & { body: string }>,
+  skillSave: (p: {
+    original_name?: string; name: string; description: string
+    scope: string; enabled: boolean; body: string
+  }) => post('/api/skill', p),
+  skillRemove: (names: string[]) => post('/api/skill/remove', { names }) as Promise<{
+    ok: boolean; message: string; removed: string[]
+    skipped: { name: string; reason: string }[]
+  }>,
+  skillEnabled: (name: string, enabled: boolean) => post('/api/skill/enabled', { name, enabled }),
+  skillImport: (path: string) =>
+    post('/api/skill/import', { path }) as Promise<{ ok: boolean; message: string; skill: SkillT }>,
+  skillScan: () => get('/api/skill/scan') as Promise<{
+    ok: boolean
+    sources: {
+      tool: string; path: string
+      skills: { name: string; description: string; path: string; exists: boolean }[]
+    }[]
+  }>,
+  skillImportBatch: (paths: string[]) => post('/api/skill/import-batch', { paths }) as Promise<{
+    ok: boolean; message: string; imported: string[]
+    skipped: { path: string; reason: string }[]
+  }>,
+  skillOpenFolder: (name: string) => post('/api/skill/open-folder', { name }),
   config: (p: Record<string, unknown>) => post('/api/config', p),
   autostart: (enabled: boolean) => post('/api/app-autostart', { enabled }),
 }

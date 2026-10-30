@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -29,15 +30,25 @@ from e2e_fake_llm import FakeLLMClient  # noqa: E402
 
 
 def api(port: int, path: str, body: dict | None = None) -> dict:
-    url = f"http://127.0.0.1:{port}{path}"
-    if body is None:
-        req = urllib.request.Request(url)
-    else:
-        req = urllib.request.Request(
-            url, data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode())
+    # HTTPError（业务 400）解析成响应体返回，与 e2e_project_import 的 api 同模式；
+    # Windows 本机回环偶发 ConnectionResetError（快速连断竞态）重试两次
+    last_err: Exception | None = None
+    for _ in range(3):
+        url = f"http://127.0.0.1:{port}{path}"
+        if body is None:
+            req = urllib.request.Request(url)
+        else:
+            req = urllib.request.Request(
+                url, data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read().decode())
+        except ConnectionResetError as e:
+            last_err = e
+    raise last_err  # type: ignore[misc]
 
 
 def make_project(root: Path) -> ProjectConfig:
@@ -78,7 +89,7 @@ def main() -> int:
                         "commit_message": "feat: bump value to 2"}),
         ]
 
-        def run_task_mock(self, task, guide_content):
+        def run_task_mock(self, task, guide_content, skills=None):
             from orcsy.llm import finish_response
             from orcsy.executor import TaskResult
             import json as _json
@@ -135,6 +146,15 @@ def main() -> int:
             "主分支文件应已合并修复"
         print("ok: 扫描闭环（任务完成、归档、代码合并）")
 
+        # 2b. 归档任务可通过 /api/task 查看（done/ 目录回退查找 + archived 标记）
+        arch_id = s["projects"][0]["archived"][0]["id"]
+        g = api(5199, f"/api/task?project=webproj&id={urllib.parse.quote(arch_id)}")
+        assert g["ok"] and g["archived"] is True, g
+        assert g["status"] == "done" and g["description"], g
+        g3 = api(5199, "/api/task?project=webproj&id=no-such-task")
+        assert not g3.get("ok"), g3
+        print("ok: 归档任务经 /api/task 只读查看（archived 标记），不存在任务报错")
+
         # 3. Web 创建任务 → 状态查询可见
         r = api(5199, "/api/task", {"project": "webproj", "id": "P2-next",
                                     "title": "下一个任务", "priority": "P2",
@@ -142,7 +162,9 @@ def main() -> int:
         assert r["ok"]
         s = api(5199, "/api/state")
         assert any(t["id"] == "P2-next" for t in s["projects"][0]["tasks"])
-        print("ok: Web 建任务 → 状态可见")
+        g2 = api(5199, "/api/task?project=webproj&id=P2-next")
+        assert g2["ok"] and g2["archived"] is False and g2["description"] == "x", g2
+        print("ok: Web 建任务 → 状态可见，待办 archived=false 可编辑")
 
         server.shutdown()
         print("\nWeb 端到端全部通过 ✅")

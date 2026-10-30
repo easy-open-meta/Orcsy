@@ -16,6 +16,7 @@ Agent 循环（run_task_loop）：
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 
@@ -78,6 +79,50 @@ def _auth_headers(provider: str, api_key: str) -> dict[str, str]:
             headers["x-api-key"] = api_key
         return headers
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def test_connection(provider: str, base_url: str, api_key: str, model: str,
+                    timeout_seconds: int = 300) -> dict:
+    """最小对话请求验证大模型接入连通性（看板「测试连接」按钮）。
+
+    只发一条极短 user 消息、max_tokens=64、不带工具与思考参数，把失败面与
+    费用压到最小：HTTP 200 即证明 网络可达 + 认证有效 + 模型名存在，回复正文
+    仅作展示——推理模型（DeepSeek-R1 等）思考可能耗尽小额 max_tokens 导致
+    正文为空，同样算连通。返回 {reply, elapsed_seconds}；失败抛 LLMError。
+    """
+    provider = provider.strip().lower()
+    model = model.strip()
+    if provider not in ("openai", "anthropic"):
+        raise LLMError(f"provider 不合法：{provider}（openai / anthropic）")
+    if not model:
+        raise LLMError("model 不能为空")
+    client = LLMClient(LLMConfig(
+        provider=provider, api_key=api_key, base_url=base_url, model=model,
+        timeout_seconds=max(5, min(int(timeout_seconds), 120)),
+    ))
+    if provider == "anthropic":
+        url = base_url.rstrip("/") + "/messages"
+        headers = _auth_headers("anthropic", api_key)
+    else:
+        url = base_url.rstrip("/") + "/chat/completions"
+        headers = _auth_headers("openai", api_key)
+    payload = {
+        "model": model, "max_tokens": 64,
+        "messages": [{"role": "user", "content": "连接测试，请回复：OK"}],
+    }
+    started = time.monotonic()
+    data = client._post(url, payload, headers)
+    elapsed = round(time.monotonic() - started, 1)
+    if provider == "anthropic":
+        reply = "".join(b.get("text", "") for b in data.get("content") or []
+                        if isinstance(b, dict) and b.get("type") == "text").strip()
+    else:
+        try:
+            reply = str(data["choices"][0]["message"].get("content") or "").strip()
+        except (KeyError, IndexError, TypeError) as e:
+            raise LLMError(
+                f"响应结构异常：{json.dumps(data, ensure_ascii=False)[:300]}") from e
+    return {"reply": reply[:200], "elapsed_seconds": elapsed}
 
 
 def list_models(provider: str, base_url: str, api_key: str,

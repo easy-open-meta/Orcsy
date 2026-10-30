@@ -18,7 +18,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
 from .config import AppConfig
-from .logging_setup import get_logger
+from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
+from .skills import skills_base
 
 log = get_logger("scheduler")
 
@@ -30,8 +31,9 @@ def _now_str() -> str:
 class Scheduler:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self.skills_dir = skills_base(config)
         self.agents = [
-            ProjectAgent(p, config.llm)
+            ProjectAgent(p, config.llm, skills_base=self.skills_dir)
             for p in config.projects
             if p.enabled
         ]
@@ -84,8 +86,9 @@ class Scheduler:
         """用新配置重建 Agent 列表。正在执行的一轮跑完前不重建（锁保护）。"""
         with self._cycle_lock:
             self.config = new_config
+            self.skills_dir = skills_base(new_config)
             self.agents = [
-                ProjectAgent(p, new_config.llm)
+                ProjectAgent(p, new_config.llm, skills_base=self.skills_dir)
                 for p in new_config.projects
                 if p.enabled
             ]
@@ -104,6 +107,7 @@ class Scheduler:
         self.is_running = True
         try:
             log.info("========== 调度周期开始 ==========")
+            self._rotate_logs_if_due()
             stats: dict[str, int] = {}
             max_parallel = max(1, self.config.scheduler.max_parallel_agents)
 
@@ -121,6 +125,19 @@ class Scheduler:
         finally:
             self.is_running = False
             self._cycle_lock.release()
+
+    def _rotate_logs_if_due(self) -> None:
+        """每轮顺手检查日志归档/清理：内部按创建时间自判是否到期，代价一次 stat。"""
+        if not self.config.source_path:  # 直接构造 AppConfig 的测试场景，跳过
+            return
+        try:
+            msg = rotate_and_cleanup(anchored_log_path(self.config),
+                                     self.config.logging.retention_days)
+        except Exception:  # noqa: BLE001 — 日志维护失败不影响调度
+            log.exception("日志归档/清理失败")
+            return
+        if msg:
+            log.info("日志维护：%s", msg)
 
     def _run_agent(self, agent: ProjectAgent) -> int:
         try:

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .config import ProjectConfig
 from .logging_setup import get_logger
+from .skills import Skill
 
 log = get_logger("prompts")
 
@@ -52,13 +53,27 @@ def _read_text(path: Path, max_chars: int) -> str:
         return ""
 
 
+def _skills_section(skills: list[Skill] | None) -> str:
+    """技能索引节：只列名称+描述，全文由 Agent 按需用 read_skill 读取。"""
+    if not skills:
+        return ""
+    lines = "\n".join(f"- {s.name}：{s.description or '（无描述）'}" for s in skills)
+    return (
+        f"# Skills 技能库\n\n"
+        f"以下技能适用于当前项目。任务内容与某技能相关时，先调用 read_skill 工具读取其全文，"
+        f"再严格按技能内容执行；与任务无关的技能不要读取。\n\n"
+        f"{lines}\n\n"
+    )
+
+
 def build_system_prompt(
     project: ProjectConfig,
     guide_content: str,
     is_git_repo: bool,
     guide_max_chars: int = 24000,
+    skills: list[Skill] | None = None,
 ) -> str:
-    """组装系统提示词：角色 → 项目指引 → 工作环境 → 输出协议。"""
+    """组装系统提示词：角色 → 项目指引 → 技能索引 → 工作环境 → 输出协议。"""
     guide = guide_content.strip()
     if len(guide) > guide_max_chars:
         log_safe = guide[:guide_max_chars]
@@ -85,6 +100,7 @@ def build_system_prompt(
         f"# Development Guide (AGENT.md)\n\n"
         f"以下是该项目的开发指引，是你在本项目工作的最高行为准则，必须遵守：\n\n"
         f"<agent_guide>\n{guide}\n</agent_guide>\n\n"
+        f"{_skills_section(skills)}"
         f"{workspace}\n"
         f"{OUTPUT_CONTRACT}"
     )

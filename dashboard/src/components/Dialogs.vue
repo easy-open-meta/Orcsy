@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, useDialog, useMessage } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import { api, type DirListing } from '../api'
 import { refresh, ui, store } from '../store'
@@ -88,11 +88,15 @@ async function saveProject(): Promise<void> {
   void refresh(true)
 }
 
-// ---------- 任务对话框（编辑仅 open 可进，在打开入口已拦截） ----------
+// ---------- 任务对话框（open 可编辑；归档/非待办以只读模式查看） ----------
 const tVisible = computed({
   get: () => !!ui.taskDlg,
   set: (v: boolean) => { if (!v) ui.taskDlg = null },
 })
+// 关闭时 ui.taskDlg 被置 null，computed 会立刻翻回非只读态，导致收起动画期间
+// 按钮/提示/标题闪变——打开时快照到 ref，动画期间保持最后状态
+const tReadonly = ref(false)
+const tTitle = ref('任务')
 const tDraft = reactive({
   id: '', idLocked: false, title: '', priority: 'P2',
   labels: '', assignee: '', description: '', err: '',
@@ -106,15 +110,20 @@ const priOptions = computed(() => {
 })
 watch(() => ui.taskDlg, async (dlg) => {
   if (!dlg) return
+  tReadonly.value = !!dlg.readonly
+  tTitle.value = tReadonly.value
+    ? `查看任务 · ${dlg.project}/${dlg.id}`
+    : `任务 · ${dlg.project}/${dlg.id || '新建'}`
   tDraft.err = ''
   tDraft.id = dlg.id ?? ''
   tDraft.idLocked = dlg.id != null
   tDraft.title = ''; tDraft.priority = 'P2'; tDraft.labels = ''
   tDraft.assignee = ''; tDraft.description = ''
   if (dlg.id) {
-    // 先用看板缓存填，再拉全文覆盖（/api/state 描述截断 2000 字）
+    // 先用看板缓存填，再拉全文覆盖（/api/state 描述截断 2000 字）；
+    // 归档任务不在 tasks 里，从 archived 缓存找，最终以 /api/task 的全文为准
     const p = store.state?.projects.find(x => x.name === dlg.project)
-    const t = p?.tasks.find(x => x.id === dlg.id)
+    const t = p?.tasks.find(x => x.id === dlg.id) || p?.archived.find(x => x.id === dlg.id)
     if (t) {
       tDraft.title = t.title; tDraft.priority = t.priority
       tDraft.labels = t.labels.join(', '); tDraft.assignee = t.assignee
@@ -129,7 +138,7 @@ watch(() => ui.taskDlg, async (dlg) => {
 })
 
 async function saveTask(): Promise<void> {
-  if (!ui.taskDlg) return
+  if (!ui.taskDlg || tReadonly.value) return
   try {
     // id 留空 = 后端自动生成「优先级-标题」；title 留空则报错
     await api.taskSave({
@@ -168,6 +177,99 @@ async function saveGuide(): Promise<void> {
     message.success('指引已保存')
     ui.guideDlg = null
   } catch (e: any) { gDraft.err = e.message }
+  void refresh(true)
+}
+
+// ---------- 技能 新建/编辑（内容存于技能库，不落项目目录） ----------
+const kVisible = computed({
+  get: () => !!ui.skillDlg,
+  set: (v: boolean) => { if (!v) ui.skillDlg = null },
+})
+const kDraft = reactive({
+  original: null as string | null,
+  name: '', description: '', scope: 'global', enabled: true, body: '', err: '',
+})
+const scopeOptions = computed(() => [
+  { label: '全局（所有项目生效）', value: 'global' },
+  ...(store.state?.projects || []).map(p => ({ label: `仅 ${p.name}`, value: p.name })),
+])
+watch(() => ui.skillDlg, async (dlg) => {
+  if (!dlg) return
+  kDraft.err = ''; kDraft.original = dlg.original
+  kDraft.name = ''; kDraft.description = ''; kDraft.scope = 'global'
+  kDraft.enabled = true; kDraft.body = ''
+  if (dlg.original) {
+    try {
+      const r = await api.skillGet(dlg.original)
+      kDraft.name = r.name; kDraft.description = r.description
+      kDraft.scope = r.scope || 'global'; kDraft.enabled = r.enabled
+      kDraft.body = r.body
+      if (r.error) kDraft.err = `注意：SKILL.md 解析有问题 —— ${r.error}`
+    } catch (e: any) { kDraft.err = e.message }
+  }
+})
+
+async function saveSkill(): Promise<void> {
+  if (!ui.skillDlg) return
+  try {
+    await api.skillSave({
+      original_name: kDraft.original ?? undefined,
+      name: kDraft.name.trim(),
+      description: kDraft.description.trim(),
+      scope: kDraft.scope,
+      enabled: kDraft.enabled,
+      body: kDraft.body,
+    })
+    message.success(kDraft.original ? '技能已保存' : '技能已新建')
+    ui.skillDlg = null
+  } catch (e: any) { kDraft.err = e.message }
+  void refresh(true)
+}
+
+// ---------- 扫描 AI 工具技能（批量勾选导入） ----------
+interface ScanSkill { name: string; description: string; path: string; exists: boolean }
+interface ScanSource { tool: string; path: string; skills: ScanSkill[] }
+
+const scanVisible = computed({
+  get: () => ui.skillScanDlg,
+  set: (v: boolean) => { ui.skillScanDlg = v },
+})
+const scanSources = ref<ScanSource[]>([])
+const scanChecked = ref<Record<string, boolean>>({})
+const scanning = ref(false)
+const importing = ref(false)
+const scanErr = ref('')
+
+const checkedPaths = computed(() =>
+  scanSources.value.flatMap(s => s.skills)
+    .filter(k => scanChecked.value[k.path]).map(k => k.path))
+
+watch(scanVisible, async (v) => {
+  if (!v) return
+  scanErr.value = ''
+  scanning.value = true
+  scanSources.value = []
+  try {
+    const r = await api.skillScan()
+    scanSources.value = r.sources || []
+    // 默认勾选尚未导入的技能
+    const checked: Record<string, boolean> = {}
+    for (const s of scanSources.value)
+      for (const k of s.skills) checked[k.path] = !k.exists
+    scanChecked.value = checked
+  } catch (e: any) { scanErr.value = e.message }
+  finally { scanning.value = false }
+})
+
+async function importChecked(): Promise<void> {
+  if (!checkedPaths.value.length) return
+  importing.value = true
+  try {
+    const r = await api.skillImportBatch(checkedPaths.value)
+    message.success(r.message || '已导入')
+    ui.skillScanDlg = false
+  } catch (e: any) { scanErr.value = e.message }
+  finally { importing.value = false }
   void refresh(true)
 }
 
@@ -256,27 +358,28 @@ async function newFolder(): Promise<void> {
     </div>
   </NModal>
 
-  <!-- 任务 编辑/新建 -->
-  <NModal v-model:show="tVisible" preset="card" :title="ui.taskDlg ? `任务 · ${ui.taskDlg.project}/${ui.taskDlg.id || '新建'}` : '任务'"
+  <!-- 任务 编辑/新建/只读查看 -->
+  <NModal v-model:show="tVisible" preset="card" :title="tTitle"
           style="width: min(560px, 92vw)">
-    <div class="hint">仅待办（open）状态的任务可编辑；执行中/受阻的任务请等本轮结束后再改。</div>
+    <div class="hint" v-if="tReadonly">该任务不在待办状态（已归档/执行中/受阻），只读查看；重新入队后再编辑。</div>
+    <div class="hint" v-else>仅待办（open）状态的任务可编辑；执行中/受阻的任务请等本轮结束后再改。</div>
     <div class="err" v-if="tDraft.err">{{ tDraft.err }}</div>
     <div class="duo">
       <div class="f1"><label>任务 ID（留空自动生成：优先级-标题）</label><NInput v-model:value="tDraft.id" :disabled="tDraft.idLocked" placeholder="fix-login-timeout" /></div>
       <div class="f1"><label>优先级</label>
-        <NSelect v-model:value="tDraft.priority" :options="priOptions" /></div>
+        <NSelect v-model:value="tDraft.priority" :options="priOptions" :disabled="tReadonly" /></div>
     </div>
     <label>标题</label>
-    <NInput v-model:value="tDraft.title" placeholder="一句话描述要做什么" />
+    <NInput v-model:value="tDraft.title" :disabled="tReadonly" placeholder="一句话描述要做什么" />
     <div class="duo">
-      <div class="f1"><label>标签（逗号分隔）</label><NInput v-model:value="tDraft.labels" placeholder="bug, ui" /></div>
-      <div class="f1"><label>指派（留空任意 Agent）</label><NInput v-model:value="tDraft.assignee" /></div>
+      <div class="f1"><label>标签（逗号分隔）</label><NInput v-model:value="tDraft.labels" :disabled="tReadonly" placeholder="bug, ui" /></div>
+      <div class="f1"><label>指派（留空任意 Agent）</label><NInput v-model:value="tDraft.assignee" :disabled="tReadonly" /></div>
     </div>
     <label>任务描述（Markdown 正文）</label>
-    <NInput v-model:value="tDraft.description" type="textarea" :autosize="{ minRows: 7, maxRows: 16 }" />
+    <NInput v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
     <div class="dlg-actions">
-      <NButton @click="ui.taskDlg = null">取消</NButton>
-      <NButton type="primary" @click="saveTask">保存</NButton>
+      <NButton @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
+      <NButton v-if="!tReadonly" type="primary" @click="saveTask">保存</NButton>
     </div>
   </NModal>
 
@@ -292,6 +395,61 @@ async function newFolder(): Promise<void> {
     <div class="dlg-actions">
       <NButton @click="ui.guideDlg = null">取消</NButton>
       <NButton type="primary" @click="saveGuide">保存指引</NButton>
+    </div>
+  </NModal>
+
+  <!-- 技能 新建/编辑 -->
+  <NModal v-model:show="kVisible" preset="card"
+          :title="ui.skillDlg?.original ? `编辑技能 · ${ui.skillDlg.original}` : '新建技能'"
+          style="width: min(760px, 94vw)">
+    <div class="hint">技能存放在 Orcsy 技能库（不落项目目录）；正文为 SKILL.md 的 Markdown 正文，frontmatter 由系统维护。</div>
+    <div class="err" v-if="kDraft.err">{{ kDraft.err }}</div>
+    <div class="duo">
+      <div class="f1"><label>技能名（字母数字/下划线/连字符）</label><NInput v-model:value="kDraft.name" placeholder="vue-best-practices" /></div>
+      <div class="f1"><label>适用范围</label>
+        <NSelect v-model:value="kDraft.scope" :options="scopeOptions" /></div>
+    </div>
+    <label>描述（进入 Agent 系统提示词的索引，写清何时该用这个技能）</label>
+    <NInput v-model:value="kDraft.description" placeholder="一句话说明技能的用途与适用场景" />
+    <label class="checkline" style="margin-top:4px">
+      <NSwitch v-model:value="kDraft.enabled" />
+      启用（停用后不注入索引，内容保留）
+    </label>
+    <label>技能内容（Markdown 正文，Agent 通过 read_skill 工具按需读取）</label>
+    <NInput v-model:value="kDraft.body" type="textarea" class="keditor"
+            :autosize="false" :input-props="{ spellcheck: false }"
+            style="height: 38vh" placeholder="# 何时使用 / # 步骤与规范 / # 注意事项 …" />
+    <div class="dlg-actions">
+      <NButton @click="ui.skillDlg = null">取消</NButton>
+      <NButton type="primary" @click="saveSkill">保存技能</NButton>
+    </div>
+  </NModal>
+
+  <!-- 扫描 AI 工具技能 -->
+  <NModal v-model:show="scanVisible" preset="card" title="扫描 AI 工具的本地技能"
+          style="width: min(660px, 94vw)">
+    <div class="hint">扫描常见 AI 工具的用户级技能目录（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等），勾选后整目录复制进 Orcsy 技能库；同一技能在多个工具里重复部署时只显示一次。找不到想要的可点「导入本地技能」手工选目录。</div>
+    <div class="err" v-if="scanErr">{{ scanErr }}</div>
+    <div v-if="scanning" class="hint">扫描中…</div>
+    <template v-else>
+      <div v-if="!scanSources.length" class="hint">
+        没有发现常见 AI 工具的技能目录。可手工选择目录导入，或在上述工具里先安装技能。
+      </div>
+      <div v-for="src in scanSources" :key="src.path" class="scan-group">
+        <div class="scan-tool">{{ src.tool }} <span class="scan-path">{{ src.path }}</span></div>
+        <label v-for="k in src.skills" :key="k.path" class="scan-item">
+          <input type="checkbox" v-model="scanChecked[k.path]" />
+          <span class="scan-name">{{ k.name }}</span>
+          <span class="scan-desc">{{ k.description || '（无描述）' }}</span>
+          <NTag v-if="k.exists" size="small" :bordered="false">已导入</NTag>
+        </label>
+      </div>
+    </template>
+    <div class="dlg-actions">
+      <NButton @click="ui.skillScanDlg = false">取消</NButton>
+      <NButton type="primary" :loading="importing" :disabled="!checkedPaths.length" @click="importChecked">
+        导入选中（{{ checkedPaths.length }}）
+      </NButton>
     </div>
   </NModal>
 
@@ -336,4 +494,13 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .bitem:hover { background: rgba(128, 140, 180, 0.16); }
 .bempty { padding: 12px; font-size: 12.5px; color: var(--faint); }
 .geditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
+.keditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
+.scan-group { margin-bottom: 10px; }
+.scan-tool { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+.scan-path { font-weight: 400; font-size: 11.5px; color: var(--faint); word-break: break-all; }
+.scan-item { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 4px; cursor: pointer; }
+.scan-item:hover { background: rgba(128, 140, 180, 0.12); }
+.scan-item input { flex: none; }
+.scan-name { font-weight: 600; font-size: 12.5px; flex: none; }
+.scan-desc { flex: 1; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

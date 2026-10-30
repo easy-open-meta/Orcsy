@@ -1,10 +1,11 @@
-"""导入项目 / 打开文件夹 / 模型思考日志 的端到端自检（自起服务，不依赖运行中的看板）。
+"""导入项目 / 打开文件夹 / 模型思考日志 / 模型连通性测试 的端到端自检（自起服务，不依赖运行中的看板）。
 
 覆盖：
 1. 导入现有项目：只新增 tasks/ 与 AGENT.md，AGENT.md 标题带项目名，不动其它文件；
 2. /api/project/open-folder：未知项目拦截 + 正常路径调起系统文件管理器；
 3. 模型思考内容：OpenAI 兼容响应里的 reasoning_content 写入运行日志（💭 条目），
-   Anthropic 响应里的 thinking 块同样处理。
+   Anthropic 响应里的 thinking 块同样处理；
+4. /api/llm/test：极短对话验证连通（草稿值优先/缺省回退已存配置/错误透出）。
 """
 
 from __future__ import annotations
@@ -285,6 +286,69 @@ def check_thinking_switch() -> None:
     print("8. 模型思考开关：请求参数按协议正确注入 ✅")
 
 
+def check_test_model(port: int) -> None:
+    """/api/llm/test：极短对话验证连通；草稿值优先、缺省回退已存配置、错误透出。"""
+    from orcsy.llm import LLMClient, LLMError
+
+    calls: list[dict] = []
+    real_post = LLMClient._post
+
+    def fake_post(self, url, payload, headers):
+        calls.append(payload)
+        # 连通性探针必须保持小额：max_tokens 限死，单条 user 消息、不带工具
+        assert payload["max_tokens"] <= 128, payload.get("max_tokens")
+        assert payload["messages"] and payload["messages"][0]["role"] == "user"
+        assert "tools" not in payload and "thinking" not in payload
+        return {"choices": [{"message": {"role": "assistant", "content": "OK"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1}}
+
+    LLMClient._post = fake_post  # type: ignore[method-assign]
+    try:
+        r = api(port, "/api/llm/test", {
+            "provider": "openai", "base_url": "https://api.example.com/v1",
+            "api_key": "sk-x", "model": "draft-model"})
+        assert r.get("ok") and "连接成功" in r["message"] and r["reply"] == "OK", r
+        assert calls[-1]["model"] == "draft-model", "草稿值应优先于已存配置"
+
+        r = api(port, "/api/llm/test", {})
+        assert r.get("ok"), r
+        assert calls[-1]["model"] == "test-model", "缺省应回退已存配置"
+
+        def fake_err(self, url, payload, headers):
+            raise LLMError("大模型返回 HTTP 401：Unauthorized")
+
+        LLMClient._post = fake_err  # type: ignore[method-assign]
+        r = api(port, "/api/llm/test", {"provider": "openai",
+                                        "base_url": "https://api.example.com/v1",
+                                        "api_key": "sk-bad", "model": "gpt-x"})
+        assert not r.get("ok") and "401" in r["message"], r
+
+        LLMClient._post = fake_post  # type: ignore[method-assign]
+        # model 传空按约定回退已存配置（与 /api/models 同模式）
+        r = api(port, "/api/llm/test", {"provider": "openai",
+                                        "base_url": "https://api.example.com/v1", "model": ""})
+        assert r.get("ok") and calls[-1]["model"] == "test-model", r
+    finally:
+        LLMClient._post = real_post  # type: ignore[method-assign]
+
+    # 参数校验在任何 HTTP 之前拦截（无需假响应）
+    r = api(port, "/api/llm/test", {"provider": "openai", "base_url": "ftp://x", "model": "m"})
+    assert not r.get("ok") and "http" in r["message"].lower(), r
+    print("11. 测试连接：极短对话验证连通、草稿值优先/缺省回退、错误与参数校验透出 ✅")
+
+
+def check_log_retention(port: int, root: Path) -> None:
+    """日志保留天数：看板保存立即生效、写回配置、非法值拦截。"""
+    r = api(port, "/api/config", {"logging": {"retention_days": 3}})
+    assert r.get("ok"), r
+    s = api(port, "/api/state")
+    assert s["logging"]["retention_days"] == 3, s.get("logging")
+    assert "retention_days: 3" in (root / "config.yaml").read_text(encoding="utf-8")
+    r = api(port, "/api/config", {"logging": {"retention_days": 999}})
+    assert not r.get("ok") and "0~365" in r.get("message", ""), r
+    print("12. 日志保留天数：看板保存立即生效、写回配置、非法值拦截 ✅")
+
+
 def main() -> int:
     root = Path(tempfile.mkdtemp(prefix="ta-selfcheck-"))
     try:
@@ -301,6 +365,8 @@ def main() -> int:
         check_open_folder(root, port)
         check_thinking_log(root)
         check_thinking_switch()
+        check_test_model(port)
+        check_log_retention(port, root)
 
         server.shutdown()
         server.server_close()

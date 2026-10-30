@@ -6,6 +6,7 @@ import Dialogs from './components/Dialogs.vue'
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { openProjectNew, refresh, store } from './store'
+import SkillsView from './views/SkillsView.vue'
 import { naiveTheme, theme, themeOverrides, toggleTheme } from './theme'
 
 const scanning = ref(false)
@@ -54,6 +55,7 @@ onUnmounted(() => window.clearInterval(timer))
           <NTabs type="segment" :value="store.view" @update:value="(v: any) => store.view = v" class="navseg">
             <NTab name="dash">看板</NTab>
             <NTab name="settings">项目与设置</NTab>
+            <NTab name="skills">技能</NTab>
           </NTabs>
           <NButton type="primary" :loading="scanning" @click="doScan">▶ 立即扫描</NButton>
           <NButton @click="openProjectNew">＋ 新建项目</NButton>
@@ -65,6 +67,7 @@ onUnmounted(() => window.clearInterval(timer))
       </header>
       <DashboardView v-show="store.view === 'dash'" />
       <SettingsView v-show="store.view === 'settings'" />
+      <SkillsView v-show="store.view === 'skills'" />
       <Dialogs />
     </NDialogProvider></NMessageProvider>
   </NConfigProvider>
@@ -103,6 +106,6 @@ body {
 .brand h1 { margin: 0; font-size: 17px; line-height: 1.3; color: var(--text); }
 .brand .sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actions { display: flex; gap: 8px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
-.navseg { width: 230px; max-width: 40vw; }
+.navseg { width: 300px; max-width: 46vw; }
 @media (max-width: 640px) { .brand .sub { display: none; } .navseg { width: auto; } }
 </style>

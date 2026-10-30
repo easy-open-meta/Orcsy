@@ -2,7 +2,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.7.2-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.9.12-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -32,19 +32,20 @@
 - **每项目一个专属 Agent** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行。
 - **真实执行，安全禁锢** —— 文件工具锁定在项目 worktree 内、命令白名单、轮数上限；git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
 - **开箱即用的项目接入** —— 新建/导入现有项目只新增 `tasks/` 与 `AGENT.md`，不动项目其它文件；自动探测技术栈（Node/Python/Rust/Go/.NET/Java/C++…）预填运行与测试命令，也可手动指定。
-- **Web 可视化看板** —— 状态总览、任务增删改、一键重新入队 blocked、手动触发扫描、运行日志从新到旧展示（模型思考内容可折叠展开）；托盘常驻、开机自启、Windows 安装包开箱即用。
+- **技能库（Skill）** —— 支持导入本地技能目录（含 SKILL.md）、看板新建技能，或一键扫描常见 AI 工具（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等）的用户级技能并批量勾选导入（同名去重）；技能可全局生效或绑定单个项目；删除技能只清技能库中的副本——外部导入的原样本仍在各工具目录里，重新扫描即可找回（自建技能删除后不可恢复）；技能统一存放在 Orcsy 数据目录（`%APPDATA%\Orcsy\skills\`），**绝不写入项目目录**；Agent 系统提示词只注入「名称+描述」索引，执行时按需经 `read_skill` 工具读取全文，技能再多也不撑爆上下文。
+- **Web 可视化看板** —— 状态总览、任务增删改、一键重新入队 blocked、手动触发扫描、模型列表拉取与一键连通性测试（发送极短对话验证密钥/模型可用）、运行日志从新到旧展示（模型思考内容可折叠展开）；托盘常驻、开机自启、Windows 安装包开箱即用。
 
 ## 🚀 快速开始
 
 ### 方式一：Windows 安装包（推荐）
 
 1. 运行 `build/Setup/orcsy-setup-<版本>.exe`，按向导安装；
-2. 勾选「初始化配置与示例任务」会在 `文档\Orcsy` 生成 `config.yaml`；
-3. 编辑该文件：填 `llm.api_key`、`base_url`、`model`，把 `projects[].path` 改成**绝对路径**指向你的项目；
+2. 可勾选「初始化示例任务」在数据目录放置示例模板；**config.yaml 无需手动初始化**——首次启动时自动生成在数据目录 `%APPDATA%\Orcsy`（Roaming，本地实体，不受 OneDrive 干扰）；
+3. 打开看板，在「项目与设置」页填写 `llm.api_key`、`base_url`、`model` 并新建项目（也可直接编辑 `%APPDATA%\Orcsy\config.yaml`，`projects[].path` 用**绝对路径**）；
 4. 从开始菜单/桌面打开「任务编排系统」→ 浏览器自动打开看板；
 5. 在看板上新建任务（或往项目 `tasks/` 目录里放任务文件），点「立即扫描一轮」或等定时调度。
 
-安装包自带卸载器；卸载时可选是否删除用户数据（`文档\Orcsy`）。
+安装包自带卸载器；卸载时可选是否删除用户数据（`%APPDATA%\Orcsy`）。
 
 ### 方式二：源码运行
 
@@ -179,7 +180,7 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 
 ## ⚙️ 配置参考
 
-见 `orcsy/__main__.py` 中的 `CONFIG_EXAMPLE`，或运行 `init` 生成的 `config.yaml`。关键项：
+见仓库根目录的 `config.example.yaml`（与 `orcsy/__main__.py` 中的 `CONFIG_EXAMPLE` 常量保持一致，`init` 命令即由它生成 `config.yaml`；改动常量后需同步模板文件，`tests/test_config_example.py` 会校验）。安装版数据目录默认 `%APPDATA%\Orcsy`，可用环境变量 `ORCSY_DATA_DIR` 整体改址。关键项：
 
 | 配置 | 说明 |
 |---|---|
@@ -189,6 +190,7 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 | `scheduler.interval_seconds` | 扫描间隔，默认 300 秒 |
 | `scheduler.max_parallel_agents` | 并行 Agent 数 |
 | `web.host / web.port / web.open_browser` | Web 看板监听地址 / 端口（默认 5116）/ 自动开浏览器 |
+| `logging.retention_days` | 日志保留天数（默认 7，0 关闭）：活动日志写满 N 天归档进 `logs/archive/`，归档与大小滚动的旧日志超过 N 天自动清理；看板「调度与看板」页可改，保存立即执行 |
 | `projects[].path` | 项目根目录（建议绝对路径） |
 | `projects[].tasks_dir` | 任务清单目录，默认 `tasks` |
 | `projects[].guide_file` | 开发指引文件，默认 `AGENT.md` |
@@ -249,7 +251,7 @@ orcsy.spec PyInstaller 打包配置（产物 dist/*.exe）
 
 ## 🔒 安全与边界
 
-- 含 `api_key` 的 `config.yaml` 已在 `.gitignore`，不要提交或分享；安装版配置放在 `文档\Orcsy\config.yaml`，不在程序目录；
+- 含 `api_key` 的 `config.yaml` 已在 `.gitignore`，不要提交或分享；安装版数据目录为 `%APPDATA%\Orcsy`（配置、技能库、日志都在这里，本地实体不受 OneDrive 干扰），不在程序目录；0.8.x 及更早版本放在「文档」目录的配置会在新版首次启动时自动迁移过来（原文件保留作备份）；
 - Web 看板默认只监听 `127.0.0.1`，不对局域网开放；如需远程访问自行改 `web.host` 并自行加鉴权（当前版本无登录功能）；
 - Agent 的改动范围限定在受管项目内；合并冲突会转为 blocked 而不是强推；
 - `blocked` / `cannot_do` 的任务会写明原因，等人工确认后在看板点「重新入队」（或把 status 改回 open）即可重新进入队列；

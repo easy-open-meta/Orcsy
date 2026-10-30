@@ -21,6 +21,7 @@ from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
 from .logging_setup import get_logger
 from .prompts import build_system_prompt
+from .skills import Skill, skill_bodies
 from .task_model import Task, append_progress
 from .tools import FinishSignal, ToolContext
 
@@ -55,7 +56,8 @@ class TaskExecutor:
 
     # ---- 对外 ----
 
-    def run_task(self, task: Task, guide_content: str) -> TaskResult:
+    def run_task(self, task: Task, guide_content: str,
+                 skills: list[Skill] | None = None) -> TaskResult:
         """执行一个任务，返回结果。本方法不抛异常——所有失败都体现在结果里。"""
         started = time.monotonic()
         self.log.info("开始执行任务 %s [%s] %s", task.id, task.priority, task.title)
@@ -67,7 +69,7 @@ class TaskExecutor:
         usage: dict = {}
         try:
             response = self._agent_loop(
-                task, guide_content, usage_out=usage,
+                task, guide_content, skills or [], usage_out=usage,
                 on_progress=lambda line: append_progress(task.path, line))
             result.turns = int(usage.get("turns", 0))
             result.prompt_tokens = int(usage.get("prompt_tokens", 0))
@@ -115,16 +117,19 @@ class TaskExecutor:
 
     # ---- Agent 循环 ----
 
-    def _agent_loop(self, task: Task, guide_content: str,
+    def _agent_loop(self, task: Task, guide_content: str, skills: list[Skill],
                     on_progress=None, usage_out: dict | None = None) -> AgentResponse:
         work_root = self.worktree if self.is_git_repo else self.project.path
         if self.is_git_repo:
             branch = self._prepare_worktree()
             self.log.debug("worktree 就绪，工作分支：%s", branch)
 
-        ctx = ToolContext(root=work_root, allowed_commands=self.project.allowed_commands)
+        # 技能正文按任务新鲜预载：read_skill 工具直接查内存，不碰文件系统
+        ctx = ToolContext(root=work_root, allowed_commands=self.project.allowed_commands,
+                          skills=skill_bodies(skills))
         client = LLMClient(self.llm)
-        client.reset(build_system_prompt(self.project, guide_content, self.is_git_repo))
+        client.reset(build_system_prompt(self.project, guide_content, self.is_git_repo,
+                                         skills=skills))
 
         try:
             resp = client.run_task_loop(self._build_task_prompt(task), ctx,

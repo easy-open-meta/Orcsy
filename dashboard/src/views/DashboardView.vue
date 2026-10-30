@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NCard, NInput, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref } from 'vue'
-import { openGuide, openProjectEdit, openTaskNew, store, ui } from '../store'
+import { openGuide, openProjectEdit, openTaskNew, openTaskView, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { parseLogEntries, relTime } from '../utils'
 import type { ProjectT, TaskT } from '../api'
@@ -45,11 +45,12 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
 }
 
 function clickTask(project: string, t: TaskT): void {
-  if (t.status !== 'open') {
-    window.$message?.('仅待办（open）状态的任务可编辑', 'warning')
-    return
+  // open 可编辑；其余状态（执行中/受阻/取消）与归档任务只读查看
+  if (t.status === 'open') {
+    ui.taskDlg = { project, id: t.id }
+  } else {
+    openTaskView(project, t.id)
   }
-  ui.taskDlg = { project, id: t.id }
 }
 
 async function delTask(p: ProjectT, t: TaskT): Promise<void> {
@@ -177,8 +178,8 @@ async function quickAdd(p: ProjectT): Promise<void> {
           </div>
 
           <div v-for="t in sorted(p)" :key="t.id" class="task">
-            <div class="t-main" :class="{ clickable: t.status === 'open' }"
-                 :title="t.status === 'open' ? '点击编辑任务内容' : undefined"
+            <div class="t-main clickable"
+                 :title="t.status === 'open' ? '点击编辑任务内容' : '点击查看任务内容（只读）'"
                  @click="clickTask(p.name, t)">
               <NTag size="small" :color="{ color: PRI_COLOR[t.priority] || '#64748f', textColor: '#fff' }"
                     :bordered="false">{{ t.priority }}</NTag>
@@ -209,13 +210,14 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </div>
 
         <details v-if="p.archived.length" class="arch">
-          <summary>已归档（{{ p.archived.length }}）</summary>
+          <summary>已归档（{{ p.archived.length }}）· 点击查看详情</summary>
           <div v-for="t in [...p.archived].reverse()" :key="t.id" class="task">
-            <div class="t-main">
+            <div class="t-main clickable" title="点击查看任务详情（只读）" @click="openTaskView(p.name, t.id)">
               <NTag size="small" :color="{ color: PRI_COLOR[t.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ t.priority }}</NTag>
               <span class="title">{{ t.title }}</span>
               <NTag size="small" type="success" :bordered="false">已完成</NTag>
             </div>
+            <div class="t-meta">{{ t.id }}</div>
           </div>
         </details>
       </NCard>

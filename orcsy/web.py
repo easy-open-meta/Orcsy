@@ -8,6 +8,8 @@ API（均为 GET/POST JSON）：
   POST /api/task/delete  删除任务       {project, id}
   POST /api/task/status  修改任务状态   {project, id, status}（blocked→open 重新入队等）
   POST /api/models       拉取大模型列表 {provider?, base_url?, api_key?}（缺省用已存配置）
+  POST /api/llm/test     测试大模型连通性 {provider?, base_url?, api_key?, model?}
+                         （一条极短对话；缺省回退已存配置；失败返回 ok:false+原因）
 
 项目管理（可视化配置）：
   POST /api/browse       浏览本地目录    {path}，返回子目录列表（供新建项目选路径）
@@ -22,6 +24,18 @@ API（均为 GET/POST JSON）：
   GET/POST /api/guide    读取/保存项目 AGENT.md {project, content?}
   POST /api/config       保存模型/调度/看板配置 {llm:{...}, scheduler:{...}, web:{...}}
                          保存后写回 config.yaml 并热重载调度器
+
+技能库（存于配置目录 skills/，绝不写入项目目录）：
+  GET  /api/skill          读取单个技能 ?name=（编辑弹窗用：字段+正文）
+  POST /api/skill          新建/更新技能 {original_name?, name, description, scope, enabled, body}
+  POST /api/skill/delete   （已废弃，由 /api/skill/remove 取代）
+  POST /api/skill/remove   删除技能 {names: [..]}（清掉技能库中的副本；导入技能可重新扫描找回，支持批量）
+  POST /api/skill/enabled  启用/停用技能 {name, enabled}（定向改 frontmatter）
+  POST /api/skill/import   导入本地技能目录 {path}（目录须含 SKILL.md，整目录复制）
+  GET  /api/skill/scan     扫描常见 AI 工具的用户级技能目录（ZCode/Claude Code/Codex/OpenCode 等），
+                           按工具分组返回可导入清单，exists 标记是否已导入
+  POST /api/skill/import-batch  批量导入 {paths: [本地技能目录]}；同名已存在则跳过并记录
+  POST /api/skill/open-folder  用系统文件管理器打开技能目录 {name}
 """
 
 from __future__ import annotations
@@ -38,11 +52,13 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import __version__
+from . import skills as skills_lib
 from .agent import ProjectAgent
 from .config import AppConfig, LLMConfig, ProjectConfig, SchedulerConfig, TaskStatus, WebConfig
-from .llm import LLMError, list_models
+from .llm import LLMError, list_models, test_connection
 from .logging_setup import get_logger
 from .scheduler import Scheduler
+from .skills import Skill
 from .task_model import Task, parse_task_file, priority_rank, scan_tasks
 
 log = get_logger("web")
@@ -82,8 +98,11 @@ class AppState:
         # 解析后的日志绝对路径（cmd_web 传入）；不传则退回原始配置值
         # ——config.logging.file 常是相对路径，直接按进程 CWD 读会读错位置
         self.log_path = log_path
+        # 技能库根目录（配置文件同级 skills/），运行期不变
+        self.skills_dir = skills_lib.skills_base(config)
         self.agents: dict[str, ProjectAgent] = {
-            p.name: ProjectAgent(p, config.llm) for p in config.projects
+            p.name: ProjectAgent(p, config.llm, skills_base=self.skills_dir)
+            for p in config.projects
         }
 
     # ---- 查询 ----
@@ -147,7 +166,10 @@ class AppState:
                 "port": self.config.web.port,
                 "open_browser": self.config.web.open_browser,
             },
+            "logging": {"retention_days": self.config.logging.retention_days},
             "app_autostart": self.app_autostart_status(),
+            "skills_dir": str(self.skills_dir),
+            "skills": [self._skill_dict(s) for s in skills_lib.load_skills(self.skills_dir)],
             "projects": projects,
             "log_tail": read_log_tail(self.log_path or self.config.logging.file),
         }
@@ -272,22 +294,33 @@ class AppState:
         return {"ok": True}
 
     def get_task(self, params: dict) -> dict:
-        """读取单个任务的完整内容（编辑弹窗用；/api/state 的描述截断到 2000 字）。"""
+        """读取单个任务的完整内容（编辑/查看弹窗用；/api/state 的描述截断到 2000 字）。
+
+        待办在 tasks/ 根目录；已完成任务被归档进 tasks/done/ ——两处都找，
+        归档命中时带 archived=true，看板以只读模式打开。
+        """
         project = str(params.get("project", ""))
         task_id = str(params.get("id", ""))
-        path = self._task_path(project, task_id)
+        agent = self.agents.get(project)
+        if agent is None:
+            raise ValueError(f"未知项目：{project}")
+        path = self._task_path(project, task_id)  # 复用 ID 合法性与路径越界校验
+        archived = False
+        if not path.exists():
+            archived = True
+            path = agent.tasks_dir / "done" / path.name
         if not path.exists():
             raise ValueError(f"任务不存在：{task_id}")
         from .task_model import parse_task_file
 
         t = parse_task_file(path)
         if t.error:
-            return {"ok": True, "id": task_id, "title": t.title,
+            return {"ok": True, "id": task_id, "title": t.title, "archived": archived,
                     "priority": "P2", "labels": [], "assignee": "",
                     "description": "", "error": t.error}
         return {"ok": True, "id": t.id, "title": t.title, "priority": t.priority,
                 "status": t.status, "labels": t.labels, "assignee": t.assignee,
-                "description": t.description}
+                "description": t.description, "archived": archived}
 
     def make_dir(self, data: dict) -> dict:
         """在指定位置创建新文件夹（目录选择器「新建项目」流程用）。"""
@@ -333,6 +366,37 @@ class AppState:
                     m["context_window"] = m["context_window"] or spec[0]
                     m["max_output_tokens"] = m["max_output_tokens"] or spec[1]
         return {"ok": True, "models": models}
+
+    def test_model(self, data: dict) -> dict:
+        """测试大模型连通性（看板「测试连接」按钮）：一条极短对话验证网络/密钥/模型名。
+
+        请求体缺省字段回退到已存配置（与 fetch_models 同模式），看板可用表单
+        草稿值在保存前先行测试。
+        """
+        llm = self.config.llm
+        provider = str(data.get("provider") or llm.provider).strip().lower()
+        base_url = str(data.get("base_url") or llm.base_url).strip()
+        api_key = str(data.get("api_key") or llm.api_key).strip()
+        model = str(data.get("model") or llm.model).strip()
+        if provider not in ("openai", "anthropic"):
+            raise ValueError(f"provider 不合法：{provider}（openai / anthropic）")
+        if not base_url.startswith(("http://", "https://")):
+            raise ValueError("API 地址必须以 http(s):// 开头")
+        if not model:
+            raise ValueError("model 不能为空")
+        try:
+            r = test_connection(provider, base_url, api_key, model, llm.timeout_seconds)
+        except LLMError as e:
+            return {"ok": False, "message": str(e)}
+        reply = r["reply"]
+        message = f"连接成功（{r['elapsed_seconds']}s）"
+        if reply:
+            message += f" · 模型回复：{reply}"
+        else:
+            message += " · 模型未返回正文（推理模型常见，连接本身正常）"
+        log.info("Web 测试模型连通：model=%s %.1fs ok", model, r["elapsed_seconds"])
+        return {"ok": True, "reply": reply,
+                "elapsed_seconds": r["elapsed_seconds"], "message": message}
 
     # ---- 项目管理 ----
 
@@ -426,7 +490,8 @@ class AppState:
                 "max_parallel_agents": cfg.scheduler.max_parallel_agents,
                 "run_once": cfg.scheduler.run_once,
             },
-            "logging": {"level": cfg.logging.level, "file": cfg.logging.file},
+            "logging": {"level": cfg.logging.level, "file": cfg.logging.file,
+                        "retention_days": cfg.logging.retention_days},
             "web": {"host": cfg.web.host, "port": cfg.web.port,
                     "open_browser": cfg.web.open_browser},
             "projects": [
@@ -451,7 +516,7 @@ class AppState:
         self.config = new_cfg
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
-        self.agents = {p.name: ProjectAgent(p, new_cfg.llm)
+        self.agents = {p.name: ProjectAgent(p, new_cfg.llm, skills_base=self.skills_dir)
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
@@ -474,6 +539,14 @@ class AppState:
                 raise ValueError(f"项目名已存在：{proj.name}")
             self.config.projects[idx] = proj
             action = "修改"
+            if proj.name != original:
+                # 项目改名：同步重映射专属技能的 scope（悬空 scope 无害但会失效）
+                for s in skills_lib.load_skills(self.skills_dir):
+                    if s.scope == original and not s.error:
+                        try:
+                            skills_lib.set_skill_meta(s.path, scope=proj.name)
+                        except OSError as e:
+                            log.warning("技能 %s 的 scope 重映射失败：%s", s.name, e)
 
         # 新项目（含导入现有项目）：只初始化任务目录与 AGENT.md，均不覆盖已有；
         # 不再生成示例任务等其它文件，已有代码的项目根目录保持干净
@@ -583,6 +656,139 @@ class AppState:
         log.info("Web 更新 AGENT.md %s（%d 字符）", project, len(content))
         return {"ok": True, "file": str(guide_path)}
 
+    # ---- 技能库（存于配置目录 skills/，不落项目目录） ----
+
+    @staticmethod
+    def _skill_dict(s: Skill) -> dict:
+        return {"name": s.name, "description": s.description, "scope": s.scope,
+                "enabled": s.enabled, "path": str(s.path), "origin": s.origin,
+                "error": s.error}
+
+    def get_skill(self, params: dict) -> dict:
+        """读取单个技能（编辑弹窗用：解析字段 + 正文全文）。"""
+        name = str(params.get("name", "")).strip()
+        d = skills_lib.skill_dir(self.skills_dir, name)
+        s = skills_lib.parse_skill_dir(d)
+        body = "" if s.error else skills_lib.read_skill_body(s.path)
+        return {"ok": True, **self._skill_dict(s), "body": body}
+
+    def save_skill(self, data: dict) -> dict:
+        """新建或更新技能。original_name 存在表示更新（支持改名 = 目录改名）。"""
+        name = str(data.get("name", "")).strip()
+        original = str(data.get("original_name", "")).strip() or None
+        description = str(data.get("description", "")).strip()
+        scope = str(data.get("scope", "")).strip() or "global"
+        enabled = bool(data.get("enabled", True))
+        body = str(data.get("body", ""))
+
+        if original is None:
+            d = skills_lib.skill_dir(self.skills_dir, name)
+            if d.exists():
+                raise ValueError(f"技能名已存在：{name}")
+            path = skills_lib.write_skill(self.skills_dir, name,
+                                          description, scope, enabled, body)
+            log.info("Web 新建技能 %s（%s）", name, path)
+            return {"ok": True, "message": f"已新建技能 {name}"}
+
+        d = skills_lib.skill_dir(self.skills_dir, original)
+        if not d.is_dir():
+            raise ValueError(f"技能不存在：{original}")
+        if name != original:
+            d = skills_lib.rename_skill_dir(self.skills_dir, original, name)
+        skills_lib.update_skill(d, description, scope, enabled, body)
+        log.info("Web 更新技能 %s", name)
+        return {"ok": True, "message": f"已保存技能 {name}"}
+
+    def remove_skills_api(self, data: dict) -> dict:
+        """删除技能（支持批量）：清掉技能库中的副本。
+
+        外部导入的技能原样本仍在各 AI 工具目录里，重新扫描即可找回；本程序
+        新建的技能没有别处副本，删除后不可恢复（确认文案由前端按 origin 区分）。
+        """
+        names = data.get("names")
+        if isinstance(names, str):
+            names = [names]
+        if not isinstance(names, list) or not [n for n in names if str(n).strip()]:
+            raise ValueError("未选择要删除的技能")
+        removed: list[str] = []
+        skipped: list[dict] = []
+        for raw in names[:100]:
+            name = str(raw).strip()
+            try:
+                skills_lib.delete_skill(self.skills_dir, name)
+                removed.append(name)
+            except ValueError as e:
+                skipped.append({"name": name, "reason": str(e)})
+        if not removed and not skipped:
+            raise ValueError("未选择要删除的技能")
+        msg = f"已删除 {len(removed)} 个技能"
+        if skipped:
+            msg += f"，跳过 {len(skipped)} 个"
+        log.info("Web 删除技能：%s", removed)
+        return {"ok": True, "removed": removed, "skipped": skipped, "message": msg}
+
+    def set_skill_enabled(self, data: dict) -> dict:
+        name = str(data.get("name", "")).strip()
+        enabled = bool(data.get("enabled", True))
+        d = skills_lib.skill_dir(self.skills_dir, name)
+        s = skills_lib.parse_skill_dir(d)
+        if s.error:
+            raise ValueError(f"技能文件解析失败：{s.error}")
+        skills_lib.set_skill_meta(s.path, enabled=enabled)
+        log.info("Web 技能 %s 启用 -> %s", name, enabled)
+        return {"ok": True, "enabled": enabled}
+
+    def import_skill_api(self, data: dict) -> dict:
+        """从本地目录导入技能（目录选择器选定路径，整目录复制进技能库）。"""
+        raw = str(data.get("path", "")).strip().strip('"')
+        if not raw:
+            raise ValueError("路径不能为空")
+        s = skills_lib.import_skill(Path(raw).expanduser(), self.skills_dir)
+        return {"ok": True, "skill": self._skill_dict(s),
+                "message": f"已导入技能 {s.name}"}
+
+    def scan_skill_sources(self) -> dict:
+        """扫描常见 AI 工具的用户级技能目录（看板「扫描 AI 工具」弹窗）。
+
+        同名技能跨来源只显示一次（共享去重集合）。
+        """
+        return {"ok": True, "sources": skills_lib.scan_sources(self.skills_dir)}
+
+    def import_skills_batch(self, data: dict) -> dict:
+        """批量导入扫描到的技能；同名已存在/无效的跳过并记录，不中断整批。"""
+        paths = data.get("paths")
+        if not isinstance(paths, list) or not [p for p in paths if str(p).strip()]:
+            raise ValueError("未选择要导入的技能")
+        imported: list[str] = []
+        skipped: list[dict] = []
+        for raw in paths[:50]:  # 单批上限保护
+            src = Path(str(raw).strip().strip('"')).expanduser()
+            try:
+                s = skills_lib.import_skill(src, self.skills_dir)
+                imported.append(s.name)
+            except ValueError as e:
+                skipped.append({"path": str(src), "reason": str(e)})
+        if not imported and not skipped:
+            raise ValueError("未选择要导入的技能")
+        msg = f"已导入 {len(imported)} 个技能"
+        if skipped:
+            msg += f"，跳过 {len(skipped)} 个（已存在或无效）"
+        log.info("Web 批量导入技能：导入 %s，跳过 %d 个", imported, len(skipped))
+        return {"ok": True, "imported": imported, "skipped": skipped, "message": msg}
+
+    def open_skill_folder(self, data: dict) -> dict:
+        """用系统文件管理器打开技能目录（管理附属脚本/参考文件）。"""
+        name = str(data.get("name", "")).strip()
+        d = skills_lib.skill_dir(self.skills_dir, name)
+        if not d.is_dir():
+            raise ValueError(f"技能不存在：{name}")
+        if sys.platform == "win32":
+            os.startfile(d)  # noqa: S606 — 本机用户主动打开自己的技能目录
+        else:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.Popen([opener, str(d)])
+        return {"ok": True, "path": str(d)}
+
     # ---- 模型/调度/看板配置 ----
 
     def save_settings(self, data: dict) -> dict:
@@ -640,10 +846,31 @@ class AppState:
             port=port,
             open_browser=bool(web.get("open_browser", self.config.web.open_browser)),
         )
+        # 日志保留天数：0 表示关闭自动归档与清理
+        log_cfg = data.get("logging") or {}
+        if "logging" in data:
+            rd = int(log_cfg.get("retention_days", self.config.logging.retention_days))
+            if not (0 <= rd <= 365):
+                raise ValueError("日志保留天数应为 0~365（0 表示关闭自动归档清理）")
+            self.config.logging.retention_days = rd
 
         self.scheduler.reload_config(self.config)
         self._apply_config(self.config)
         self._save_config(self.config)
+
+        # 新保留天数立即生效：顺手做一次归档/清理
+        if "logging" in data:
+            from .logging_setup import rotate_and_cleanup
+
+            log_path = (Path(self.log_path) if self.log_path
+                        else Path(self.config.logging.file))
+            try:
+                msg = rotate_and_cleanup(log_path, rd)
+                if msg:
+                    log.info("日志维护：%s", msg)
+            except OSError as e:
+                log.warning("日志归档/清理失败：%s", e)
+
         log.info("Web 保存配置：model=%s interval=%ss", self.config.llm.model, interval)
         return {"ok": True, "message": "配置已保存并生效（看板 host/port 变更下次启动生效）"}
 
@@ -695,6 +922,17 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.get_task(self._query_params()))
             except (ValueError, OSError) as e:
                 self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/skill":
+            try:
+                self._json(self.state.get_skill(self._query_params()))
+            except (ValueError, OSError) as e:
+                self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/skill/scan":
+            try:
+                self._json(self.state.scan_skill_sources())
+            except Exception as e:  # noqa: BLE001 — 探针失败也要回 JSON，不能掐断连接
+                log.exception("扫描 AI 工具技能目录失败")
+                self._json({"ok": False, "message": f"扫描失败：{e}"}, 500)
         elif path == "/api/app-autostart":
             self._json(self.state.app_autostart_status())
         else:
@@ -722,6 +960,11 @@ class WebHandler(BaseHTTPRequestHandler):
                     self._json(self.state.fetch_models(body))
                 except (ValueError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/llm/test":
+                try:
+                    self._json(self.state.test_model(body))
+                except (ValueError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/browse":
                 self._json(self.state.browse_dir(body))
             elif path == "/api/probe":
@@ -739,6 +982,18 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.open_project_folder(body))
             elif path == "/api/guide":
                 self._json(self.state.save_guide(body))
+            elif path == "/api/skill":
+                self._json(self.state.save_skill(body))
+            elif path == "/api/skill/remove":
+                self._json(self.state.remove_skills_api(body))
+            elif path == "/api/skill/enabled":
+                self._json(self.state.set_skill_enabled(body))
+            elif path == "/api/skill/import":
+                self._json(self.state.import_skill_api(body))
+            elif path == "/api/skill/import-batch":
+                self._json(self.state.import_skills_batch(body))
+            elif path == "/api/skill/open-folder":
+                self._json(self.state.open_skill_folder(body))
             elif path == "/api/app-autostart":
                 self._json(self.state.set_app_autostart(body))
             elif path == "/api/config":
