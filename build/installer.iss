@@ -73,11 +73,19 @@ Filename: "{app}\{#MyAppNameTray}"; Parameters: "web --tray-autostart-on"; Tasks
 Filename: "{app}\{#MyAppNameTray}"; Parameters: "--tray"; Description: "启动任务编排系统（托盘后台）"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; 卸载时清掉开机自启注册表值（Run 键本身是共享的，只删自己的值）
+; 卸载时清掉开机自启注册表值（Run 键本身是共享的，只删自己的值）；
+; 旧版本（task-arranger）写入的 TaskArranger 值一并清理，避免残留失效自启项
 Filename: "{sys}\reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v Orcsy /f"; Flags: runhidden; RunOnceId: "DelAutoStart"
+Filename: "{sys}\reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v TaskArranger /f"; Flags: runhidden; RunOnceId: "DelAutoStartLegacy"
 
 [UninstallDelete]
-; 只清程序目录；用户配置与任务（文档\Orcsy）保留
+; 程序目录里的文件由卸载日志自动删除；用户配置与任务（文档\Orcsy）保留。
+; 快捷方式本应由卸载日志回收，但跨版本更名（任务编排系统 → Orcsy）后旧名
+; 残留、桌面被 OneDrive 重定向等场景会漏删，公共区域按名字显式兜底清理；
+; 用户桌面在下方 [Code] 里按注册表真实路径处理（提权上下文 {userdesktop} 可能错位）。
+Type: files; Name: "{autodesktop}\{#MyAppName}.lnk"
+Type: files; Name: "{autodesktop}\任务编排系统.lnk"
+Type: filesandordirs; Name: "{autoprograms}\任务编排系统"
 
 [Code]
 // 卸载时询问是否删除用户数据（文档\Orcsy：配置、日志、任务模板）
@@ -219,13 +227,43 @@ begin
   Result := True;
 end;
 
+// 用户桌面快捷方式兜底清理：桌面被 OneDrive 重定向时，提权卸载进程里的
+// {userdesktop} 可能指向错误位置，这里与 RealUserDocs 同源，按注册表
+// User Shell Folders\Desktop 解析真实桌面路径，新旧两代名称都清。
+procedure DeleteUserDesktopShortcuts();
+var
+  Raw, Desktop: string;
+  Names: array[0..1] of string;
+  I: Integer;
+begin
+  Names[0] := '{#MyAppName}.lnk';
+  Names[1] := '任务编排系统.lnk';   // 改名前旧版创建的快捷方式
+  Desktop := '';
+  if RegQueryStringValue(HKEY_CURRENT_USER,
+      'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders',
+      'Desktop', Raw) and (Trim(Raw) <> '') then
+  begin
+    StringChangeEx(Raw, '%USERPROFILE%', GetEnv('USERPROFILE'), True);
+    if Pos('%', Raw) = 0 then
+      Desktop := Raw;
+  end;
+  if Trim(Desktop) = '' then
+    Desktop := ExpandConstant('{userdesktop}');
+  for I := 0 to 1 do
+    if FileExists(AddBackslash(Desktop) + Names[I]) then
+      DeleteFile(AddBackslash(Desktop) + Names[I]);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: string;
 begin
-  if (CurUninstallStep = usPostUninstall) and DeleteUserData then begin
-    DataDir := RealUserDocs('') + '\Orcsy';
-    if DirExists(DataDir) then
-      DelTree(DataDir, True, True, True);
+  if CurUninstallStep = usPostUninstall then begin
+    DeleteUserDesktopShortcuts();
+    if DeleteUserData then begin
+      DataDir := RealUserDocs('') + '\Orcsy';
+      if DirExists(DataDir) then
+        DelTree(DataDir, True, True, True);
+    end;
   end;
 end;
