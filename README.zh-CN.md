@@ -333,6 +333,9 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 # 一键打包（版本号 -> 前端构建 -> PyInstaller 双 exe -> Inno Setup 安装包）
 build.bat
 
+# 版本规则：功能大变更 → 次版本 +1（0.13.0）；功能补丁 → 修订号 +1（0.12.3）
+# 版本唯一来源 orcsy/__init__.py 的 __version__，打包前改它即可
+
 # 或手动分步：
 # 1. 打包 exe（需要 dev 依赖：uv sync --dev；产物 dist/*.exe）
 uv run pyinstaller orcsy.spec --noconfirm

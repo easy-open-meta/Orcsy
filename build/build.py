@@ -1,6 +1,8 @@
 """一键构建：版本号单源化 → PyInstaller 双产物 → Inno Setup 安装包。
 
 版本号唯一来源：orcsy/__init__.py 的 __version__。
+版本规则：功能大变更（新部署方式/新核心功能）→ 次版本 +1（如 0.12.2 → 0.13.0）；
+功能补丁（行为修正/UI 调整/文案提示）→ 修订号 +1（如 0.12.2 → 0.12.3）。
 本脚本由它生成两份构建期文件（勿手改）：
   - build/exe-version.txt : PyInstaller exe 的 Windows 版本资源
   - build/version.ini     : installer.iss 的 MyAppVersion（ReadIni 读取）

@@ -335,6 +335,9 @@ See `config.example.yaml` at the repo root (kept identical to the `CONFIG_EXAMPL
 # One-click packaging (version -> frontend build -> PyInstaller dual exe -> Inno Setup installer)
 build.bat
 
+# Version rule: feature-level changes bump the minor digit (0.13.0);
+# functional patches bump the patch digit (0.12.3). Single source: orcsy/__init__.py
+
 # Or step by step:
 # 1. Build exes (needs dev dependencies: uv sync --dev; output dist/*.exe)
 uv run pyinstaller orcsy.spec --noconfirm
