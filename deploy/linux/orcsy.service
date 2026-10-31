@@ -1,0 +1,32 @@
+# Orcsy — Agent 任务编排系统 systemd 服务单元
+# 由 deploy/linux/install.sh 安装到 /etc/systemd/system/orcsy.service。
+# 若调整数据/项目路径,需同步修改 Environment、WorkingDirectory 与 ReadWritePaths。
+
+[Unit]
+Description=Orcsy — Agent 任务编排系统(看板 + 定时调度)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orcsy
+Group=orcsy
+# HOME 显式指定:旧版 systemd 不一定从 passwd 注入,git 全局配置(.gitconfig)依赖它
+Environment=ORCSY_DATA_DIR=/var/lib/orcsy
+Environment=HOME=/var/lib/orcsy
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/var/lib/orcsy
+# KillSignal=SIGINT:走应用的 KeyboardInterrupt 清理路径(停调度/关端口/收子进程)
+KillSignal=SIGINT
+TimeoutStopSec=20
+ExecStart=/opt/orcsy/.venv/bin/orcsy web --host 0.0.0.0 --no-tray --no-browser
+Restart=on-failure
+RestartSec=5
+# 基础加固;个别项目工具链需要更宽权限时,注释掉 ProtectSystem 后 systemctl daemon-reload
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/orcsy /srv/orcsy-projects
+
+[Install]
+WantedBy=multi-user.target

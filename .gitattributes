@@ -1,2 +1,5 @@
 # 容器内执行的脚本必须保持 LF,Windows autocrlf 检出成 CRLF 会让容器启动失败
 docker/entrypoint.sh text eol=lf
+# Linux 部署脚本同理
+deploy/linux/install.sh text eol=lf
+deploy/linux/uninstall.sh text eol=lf

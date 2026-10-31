@@ -2,7 +2,7 @@
 #
 # 构建:  docker build -t orcsy .
 # 运行:  docker run -d -p 5116:5116 -v ./orcsy-data:/data -v ./projects:/projects orcsy
-# 详见 README「Docker 部署」章节。
+# 详见 README.zh-CN.md「Docker 部署」章节 / See "Docker Deployment" in README.md.
 
 # ---------- 构建阶段:按 uv.lock 可复现安装依赖 ----------
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
