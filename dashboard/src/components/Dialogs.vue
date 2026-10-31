@@ -408,10 +408,13 @@ async function newFolder(): Promise<void> {
       </div>
       <div class="duo">
         <div class="f1"><label>接口 base_url</label>
-          <NInput v-model:value="pDraft.ll_base" :placeholder="'留空继承全局（当前 ' + (store.state?.llm.base_url || '-') + '）'" /></div>
+          <NInput v-model:value="pDraft.ll_base" :placeholder="(pDraft.ll_provider === 'anthropic' ? '填官方根地址即可（自动补 /v1）；' : '') + '留空继承全局（当前 ' + (store.state?.llm.base_url || '-') + '）'" /></div>
         <div class="f1"><label>密钥 api_key</label>
           <NInput v-model:value="pDraft.ll_key" type="password" show-password-on="click"
                   :placeholder="store.state?.llm.api_key ? '留空继承全局密钥' : 'sk-...'" /></div>
+      </div>
+      <div class="hint" v-if="pDraft.ll_provider === 'anthropic'">
+        Anthropic 协议：程序自动补 /v1（已含 /v1 则不重复）；多数兼容服务不提供 /models 列表端点，拉取 404 时直接手填模型名即可。
       </div>
       <div class="btnrow" style="margin-top:6px">
         <NButton size="small" :loading="pFetching" @click="fetchProjectModels">获取模型列表</NButton>
@@ -565,6 +568,7 @@ async function newFolder(): Promise<void> {
 label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .pathline { display: flex; gap: 8px; }
+.btnrow { display: flex; gap: 8px; align-items: center; }
 .brow-crumb { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
 .bcur { font-size: 12.5px; color: var(--dim); word-break: break-all; }
 .blist {

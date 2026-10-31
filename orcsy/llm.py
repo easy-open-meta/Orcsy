@@ -81,6 +81,18 @@ def _auth_headers(provider: str, api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
+def _anthropic_base(base_url: str) -> str:
+    """归一化 anthropic 兼容地址：自动补 /v1。
+
+    官方（https://api.anthropic.com）与多数兼容服务（如 MiMo 的
+    https://token-plan-cn.xiaomimimo.com/anthropic）公布的根地址都不含 /v1，
+    而对话端点在其下 /v1/messages——用户照抄官方地址即可，这里统一补齐；
+    已以 /v1 结尾的地址不重复补（兼容既有配置与自带 /v1 的代理服务）。
+    """
+    base = (base_url or "").rstrip("/")
+    return base if base.endswith("/v1") else base + "/v1"
+
+
 def test_connection(provider: str, base_url: str, api_key: str, model: str,
                     timeout_seconds: int = 300) -> dict:
     """最小对话请求验证大模型接入连通性（看板「测试连接」按钮）。
@@ -101,7 +113,7 @@ def test_connection(provider: str, base_url: str, api_key: str, model: str,
         timeout_seconds=max(5, min(int(timeout_seconds), 120)),
     ))
     if provider == "anthropic":
-        url = base_url.rstrip("/") + "/messages"
+        url = _anthropic_base(base_url) + "/messages"
         headers = _auth_headers("anthropic", api_key)
     else:
         url = base_url.rstrip("/") + "/chat/completions"
@@ -133,12 +145,26 @@ def list_models(provider: str, base_url: str, api_key: str,
     context_window / max_output_tokens，openai 兼容服务通常没有（置 None，
     由看板用 model_spec 补全）。
     """
-    url = base_url.rstrip("/") + "/models"
+    if provider == "anthropic":
+        url = _anthropic_base(base_url) + "/models"
+    else:
+        url = base_url.rstrip("/") + "/models"
     headers = _auth_headers(provider, api_key)
     try:
         resp = httpx.get(url, headers=headers, timeout=min(max(timeout_seconds, 5), 30))
     except httpx.HTTPError as e:
         raise LLMError(f"获取模型列表失败：{e}") from e
+    if resp.status_code == 404:
+        # 404 ≠ 密钥/网络问题，是该 base_url 下没有 /models 端点——按协议给
+        # 可行动的提示（如 MiMo 等 anthropic 兼容面只有 /messages，无列表端点）
+        if provider == "anthropic":
+            raise LLMError(
+                "获取模型列表失败：HTTP 404 —— 该服务的 anthropic 兼容面通常不提供"
+                "模型列表端点（仅 /messages 对话）。可直接手填模型名，"
+                "或改用其 openai 兼容地址拉取列表。")
+        raise LLMError(
+            "获取模型列表失败：HTTP 404 —— 该地址下没有 /models 端点，"
+            "请检查 base_url（OpenAI 兼容地址通常以 /v1 结尾）。")
     if resp.status_code != 200:
         raise LLMError(f"获取模型列表失败：HTTP {resp.status_code} {resp.text[:200]}")
     try:
@@ -500,7 +526,7 @@ class LLMClient:
 
     def _step_anthropic(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]], str]:
         data = self._post(
-            self.cfg.base_url.rstrip("/") + "/messages",
+            _anthropic_base(self.cfg.base_url) + "/messages",
             self._payload_anthropic(use_tools),
             _auth_headers("anthropic", self.cfg.api_key),
         )
