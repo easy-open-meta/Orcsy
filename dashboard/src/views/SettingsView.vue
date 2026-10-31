@@ -91,6 +91,18 @@ async function openFolder(p: { name: string; path: string }): Promise<void> {
   } catch (e: any) { message()?.(e.message, 'error') }
 }
 
+// ---- 拉取 Issues：项目绑定远程仓库后，把 open Issue 导入任务队列 ----
+const syncing = ref('')
+async function syncIssues(p: { name: string }): Promise<void> {
+  syncing.value = p.name
+  try {
+    const r = await api.issuesSync(p.name)
+    message()?.(r.message || '同步完成', 'success')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { syncing.value = '' }
+  void import('../store').then(m => m.refresh(true))
+}
+
 // ---- 模型列表与规格自动填充 ----
 const fetching = ref(false)
 const testing = ref(false)
@@ -222,6 +234,7 @@ const providerOptions = [
           <NTag size="small" :bordered="false" :type="p.enabled ? 'info' : 'default'">{{ p.name }}</NTag>
           <NTag size="small" :bordered="false" :type="p.is_git_repo ? 'default' : 'warning'">{{ p.is_git_repo ? 'git' : '非 git' }}</NTag>
           <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
+          <NTag v-if="p.repo" size="small" :bordered="false" type="success">issues</NTag>
         </div>
         <div class="prow-meta">
           {{ p.path }} · 任务目录 {{ p.tasks_dir || 'tasks' }} · 每轮 {{ p.max_tasks_per_cycle || 1 }} 任务
@@ -230,6 +243,7 @@ const providerOptions = [
           <NButton size="tiny" @click="openFolder(p)">打开文件夹</NButton>
           <NButton size="tiny" @click="openTaskNew(p.name)">新建任务</NButton>
           <NButton size="tiny" @click="openGuide(p.name)">编辑 AGENT.md</NButton>
+          <NButton size="tiny" :loading="syncing === p.name" @click="syncIssues(p)">拉取 Issues</NButton>
           <NButton size="tiny" @click="openProjectEdit(p.name)">设置</NButton>
           <NButton size="tiny" quaternary type="error" @click="delProject(p.name)">移除</NButton>
         </div>

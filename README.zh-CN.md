@@ -4,7 +4,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.12.2-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.13.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -32,6 +32,7 @@
 - **任意大模型** —— OpenAI 兼容协议（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）与 Anthropic 协议均原生 function calling，改 `base_url` + `model` 即可切换；可选开启模型思考内容查看。
 - **Markdown 即任务** —— 每个任务一个 `.md` 文件，frontmatter 写元信息、正文写需求与验收标准，纯文本可版本化、可人工编辑。
 - **每项目一个专属 Agent** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行；支持绑定**专属模型**（部分覆盖全局 llm 配置，未写字段自动继承），只有绑定的模型处理该项目的任务。
+- **仓库 Issues 集成** —— 项目可绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），看板一键把 open Issue 拉取为任务：优先级默认 P2，Issue 带 P0~P4 标签则按标签；带来源标注，含归档去重；单向导入，Issue 状态不回写。
 - **真实执行，安全禁锢** —— 文件工具锁定在项目 worktree 内、命令白名单、轮数上限；git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
 - **开箱即用的项目接入** —— 新建/导入现有项目只新增 `tasks/` 与 `AGENT.md`，不动项目其它文件；自动探测技术栈（Node/Python/Rust/Go/.NET/Java/C++…）预填运行与测试命令，也可手动指定。
 - **技能库（Skill）** —— 支持导入本地技能目录（含 SKILL.md）、看板新建技能，或一键扫描常见 AI 工具（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等）的用户级技能并批量勾选导入（同名去重）；技能可全局生效或绑定单个项目；删除技能只清技能库中的副本——外部导入的原样本仍在各工具目录里，重新扫描即可找回（自建技能删除后不可恢复）；技能统一存放在 Orcsy 数据目录（`%APPDATA%\Orcsy\skills\`），**绝不写入项目目录**；Agent 系统提示词只注入「名称+描述」索引，执行时按需经 `read_skill` 工具读取全文，技能再多也不撑爆上下文。
@@ -320,6 +321,7 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 | `projects[].allowed_commands` | Agent 命令白名单，缺省用内置默认 |
 | `projects[].allowed_branch` | 只在该分支上工作，缺省用当前分支 |
 | `projects[].llm` | 项目专属模型绑定：部分覆盖全局 `llm`（provider / base_url / api_key / model / temperature 等任意字段，未写字段继承全局）；只有绑定的模型处理该项目的任务，看板项目对话框可可视化编辑 |
+| `projects[].repo` | 远程仓库绑定：`{url, token?, provider?, api_base?}`（GitHub / Gitee / GitLab / Gitea，token 公开仓库可省）；绑定后看板项目卡片「拉取 Issues」把 open Issue 导入任务队列 |
 
 ## 📊 日志与观测
 

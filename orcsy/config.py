@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 import yaml
 
+from .issues import IssueError, normalize_repo
+
 # 任务状态机：open → in_progress → done / blocked / cancelled
 TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
 
@@ -34,6 +36,9 @@ class ProjectConfig:
     # 项目专属模型绑定：部分覆盖全局 llm 配置（只写需要换的字段，其余继承全局）。
     # 存原始字典而非 LLMConfig——全局配置改动后，未覆盖字段始终继承最新全局值。
     llm: dict[str, Any] | None = None
+    # 远程仓库绑定（GitHub/Gitee/GitLab）：{url, token?, provider?, api_base?}。
+    # 绑定后可从仓库 Issues 导入任务队列（看板「拉取 Issues」）；token 可选（公开仓库免认证）。
+    repo: dict[str, Any] | None = None
 
 
 @dataclass
@@ -223,6 +228,15 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         if p_llm:
             # 加载期即解析校验：typo / 非法值立刻暴露，而不是等首个任务执行时才炸
             resolve_llm(llm, p_llm, context=f"项目 {p_name} 的 llm")
+        p_repo = item.get("repo")
+        if p_repo is not None and not isinstance(p_repo, dict):
+            raise ValueError(f"项目 {p_name} 的 repo 配置必须是字典（键值对）。")
+        if p_repo:
+            # repo 无继承语义，加载即归一化（补 provider、洗 token），存取一致
+            try:
+                p_repo = normalize_repo(p_repo, context=f"项目 {p_name} 的 repo")
+            except IssueError as e:
+                raise ValueError(str(e)) from e
         projects.append(
             ProjectConfig(
                 name=p_name,
@@ -238,6 +252,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     if isinstance(item.get("allowed_commands"), list) else None
                 ),
                 llm=p_llm or None,
+                repo=p_repo or None,
             )
         )
 

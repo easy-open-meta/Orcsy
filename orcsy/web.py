@@ -56,6 +56,7 @@ from . import skills as skills_lib
 from .agent import ProjectAgent
 from .config import (AppConfig, LLMConfig, ProjectConfig, SchedulerConfig,
                      TaskStatus, WebConfig, normalize_llm_override, resolve_llm)
+from .issues import IssueError, normalize_repo, sync_issues
 from .llm import LLMError, list_models, test_connection
 from .logging_setup import get_logger
 from .scheduler import Scheduler
@@ -137,6 +138,7 @@ class AppState:
                 "allowed_branch": p.allowed_branch,
                 "allowed_commands": p.allowed_commands,
                 "llm": p.llm or None,
+                "repo": p.repo or None,
                 "is_git_repo": agent.executor.is_git_repo,
                 "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),
@@ -296,6 +298,55 @@ class AppState:
         path.unlink()
         log.info("Web 删除任务 %s/%s", project, task_id)
         return {"ok": True}
+
+    def delete_tasks_batch(self, data: dict) -> dict:
+        """批量删除任务：{project, ids: [...]}。单条缺失不阻断，返回删除/失败明细。"""
+        project = str(data.get("project", "")).strip()
+        if not self.agents.get(project):
+            raise ValueError(f"项目不存在：{project}")
+        ids = data.get("ids")
+        if not isinstance(ids, list) or not ids:
+            raise ValueError("ids 必须是非空数组")
+        if len(ids) > 500:
+            raise ValueError("单次最多删除 500 个任务")
+        deleted, failed = 0, []
+        for raw in ids[:500]:
+            task_id = str(raw).strip()
+            try:
+                path = self._task_path(project, task_id)
+                if not path.exists():
+                    failed.append(task_id)
+                    continue
+                path.unlink()
+                deleted += 1
+            except (ValueError, OSError) as e:
+                failed.append(f"{task_id}（{e}）")
+        log.info("Web 批量删除任务 %s：删除 %d，失败 %d", project, deleted, len(failed))
+        msg = f"已删除 {deleted} 个任务"
+        if failed:
+            msg += f"，{len(failed)} 个失败：{'、'.join(failed[:5])}{'…' if len(failed) > 5 else ''}"
+        return {"ok": True, "deleted": deleted, "failed": failed, "message": msg}
+
+    def clear_tasks(self, data: dict) -> dict:
+        """一键清空项目任务：删除 tasks/ 根目录全部 .md（含解析失败文件），
+        已归档任务（tasks/done/）不动。"""
+        project = str(data.get("project", "")).strip()
+        agent = self.agents.get(project)
+        if agent is None:
+            raise ValueError(f"项目不存在：{project}")
+        tasks_dir = agent.tasks_dir
+        files = [p for p in tasks_dir.glob("*.md")]
+        cleared = 0
+        for path in files:
+            try:
+                path.unlink()
+                cleared += 1
+            except OSError as e:
+                log.warning("清空任务：删除 %s 失败（%s）", path, e)
+        log.info("Web 清空项目任务 %s：清除 %d/%d 个任务文件（归档未动）",
+                 project, cleared, len(files))
+        return {"ok": True, "cleared": cleared,
+                "message": f"已清空 {cleared} 个任务（已归档任务不受影响）"}
 
     def get_task(self, params: dict) -> dict:
         """读取单个任务的完整内容（编辑/查看弹窗用；/api/state 的描述截断到 2000 字）。
@@ -477,11 +528,21 @@ class AppState:
             llm = normalize_llm_override(llm_raw) or None
             if llm:
                 resolve_llm(self.config.llm, llm, context=f"项目 {name} 的 llm")
+        # 远程仓库绑定（Issues 导入用）：null/空=清除；平台由 URL 识别或显式 provider
+        repo_raw = data.get("repo")
+        if repo_raw is not None and not isinstance(repo_raw, dict):
+            raise ValueError("repo 绑定必须是键值对字典或 null")
+        repo = None
+        if isinstance(repo_raw, dict) and repo_raw:
+            try:
+                repo = normalize_repo(repo_raw, context=f"项目 {name} 的 repo")
+            except IssueError as e:
+                raise ValueError(str(e)) from e
         return ProjectConfig(
             name=name, path=path, enabled=bool(data.get("enabled", True)),
             tasks_dir=tasks_dir, guide_file=guide_file,
             max_tasks_per_cycle=max_tasks, max_agent_turns=max_turns,
-            allowed_commands=allowed, allowed_branch=branch, llm=llm,
+            allowed_commands=allowed, allowed_branch=branch, llm=llm, repo=repo,
         )
 
     def _save_config(self, cfg: AppConfig) -> None:
@@ -516,6 +577,7 @@ class AppState:
                     **({"allowed_branch": p.allowed_branch} if p.allowed_branch else {}),
                     **({"allowed_commands": p.allowed_commands} if p.allowed_commands else {}),
                     **({"llm": p.llm} if p.llm else {}),
+                    **({"repo": p.repo} if p.repo else {}),
                 }
                 for p in cfg.projects
             ],
@@ -592,6 +654,28 @@ class AppState:
         log.info("Web %s项目 %s（%s）", action, proj.name, proj.path)
         return {"ok": True, "created": created, "message":
                 f"已{action}项目 {proj.name}" + (f"，初始化了 {'、'.join(created)}" if created else "")}
+
+    def sync_project_issues(self, body: dict) -> dict:
+        """拉取绑定仓库的 open Issues 导入任务队列（单向；去重含 done/ 归档）。"""
+        # 兼容两种键名：项目级端点惯例是 name（与 /api/project/delete 一致）
+        name = str(body.get("name") or body.get("project") or "").strip()
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"项目不存在：{name}")
+        repo = agent.project.repo
+        if not repo:
+            raise ValueError(f"项目 {name} 未绑定远程仓库（项目设置里先填仓库 URL）。")
+        try:
+            result = sync_issues(name, repo, agent.tasks_dir)
+        except IssueError as e:
+            raise ValueError(str(e)) from e
+        imported, skipped = result["imported"], result["skipped"]
+        log.info("Web 项目 %s 拉取 Issues：导入 %d，跳过 %d（共 %d）",
+                 name, imported, skipped, result["total"])
+        return {"ok": True, "imported": imported, "skipped": skipped,
+                "message": (f"导入 {imported} 个 Issue 为任务，跳过 {skipped} 个已存在"
+                            if imported or skipped else
+                            f"仓库没有新的 open Issue（共 {result['total']} 条）")}
 
     def delete_project(self, data: dict) -> dict:
         name = str(data.get("name", "")).strip()
@@ -969,6 +1053,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.create_or_update_task(body))
             elif path == "/api/task/status":
                 self._json(self.state.set_task_status(body))
+            elif path == "/api/task/delete-batch":
+                self._json(self.state.delete_tasks_batch(body))
+            elif path == "/api/task/clear":
+                self._json(self.state.clear_tasks(body))
             elif path == "/api/task/delete":
                 self._json(self.state.delete_task(body))
             elif path == "/api/models":
@@ -996,6 +1084,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.delete_project(body))
             elif path == "/api/project/open-folder":
                 self._json(self.state.open_project_folder(body))
+            elif path == "/api/project/issues-sync":
+                self._json(self.state.sync_project_issues(body))
             elif path == "/api/guide":
                 self._json(self.state.save_guide(body))
             elif path == "/api/skill":

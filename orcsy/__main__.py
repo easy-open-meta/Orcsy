@@ -70,6 +70,9 @@ projects: []
 #    #   base_url: https://open.bigmodel.cn/api/paas/v4
 #    #   api_key: sk-yyy
 #    #   model: glm-4-plus
+#    # repo:                           # 绑定远程仓库（GitHub/Gitee/GitLab/Gitea），
+#    #   url: https://github.com/owner/repo   # 看板「拉取 Issues」把 open Issue 导入任务
+#    #   token: ghp_xxx               # token 可选：私有仓库必填，公开仓库可省
 """
 
 

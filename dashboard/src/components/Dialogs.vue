@@ -23,6 +23,9 @@ const pDraft = reactive({
   // 专属模型绑定：use_llm 关=跟随全局；开=部分覆盖（空字段仍继承全局）
   use_llm: false, ll_provider: '' as '' | 'openai' | 'anthropic',
   ll_base: '', ll_key: '', ll_model: '',
+  // 远程仓库绑定：拉取 open Issues 入任务队列（单向）；token 与账号密码二选一
+  use_repo: false, repo_url: '', repo_token: '', repo_user: '', repo_pass: '',
+  repo_provider: '' as '' | 'github' | 'gitee' | 'gitlab' | 'gitea',
 })
 const pVisible = computed({
   get: () => !!ui.projectDlg,
@@ -48,6 +51,13 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.ll_key = pl?.api_key ?? ''
   pDraft.ll_model = pl?.model ?? ''
   pModels.value = []
+  const pr = p?.repo ?? null
+  pDraft.use_repo = !!pr
+  pDraft.repo_url = pr?.url ?? ''
+  pDraft.repo_token = pr?.token ?? ''
+  pDraft.repo_user = pr?.username ?? ''
+  pDraft.repo_pass = pr?.password ?? ''
+  pDraft.repo_provider = (pr?.provider as '' | 'github' | 'gitee' | 'gitlab' | 'gitea') ?? ''
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
 })
 
@@ -77,6 +87,23 @@ async function fetchProjectModels(): Promise<void> {
   } catch (e: any) { message.error(e.message) }
   finally { pFetching.value = false }
 }
+
+// 仓库平台：显式选择优先，否则按 host 关键词识别（与后端 detect_repo 同规则）
+const repoPlatform = computed(() => {
+  if (pDraft.repo_provider) return pDraft.repo_provider.toUpperCase()
+  const m = /^https?:\/\/([^/]+)/.exec(pDraft.repo_url.trim())
+  if (!m) return ''
+  const host = m[1].toLowerCase()
+  const hit = ['github', 'gitee', 'gitlab'].find(k => host.includes(k))
+  return hit ? hit.toUpperCase() : ''
+})
+const repoProviderOptions = [
+  { label: '自动识别（按 URL）', value: '' },
+  { label: 'GitHub', value: 'github' },
+  { label: 'Gitee', value: 'gitee' },
+  { label: 'GitLab（含自托管）', value: 'gitlab' },
+  { label: 'Gitea（含自托管）', value: 'gitea' },
+]
 
 async function testProjectModel(): Promise<void> {
   const eff = effLlm()
@@ -113,6 +140,10 @@ function browsePath(): void {
 
 async function saveProject(): Promise<void> {
   if (!ui.projectDlg) return
+  if (pDraft.use_repo && !pDraft.repo_url.trim()) {
+    pDraft.err = '已启用仓库绑定，请填写仓库 URL'
+    return
+  }
   try {
     await api.projectSave({
       name: pDraft.name.trim(), path: pDraft.path.trim(),
@@ -129,6 +160,14 @@ async function saveProject(): Promise<void> {
         ...(pDraft.ll_base.trim() ? { base_url: pDraft.ll_base.trim() } : {}),
         ...(pDraft.ll_key.trim() ? { api_key: pDraft.ll_key.trim() } : {}),
         ...(pDraft.ll_model.trim() ? { model: pDraft.ll_model.trim() } : {}),
+      } : null,
+      // 远程仓库绑定：关或 URL 空=清除；平台显式选择优先，否则后端按 URL 识别
+      repo: pDraft.use_repo && pDraft.repo_url.trim() ? {
+        url: pDraft.repo_url.trim(),
+        ...(pDraft.repo_provider ? { provider: pDraft.repo_provider } : {}),
+        ...(pDraft.repo_token.trim() ? { token: pDraft.repo_token.trim() } : {}),
+        ...(pDraft.repo_user.trim() ? { username: pDraft.repo_user.trim() } : {}),
+        ...(pDraft.repo_pass ? { password: pDraft.repo_pass } : {}),
       } : null,
       original_name: ui.projectDlg.original ?? undefined,
       // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
@@ -420,6 +459,32 @@ async function newFolder(): Promise<void> {
         <NButton size="small" :loading="pFetching" @click="fetchProjectModels">获取模型列表</NButton>
         <NButton size="small" :loading="pTesting" @click="testProjectModel">测试连接</NButton>
         <span class="hint">未填写的字段自动继承全局「大模型接入」配置</span>
+      </div>
+    </template>
+    <label class="checkline" style="margin-top:12px">
+      <NSwitch v-model:value="pDraft.use_repo" />
+      绑定远程仓库 Issues（把 open Issue 拉取为任务；单向导入，状态不回写）
+    </label>
+    <template v-if="pDraft.use_repo">
+      <div class="duo" style="margin-top:6px">
+        <div class="f2"><label>仓库 URL{{ repoPlatform ? ' · ' + repoPlatform : '' }}</label>
+          <NInput v-model:value="pDraft.repo_url" placeholder="https://github.com/owner/repo" /></div>
+        <div class="f1"><label>平台（自托管必选）</label>
+          <NSelect v-model:value="pDraft.repo_provider" :options="repoProviderOptions" /></div>
+      </div>
+      <div class="duo">
+        <div class="f1"><label>访问 token（与账号密码二选一）</label>
+          <NInput v-model:value="pDraft.repo_token" type="password" show-password-on="click"
+                  placeholder="ghp_... / gitee私人令牌 / glpat-... / gitea token" /></div>
+        <div class="f1"><label>账号 + 密码（可选，GitLab / Gitee / Gitea 支持）</label>
+          <div class="duo">
+            <NInput v-model:value="pDraft.repo_user" placeholder="username" />
+            <NInput v-model:value="pDraft.repo_pass" type="password" show-password-on="click"
+                    placeholder="password" />
+          </div></div>
+      </div>
+      <div class="hint" style="margin-top:6px">
+        认证二选一：token 优先；GitHub 只支持 token。自托管 Gitea / GitLab 请在「平台」里显式选择。绑定后在项目卡片点「拉取 Issues」导入任务，优先级默认 P2（带 P0~P4 标签按标签）。
       </div>
     </template>
     <template v-if="!ui.projectDlg?.original">

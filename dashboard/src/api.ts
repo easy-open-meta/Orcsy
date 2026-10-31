@@ -28,6 +28,9 @@ export interface ProjectT {
   allowed_commands: string[] | null
   /** 项目专属模型绑定（部分覆盖全局 llm）；null = 未绑定 */
   llm?: Record<string, string> | null
+  /** 远程仓库绑定（Issues 导入）；null = 未绑定；认证 token 与账号密码二选一 */
+  repo?: { url: string; token?: string; username?: string
+           password?: string; provider?: string; api_base?: string } | null
   is_git_repo: boolean
   guide_file_path: string
   guide_exists: boolean
@@ -146,6 +149,13 @@ export const api = {
   taskStatus: (project: string, id: string, status: string) =>
     post('/api/task/status', { project, id, status }),
   taskDelete: (project: string, id: string) => post('/api/task/delete', { project, id }),
+  taskDeleteBatch: (project: string, ids: string[]) =>
+    post('/api/task/delete-batch', { project, ids }) as Promise<{
+      ok: boolean; message: string; deleted: number; failed: string[]
+    }>,
+  taskClear: (project: string) => post('/api/task/clear', { project }) as Promise<{
+    ok: boolean; message: string; cleared: number
+  }>,
   models: (p: { provider: string; base_url: string; api_key: string }) =>
     post('/api/models', p) as Promise<{ models: ModelInfo[] }>,
   testModel: (p: { provider: string; base_url: string; api_key: string; model: string }) =>
@@ -159,6 +169,9 @@ export const api = {
   projectSave: (p: Record<string, unknown>) => post('/api/project', p),
   projectDelete: (name: string) => post('/api/project/delete', { name }),
   projectOpenFolder: (name: string) => post('/api/project/open-folder', { name }),
+  issuesSync: (name: string) => post('/api/project/issues-sync', { name }) as Promise<{
+    ok: boolean; message: string; imported: number; skipped: number
+  }>,
   guide: (project: string) =>
     get(`/api/guide?project=${encodeURIComponent(project)}`) as Promise<{ file: string; content: string }>,
   guideSave: (project: string, content: string) => post('/api/guide', { project, content }),

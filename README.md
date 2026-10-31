@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 > Orcsy is an Agent task-orchestration system that plugs into any LLM API: it periodically scans each project's `tasks/` directory for Markdown tasks, dispatches them by priority to a dedicated Agent that does the development and fixes, then automatically commits to Git and writes the task status back — an unattended, closed-loop development pipeline.
 
-![version](https://img.shields.io/badge/version-0.12.2-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.13.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 Write tasks as Markdown and let Orcsy handle the rest: a scheduler scans each managed project's `tasks/` directory, dispatches tasks by priority (P0 → P4) to that project's dedicated Agent, the Agent reads and writes real code and runs tests inside an isolated git worktree, and on completion Orcsy commits, merges and writes the status back — with a web dashboard and run logs throughout.
 
@@ -32,6 +32,7 @@ Write tasks as Markdown and let Orcsy handle the rest: a scheduler scans each ma
 - **Any LLM** — OpenAI-compatible protocol (DeepSeek / GLM / Kimi / Qwen / Ollama / vLLM…) and the Anthropic protocol, both with native function calling; switch providers by changing `base_url` + `model`. Optional model-thinking display.
 - **Markdown as tasks** — one `.md` file per task: frontmatter for metadata, body for requirements and acceptance criteria. Plain text, versionable, human-editable.
 - **One dedicated Agent per project** — its own `AGENT.md` guidelines, task list, git worktree and conversation history; multi-Agent parallelism supported; each project can bind a **dedicated model** (partial override of the global `llm` config, unset fields inherited) — only the bound model handles that project's tasks.
+- **Repo Issues integration** — bind a GitHub / Gitee / GitLab / Gitea repo (self-hosted included) to a project and pull its open Issues into the task queue with one click: priority defaults to P2, P0~P4 labels override; tasks carry source annotations with archive-aware dedup; one-way import, Issue status is not written back.
 - **Real execution, safely sandboxed** — file tools locked inside the project worktree, command whitelist, turn limits; git commit/merge/push is performed by the system, the Agent cannot touch version control.
 - **Zero-friction project onboarding** — creating/importing a project only adds `tasks/` and `AGENT.md`, nothing else in the repo is touched; tech stack auto-detection (Node/Python/Rust/Go/.NET/Java/C++…) pre-fills run and test commands, or set them manually.
 - **Skill library** — import local skill directories (with SKILL.md), create skills in the dashboard, or one-click scan user-level skills from common AI tools (ZCode / generic Agents / Claude Code / Codex / OpenCode etc.) and batch-import with dedup; skills can be global or bound to a single project; deleting a skill only removes the copy in the library — externally imported originals stay in their tool directories and can be re-scanned (custom-built skills are unrecoverable once deleted); skills live in the Orcsy data directory (`%APPDATA%\Orcsy\skills\`) and are **never written into project directories**; the Agent system prompt only receives a "name + description" index, full content is read on demand via the `read_skill` tool, so the skill count never bloats the context.
@@ -322,6 +323,7 @@ See `config.example.yaml` at the repo root (kept identical to the `CONFIG_EXAMPL
 | `projects[].allowed_commands` | Agent command whitelist; built-in default when omitted |
 | `projects[].allowed_branch` | Work only on this branch; defaults to the current branch |
 | `projects[].llm` | Per-project dedicated model binding: partial override of the global `llm` config (any of provider / base_url / api_key / model / temperature etc.; unset fields inherit) — only the bound model handles that project's tasks; editable on the dashboard's project dialog |
+| `projects[].repo` | Remote repo binding: `{url, token?, provider?, api_base?}` (GitHub / Gitee / GitLab / Gitea; token optional for public repos); once bound, "Pull Issues" on the project card imports open Issues into the task queue |
 
 ## 📊 Logging & Observability
 
