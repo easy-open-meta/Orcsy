@@ -1,0 +1,33 @@
+# Orcsy — Agent 任务编排系统 容器编排
+#
+# 启动:   docker compose up -d
+# 查看日志: docker compose logs -f
+# 停止:    docker compose down
+#
+# 数据布局(首次启动自动生成模板配置,在看板「项目与设置」页填 llm.api_key):
+#   ./orcsy-data  -> 容器 /data     config.yaml、skills/、logs/
+#   ./projects    -> 容器 /projects 受管 git 仓库(config 里 path 写 /projects/<名称>)
+
+services:
+  orcsy:
+    build: .
+    image: orcsy:latest
+    container_name: orcsy
+    restart: unless-stopped
+    ports:
+      - "5116:5116"
+    environment:
+      ORCSY_DATA_DIR: /data
+      TZ: Asia/Shanghai # 日志按天归档用本地时区
+      # git 提交身份(不设则用镜像内置默认 Orcsy Agent / orcsy@localhost):
+      # ORCSY_GIT_NAME: 你的名字
+      # ORCSY_GIT_EMAIL: you@example.com
+    volumes:
+      - ./orcsy-data:/data # 配置、技能库、日志
+      - ./projects:/projects # 受管 git 仓库
+      # git 推送走 SSH 时,挂载密钥并指定命令:
+      # - ~/.ssh:/home/orcsy/.ssh:ro
+      # GIT_SSH_COMMAND: ssh -i /home/orcsy/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new
+    # 改端口示例:
+    # ports:
+    #   - "8080:5116"

@@ -1,0 +1,31 @@
+# 版本控制与本机运行产物
+.git
+.venv
+.zcode
+logs
+run
+dist
+
+# 看板源码:运行时页面已编译进 orcsy/dashboard_html.py,仅改前端时本机构建用
+dashboard
+
+# Windows 打包与开发辅助
+build
+build.bat
+orcsy.spec
+entry_web.py
+entry_tray.py
+tests
+tools
+
+# 机密:含 api_key 的本地配置绝不进镜像
+config.yaml
+
+# 杂项
+*.log
+__pycache__
+*.pyc
+.gitattributes
+Dockerfile
+docker-compose.yml
+.dockerignore

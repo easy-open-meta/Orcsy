@@ -2,7 +2,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.9.12-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.10.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -74,6 +74,69 @@ uv run orcsy run --config run/config.yaml --once
 ```
 
 也可以用外部调度器触发单轮（Windows 计划任务 / cron）：配置 `scheduler.run_once: true` 或命令行 `--once`。
+
+### 方式三：Docker 部署（服务器 / Linux / NAS）
+
+```bash
+# 1. 构建并启动（数据落在 ./orcsy-data，受管仓库放 ./projects）
+docker compose up -d --build
+
+# 2. 打开看板 http://localhost:5116，在「项目与设置」页填写 llm.api_key，
+#    并把项目路径指向容器内挂载点 /projects/<项目名>
+```
+
+详见下方「Docker 部署」章节。
+
+## 🐳 Docker 部署
+
+镜像基于 Python 3.12 slim，多阶段 uv 构建、按 `uv.lock` 可复现；内置 `git` 与 tini（PID 1 转发信号），应用进程以非 root 用户（orcsy）运行，宿主挂载卷权限由入口脚本自动修正。容器内自动关闭托盘与自动开浏览器（`--no-tray --no-browser`），核心能力（看板 + 定时调度 + Agent 执行）与桌面版一致。
+
+### 数据与挂载
+
+| 宿主目录 | 容器内 | 内容 |
+|---|---|---|
+| `./orcsy-data` | `/data` | `config.yaml`、`skills/`、`logs/`（由环境变量 `ORCSY_DATA_DIR` 指定） |
+| `./projects` | `/projects` | 受管 git 仓库 |
+
+**受管项目路径必须写容器内路径**：编辑 `./orcsy-data/config.yaml`（或直接在看板「项目与设置」页操作），`projects[].path` 填 `/projects/<项目名>`：
+
+```yaml
+projects:
+  - name: my-app
+    path: /projects/my-app   # 对应宿主 ./projects/my-app（需是 git 仓库）
+```
+
+### Git 推送凭据
+
+- **HTTPS**：把 token 写进远端地址，如 `https://<用户名>:<token>@github.com/user/repo.git`（`git remote set-url` 或看板里改）；
+- **SSH**：按 `docker-compose.yml` 里的注释挂载 `~/.ssh`（只读）并设置 `GIT_SSH_COMMAND`；
+- 提交身份默认 `Orcsy Agent <orcsy@localhost>`，可用环境变量 `ORCSY_GIT_NAME` / `ORCSY_GIT_EMAIL` 覆盖。
+
+### 一次性执行（外部调度）
+
+不想长驻容器时，可用外部 cron 触发单轮：
+
+```bash
+docker run --rm -v "$PWD/orcsy-data:/data" -v "$PWD/projects:/projects" \
+  orcsy:latest run --once
+```
+
+### 扩展工具链
+
+精简镜像只含 Python + git。受管项目若需 node/npm 等命令，新建 `Dockerfile.custom` 叠加安装：
+
+```dockerfile
+FROM orcsy:latest
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+USER orcsy
+```
+
+```bash
+docker build -f Dockerfile.custom -t orcsy:custom .
+# docker-compose.yml 里 image 改为 orcsy:custom
+```
 
 ## 🧩 核心概念
 
@@ -247,6 +310,9 @@ build/
   Setup/           编译产物 orcsy-setup-*.exe
 tests/             端到端自检（模拟 LLM / 真实 HTTP）
 orcsy.spec PyInstaller 打包配置（产物 dist/*.exe）
+Dockerfile         容器镜像（多阶段 uv 构建，git + Python 精简基础）
+docker/            容器入口脚本 entrypoint.sh（git 环境初始化）
+docker-compose.yml 开箱即用的编排示例（/data 与 /projects 挂载）
 ```
 
 ## 🔒 安全与边界

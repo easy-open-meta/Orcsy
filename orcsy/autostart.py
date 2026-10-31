@@ -31,6 +31,9 @@ def _current_command() -> str:
 
 
 def is_enabled() -> bool:
+    """查询是否已开启自启（非 Windows 一律 False，注册表仅 win32 存在）。"""
+    if sys.platform != "win32":
+        return False
     try:
         import winreg
 
