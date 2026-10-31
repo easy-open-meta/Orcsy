@@ -44,7 +44,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "..\dist\orcsy-web.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\orcsy-tray.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+; README 按目标机器时区分发（[Code] 的 IsCnTimeZone 安装期判断）：UTC+8 机器
+; 主 README.md 安装中文内容，其余时区安装英文；另一语言以带后缀文件名保留
+Source: "..\README.md"; DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion; Check: not IsCnTimeZone
+Source: "..\README.zh-CN.md"; DestDir: "{app}"; DestName: "README.zh-CN.md"; Flags: ignoreversion; Check: not IsCnTimeZone
+Source: "..\README.zh-CN.md"; DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion; Check: IsCnTimeZone
+Source: "..\README.md"; DestDir: "{app}"; DestName: "README.en.md"; Flags: ignoreversion; Check: IsCnTimeZone
 
 [InstallDelete]
 ; 从改名前版本（task-arranger）升级时清理旧 exe，避免残留
@@ -93,6 +98,32 @@ Type: filesandordirs; Name: "{autoprograms}\任务编排系统"
 [Code]
 // 卸载时询问是否删除用户数据（%APPDATA%\Orcsy：配置、日志、任务模板、技能库）
 var DeleteUserData: Boolean;
+
+// ===== README 按目标机器时区分发 =====
+// Inno 的编译期预处理只知道打包机时区，选语言必须在安装期做（[Files] Check）。
+// 三级判据（注册表读取，免 API 声明）：
+// 1. TimeZoneKeyName——不随显示语言本地化（如 "China Standard Time"），主判据；
+// 2. StandardName——简中系统应显示「中国标准时间」，但部分系统存的是
+//    @tzres.dll,-572 间接引用（读不出字面量），故仅在非 @ 开头时比对；
+// 3. Bias = -480（UTC+8）兜底，同时覆盖港澳台/新加坡等同样适读中文的时区。
+function IsCnTimeZone(): Boolean;
+var
+  Name: String;
+  Bias: Cardinal;
+begin
+  Result := False;
+  if RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\TimeZoneInformation',
+      'TimeZoneKeyName', Name) then
+    Result := Pos('China', Name) > 0;
+  if not Result and RegQueryStringValue(HKLM,
+      'SYSTEM\CurrentControlSet\Control\TimeZoneInformation',
+      'StandardName', Name) and (Pos('@', Name) <> 1) then
+    Result := (Pos('中国', Name) > 0) or (Pos('China', Name) > 0);
+  if not Result and RegQueryDwordValue(HKLM,
+      'SYSTEM\CurrentControlSet\Control\TimeZoneInformation',
+      'Bias', Bias) then
+    Result := (Bias = $FFFFFE20);
+end;
 
 // ===== 安装前结束正在运行的旧版本 =====
 

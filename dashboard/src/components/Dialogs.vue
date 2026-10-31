@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
-import { api, type DirListing } from '../api'
+import { api, type DirListing, type ModelInfo } from '../api'
 import { refresh, ui, store } from '../store'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
@@ -20,6 +20,9 @@ const pDraft = reactive({
   name: '', path: '', tasks_dir: 'tasks', guide_file: 'AGENT.md',
   max_tasks: 1, max_turns: 40, branch: '', cmds: '', enabled: true,
   stack: '', run: '', test: '', err: '',
+  // 专属模型绑定：use_llm 关=跟随全局；开=部分覆盖（空字段仍继承全局）
+  use_llm: false, ll_provider: '' as '' | 'openai' | 'anthropic',
+  ll_base: '', ll_key: '', ll_model: '',
 })
 const pVisible = computed({
   get: () => !!ui.projectDlg,
@@ -38,8 +41,53 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.branch = p?.allowed_branch ?? ''
   pDraft.cmds = p?.allowed_commands?.join(', ') ?? ''
   pDraft.enabled = p?.enabled ?? true
+  const pl = p?.llm ?? null
+  pDraft.use_llm = !!pl
+  pDraft.ll_provider = (pl?.provider as '' | 'openai' | 'anthropic') ?? ''
+  pDraft.ll_base = pl?.base_url ?? ''
+  pDraft.ll_key = pl?.api_key ?? ''
+  pDraft.ll_model = pl?.model ?? ''
+  pModels.value = []
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
 })
+
+// ---- 专属模型绑定：拉取列表 / 测试连接（未填字段回退全局 llm 配置） ----
+const pModels = ref<ModelInfo[]>([])
+const pFetching = ref(false)
+const pTesting = ref(false)
+const pModelOptions = computed(() => pModels.value.map(m => ({ label: m.id, value: m.id })))
+const llProviderOptions = [
+  { label: '继承全局', value: '' },
+  { label: 'openai（兼容协议）', value: 'openai' },
+  { label: 'anthropic', value: 'anthropic' },
+]
+const effLlm = () => ({
+  provider: pDraft.ll_provider || store.state?.llm.provider || 'openai',
+  base_url: pDraft.ll_base.trim() || store.state?.llm.base_url || '',
+  api_key: pDraft.ll_key.trim() || store.state?.llm.api_key || '',
+  model: pDraft.ll_model.trim() || store.state?.llm.model || '',
+})
+
+async function fetchProjectModels(): Promise<void> {
+  pFetching.value = true
+  try {
+    const r = await api.models(effLlm())
+    pModels.value = r.models
+    message.success(`已获取 ${r.models.length} 个模型：在「模型」框下拉选择或输入`)
+  } catch (e: any) { message.error(e.message) }
+  finally { pFetching.value = false }
+}
+
+async function testProjectModel(): Promise<void> {
+  const eff = effLlm()
+  if (!eff.model) { message.warning('请先填写或选择模型名'); return }
+  pTesting.value = true
+  try {
+    const r = await api.testModel(eff)
+    message.success(r.message || '连接成功')
+  } catch (e: any) { message.error(e.message) }
+  finally { pTesting.value = false }
+}
 
 // 新建项目时按路径自动探测技术栈预填（防抖 400ms，输入完整路径后触发）；
 // 编辑项目不探测——AGENT.md 已存在，保存时不会重写
@@ -75,6 +123,13 @@ async function saveProject(): Promise<void> {
       allowed_branch: pDraft.branch.trim() || undefined,
       allowed_commands: pDraft.cmds.split(/[,，]/).map(s => s.trim()).filter(Boolean) || undefined,
       enabled: pDraft.enabled,
+      // 专属模型绑定：关=清除（null）；开=只提交非空字段（其余继承全局，后端清洗）
+      llm: pDraft.use_llm ? {
+        ...(pDraft.ll_provider ? { provider: pDraft.ll_provider } : {}),
+        ...(pDraft.ll_base.trim() ? { base_url: pDraft.ll_base.trim() } : {}),
+        ...(pDraft.ll_key.trim() ? { api_key: pDraft.ll_key.trim() } : {}),
+        ...(pDraft.ll_model.trim() ? { model: pDraft.ll_model.trim() } : {}),
+      } : null,
       original_name: ui.projectDlg.original ?? undefined,
       // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
       ...(ui.projectDlg.original ? {} : {
@@ -338,6 +393,32 @@ async function newFolder(): Promise<void> {
     </div>
     <label>命令白名单（逗号分隔，留空用默认：python/pytest/node/npm/git…）</label>
     <NInput v-model:value="pDraft.cmds" placeholder="python, pytest, npm, dotnet" />
+    <label class="checkline" style="margin-top:12px">
+      <NSwitch v-model:value="pDraft.use_llm" />
+      绑定专属模型（仅该模型处理本项目任务；关闭=跟随全局大模型配置）
+    </label>
+    <template v-if="pDraft.use_llm">
+      <div class="duo" style="margin-top:6px">
+        <div class="f1"><label>协议 provider</label>
+          <NSelect v-model:value="pDraft.ll_provider" :options="llProviderOptions" /></div>
+        <div class="f2"><label>模型 model</label>
+          <NSelect v-model:value="pDraft.ll_model" :options="pModelOptions" filterable tag clearable
+                   :placeholder="'留空继承全局（当前 ' + (store.state?.llm.model || '-') + '）'"
+                   @update:value="(v: string | null) => { pDraft.ll_model = v || '' }" /></div>
+      </div>
+      <div class="duo">
+        <div class="f1"><label>接口 base_url</label>
+          <NInput v-model:value="pDraft.ll_base" :placeholder="'留空继承全局（当前 ' + (store.state?.llm.base_url || '-') + '）'" /></div>
+        <div class="f1"><label>密钥 api_key</label>
+          <NInput v-model:value="pDraft.ll_key" type="password" show-password-on="click"
+                  :placeholder="store.state?.llm.api_key ? '留空继承全局密钥' : 'sk-...'" /></div>
+      </div>
+      <div class="btnrow" style="margin-top:6px">
+        <NButton size="small" :loading="pFetching" @click="fetchProjectModels">获取模型列表</NButton>
+        <NButton size="small" :loading="pTesting" @click="testProjectModel">测试连接</NButton>
+        <span class="hint">未填写的字段自动继承全局「大模型接入」配置</span>
+      </div>
+    </template>
     <template v-if="!ui.projectDlg?.original">
       <label style="margin-top:10px">
         技术栈（按路径自动探测预填，可修改；保存时写入 AGENT.md 的 Project 节，留空不填）

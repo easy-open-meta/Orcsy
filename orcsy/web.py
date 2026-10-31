@@ -54,7 +54,8 @@ from urllib.parse import urlparse
 from . import __version__
 from . import skills as skills_lib
 from .agent import ProjectAgent
-from .config import AppConfig, LLMConfig, ProjectConfig, SchedulerConfig, TaskStatus, WebConfig
+from .config import (AppConfig, LLMConfig, ProjectConfig, SchedulerConfig,
+                     TaskStatus, WebConfig, normalize_llm_override, resolve_llm)
 from .llm import LLMError, list_models, test_connection
 from .logging_setup import get_logger
 from .scheduler import Scheduler
@@ -101,7 +102,9 @@ class AppState:
         # 技能库根目录（配置文件同级 skills/），运行期不变
         self.skills_dir = skills_lib.skills_base(config)
         self.agents: dict[str, ProjectAgent] = {
-            p.name: ProjectAgent(p, config.llm, skills_base=self.skills_dir)
+            p.name: ProjectAgent(p, resolve_llm(config.llm, p.llm,
+                                                context=f"项目 {p.name} 的 llm"),
+                                 skills_base=self.skills_dir)
             for p in config.projects
         }
 
@@ -133,6 +136,7 @@ class AppState:
                 "max_agent_turns": p.max_agent_turns,
                 "allowed_branch": p.allowed_branch,
                 "allowed_commands": p.allowed_commands,
+                "llm": p.llm or None,
                 "is_git_repo": agent.executor.is_git_repo,
                 "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),
@@ -464,11 +468,20 @@ class AppState:
         cmds = data.get("allowed_commands")
         allowed = [str(c).strip() for c in cmds if str(c).strip()] if isinstance(cmds, list) else None
         branch = str(data.get("allowed_branch") or "").strip() or None
+        # 项目专属模型绑定：字典则清洗+校验（值非法立刻报错），显式 null 或全空=清除绑定
+        llm_raw = data.get("llm")
+        if llm_raw is not None and not isinstance(llm_raw, dict):
+            raise ValueError("llm 绑定必须是键值对字典或 null")
+        llm = None
+        if isinstance(llm_raw, dict):
+            llm = normalize_llm_override(llm_raw) or None
+            if llm:
+                resolve_llm(self.config.llm, llm, context=f"项目 {name} 的 llm")
         return ProjectConfig(
             name=name, path=path, enabled=bool(data.get("enabled", True)),
             tasks_dir=tasks_dir, guide_file=guide_file,
             max_tasks_per_cycle=max_tasks, max_agent_turns=max_turns,
-            allowed_commands=allowed, allowed_branch=branch,
+            allowed_commands=allowed, allowed_branch=branch, llm=llm,
         )
 
     def _save_config(self, cfg: AppConfig) -> None:
@@ -502,6 +515,7 @@ class AppState:
                     "max_agent_turns": p.max_agent_turns,
                     **({"allowed_branch": p.allowed_branch} if p.allowed_branch else {}),
                     **({"allowed_commands": p.allowed_commands} if p.allowed_commands else {}),
+                    **({"llm": p.llm} if p.llm else {}),
                 }
                 for p in cfg.projects
             ],
@@ -516,7 +530,9 @@ class AppState:
         self.config = new_cfg
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
-        self.agents = {p.name: ProjectAgent(p, new_cfg.llm, skills_base=self.skills_dir)
+        self.agents = {p.name: ProjectAgent(p, resolve_llm(new_cfg.llm, p.llm,
+                                                           context=f"项目 {p.name} 的 llm"),
+                                            skills_base=self.skills_dir)
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:

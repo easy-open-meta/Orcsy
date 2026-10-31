@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
-from .config import AppConfig
+from .config import AppConfig, resolve_llm
 from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
 from .skills import skills_base
 
@@ -33,7 +33,9 @@ class Scheduler:
         self.config = config
         self.skills_dir = skills_base(config)
         self.agents = [
-            ProjectAgent(p, config.llm, skills_base=self.skills_dir)
+            ProjectAgent(p, resolve_llm(config.llm, p.llm,
+                                        context=f"项目 {p.name} 的 llm"),
+                         skills_base=self.skills_dir)
             for p in config.projects
             if p.enabled
         ]
@@ -88,7 +90,9 @@ class Scheduler:
             self.config = new_config
             self.skills_dir = skills_base(new_config)
             self.agents = [
-                ProjectAgent(p, new_config.llm, skills_base=self.skills_dir)
+                ProjectAgent(p, resolve_llm(new_config.llm, p.llm,
+                                            context=f"项目 {p.name} 的 llm"),
+                             skills_base=self.skills_dir)
                 for p in new_config.projects
                 if p.enabled
             ]

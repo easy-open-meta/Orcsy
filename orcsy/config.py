@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -10,6 +10,12 @@ import yaml
 
 # 任务状态机：open → in_progress → done / blocked / cancelled
 TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
+
+# LLMConfig 的可覆盖字段（项目专属模型绑定按此白名单过滤）
+_LLM_FIELDS = (
+    "provider", "api_key", "base_url", "model", "temperature",
+    "max_tokens", "max_context_tokens", "enable_thinking", "timeout_seconds",
+)
 
 
 @dataclass
@@ -25,6 +31,9 @@ class ProjectConfig:
     allowed_branch: str | None = None # 仅在该分支上工作；None 表示当前分支
     max_agent_turns: int = 40         # 单个任务的工具循环轮数上限
     allowed_commands: list[str] | None = None  # Agent 可执行的命令白名单；None 用内置默认
+    # 项目专属模型绑定：部分覆盖全局 llm 配置（只写需要换的字段，其余继承全局）。
+    # 存原始字典而非 LLMConfig——全局配置改动后，未覆盖字段始终继承最新全局值。
+    llm: dict[str, Any] | None = None
 
 
 @dataclass
@@ -83,6 +92,78 @@ class AppConfig:
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
 
 
+def _coerce_llm(data: dict[str, Any], *, require_api_key: bool = False,
+                context: str = "llm") -> LLMConfig:
+    """把 YAML/JSON 字典映射为 LLMConfig：类型收窄、provider/base_url 值校验、未知键警告。
+
+    全局 llm 与项目专属 llm 绑定共用此入口，保证两路行为一致。
+    """
+    unknown = sorted(k for k in data if k not in _LLM_FIELDS)
+    if unknown:
+        print(f"警告：{context} 中存在未知字段（已忽略）：{', '.join(unknown)}")
+    provider = str(data.get("provider") or "openai")
+    if provider not in ("openai", "anthropic"):
+        raise ValueError(
+            f"{context}.provider 只能是 openai 或 anthropic（当前：{provider}）。")
+    base_url = str(data.get("base_url") or LLMConfig.base_url)
+    if not base_url.startswith(("http://", "https://")):
+        raise ValueError(
+            f"{context}.base_url 必须以 http:// 或 https:// 开头（当前：{base_url}）。")
+    try:
+        cfg = LLMConfig(
+            provider=provider,  # type: ignore[arg-type]
+            api_key=str(data.get("api_key") or ""),
+            base_url=base_url,
+            model=str(data.get("model") or LLMConfig.model),
+            temperature=float(data.get("temperature", 0.2)),
+            max_tokens=int(data.get("max_tokens", 8192)),
+            max_context_tokens=int(data.get("max_context_tokens", 131072)),
+            enable_thinking=bool(data.get("enable_thinking", False)),
+            timeout_seconds=int(data.get("timeout_seconds", 300)),
+        )
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"{context} 配置项类型有误：{e}") from e
+    if require_api_key and not cfg.api_key:
+        raise ValueError(f"{context}.api_key 未配置。")
+    return cfg
+
+
+def resolve_llm(global_llm: LLMConfig, override: dict[str, Any] | None,
+                context: str = "llm") -> LLMConfig:
+    """解析项目专属模型：override 未写的字段继承全局（部分覆盖语义）。
+
+    override 为 None / 空字典 / 全空值时原样返回全局对象，未绑定项目行为
+    与旧版完全一致。字段级继承规则：字符串空或缺失=继承；数值与布尔
+    写了即覆盖（数值无「空」概念）。
+    """
+    if not override:
+        return global_llm
+    merged: dict[str, Any] = asdict(global_llm)
+    applied = False
+    for key in _LLM_FIELDS:
+        value = override.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        merged[key] = value
+        applied = True
+    if not applied:
+        return global_llm  # 全空绑定等价于未绑定：保持对象同一性
+    return _coerce_llm(merged, require_api_key=False, context=context)
+
+
+def normalize_llm_override(data: dict[str, Any]) -> dict[str, Any]:
+    """清洗项目 llm 绑定字典：仅保留已知字段、丢弃空值；返回空字典=无有效绑定。
+
+    供 Web 保存路径使用——未知键直接丢弃（_coerce_llm 只在读取/解析时警告，
+    存盘就不该再保留脏数据反复触发警告）。
+    """
+    return {
+        k: data[k] for k in _LLM_FIELDS
+        if k in data and data[k] is not None
+        and not (isinstance(data[k], str) and not data[k].strip())
+    }
+
+
 def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     """解析 YAML 配置文件为 AppConfig，缺失字段回退到默认值。
 
@@ -106,20 +187,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
 
     raw: dict[str, Any] = yaml.safe_load(text) or {}
 
-    llm_raw = raw.get("llm") or {}
-    llm = LLMConfig(
-        provider=llm_raw.get("provider", "openai"),
-        api_key=llm_raw.get("api_key", ""),
-        base_url=llm_raw.get("base_url", LLMConfig.base_url),
-        model=llm_raw.get("model", LLMConfig.model),
-        temperature=float(llm_raw.get("temperature", 0.2)),
-        max_tokens=int(llm_raw.get("max_tokens", 8192)),
-        max_context_tokens=int(llm_raw.get("max_context_tokens", 131072)),
-        enable_thinking=bool(llm_raw.get("enable_thinking", False)),
-        timeout_seconds=int(llm_raw.get("timeout_seconds", 300)),
-    )
-    if require_api_key and not llm.api_key:
-        raise ValueError("config.yaml 中 llm.api_key 未配置。")
+    llm = _coerce_llm(raw.get("llm") or {}, require_api_key=require_api_key)
 
     sched_raw = raw.get("scheduler") or {}
     scheduler = SchedulerConfig(
@@ -148,9 +216,16 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         if not p_path.is_absolute():
             # 相对路径以配置文件所在目录为基准，避免受启动工作目录影响
             p_path = (path.parent / p_path).resolve()
+        p_name = str(item.get("name") or p_path.name or f"project-{i + 1}")
+        p_llm = item.get("llm")
+        if p_llm is not None and not isinstance(p_llm, dict):
+            raise ValueError(f"项目 {p_name} 的 llm 配置必须是字典（键值对）。")
+        if p_llm:
+            # 加载期即解析校验：typo / 非法值立刻暴露，而不是等首个任务执行时才炸
+            resolve_llm(llm, p_llm, context=f"项目 {p_name} 的 llm")
         projects.append(
             ProjectConfig(
-                name=str(item.get("name") or p_path.name or f"project-{i + 1}"),
+                name=p_name,
                 path=p_path,
                 enabled=bool(item.get("enabled", True)),
                 tasks_dir=str(item.get("tasks_dir", "tasks")),
@@ -162,6 +237,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     [str(c) for c in item["allowed_commands"]]
                     if isinstance(item.get("allowed_commands"), list) else None
                 ),
+                llm=p_llm or None,
             )
         )
 

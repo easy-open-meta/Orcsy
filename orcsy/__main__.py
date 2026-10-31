@@ -65,6 +65,11 @@ projects: []
 #    #   - python                      #   python/pytest/node/npm/cargo/go/dotnet/git/uv 等）
 #    #   - pytest
 #    # allowed_branch: main            # 只在该分支上工作；缺省用项目当前分支
+#    # llm:                            # 项目专属模型绑定（部分覆盖：只写要换的字段，
+#    #   provider: openai              # 其余继承全局 llm 配置；删除本节即回到全局）
+#    #   base_url: https://open.bigmodel.cn/api/paas/v4
+#    #   api_key: sk-yyy
+#    #   model: glm-4-plus
 """
 
 

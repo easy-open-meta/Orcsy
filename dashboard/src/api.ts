@@ -26,6 +26,8 @@ export interface ProjectT {
   max_agent_turns: number
   allowed_branch: string | null
   allowed_commands: string[] | null
+  /** 项目专属模型绑定（部分覆盖全局 llm）；null = 未绑定 */
+  llm?: Record<string, string> | null
   is_git_repo: boolean
   guide_file_path: string
   guide_exists: boolean
