@@ -17,6 +17,17 @@ const draft = reactive({
 })
 // ---- 软件更新配置草稿 ----
 const updDraft = reactive({ repo: '', token: '', auto_check: true })
+// ---- Agent 工具开关草稿（全局默认；只上报关闭项，未列出 = 启用） ----
+const toolsCatalog = ref<{ name: string; description: string }[]>([])
+const toolsDraft = reactive<Record<string, boolean>>({})
+const toolsSaving = ref(false)
+// ---- 访问权限草稿（全局默认；项目可在对话框里逐个覆盖） ----
+const permOptions = [
+  { label: '变更前询问（发生变更时询问：写/改/删/移文件、执行命令都挂起等批准）', value: 'ask_on_change' },
+  { label: '自主模式（有风险时询问：仅 delete_file / move_file / run_command）', value: 'autonomous' },
+  { label: '完全访问（减少确认次数：一律不询问，与历史行为一致）', value: 'full_access' },
+]
+const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
 let inited = false
 watch(() => store.state, (s) => {
   if (!s || inited) return
@@ -24,6 +35,14 @@ watch(() => store.state, (s) => {
   updDraft.repo = s.update_cfg?.repo ?? ''
   updDraft.token = s.update_cfg?.token ?? ''
   updDraft.auto_check = s.update_cfg?.auto_check ?? true
+  toolsCatalog.value = s.tools_catalog ?? []
+  // finish 只是展示行（常开且禁用），不进草稿、不参与保存
+  for (const t of toolsCatalog.value) {
+    if (t.name === 'finish') continue
+    toolsDraft[t.name] = s.tools_cfg?.[t.name] ?? true
+  }
+  permDraft.mode = s.permissions_cfg?.mode ?? 'full_access'
+  permDraft.timeout_minutes = s.permissions_cfg?.timeout_minutes ?? 30
   draft.provider = s.llm.provider
   // 清洗历史 bug 写入的模型名：下拉标注「（977K）」曾被当成 id 存进配置
   draft.model = s.llm.model.replace(/（\d+K）$/, '')
@@ -56,14 +75,39 @@ async function saveLlm(): Promise<void> {
 
 async function saveSched(): Promise<void> {
   try {
+    const web: Record<string, unknown> = { port: draft.port }
+    // 登录密码三态：默认不带键（保持原值）；点过「清除」带空串（关闭鉴权）；
+    // 输入过新密码则带上（后端保存后注销全部旧会话）
+    if (authPwdClear.value) web.auth_password = ''
+    else if (authPwdTouched.value) web.auth_password = authPwd.value
     await api.config({
       scheduler: { interval_seconds: draft.interval, max_parallel_agents: draft.parallel },
-      web: { port: draft.port },
+      web,
       logging: { retention_days: draft.retention },
     })
-    message()?.('已保存（端口下次启动生效；日志归档清理立即按新天数执行）')
+    if (authPwdClear.value) message()?.('已保存：看板登录鉴权已关闭', 'success')
+    else if (authPwdTouched.value) message()?.('已保存：登录密码已更新，旧会话已失效，请重新登录', 'success')
+    else message()?.('已保存（端口下次启动生效；日志归档清理立即按新天数执行）')
+    authPwd.value = ''
+    authPwdTouched.value = false
+    authPwdClear.value = false
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
+}
+
+// ---- 看板登录密码（web.auth_password）：留空保持不变 / 输入即改 / 清除即关鉴权 ----
+const authPwd = ref('')
+const authPwdTouched = ref(false)
+const authPwdClear = ref(false)
+function onPwdInput(v: string): void {
+  authPwd.value = v
+  authPwdTouched.value = v.length > 0
+  if (v) authPwdClear.value = false  // 重新输入视为放弃「清除」
+}
+function clearAuthPwd(): void {
+  authPwd.value = ''
+  authPwdTouched.value = false
+  authPwdClear.value = true
 }
 
 async function toggleAutostart(enabled: boolean): Promise<void> {
@@ -71,6 +115,22 @@ async function toggleAutostart(enabled: boolean): Promise<void> {
     await api.autostart(enabled)
     message()?.('开机自启动已' + (enabled ? '开启' : '关闭'))
   } catch (e: any) { message()?.(e.message, 'error') }
+  void import('../store').then(m => m.refresh(true))
+}
+
+async function saveTools(): Promise<void> {
+  toolsSaving.value = true
+  try {
+    // 只上报关闭项：后端语义「未列出 = 默认启用」，config.yaml 保持干净
+    const disabled = Object.fromEntries(
+      Object.entries(toolsDraft).filter(([, v]) => !v))
+    await api.config({
+      tools: disabled,
+      permissions: { mode: permDraft.mode, timeout_minutes: permDraft.timeout_minutes },
+    })
+    message()?.('工具与访问权限已保存并生效（各项目未覆盖的部分立即按此执行）')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { toolsSaving.value = false }
   void import('../store').then(m => m.refresh(true))
 }
 
@@ -289,7 +349,50 @@ const providerOptions = [
           <NInputNumber v-model:value="draft.retention" :min="0" :max="365" /></div>
         <div class="f2" />
       </div>
+      <div class="frow">
+        <div class="f1"><label>看板登录密码（非空时访问页面/API 均需先登录，保存后立即生效）</label>
+          <NInput :value="authPwd" type="password" show-password-on="click"
+                  :placeholder="store.state.web_cfg.auth_enabled
+                    ? '已设置，留空保持不变' : '未设置（免登录；外网部署务必设置）'"
+                  @update:value="onPwdInput" /></div>
+        <div class="f0 pwd-btns">
+          <NButton v-if="store.state.web_cfg.auth_enabled" size="small" quaternary
+                   type="error" :disabled="authPwdClear" @click="clearAuthPwd">清除密码（关闭鉴权）</NButton>
+        </div>
+      </div>
+      <div class="hint pwd-hint" v-if="authPwdClear">
+        将在保存后关闭登录鉴权（任何能访问该端口的人都可操作看板）；在上方重新输入密码可取消。
+      </div>
+      <div class="hint pwd-hint" v-else-if="authPwdTouched">
+        将在保存后启用/更新登录密码，所有已登录会话立即失效，需用新密码重新登录。
+      </div>
       <div class="sfoot"><NButton type="primary" @click="saveSched">保存调度配置</NButton></div>
+    </NCard>
+
+    <NCard title="🛠 Agent 工具与访问权限" size="small" class="scard">
+      <template #header-extra><span class="hint">全局默认：项目未单独覆盖时按这里生效；保存后立即生效。</span></template>
+      <div class="frow">
+        <div class="f2"><label>访问权限模式（敏感操作是否挂起等待看板批准）</label>
+          <NSelect v-model:value="permDraft.mode" :options="permOptions" /></div>
+        <div class="f1"><label>审批超时（分钟，1~1440，无人响应自动拒绝）</label>
+          <NInputNumber v-model:value="permDraft.timeout_minutes" :min="1" :max="1440" /></div>
+      </div>
+      <div class="hint pwd-hint">
+        询问 = 任务挂起，顶栏出现「🔔 待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。
+      </div>
+      <div class="tools-grid">
+        <label v-for="t in toolsCatalog" :key="t.name" class="checkline tool-line">
+          <!-- finish 为协议工具：常开且禁用的展示行，不可配置 -->
+          <NSwitch v-if="t.name === 'finish'" size="small" :value="true" disabled />
+          <NSwitch v-else size="small" v-model:value="toolsDraft[t.name]" />
+          <span class="tool-name">{{ t.name }}</span>
+          <span class="hint tool-desc">{{ t.description }}</span>
+        </label>
+      </div>
+      <div class="hint tool-foot">finish 为任务结束的协议工具，始终可用（开关仅为展示）。</div>
+      <div class="sfoot">
+        <NButton type="primary" :loading="toolsSaving" @click="saveTools">保存工具与权限</NButton>
+      </div>
     </NCard>
 
     <NCard title="⚙️ 应用" size="small" class="scard">
@@ -378,6 +481,16 @@ const providerOptions = [
 .pkg-row > div { display: flex; flex-direction: column; gap: 4px; }
 .pkg-btns { flex-direction: row !important; gap: 8px; padding-bottom: 1px; }
 .pkg-meta { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.pwd-btns { align-self: flex-end; padding-bottom: 1px; }
+.pwd-hint { margin: -4px 0 8px; }
+.tools-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 6px 18px; margin-bottom: 8px; }
+.tool-line { align-items: baseline; }
+.tool-name { font-family: Consolas, monospace; font-size: 12.5px; color: var(--text);
+  flex: none; min-width: 92px; }
+.tool-desc { flex: 1; min-width: 0; }
+.tool-foot { margin-bottom: 10px; }
+@media (max-width: 900px) { .tools-grid { grid-template-columns: 1fr; } }
 .checkline { display: flex; gap: 10px; align-items: center; }
 .prow { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
 .prow-head { display: flex; gap: 6px; align-items: center; }

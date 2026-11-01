@@ -8,7 +8,9 @@ from typing import Any, Literal
 
 import yaml
 
+from .approvals import PERMISSION_MODES
 from .issues import IssueError, normalize_repo
+from .tools import validate_tools_map
 
 # 任务状态机：open → in_progress → done / blocked / cancelled
 TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
@@ -41,6 +43,13 @@ class ProjectConfig:
     # auto_pull_interval 为定时自动拉取间隔（秒），0/缺省=仅手动拉取。
     # token 可选（公开仓库免认证）。
     repo: dict[str, Any] | None = None
+    # 项目级工具开关覆盖：{工具名: bool}。None = 跟随全局 tools 配置；
+    # 字典 = 按工具名逐项覆盖全局（resolve_tools 合并，同 llm 绑定的部分覆盖语义）。
+    # 存原始字典，全局开关改动后未覆盖的工具始终继承最新全局值。
+    tools: dict[str, bool] | None = None
+    # 项目级访问权限模式覆盖（ask_on_change / autonomous / full_access）；
+    # None = 跟随全局 permissions.mode
+    permission_mode: str | None = None
 
 
 @dataclass
@@ -87,6 +96,9 @@ class WebConfig:
     host: str = "127.0.0.1"
     port: int = 5116
     open_browser: bool = True     # 启动时自动打开浏览器
+    # 看板登录密码：非空时所有页面/API 需先登录（外网部署务必设置）；
+    # 留空 = 关闭鉴权，本机使用零打扰
+    auth_password: str = ""
 
 
 @dataclass
@@ -99,12 +111,45 @@ class UpdateConfig:
 
 
 @dataclass
+class ToolsConfig:
+    """全局 Agent 工具开关：{工具名: bool}，未列出的工具默认启用。
+
+    finish 是任务循环的协议工具，不在可配置范围内（validate_tools_map 拒绝）。
+    项目级 ProjectConfig.tools 按工具名逐项覆盖这里的值。
+    """
+
+    enabled: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass
+class PermissionsConfig:
+    """全局访问权限：Agent 敏感操作的人工审批策略。
+
+    mode 三档（详见 orcsy/approvals.py）：ask_on_change 变更前询问 /
+    autonomous 自主模式（仅高风险询问）/ full_access 完全访问（默认，不询问）。
+    timeout_minutes：审批挂起超时，到期自动拒绝（防无人值守时任务永久挂起）。
+    """
+
+    mode: str = "full_access"
+    timeout_minutes: int = 30
+
+
+def validate_permission_mode(value: object, context: str = "permissions.mode") -> str:
+    mode = str(value or "").strip()
+    if mode not in PERMISSION_MODES:
+        raise ValueError(f"{context} 只能是 {' / '.join(PERMISSION_MODES)}（当前：{mode or '空'}）")
+    return mode
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     web: WebConfig = field(default_factory=WebConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
+    permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
 
@@ -181,6 +226,24 @@ def normalize_llm_override(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def resolve_tools(global_tools: ToolsConfig,
+                  override: dict[str, bool] | None) -> dict[str, bool]:
+    """解析项目生效的工具开关：项目覆盖逐项合并到全局之上（部分覆盖语义）。
+
+    override 为 None/空字典时原样返回全局 map（保持同一性，未绑定项目行为
+    与旧版完全一致）；否则返回 {**全局, **项目} 的新字典。
+    """
+    if not override:
+        return global_tools.enabled
+    return {**global_tools.enabled, **override}
+
+
+def resolve_permission_mode(global_perms: PermissionsConfig,
+                            project: ProjectConfig) -> str:
+    """项目生效的访问权限模式：项目覆盖优先，None = 跟随全局。"""
+    return project.permission_mode or global_perms.mode
+
+
 def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     """解析 YAML 配置文件为 AppConfig，缺失字段回退到默认值。
 
@@ -225,6 +288,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         host=str(web_raw.get("host", "127.0.0.1")),
         port=int(web_raw.get("port", 5116)),
         open_browser=bool(web_raw.get("open_browser", True)),
+        auth_password=str(web_raw.get("auth_password") or ""),
     )
 
     upd_raw = raw.get("update") or {}
@@ -232,6 +296,27 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         repo=str(upd_raw.get("repo") or "").strip(),
         token=str(upd_raw.get("token") or ""),
         auto_check=bool(upd_raw.get("auto_check", True)),
+    )
+
+    # 全局工具开关：加载期即校验（未知工具名/禁用 finish 立刻暴露，风格同 llm）
+    try:
+        tools = ToolsConfig(enabled=validate_tools_map(raw.get("tools"), context="tools"))
+    except ValueError as e:
+        raise ValueError(str(e)) from e
+
+    # 全局访问权限：模式枚举 + 超时范围，加载期即校验
+    perm_raw = raw.get("permissions") or {}
+    if not isinstance(perm_raw, dict):
+        raise ValueError("permissions 配置必须是字典（键值对）。")
+    try:
+        perm_timeout = int(perm_raw.get("timeout_minutes", 30))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"permissions.timeout_minutes 必须是整数：{e}") from e
+    if not (1 <= perm_timeout <= 1440):
+        raise ValueError(f"permissions.timeout_minutes 应为 1~1440 分钟（当前：{perm_timeout}）")
+    permissions = PermissionsConfig(
+        mode=validate_permission_mode(perm_raw.get("mode", "full_access")),
+        timeout_minutes=perm_timeout,
     )
 
     projects: list[ProjectConfig] = []
@@ -256,6 +341,16 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 p_repo = normalize_repo(p_repo, context=f"项目 {p_name} 的 repo")
             except IssueError as e:
                 raise ValueError(str(e)) from e
+        p_tools_raw = item.get("tools")
+        if p_tools_raw is not None and not isinstance(p_tools_raw, dict):
+            raise ValueError(f"项目 {p_name} 的 tools 配置必须是字典（工具名: true/false）。")
+        # 加载期即校验（未知工具名/禁用 finish 立刻暴露，同 llm 绑定的 eager-validate）
+        p_tools = validate_tools_map(p_tools_raw, context=f"项目 {p_name} 的 tools") or None
+        # 项目级访问权限模式覆盖：缺省/空 = 跟随全局；非法值加载期即报错
+        p_perm_raw = item.get("permission_mode")
+        p_perm = (validate_permission_mode(p_perm_raw,
+                                           context=f"项目 {p_name} 的 permission_mode")
+                  if p_perm_raw else None)
         projects.append(
             ProjectConfig(
                 name=p_name,
@@ -272,9 +367,12 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 ),
                 llm=p_llm or None,
                 repo=p_repo or None,
+                tools=p_tools,
+                permission_mode=p_perm,
             )
         )
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
-                    update=update, projects=projects, source_path=path.resolve())
+                    update=update, tools=tools, permissions=permissions,
+                    projects=projects, source_path=path.resolve())
     return cfg

@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 > Orcsy is an Agent task-orchestration system that plugs into any LLM API: it periodically scans each project's `tasks/` directory for Markdown tasks, dispatches them by priority to a dedicated Agent that does the development and fixes, then automatically commits to Git and writes the task status back — an unattended, closed-loop development pipeline.
 
-![version](https://img.shields.io/badge/version-0.15.3-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.17.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 Write tasks as Markdown and let Orcsy handle the rest: a scheduler scans each managed project's `tasks/` directory, dispatches tasks by priority (P0 → P4) to that project's dedicated Agent, the Agent reads and writes real code and runs tests inside an isolated git worktree, and on completion Orcsy commits, merges and writes the status back — with a web dashboard and run logs throughout.
 
@@ -33,7 +33,7 @@ Write tasks as Markdown and let Orcsy handle the rest: a scheduler scans each ma
 - **Markdown as tasks** — one `.md` file per task: frontmatter for metadata, body for requirements and acceptance criteria. Plain text, versionable, human-editable.
 - **One dedicated Agent per project** — its own `AGENT.md` guidelines, task list, git worktree and conversation history; multi-Agent parallelism supported; each project can bind a **dedicated model** (partial override of the global `llm` config, unset fields inherited) — only the bound model handles that project's tasks.
 - **Repo Issues integration** — bind a GitHub / Gitee / GitLab / Gitea repo (self-hosted included) to a project and pull its open Issues into the task queue with one click: priority defaults to P2, P0~P4 labels override; tasks carry source annotations with archive-aware dedup; one-way import, Issue status is not written back.
-- **Self-update** — check/download new versions from a Gitee Release (auto-check on startup, toggleable), one-click silent install with automatic restart (Windows installed edition; Docker/Linux upgrade via their own means).
+- **Self-update** — check/download new versions from a Gitee Release (auto-check on startup, toggleable), one-click silent install with automatic restart (Windows installed edition; Docker/Linux upgrade via their own means). Fully zero-UAC when installed in a user-writable directory; when installed under Program Files (or other system dirs), the update asks for UAC once mid-install (accept to continue; cancel leaves the app running untouched).
 - **Real execution, safely sandboxed** — file tools locked inside the project worktree, command whitelist, turn limits; git commit/merge/push is performed by the system, the Agent cannot touch version control.
 - **Zero-friction project onboarding** — creating/importing a project only adds `tasks/` and `AGENT.md`, nothing else in the repo is touched; tech stack auto-detection (Node/Python/Rust/Go/.NET/Java/C++…) pre-fills run and test commands, or set them manually.
 - **Skill library** — import local skill directories (with SKILL.md), create skills in the dashboard, or one-click scan user-level skills from common AI tools (ZCode / generic Agents / Claude Code / Codex / OpenCode etc.) and batch-import with dedup; skills can be global or bound to a single project; deleting a skill only removes the copy in the library — externally imported originals stay in their tool directories and can be re-scanned (custom-built skills are unrecoverable once deleted); skills live in the Orcsy data directory (`%APPDATA%\Orcsy\skills\`) and are **never written into project directories**; the Agent system prompt only receives a "name + description" index, full content is read on demand via the `read_skill` tool, so the skill count never bloats the context.
@@ -200,6 +200,27 @@ sudo bash deploy/linux/uninstall.sh
 # output to remove them manually if desired
 ```
 
+## 🔐 Dashboard Login Auth (required for external deployments)
+
+The dashboard binds to `127.0.0.1` with no auth by default (zero friction for local use). Once you expose it via Docker / systemd / `--host 0.0.0.0`, **always set a login password** — otherwise anyone who can reach the port can drive the dashboard (browse server directories, read/write projects, see `llm.api_key`):
+
+```yaml
+web:
+  host: 0.0.0.0
+  port: 5116
+  auth_password: "your-strong-password"   # non-empty enables auth; empty = off
+```
+
+You can also set/change/clear the password while logged in, under "Projects & Settings → Scheduling & Dashboard" (takes effect on save).
+
+Behavior:
+
+- When enabled, every page and API except the login screen requires a session; wrong passwords incur a delay penalty (brute-force mitigation).
+- Successful login issues an HttpOnly session cookie valid for 7 days; sessions live in memory, so **a program restart requires logging in again**.
+- Changing the password invalidates all existing sessions immediately; clearing it disables auth.
+- The password is stored in plaintext in `config.yaml` (treat it like `llm.api_key`: never commit it, mind file permissions).
+- Auth is not a substitute for TLS: over plain HTTP the password and session can be sniffed. For public deployments, put a reverse proxy (nginx/caddy) with HTTPS in front.
+
 ## 🧩 Core Concepts
 
 ### Task files
@@ -260,16 +281,64 @@ While executing a task the Agent works through a set of tools **confined to the 
 | `read_file` | Read a file (over-long content is truncated) |
 | `write_file` | Create / wholesale-rewrite a file |
 | `edit_file` | Exact text replacement (old_string must match uniquely) |
+| `multi_edit` | Multiple replacements in one file, all-or-nothing (any failed edit leaves the file untouched) |
+| `delete_file` | Delete a file; directories require explicit `recursive: true` |
+| `move_file` | Move/rename (existing destination requires `overwrite: true`) |
 | `grep` | Regex code search |
+| `find_files` | Find files by name glob (e.g. `*.py`) |
 | `run_command` | Run whitelisted commands (python/pytest/node/cargo/go/dotnet/git/uv etc.) for tests and builds |
+| `web_fetch` | Fetch the text content of a public URL (HTML stripped; public addresses only, intranet/loopback always rejected) |
+| `read_skill` | Read the full body of one skill from the skill library |
 | `finish` | Structured conclusion (completed / blocked / cannot_do + summary + commit message) |
 
 Safety boundaries:
 
 - File tools are confined to the project root (worktree); absolute paths and `../` traversal are always rejected;
 - The command tool is whitelisted (customizable via `projects[].allowed_commands`); non-whitelisted commands are rejected outright;
+- `web_fetch` is the only networked tool: http/https only, targets resolving to loopback/private/link-local/reserved addresses (including the cloud metadata IP 169.254.169.254) are always rejected, and only text-like content is returned;
 - The tool loop has a turn limit (`projects[].max_agent_turns`, default 40) and is force-wrapped up on timeout;
 - git commit/merge/push is executed by the system, the Agent cannot operate version control.
+
+### Tool capability toggles (global + per project)
+
+Every tool except `finish` (the task-ending protocol tool, always available) can be toggled by name:
+
+```yaml
+tools:                     # global defaults: tools not listed stay enabled
+  web_fetch: false         # e.g. disable network access globally
+projects:
+  - name: my-app
+    path: D:/Repos/my-app
+    tools:                 # per-project override, merged per tool name; remove the section to follow global
+      web_fetch: true      # e.g. allow network for this project only
+      run_command: false   # e.g. code-edit only, no command execution (read-only review projects)
+```
+
+Dashboard equivalents: the "🛠 Agent Tool Capabilities" card on the settings page (global), and the "Override Agent tool toggles" switch in the project edit dialog (per project); both take effect on save. Enforcement is two-layered: disabled tools are removed from the schemas sent to the model, and the dispatch layer blocks them as a backstop; the system and task prompts stop mentioning disabled tools as well.
+
+### Permission modes (human approval)
+
+Three access-permission modes control whether sensitive Agent operations need human confirmation — global default plus per-project override:
+
+| Mode | Semantics | Operations paused for approval |
+|---|---|---|
+| `ask_on_change` | Ask before changes | write_file / edit_file / multi_edit / delete_file / move_file / run_command |
+| `autonomous` | Autonomous (ask on risk) | delete_file / move_file / run_command |
+| `full_access` | Full access (fewer confirmations) | none (default, identical to historical behavior) |
+
+Read-only tools (list_dir / read_file / grep / find_files / read_skill / web_fetch) and finish never ask.
+
+```yaml
+permissions:
+  mode: autonomous           # global default mode
+  timeout_minutes: 30        # approval timeout: auto-reject when nobody responds, tasks never hang forever
+projects:
+  - name: my-app
+    path: D:/Repos/my-app
+    permission_mode: ask_on_change   # per-project override; omit to follow global
+```
+
+How it works: an operation that hits the policy pauses the task thread (the operation is **not executed** — zero side effects); the dashboard header shows a "🔔 Pending approval N" entry and the task row gets a "⏸ awaiting approval" tag. The panel lists project / task / tool / argument preview / waited time per request, with **Approve**, **Reject**, and an "always allow this tool within the task" checkbox to cut repeat confirmations (current task only). Rejections and timeouts are fed back to the model as error text (the prompt tells it not to retry verbatim — adjust the plan or wrap up as blocked), and the whole approval trail is recorded in the task's progress log. Dashboard equivalents: the "🛠 Agent Tools & Permissions" card in settings (global), and the "Access permission" dropdown in the project dialog (per project).
 
 ### Git integration
 
@@ -316,6 +385,9 @@ See `config.example.yaml` at the repo root (kept identical to the `CONFIG_EXAMPL
 | `scheduler.max_parallel_agents` | Number of parallel Agents |
 | `web.host / web.port / web.open_browser` | Dashboard listen address / port (default 5116) / auto-open browser |
 | `logging.retention_days` | Log retention days (default 7, 0 disables): the active log is archived into `logs/archive/` after N days, and archived/size-rotated old logs beyond N days are cleaned; editable on the dashboard's "Scheduler & Dashboard" page, effective on save |
+| `tools` | Global Agent tool toggles: `{tool_name: bool}`, tools not listed stay enabled; `finish` cannot be disabled. Editable via the "🛠 Agent Tools & Permissions" card in dashboard settings |
+| `permissions.mode` | Global permission mode: `ask_on_change` (ask before changes) / `autonomous` (ask on risky ops only) / `full_access` (never ask; default). Sensitive operations pause until approved via the dashboard's "🔔 Pending approval" entry |
+| `permissions.timeout_minutes` | Approval timeout in minutes (default 30): auto-reject when nobody responds |
 | `projects[].path` | Project root directory (absolute path recommended) |
 | `projects[].tasks_dir` | Task list directory, default `tasks` |
 | `projects[].guide_file` | Development guide file, default `AGENT.md` |
@@ -325,7 +397,9 @@ See `config.example.yaml` at the repo root (kept identical to the `CONFIG_EXAMPL
 | `projects[].allowed_branch` | Work only on this branch; defaults to the current branch |
 | `projects[].llm` | Per-project dedicated model binding: partial override of the global `llm` config (any of provider / base_url / api_key / model / temperature etc.; unset fields inherit) — only the bound model handles that project's tasks; editable on the dashboard's project dialog |
 | `projects[].repo` | Remote repo binding: `{url, token?, provider?, api_base?}` (GitHub / Gitee / GitLab / Gitea; token optional for public repos); once bound, "Pull Issues" on the project card imports open Issues into the task queue |
-| `update.repo` / `update.token` / `update.auto_check` | Self-update: Gitee source repo URL (Release assets carry both `orcsy-setup-*.exe` for first install and `orcsy-update-*.zip` for updates), private-repo token, auto-check on startup (default on); one-click check/update from the dashboard header, or manual package import in Settings (Windows installed edition) |
+| `projects[].tools` | Per-project tool toggle override: `{tool_name: bool}` merged over the global `tools` per tool name; omit/remove the section to follow global. Editable via "Override Agent tool toggles" in the dashboard's project dialog |
+| `projects[].permission_mode` | Per-project permission mode override (`ask_on_change` / `autonomous` / `full_access`); omit to follow global. Editable via the "Access permission" dropdown in the dashboard's project dialog |
+| `update.repo` / `update.token` / `update.auto_check` | Self-update: Gitee source repo URL (Release assets carry both `orcsy-setup-*.exe` for first install and `orcsy-update-*.zip` for updates), private-repo token, auto-check on startup (default on); one-click check/update from the dashboard header, or manual package import in Settings (Windows installed edition). User-writable install dir = fully zero-UAC silent upgrade; non-writable (e.g. Program Files) = one UAC prompt for the elevated copy, and the tray still relaunches at normal privileges |
 
 ## 📊 Logging & Observability
 

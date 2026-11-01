@@ -66,9 +66,16 @@ def recover_interrupted_tasks(project: ProjectConfig) -> list[str]:
 class ProjectAgent:
     """一个项目一个实例；scan() 由调度器周期性调用。"""
 
-    def __init__(self, project: ProjectConfig, llm, skills_base=None) -> None:
+    def __init__(self, project: ProjectConfig, llm, skills_base=None,
+                 tools: dict[str, bool] | None = None,
+                 permission_mode: str = "full_access",
+                 permission_timeout_minutes: int = 30) -> None:
         self.project = project
-        self.executor = TaskExecutor(project, llm)
+        # tools / permission_*：构造方按全局+项目覆盖解析后的生效值
+        # （resolve_tools / resolve_permission_mode，与 llm 的 resolve_llm 同型）
+        self.executor = TaskExecutor(project, llm, tools=tools,
+                                     permission_mode=permission_mode,
+                                     permission_timeout_minutes=permission_timeout_minutes)
         self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
         self.log = get_logger(f"agent.{project.name}")
 

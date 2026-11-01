@@ -20,11 +20,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
 
 from orcsy.config import load_config
-from orcsy.updater import (UpdateError, _clean_env, _watchdog_bat,
-                           _WATCHDOG_FLAGS, append_install_log,
-                           check_update, clear_update_result,
+from orcsy.updater import (UpdateError, _clean_env, _copier_bat, _watchdog_bat,
+                           _watchdog_bat_elevated, _WATCHDOG_FLAGS,
+                           append_install_log, check_update, clear_update_result,
                            detect_installer_version, install_log_path,
-                           parse_version, read_install_log,
+                           is_writable, parse_version, read_install_log,
                            read_update_result, result_message, run_local_install,
                            stage_package, validate_package, version_newer,
                            write_update_result)
@@ -349,6 +349,180 @@ def check_config_roundtrip() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---- 提权兜底（安装目录不可写，如 C:\Program Files\Orcsy） ----
+
+def check_is_writable() -> None:
+    tmp = Path(tempfile.mkdtemp(prefix="orcsy-upd-w-"))
+    try:
+        assert is_writable(tmp) is True          # 用户 temp 可写
+        assert is_writable(tmp / "nope") is False  # 不存在路径：False 而非抛错
+        assert not list(tmp.glob(".orcsy-write-probe-*")), "探针文件应即写即删"
+        print("is_writable 探测（可写/不可写/探针清理）✅")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def check_copier_script() -> None:
+    cmd = _copier_bat(Path("C:/u/temp/orcsy-elev-1/staging"),
+                      Path("C:/Program Files/Orcsy"),
+                      Path("C:/u/logs/install.log"),
+                      Path("C:/u/temp/orcsy-elev-1/copy-done.txt"),
+                      4321, ["orcsy-tray.exe", "orcsy-web.exe"])
+    cmd.encode("ascii")  # 纯 ASCII：控制台代码页安全
+    assert "set PID=4321" in cmd and "Wait-Process" in cmd      # 等旧进程退出
+    assert 'move /y "%DST%" "%DST%.old"' in cmd                 # 先备份
+    assert 'copy /y "%SRC%" "%DST%"' in cmd                     # 再复制
+    assert ":copyfail" in cmd and "%%M.old" in cmd              # 失败整体回滚
+    assert 'echo OK> "%MARKER%"' in cmd                         # 成功标记
+    assert "FAIL copy-failed" in cmd and "FAIL old-process-lingering" in cmd
+    assert '"orcsy-tray.exe" "orcsy-web.exe"' in cmd            # 成员白名单进 for 列表
+    assert "runas" not in cmd.lower().replace("-verb runas", "")  # 脚本自身不提权（由外部拉起）
+    print("管理员复制脚本（等进程/备份/复制/整体回滚/纯文本标记/ASCII）✅")
+
+
+def check_watchdog_elevated_script() -> None:
+    cmd = _watchdog_bat_elevated(Path("C:/Program Files/Orcsy"),
+                                 Path("C:/u/logs/install.log"),
+                                 Path("C:/t/orcsy-update-result.json"),
+                                 Path("C:/Program Files/Orcsy/orcsy-tray.exe"),
+                                 4321, Path("C:/u/temp/orcsy-elev-1/copy-done.txt"))
+    cmd.encode("ascii")
+    # 看护自身绝不提权（UAC 只发生在拉起复制脚本那一次）
+    assert "runas" not in cmd and "ShellExecute" not in cmd
+    assert "set PID=4321" in cmd and "Wait-Process" in cmd      # 等旧进程退出
+    assert ":waitmarker" in cmd and 'findstr /b "OK" "%MARKER%"' in cmd  # 轮询复制标记
+    assert "elevated-copy-timeout" in cmd and "elevated-copy-failed" in cmd
+    # 新程序以普通权限拉起（start 而非任何提权动词）
+    assert 'start "" "%TRAY%" --tray' in cmd
+    # 结果标记先写后拉（契约同零 UAC 版）
+    launch_at = cmd.index('start "" "%TRAY%"')
+    assert cmd.index('echo {"ok": true}') < launch_at
+    assert cmd.index('echo {"ok": false, "reason": "%REASON%"}') < launch_at
+    # 健康检查 = result 被新进程消费；出错才开日志
+    assert 'if not exist "%RESULT%"' in cmd
+    assert cmd.index('start "" notepad') > cmd.index(":finish")
+    # 没有 app_dir swap flag 与 .old 清理段（那些在复制脚本的管理员权限里做）
+    assert ".orcsy-swapped" not in cmd
+    # PyInstaller bootstrap 变量剥离（同零 UAC 版）
+    assert 'set "PYINSTALLER_RESET_ENVIRONMENT=1"' in cmd
+    assert 'set "_PYI_ARCHIVE_FILE="' in cmd
+    print("提权版看护脚本（轮询标记/新 reason/结果先行/普通权限拉托盘/出错才开日志）✅")
+
+
+def _mock_elevated_env(rc: int):
+    """给 run_local_install 的提权分支搭 mock 环境；返回 (patch还原fn, 捕获dict)。"""
+    import orcsy.updater as U
+    from types import SimpleNamespace
+
+    captured: dict = {"watchdog": [], "ps": []}
+    orig = {k: getattr(U, k) for k in
+            ("can_apply", "is_writable", "start_watchdog", "subprocess")}
+
+    class FakeProc:
+        def kill(self) -> None:
+            captured.setdefault("killed", []).append(True)
+
+    U.can_apply = lambda: True
+    U.is_writable = lambda p: False  # 强制走提权分支
+
+    def fake_start_watchdog(bat):
+        captured["watchdog"].append(Path(bat))
+        return FakeProc()
+    U.start_watchdog = fake_start_watchdog
+
+    class FakeSubprocess:
+        CREATE_NO_WINDOW = 0
+
+        @staticmethod
+        def run(cmd, **kw):
+            captured["ps"].append((cmd, kw))
+            return SimpleNamespace(returncode=rc, stderr=b"", stdout=b"")
+    U.subprocess = FakeSubprocess
+
+    def restore() -> None:
+        for k, v in orig.items():
+            setattr(U, k, v)
+    return restore, captured
+
+
+def check_elevated_install_flow() -> None:
+    tmp = Path(tempfile.mkdtemp(prefix="orcsy-upd-elev-"))
+    import os as _os
+    work = Path(tempfile.gettempdir()) / f"orcsy-elev-{_os.getpid()}"
+    try:
+        pkg = _make_zip(tmp / "orcsy-update-0.17.0.zip", {
+            "orcsy-web.exe": b"WEB", "orcsy-tray.exe": b"TRAY", "README.md": b"# r"})
+        app_dir = tmp / "ProgramFiles" / "Orcsy"   # is_writable 已 mock，目录只需存在
+        app_dir.mkdir(parents=True)
+        logf = tmp / "install.log"
+        clear_update_result()
+        restore, cap = _mock_elevated_env(rc=0)   # UAC 批准
+        try:
+            out = run_local_install(pkg, app_dir, logf)
+        finally:
+            restore()
+        assert out["elevated"] is True and out["version"] == "0.17.0", out
+        assert sorted(out["replaced"]) == ["README.md", "orcsy-tray.exe", "orcsy-web.exe"]
+        # 暂存区解压落地 + 两个脚本写到用户 temp（安装目录写不进去）
+        assert (work / "staging" / "orcsy-web.exe").is_file()
+        copier = work / "orcsy-elev-copy.bat"
+        assert copier.is_file() and str(app_dir) in copier.read_text(encoding="gbk")
+        # UAC 批准成功后才启动看护（顺序不能反：防看护 60s 误报）
+        assert len(cap["watchdog"]) == 1 and cap["watchdog"][0].name == \
+            "orcsy-elev-watchdog.bat"
+        # powershell 提权命令：-Verb RunAs + 复制脚本路径
+        ps_cmd, kw = cap["ps"][0]
+        joined = " ".join(ps_cmd)
+        assert "-Verb RunAs" in joined and "orcsy-elev-copy.bat" in joined
+        assert ps_cmd[0] == "powershell" and "-NoProfile" in ps_cmd
+        # 崩溃面包屑已写（进程退出前被杀 → 下次启动如实报中断）
+        assert read_update_result() == {"ok": False, "reason": "install-interrupted"}
+        log_text = logf.read_text(encoding="utf-8")
+        assert "提权安装" in log_text and "UAC 已批准" in log_text
+        clear_update_result()
+        print("提权安装流程（分流/暂存/脚本落地/UAC 后启动看护/面包屑/日志）✅")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def check_uac_cancel_flow() -> None:
+    tmp = Path(tempfile.mkdtemp(prefix="orcsy-upd-uac-"))
+    import os as _os
+    work = Path(tempfile.gettempdir()) / f"orcsy-elev-{_os.getpid()}"
+    try:
+        pkg = _make_zip(tmp / "orcsy-update-0.17.0.zip", {
+            "orcsy-web.exe": b"WEB", "orcsy-tray.exe": b"TRAY"})
+        app_dir = tmp / "Orcsy"
+        app_dir.mkdir(parents=True)
+        logf = tmp / "install.log"
+        clear_update_result()
+        restore, cap = _mock_elevated_env(rc=1)   # UAC 取消/被拒
+        try:
+            try:
+                run_local_install(pkg, app_dir, logf)
+                raise AssertionError("UAC 取消应抛 UpdateError")
+            except UpdateError as e:
+                assert "UAC" in str(e) and "继续运行" in str(e), e
+        finally:
+            restore()
+        # 取消路径：看护绝不启动、temp 工作目录清干净、面包屑不残留
+        assert cap["watchdog"] == [], "UAC 批准前不得启动看护"
+        assert not work.exists(), "取消后应清理 temp 工作目录"
+        assert read_update_result() is None, "取消后不应残留中断面包屑"
+        assert "取消" in logf.read_text(encoding="utf-8")
+        print("UAC 取消路径（如实报错/程序继续运行/痕迹清理/看护未启动）✅")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def check_elevated_reasons() -> None:
+    assert "提权" in result_message("elevated-copy-timeout")
+    assert "回滚" in result_message("elevated-copy-failed")
+    print("提权流程 reason 码转述 ✅")
+
+
 def main() -> int:
     check_parse_version()
     check_detect_installer()
@@ -361,6 +535,12 @@ def main() -> int:
     check_install_log()
     check_check_update()
     check_config_roundtrip()
+    check_is_writable()
+    check_copier_script()
+    check_watchdog_elevated_script()
+    check_elevated_install_flow()
+    check_uac_cancel_flow()
+    check_elevated_reasons()
     print("\n全部断言通过 ✅")
     return 0
 

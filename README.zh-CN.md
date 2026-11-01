@@ -4,7 +4,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.15.3-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.17.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -33,7 +33,7 @@
 - **Markdown 即任务** —— 每个任务一个 `.md` 文件，frontmatter 写元信息、正文写需求与验收标准，纯文本可版本化、可人工编辑。
 - **每项目一个专属 Agent** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行；支持绑定**专属模型**（部分覆盖全局 llm 配置，未写字段自动继承），只有绑定的模型处理该项目的任务。
 - **仓库 Issues 集成** —— 项目可绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），看板一键把 open Issue 拉取为任务：优先级默认 P2，Issue 带 P0~P4 标签则按标签；带来源标注，含归档去重；单向导入，Issue 状态不回写。
-- **程序自更新** —— 从 Gitee Release 检查/下载新版本（启动自动检查可关），一键静默安装并自动重启（Windows 安装版；Docker/Linux 按各自方式升级）。
+- **程序自更新** —— 从 Gitee Release 检查/下载新版本（启动自动检查可关），一键静默安装并自动重启（Windows 安装版；Docker/Linux 按各自方式升级）。装在用户可写目录时全程零 UAC；装在 Program Files 等系统目录时更新中会弹一次 UAC 授权（点「是」继续，取消则不更新、程序照常运行）。
 - **真实执行，安全禁锢** —— 文件工具锁定在项目 worktree 内、命令白名单、轮数上限；git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
 - **开箱即用的项目接入** —— 新建/导入现有项目只新增 `tasks/` 与 `AGENT.md`，不动项目其它文件；自动探测技术栈（Node/Python/Rust/Go/.NET/Java/C++…）预填运行与测试命令，也可手动指定。
 - **技能库（Skill）** —— 支持导入本地技能目录（含 SKILL.md）、看板新建技能，或一键扫描常见 AI 工具（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等）的用户级技能并批量勾选导入（同名去重）；技能可全局生效或绑定单个项目；删除技能只清技能库中的副本——外部导入的原样本仍在各工具目录里，重新扫描即可找回（自建技能删除后不可恢复）；技能统一存放在 Orcsy 数据目录（`%APPDATA%\Orcsy\skills\`），**绝不写入项目目录**；Agent 系统提示词只注入「名称+描述」索引，执行时按需经 `read_skill` 工具读取全文，技能再多也不撑爆上下文。
@@ -198,6 +198,27 @@ sudo bash deploy/linux/uninstall.sh
 # 数据目录 /var/lib/orcsy 与 /srv/orcsy-projects 默认保留,按脚本输出提示手动清理
 ```
 
+## 🔐 看板登录鉴权（外网部署必读）
+
+看板默认只监听 `127.0.0.1` 且无鉴权（本机使用零打扰）。一旦以 Docker / systemd / `--host 0.0.0.0` 等方式对外暴露，**务必设置登录密码**，否则任何能访问该端口的人都可以操作看板（含浏览服务器目录、读写项目、看到 `llm.api_key`）：
+
+```yaml
+web:
+  host: 0.0.0.0
+  port: 5116
+  auth_password: "你的强密码"   # 非空即开启鉴权；留空 = 关闭
+```
+
+也可以在登录后于看板「项目与设置 → 调度与看板」里设置/修改/清除密码（保存后立即生效）。
+
+行为说明：
+
+- 开启后除登录页外，所有页面与 API 均需先登录；密码错误会有延迟惩罚（防爆破）。
+- 登录成功下发 HttpOnly 会话 Cookie，有效期 7 天；会话存于内存，**程序重启后需重新登录**。
+- 修改密码后所有旧会话立即失效；清除密码即关闭鉴权。
+- 密码以明文存于 `config.yaml`（与 `llm.api_key` 同等对待：勿提交仓库、注意文件权限）。
+- 鉴权不替代 TLS：纯 HTTP 下密码与会话可被嗅探，公网部署请再套一层反向代理（nginx/caddy）上 HTTPS。
+
 ## 🧩 核心概念
 
 ### 任务文件
@@ -258,16 +279,64 @@ Agent 执行任务时通过一组**禁锢在项目内的工具**真实地工作�
 | `read_file` | 读文件（超长自动截断） |
 | `write_file` | 创建/整体重写文件 |
 | `edit_file` | 精确文本替换（old_string 须唯一匹配） |
+| `multi_edit` | 同一文件一次多处替换（全有或全无，任一条失败文件不变） |
+| `delete_file` | 删除文件；删目录须显式 `recursive: true` |
+| `move_file` | 移动/重命名（目标已存在须 `overwrite: true`） |
 | `grep` | 正则搜索代码 |
+| `find_files` | 按文件名 glob 查找（如 `*.py`） |
 | `run_command` | 执行白名单内的命令（python/pytest/node/cargo/go/dotnet/git/uv 等），用于跑测试与构建 |
+| `web_fetch` | 抓取公网 URL 正文（HTML 剥标签；仅限公网地址，内网/回环一律拒绝） |
+| `read_skill` | 读取技能库中某个技能的全文 |
 | `finish` | 给出结构化结论（completed / blocked / cannot_do + 摘要 + 提交信息） |
 
 安全边界：
 
 - 文件工具被禁锢在项目根（worktree）内，绝对路径与 `../` 穿越一律拒绝；
 - 命令工具有白名单（`projects[].allowed_commands` 可自定义），非白名单命令直接拒绝；
+- `web_fetch` 是唯一联网的工具：仅 http/https，目标解析到回环/私网/链路本地/保留地址（含云元数据 169.254.169.254）一律拒绝，只回文本类内容；
 - 工具循环有轮数上限（`projects[].max_agent_turns`，默认 40），超时强制收尾；
 - git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
+
+### 工具能力开关（全局 + 每项目）
+
+除 `finish`（任务结束的协议工具，恒可用）外，其余 12 个工具都可按名开关：
+
+```yaml
+tools:                     # 全局默认：未列出的工具默认启用
+  web_fetch: false         # 例：全局关闭联网
+projects:
+  - name: my-app
+    path: D:/Repos/my-app
+    tools:                 # 项目级覆盖：按工具名逐项覆盖全局；删除本节 = 跟随全局
+      web_fetch: true      # 例：仅该项目放开联网
+      run_command: false   # 例：该项目只许改代码不许跑命令（只读审查类项目）
+```
+
+看板等价操作：设置页「🛠 Agent 工具能力」卡片（全局），项目编辑对话框「覆盖 Agent 工具开关」（项目级），保存后立即生效。开关是双层强制：被禁工具既不会出现在下发给模型的 schema 里，`dispatch` 层也会兜底拦截；系统提示词与任务提示词同步不再提及被禁工具。
+
+### 访问权限模式（人工审批）
+
+三档访问权限控制 Agent 敏感操作是否需要人工确认，全局默认 + 每项目覆盖：
+
+| 模式 | 语义 | 挂起等待批准的操作 |
+|---|---|---|
+| `ask_on_change` | 变更前询问 | write_file / edit_file / multi_edit / delete_file / move_file / run_command |
+| `autonomous` | 自主模式（有风险时询问） | delete_file / move_file / run_command |
+| `full_access` | 完全访问（减少确认次数） | 无（默认，与历史行为一致） |
+
+只读类工具（list_dir / read_file / grep / find_files / read_skill / web_fetch）与 finish 永不询问。
+
+```yaml
+permissions:
+  mode: autonomous           # 全局默认模式
+  timeout_minutes: 30        # 审批超时（分钟）：无人响应自动拒绝，任务不会永久挂起
+projects:
+  - name: my-app
+    path: D:/Repos/my-app
+    permission_mode: ask_on_change   # 项目级覆盖；缺省 = 跟随全局
+```
+
+工作方式：命中审批的操作会把任务线程挂起（操作**不执行**，零副作用），看板顶栏出现「🔔 待审批 N」入口，任务行同时标注「⏸ 待审批」；面板里逐条显示项目/任务/工具/参数预览与等待时长，可**批准**、**拒绝**，或勾选「本任务内始终允许该工具」减少重复确认（仅当前任务内有效）。拒绝与超时都会以错误文本反馈给模型（提示词已告知它不要原样重试，应调整方案或以 blocked 收尾），审批全程在任务的「执行进度」里留痕。看板等价操作：设置页「🛠 Agent 工具与访问权限」卡片（全局），项目对话框「访问权限」下拉（项目级）。
 
 ### Git 集成
 
@@ -314,6 +383,9 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 | `scheduler.max_parallel_agents` | 并行 Agent 数 |
 | `web.host / web.port / web.open_browser` | Web 看板监听地址 / 端口（默认 5116）/ 自动开浏览器 |
 | `logging.retention_days` | 日志保留天数（默认 7，0 关闭）：活动日志写满 N 天归档进 `logs/archive/`，归档与大小滚动的旧日志超过 N 天自动清理；看板「调度与看板」页可改，保存立即执行 |
+| `tools` | 全局 Agent 工具开关：`{工具名: bool}`，未列出的默认启用；`finish` 不可禁用。看板设置页「🛠 Agent 工具与访问权限」可视化编辑 |
+| `permissions.mode` | 全局访问权限模式：`ask_on_change` 变更前询问 / `autonomous` 自主模式（仅高风险询问）/ `full_access` 完全访问（默认，不询问）；敏感操作挂起等待看板「🔔 待审批」批准 |
+| `permissions.timeout_minutes` | 审批超时（分钟，默认 30）：无人响应自动拒绝 |
 | `projects[].path` | 项目根目录（建议绝对路径） |
 | `projects[].tasks_dir` | 任务清单目录，默认 `tasks` |
 | `projects[].guide_file` | 开发指引文件，默认 `AGENT.md` |
@@ -323,7 +395,9 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 | `projects[].allowed_branch` | 只在该分支上工作，缺省用当前分支 |
 | `projects[].llm` | 项目专属模型绑定：部分覆盖全局 `llm`（provider / base_url / api_key / model / temperature 等任意字段，未写字段继承全局）；只有绑定的模型处理该项目的任务，看板项目对话框可可视化编辑 |
 | `projects[].repo` | 远程仓库绑定：`{url, token?, provider?, api_base?}`（GitHub / Gitee / GitLab / Gitea，token 公开仓库可省）；绑定后看板项目卡片「拉取 Issues」把 open Issue 导入任务队列 |
-| `update.repo` / `update.token` / `update.auto_check` | 程序自更新：Gitee 更新源仓库 URL（Release 附件含首次安装的 `orcsy-setup-*.exe` 与更新用的 `orcsy-update-*.zip`）、私有仓库令牌、启动自动检查（默认开）；看板头部一键检查/更新，或设置页手动导入安装包（Windows 安装版） |
+| `projects[].tools` | 项目级工具开关覆盖：`{工具名: bool}` 按工具名逐项覆盖全局 `tools`；缺省/删除本节 = 跟随全局。看板项目对话框「覆盖 Agent 工具开关」可视化编辑 |
+| `projects[].permission_mode` | 项目级访问权限覆盖（`ask_on_change` / `autonomous` / `full_access`）；缺省 = 跟随全局。看板项目对话框「访问权限」下拉可视化编辑 |
+| `update.repo` / `update.token` / `update.auto_check` | 程序自更新：Gitee 更新源仓库 URL（Release 附件含首次安装的 `orcsy-setup-*.exe` 与更新用的 `orcsy-update-*.zip`）、私有仓库令牌、启动自动检查（默认开）；看板头部一键检查/更新，或设置页手动导入安装包（Windows 安装版）。安装目录用户可写 = 零 UAC 静默升级；不可写（如 Program Files）= 更新时弹一次 UAC 提权复制，托盘仍以普通权限重启 |
 
 ## 📊 日志与观测
 

@@ -268,6 +268,8 @@ class LLMClient:
         self.messages: list[dict] = []
         # 每轮响应的 usage 累计（两种协议字段不同，这里统一收敛）
         self.usage = {"turns": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        # 启用的工具名集合（run_task_loop 从 ToolContext 取）；None = 全量下发
+        self._enabled_tools: frozenset[str] | None = None
 
     def _acc_usage(self, data: dict, provider: str) -> None:
         u = data.get("usage") or {}
@@ -317,6 +319,8 @@ class LLMClient:
         进度落盘到任务文件——进程被强杀时进度不丢。
         """
         self.messages.append(self._user(task_prompt))
+        # 工具开关：schema 按启用集过滤下发（dispatch_tool 里还有兜底拦截）
+        self._enabled_tools = ctx.enabled_tools
         use_tools = True
 
         for turn in range(1, max_turns + 1):
@@ -447,7 +451,7 @@ class LLMClient:
             payload["enable_thinking"] = True
             payload["thinking"] = {"type": "enabled"}
         if use_tools:
-            payload["tools"] = tool_definitions_openai()
+            payload["tools"] = tool_definitions_openai(self._enabled_tools)
         return payload
 
     def _step_openai(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]], str]:
@@ -522,7 +526,7 @@ class LLMClient:
             }
             del payload["temperature"]
         if use_tools:
-            payload["tools"] = tool_definitions_anthropic()
+            payload["tools"] = tool_definitions_anthropic(self._enabled_tools)
         return payload
 
     def _step_anthropic(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]], str]:

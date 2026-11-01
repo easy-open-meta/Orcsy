@@ -33,6 +33,12 @@ export interface ProjectT {
   repo?: { url: string; token?: string; username?: string
            password?: string; provider?: string; api_base?: string
            auto_pull_interval?: number } | null
+  /** 项目级工具开关覆盖 {工具名: bool}；null = 跟随全局 tools_cfg */
+  tools?: Record<string, boolean> | null
+  /** 项目级访问权限覆盖；null = 跟随全局 permissions_cfg.mode */
+  permission_mode?: PermissionMode | null
+  /** 当前生效的访问权限模式（后端解析：项目覆盖 ?? 全局） */
+  permission_mode_effective?: PermissionMode
   /** 定时拉取 Issues 状态（repo.auto_pull_interval 启用时非空） */
   issue_auto_pull?: { interval: number; imported?: number; skipped?: number
                       total?: number; last_error?: string } | null
@@ -67,6 +73,21 @@ export interface SkillT {
   error: string
 }
 
+/** 访问权限模式：变更前询问 / 自主模式（仅高风险询问）/ 完全访问（不询问） */
+export type PermissionMode = 'ask_on_change' | 'autonomous' | 'full_access'
+
+/** 一条挂起的人工审批请求（GET /api/state 的 approvals 字段） */
+export interface ApprovalT {
+  id: string
+  project: string
+  task_id: string
+  tool: string
+  args_preview: string
+  mode: PermissionMode
+  created_at: number
+  waited_seconds: number
+}
+
 export interface AppStateT {
   version: string
   config_path: string
@@ -95,9 +116,17 @@ export interface AppStateT {
     last_cycle_stats: Record<string, number>
   }
   scheduler_cfg: { interval_seconds: number; max_parallel_agents: number }
-  web_cfg: { host: string; port: number; open_browser: boolean }
+  web_cfg: { host: string; port: number; open_browser: boolean; auth_enabled: boolean }
   update_cfg: { repo: string; token: string; auto_check: boolean }
   logging: { retention_days: number }
+  /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
+  tools_cfg: Record<string, boolean>
+  /** 可开关工具目录（名称+中文描述；finish 为协议工具不在其中） */
+  tools_catalog: { name: string; description: string }[]
+  /** 全局访问权限：模式 + 审批超时（分钟） */
+  permissions_cfg: { mode: PermissionMode; timeout_minutes: number }
+  /** 当前挂起的人工审批请求（5s 轮询刷新；处理后条目消失） */
+  approvals: ApprovalT[]
   app_autostart: { enabled: boolean }
   skills_dir: string
   skills: SkillT[]
@@ -129,6 +158,18 @@ function isNetErr(e: unknown): boolean {
   return e instanceof TypeError  // fetch 的网络层失败统一是 TypeError
 }
 
+// ---- 登录鉴权：401 全局回调（store 注册后把应用切到未登录态，登录层接管） ----
+export class UnauthorizedError extends Error {
+  constructor() { super('未登录或会话已过期') }
+}
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: () => void): void { onUnauthorized = fn }
+
+function handle401(r: Response, path: string): void {
+  // /api/login 的 401 是「密码错误」，属正常业务反馈，不触发全局登出
+  if (r.status === 401 && path !== '/api/login') onUnauthorized?.()
+}
+
 async function post(path: string, body: unknown): Promise<any> {
   let r: Response
   try {
@@ -140,6 +181,7 @@ async function post(path: string, body: unknown): Promise<any> {
   } catch {
     throw new Error(NET_ERR)
   }
+  handle401(r, path)
   const j = await r.json().catch(() => ({}))
   if (!r.ok || j.ok === false) throw new Error(j.message || j.error || `HTTP ${r.status}`)
   return j
@@ -150,6 +192,7 @@ async function get(path: string): Promise<any> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch(path)
+      handle401(r, path)
       const j = await r.json().catch(() => ({}))
       if (!r.ok || j.ok === false) throw new Error(j.message || j.error || `HTTP ${r.status}`)
       return j
@@ -164,6 +207,12 @@ async function get(path: string): Promise<any> {
 
 export const api = {
   state: (): Promise<AppStateT> => get('/api/state'),
+  /** 鉴权状态：enabled=是否配置了登录密码；authed=当前会话 Cookie 是否有效 */
+  authStatus: () => get('/api/auth') as Promise<{
+    ok: boolean; enabled: boolean; authed: boolean
+  }>,
+  login: (password: string) => post('/api/login', { password }),
+  logout: () => post('/api/logout', {}),
   scan: () => post('/api/scan', {}),
   taskFull: (project: string, id: string) =>
     get(`/api/task?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`),
@@ -227,6 +276,9 @@ export const api = {
   }>,
   skillOpenFolder: (name: string) => post('/api/skill/open-folder', { name }),
   config: (p: Record<string, unknown>) => post('/api/config', p),
+  /** 响应一条挂起的审批：approved=批准/拒绝；always=本任务内始终允许该工具（仅批准时有意义） */
+  approvalRespond: (id: string, approved: boolean, always = false) =>
+    post('/api/approval', { id, approved, always }),
   autostart: (enabled: boolean) => post('/api/app-autostart', { enabled }),
   updateCheck: () => post('/api/update/check', {}) as Promise<{
     ok: boolean; phase: string; has_update: boolean; latest: string

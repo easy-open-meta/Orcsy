@@ -33,6 +33,23 @@ web:
   host: 127.0.0.1            # 看板监听地址
   port: 5116                 # 看板端口（被占用时可改这里，或启动时用 --port 覆盖）
   open_browser: true         # 启动时自动打开浏览器
+  auth_password: ""          # 看板登录密码：非空则所有页面/API 需先登录（外网部署务必设置）；
+                             # 留空 = 关闭鉴权，本机使用零打扰
+
+# tools:                     # Agent 工具开关（全局默认）：未列出的工具默认启用。
+#   run_command: false       # 可开关 12 个：list_dir / read_file / write_file / edit_file /
+#   web_fetch: false         #   multi_edit / delete_file / move_file / grep / find_files /
+#                            #   run_command / read_skill / web_fetch；
+#                            #   finish 是任务结束的协议工具，不可禁用
+
+permissions:
+  mode: full_access          # Agent 访问权限（全局默认）：
+                             #   full_access   完全访问——不询问，减少确认次数（默认，与历史行为一致）
+                             #   autonomous    自主模式——仅高风险操作询问（delete_file / move_file / run_command）
+                             #   ask_on_change 变更前询问——一切变更操作询问（写/改/删/移文件、执行命令）
+                             # 询问 = 任务挂起等待看板顶栏「🔔 待审批」批准/拒绝；项目级可用
+                             # projects[].permission_mode 覆盖
+  timeout_minutes: 30        # 审批挂起超时（分钟，1~1440）：无人响应自动拒绝，任务不会永久挂起
 
 # update:                          # 程序自更新（Windows 安装版）：
 #   repo: https://gitee.com/xxx/orcsy   # Gitee 仓库 URL，Release 附件放安装包
@@ -63,3 +80,8 @@ projects: []
 #    #   url: https://github.com/owner/repo   # 看板「拉取 Issues」把 open Issue 导入任务
 #    #   token: ghp_xxx               # token 可选：私有仓库必填，公开仓库可省
 #    #   auto_pull_interval: 600      # 定时自动拉取间隔（秒），最小 60；缺省 = 仅手动拉取
+#    # tools:                          # 项目级工具开关覆盖：按工具名逐项覆盖全局 tools
+#    #   run_command: true             # 配置；删除本节 = 跟随全局（可开关工具同上，
+#    #   web_fetch: false              # finish 不可禁用）
+#    # permission_mode: autonomous     # 项目级访问权限覆盖（ask_on_change / autonomous /
+#    #                                 # full_access）；缺省 = 跟随全局 permissions.mode

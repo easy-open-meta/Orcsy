@@ -1,11 +1,49 @@
 // 全局共享状态：/api/state 数据 + 当前视图 + 弹窗开关（任一弹窗打开时轮询暂停）
 import { computed, reactive } from 'vue'
-import { api, type AppStateT } from './api'
+import { api, setUnauthorizedHandler, type AppStateT } from './api'
 
 export const store = reactive({
   state: null as AppStateT | null,
   view: 'dash' as 'dash' | 'settings' | 'skills',
 })
+
+// ---- 登录鉴权状态：enabled=配置了登录密码；authed=当前会话有效 ----
+// checked=false（启动探测未回）时不渲染登录层，避免闪屏
+export const auth = reactive({
+  enabled: false,
+  authed: true,
+  checked: false,
+})
+// 任何 API 收到 401（会话过期/服务端改密）→ 切回登录层；轮询静默失败不刷屏
+setUnauthorizedHandler(() => { if (auth.enabled) auth.authed = false })
+
+/** 启动时探测鉴权状态（/api/auth 在免登录白名单里） */
+export async function initAuth(): Promise<void> {
+  try {
+    const s = await api.authStatus()
+    auth.enabled = s.enabled
+    auth.authed = s.authed
+  } catch { /* 服务不可达：保持默认已登录，交给轮询重试 */ }
+  auth.checked = true
+}
+
+/** 登录成功后拉全量状态并恢复轮询 */
+export async function doLogin(password: string): Promise<void> {
+  await api.login(password)   // 失败抛出后端 message（如「密码错误」），由调用方提示
+  auth.authed = true
+  await refresh(true)
+}
+
+export async function doLogout(): Promise<void> {
+  try { await api.logout() } catch { /* 服务端注销失败也照常退出界面 */ }
+  auth.authed = false
+  store.state = null
+}
+
+/** 未登录时所有刷新静默跳过（登录层接管，不打扰、不报错） */
+export function needLogin(): boolean {
+  return auth.checked && auth.enabled && !auth.authed
+}
 
 // 弹窗 UI 状态：null=关闭；browserPick 是选择器选定后的回写回调；
 // browserMode='dir' 选目录（点=进入，按钮确认），'file' 选文件（点文件即确认）
@@ -22,6 +60,9 @@ export const ui = reactive({
   browserMode: 'dir' as 'dir' | 'file',
   // 自更新重启窗口：触发后页面显示全屏进度，应用回来即自动 reload 并核对版本
   restarting: false,
+  // 审批面板：故意不进 anyModal——面板打开时轮询必须继续，
+  // pending 列表（store.state.approvals）才能实时刷新、处理后即时消失
+  approvalDlg: false,
 })
 
 // ---- 自更新收尾：记录目标版本，应用回归后核对并明确提示成功 ----
@@ -41,8 +82,9 @@ export function clearPendingUpdate(): void {
   localStorage.removeItem(PENDING_KEY)
 }
 
-// 自更新后等待应用回归：每 2 秒探测一次 /api/state，一上线就整页 reload
-// （reload 同时换上新版本的前端页面，版本号/新界面即刻生效）。
+// 自更新后等待应用回归：每 2 秒探测一次 /api/auth（免登录白名单，重启后
+// 会话失效也能探活），一上线就整页 reload（reload 同时换上新版本的前端页面，
+// 版本号/新界面即刻生效；开启鉴权时 reload 后落在登录层属预期）。
 // 探测持续 5 分钟不放弃（安装+重启可能超过 90 秒）；遮罩 90 秒后自动撤除
 // （不阻塞页面正常轮询与交互），探测成功仍会自动 reload
 export function beginRestartWait(target?: string): void {
@@ -51,7 +93,7 @@ export function beginRestartWait(target?: string): void {
   ui.restarting = true
   window.setTimeout(() => { ui.restarting = false }, 90000) // 遮罩 90 秒撤除，探测继续
   const probe = window.setInterval(() => {
-    fetch('/api/state').then(r => {
+    fetch('/api/auth').then(r => {
       if (r.ok) { window.clearInterval(probe); window.location.reload() }
     }).catch(() => { /* 应用还没回来，继续等 */ })
   }, 2000)
@@ -62,6 +104,7 @@ export const anyModal = computed(() =>
     || ui.browserDlg))
 
 export async function refresh(force = false): Promise<void> {
+  if (needLogin()) return  // 未登录：静默跳过（401 已由全局回调处理）
   if (!force && anyModal.value) return
   try { store.state = await api.state() } catch { /* 服务瞬时不可达时保持旧数据 */ }
 }

@@ -18,12 +18,31 @@ API（均为 GET/POST JSON）：
   POST /api/project      新建/修改项目   {name, path, tasks_dir, guide_file,
                                           max_tasks_per_cycle, max_agent_turns,
                                           allowed_branch, allowed_commands, enabled,
+                                          tools 可选：项目级工具开关覆盖 {工具名:bool}，
+                                          null=跟随全局,
+                                          permission_mode 可选：项目级访问权限覆盖
+                                          （ask_on_change/autonomous/full_access），
+                                          null=跟随全局,
                                           stack/run/test 可选：写入 AGENT.md 的 Project 节}
   POST /api/project/delete        删除项目（仅从配置移除，不动磁盘）
   POST /api/project/open-folder   用系统文件管理器打开项目根目录 {name}
   GET/POST /api/guide    读取/保存项目 AGENT.md {project, content?}
-  POST /api/config       保存模型/调度/看板配置 {llm:{...}, scheduler:{...}, web:{...}}
+  POST /api/config       保存模型/调度/看板配置 {llm:{...}, scheduler:{...}, web:{...},
+                         tools:{工具名:bool}, permissions:{mode, timeout_minutes}}
+                         （分块保存；tools 为全局 Agent 工具开关，permissions 为
+                         访问权限模式；非法值报 400）
                          保存后写回 config.yaml 并热重载调度器
+
+人工审批（访问权限模式为 ask_on_change / autonomous 时，敏感工具调用挂起等待）：
+  POST /api/approval     响应一条挂起的审批 {id, approved, always?}
+                         （always=true 且批准时，该工具在本任务内不再询问；
+                         挂起列表经 GET /api/state 的 approvals 字段曝光；
+                         超时 permissions.timeout_minutes 自动拒绝）
+
+登录鉴权（web.auth_password 非空时，除白名单外所有页面/API 需先登录）：
+  GET  /api/auth         查询鉴权状态 {enabled, authed}（凭会话 Cookie 判定）
+  POST /api/login        登录 {password}；成功下发 HttpOnly 会话 Cookie（7 天有效）
+  POST /api/logout       退出登录；服务端注销当前会话并清除 Cookie
 
 程序自更新（零 UAC 静默换名安装，详见 orcsy/updater.py）：
   POST /api/update/check   检查 Gitee Release 是否有新版本
@@ -47,7 +66,9 @@ API（均为 GET/POST JSON）：
 from __future__ import annotations
 
 import json
+import hmac
 import os
+import secrets
 import tempfile
 import time
 import re
@@ -55,6 +76,7 @@ import subprocess
 import sys
 import threading
 import yaml
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -62,9 +84,12 @@ from urllib.parse import urlparse
 from . import __version__
 from . import skills as skills_lib
 from .agent import ProjectAgent
-from .config import (AppConfig, LLMConfig, ProjectConfig, SchedulerConfig,
-                     TaskStatus, UpdateConfig, WebConfig, normalize_llm_override,
-                     resolve_llm)
+from .approvals import get_manager
+from .config import (AppConfig, LLMConfig, PermissionsConfig, ProjectConfig,
+                     SchedulerConfig, TaskStatus, ToolsConfig, UpdateConfig,
+                     WebConfig, normalize_llm_override, resolve_llm,
+                     resolve_permission_mode, resolve_tools,
+                     validate_permission_mode)
 from .issues import IssueError, normalize_repo, sync_issues
 from . import updater
 from .llm import LLMError, list_models, test_connection
@@ -72,12 +97,17 @@ from .logging_setup import get_logger
 from .scheduler import Scheduler
 from .skills import Skill
 from .task_model import Task, parse_task_file, priority_rank, scan_tasks
+from .tools import TOOLS, validate_tools_map
 
 log = get_logger("web")
 
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 VALID_STATUS = ("open", "in_progress", "done", "blocked", "cancelled")
 _NAME_RE = re.compile(r"^[\w][\w\-]*$")
+
+# 登录会话：Cookie 名与有效期（秒）；会话仅存内存，进程重启后需重新登录
+AUTH_COOKIE = "orcsy_session"
+SESSION_TTL = 7 * 24 * 3600
 
 # 浏览目录时忽略的噪音项
 _DIR_IGNORE = {"$Recycle.Bin", "System Volume Information", "Windows", "AppData",
@@ -115,11 +145,17 @@ class AppState:
         self.agents: dict[str, ProjectAgent] = {
             p.name: ProjectAgent(p, resolve_llm(config.llm, p.llm,
                                                 context=f"项目 {p.name} 的 llm"),
-                                 skills_base=self.skills_dir)
+                                 skills_base=self.skills_dir,
+                                 tools=resolve_tools(config.tools, p.tools),
+                                 permission_mode=resolve_permission_mode(config.permissions, p),
+                                 permission_timeout_minutes=config.permissions.timeout_minutes)
             for p in config.projects
         }
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
         self.update_state: dict = {"phase": "idle"}
+        # 登录会话：token -> 过期时间戳（内存态，进程重启即全部失效）
+        self._auth_tokens: dict[str, float] = {}
+        self._auth_lock = threading.Lock()
         # 安装日志：<配置目录>/logs/install.log，升级全程留痕（仅出错时自动打开）
         self.install_log = updater.install_log_path(config)
         # 上次升级结果（看护脚本写、启动时消费）；一次曝光后清空
@@ -135,6 +171,71 @@ class AppState:
             self.update_check({})
         except Exception:  # noqa: BLE001 — 自检失败不影响启动
             log.info("启动自动检查更新失败（可忽略，可在设置页手动重试）")
+
+    # ---- 登录鉴权 ----
+
+    @property
+    def auth_enabled(self) -> bool:
+        """配置了登录密码即开启鉴权；留空 = 关闭（本机使用零打扰）。"""
+        return bool(self.config.web.auth_password)
+
+    def login(self, password: str) -> dict:
+        """校验登录密码；成功颁发会话 token（由 handler 负责下发 Cookie）。"""
+        if not self.auth_enabled:
+            return {"ok": True, "token": None}
+        if not hmac.compare_digest(str(password or ""), self.config.web.auth_password):
+            time.sleep(0.8)  # 失败延迟：抬高暴力破解成本
+            return {"ok": False, "message": "密码错误"}
+        token = secrets.token_urlsafe(32)
+        with self._auth_lock:
+            self._prune_sessions()
+            self._auth_tokens[token] = time.time() + SESSION_TTL
+        return {"ok": True, "token": token}
+
+    def logout(self, token: str | None) -> dict:
+        with self._auth_lock:
+            self._auth_tokens.pop(token or "", None)
+        return {"ok": True}
+
+    def token_valid(self, token: str | None) -> bool:
+        if not token:
+            return False
+        with self._auth_lock:
+            expiry = self._auth_tokens.get(token)
+            if expiry is None:
+                return False
+            if expiry < time.time():
+                del self._auth_tokens[token]
+                return False
+            return True
+
+    def auth_status(self, token: str | None) -> dict:
+        enabled = self.auth_enabled
+        return {"ok": True, "enabled": enabled,
+                "authed": (not enabled) or self.token_valid(token)}
+
+    def _prune_sessions(self) -> None:
+        """清掉过期会话（调用方须持有 _auth_lock）。"""
+        now = time.time()
+        self._auth_tokens = {t: e for t, e in self._auth_tokens.items() if e >= now}
+
+    def _invalidate_sessions(self) -> None:
+        """密码变更/清除后注销全部会话：旧 Cookie 立即失效，需用新密码重登。"""
+        with self._auth_lock:
+            self._auth_tokens.clear()
+
+    # ---- 人工审批 ----
+
+    def approval_respond(self, data: dict) -> dict:
+        """看板响应一条挂起的审批请求（批准/拒绝，可带「本任务内始终允许」）。"""
+        rid = str(data.get("id") or "").strip()
+        if not rid:
+            raise ValueError("缺少审批请求 id")
+        ok = get_manager().respond(rid, bool(data.get("approved")),
+                                   always=bool(data.get("always")))
+        if not ok:
+            raise ValueError("审批请求不存在或已处理（可能已被响应或超时自动拒绝）")
+        return {"ok": True}
 
     # ---- 查询 ----
 
@@ -166,6 +267,12 @@ class AppState:
                 "allowed_commands": p.allowed_commands,
                 "llm": p.llm or None,
                 "repo": p.repo or None,
+                # 项目级工具开关覆盖；null = 跟随全局（前端显示「跟随全局」态）
+                "tools": p.tools or None,
+                # 项目级访问权限覆盖（原始值）+ 当前生效值（前端展示用）
+                "permission_mode": p.permission_mode,
+                "permission_mode_effective": resolve_permission_mode(
+                    self.config.permissions, p),
                 # 定时拉取 Issues：repo.auto_pull_interval 启用时附最近一次自动拉取状态
                 "issue_auto_pull": (
                     {**(self.scheduler.issue_pull_status.get(name) or {}),
@@ -207,6 +314,8 @@ class AppState:
                 "host": self.config.web.host,
                 "port": self.config.web.port,
                 "open_browser": self.config.web.open_browser,
+                # 只回显开关状态，绝不回显密码本身
+                "auth_enabled": self.auth_enabled,
             },
             "update_cfg": {
                 "repo": self.config.update.repo,
@@ -214,6 +323,21 @@ class AppState:
                 "auto_check": self.config.update.auto_check,
             },
             "logging": {"retention_days": self.config.logging.retention_days},
+            # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
+            # finish 也进目录——前端把它渲染成「常开且禁用」的展示行，
+            # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
+            "tools_cfg": dict(self.config.tools.enabled),
+            "tools_catalog": [
+                {"name": name, "description": desc}
+                for name, (desc, _, _) in TOOLS.items()
+            ],
+            # 访问权限：全局配置 + 当前挂起的审批请求（看板 5s 轮询刷新，
+            # 顶栏「待审批」徽标与审批面板都读这里）
+            "permissions_cfg": {
+                "mode": self.config.permissions.mode,
+                "timeout_minutes": self.config.permissions.timeout_minutes,
+            },
+            "approvals": get_manager().pending(),
             "app_autostart": self.app_autostart_status(),
             "skills_dir": str(self.skills_dir),
             "skills": [self._skill_dict(s) for s in skills_lib.load_skills(self.skills_dir)],
@@ -587,11 +711,23 @@ class AppState:
                 repo = normalize_repo(repo_raw, context=f"项目 {name} 的 repo")
             except IssueError as e:
                 raise ValueError(str(e)) from e
+        # 项目级工具开关覆盖：字典则校验（未知工具名/禁 finish/非 bool 立刻报错），
+        # 显式 null 或空字典=清除覆盖（跟随全局）
+        tools_raw = data.get("tools")
+        if tools_raw is not None and not isinstance(tools_raw, dict):
+            raise ValueError("tools 覆盖必须是「工具名: true/false」字典或 null")
+        tools = validate_tools_map(tools_raw, context=f"项目 {name} 的 tools") or None
+        # 项目级访问权限模式覆盖：合法枚举或 null/缺失（跟随全局）
+        perm_raw = data.get("permission_mode")
+        perm = (validate_permission_mode(perm_raw,
+                                         context=f"项目 {name} 的 permission_mode")
+                if perm_raw else None)
         return ProjectConfig(
             name=name, path=path, enabled=bool(data.get("enabled", True)),
             tasks_dir=tasks_dir, guide_file=guide_file,
             max_tasks_per_cycle=max_tasks, max_agent_turns=max_turns,
             allowed_commands=allowed, allowed_branch=branch, llm=llm, repo=repo,
+            tools=tools, permission_mode=perm,
         )
 
     def _save_config(self, cfg: AppConfig) -> None:
@@ -616,7 +752,12 @@ class AppState:
             "logging": {"level": cfg.logging.level, "file": cfg.logging.file,
                         "retention_days": cfg.logging.retention_days},
             "web": {"host": cfg.web.host, "port": cfg.web.port,
-                    "open_browser": cfg.web.open_browser},
+                    "open_browser": cfg.web.open_browser,
+                    "auth_password": cfg.web.auth_password},
+            # 全局工具开关：只落盘显式关闭/开启的项（空 dict = 全默认启用）
+            "tools": dict(cfg.tools.enabled),
+            "permissions": {"mode": cfg.permissions.mode,
+                            "timeout_minutes": cfg.permissions.timeout_minutes},
             "projects": [
                 {
                     "name": p.name, "path": str(p.path), "enabled": p.enabled,
@@ -627,6 +768,8 @@ class AppState:
                     **({"allowed_commands": p.allowed_commands} if p.allowed_commands else {}),
                     **({"llm": p.llm} if p.llm else {}),
                     **({"repo": p.repo} if p.repo else {}),
+                    **({"tools": p.tools} if p.tools else {}),
+                    **({"permission_mode": p.permission_mode} if p.permission_mode else {}),
                 }
                 for p in cfg.projects
             ],
@@ -643,7 +786,11 @@ class AppState:
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
         self.agents = {p.name: ProjectAgent(p, resolve_llm(new_cfg.llm, p.llm,
                                                            context=f"项目 {p.name} 的 llm"),
-                                            skills_base=self.skills_dir)
+                                            skills_base=self.skills_dir,
+                                            tools=resolve_tools(new_cfg.tools, p.tools),
+                                            permission_mode=resolve_permission_mode(
+                                                new_cfg.permissions, p),
+                                            permission_timeout_minutes=new_cfg.permissions.timeout_minutes)
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
@@ -830,21 +977,28 @@ class AppState:
                              "若长时间未完成请刷新页面后重试")
 
     def _start_install_thread(self, package: Path) -> dict:
-        """校验通过后启动后台安装线程并立即返回（零 UAC 换名安装）。
+        """校验通过后启动后台安装线程并立即返回（可写目录零 UAC；系统目录提权兜底）。
 
-        响应送达后线程开始换名落位；成功则旧进程退出、看护拉起新版，
-        前端遮罩等待 /api/state 回归后自动刷新。失败在线程里写日志、弹窗
-        并自动打开安装日志（成功不打开）。
+        响应送达后线程开始安装：目录可写走换名落位；不可写（如 Program Files）
+        走提权兜底——安装中会弹一次 UAC 授权窗口，message 里提前告知。
+        成功则旧进程退出、看护拉起新版，前端遮罩等待 /api/state 回归后自动
+        刷新。失败在线程里写日志、弹窗并自动打开安装日志（成功不打开）。
         """
         self._set_update_state({"phase": "applying", "asset_name": package.name,
                                 "target_version":
                                     updater.detect_installer_version(package.name)})
+        # 提前探测可写性只为提示语准确；实际分流在 run_local_install 里做
+        elevated = not updater.is_writable(Path(sys.executable).parent)
         threading.Thread(target=self._install_worker, args=(package,),
                          daemon=True, name="update-install").start()
-        log.info("Web 触发静默升级：更新包 %s（后台线程换名落位，零 UAC）", package.name)
-        return {"ok": True, "phase": "applying", "target":
-                updater.detect_installer_version(package.name),
-                "message": "已开始静默升级，应用将短暂离线并自动重启"}
+        log.info("Web 触发静默升级：更新包 %s（后台线程%s）", package.name,
+                 "提权安装，将弹一次 UAC" if elevated else "换名落位，零 UAC")
+        message = ("已开始安装：安装目录需要管理员权限，稍后将弹出一次 UAC 授权窗口，"
+                   "请点「是」继续（取消则不更新，程序照常运行）" if elevated else
+                   "已开始静默升级，应用将短暂离线并自动重启")
+        return {"ok": True, "phase": "applying", "elevated": elevated,
+                "target": updater.detect_installer_version(package.name),
+                "message": message}
 
     def _install_worker(self, package: Path) -> None:
         """后台安装线程：换名落位 → 成功退出进程由看护重启；失败弹窗+开日志。"""
@@ -917,7 +1071,6 @@ class AppState:
         package = Path(raw)
         try:
             info = updater.validate_package(package)
-            updater.check_writable(Path(sys.executable).parent)
         except updater.UpdateError as e:
             raise ValueError(str(e)) from e
         log.info("Web 手动导入更新包：%s（版本 %s，同/异版本均允许）",
@@ -1157,10 +1310,18 @@ class AppState:
             run_once=self.config.scheduler.run_once,
         )
         # host/port 变更需重启生效，其余立即生效
+        # auth_password 三态：键缺失=保持原值；空字符串=清除（关闭鉴权）；非空=设置新密码
+        auth_password = self.config.web.auth_password
+        if "auth_password" in web:
+            new_pwd = str(web.get("auth_password") or "")
+            if new_pwd != auth_password:
+                auth_password = new_pwd
+                self._invalidate_sessions()  # 密码变更后旧会话全部作废
         self.config.web = WebConfig(
             host=str(web.get("host") or self.config.web.host),
             port=port,
             open_browser=bool(web.get("open_browser", self.config.web.open_browser)),
+            auth_password=auth_password,
         )
         # 日志保留天数：0 表示关闭自动归档与清理
         log_cfg = data.get("logging") or {}
@@ -1181,6 +1342,30 @@ class AppState:
                 token=str(upd.get("token", self.config.update.token)),
                 auto_check=bool(upd.get("auto_check", self.config.update.auto_check)),
             )
+
+        # Agent 工具开关：分块保存，只带 tools 的请求生效；
+        # 未知工具名/禁用 finish/非布尔值由 validate_tools_map 直接报错（400 透传看板）
+        if "tools" in data:
+            self.config.tools = ToolsConfig(
+                enabled=validate_tools_map(data.get("tools"), context="tools"))
+
+        # 访问权限：分块保存；模式枚举与超时范围校验（400 透传看板）
+        if "permissions" in data:
+            perm = data.get("permissions") or {}
+            mode = validate_permission_mode(
+                perm.get("mode", self.config.permissions.mode))
+            # 不能用 `or` 兜底：0 是非法值该报错，而不是被当成「未填」回退现值
+            raw_timeout = perm.get("timeout_minutes")
+            if raw_timeout is None:
+                timeout = self.config.permissions.timeout_minutes
+            else:
+                try:
+                    timeout = int(raw_timeout)
+                except (TypeError, ValueError):
+                    raise ValueError("审批超时必须是整数（分钟）") from None
+            if not (1 <= timeout <= 1440):
+                raise ValueError("审批超时应为 1~1440 分钟")
+            self.config.permissions = PermissionsConfig(mode=mode, timeout_minutes=timeout)
 
         self.scheduler.reload_config(self.config)
         self._apply_config(self.config)
@@ -1214,12 +1399,15 @@ class WebHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # noqa: A002 — 静默默认访问日志
         pass
 
-    def _json(self, obj: dict, code: int = 200) -> None:
+    def _json(self, obj: dict, code: int = 200,
+              extra_headers: list[tuple[str, str]] | None = None) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in extra_headers or ():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -1232,12 +1420,52 @@ class WebHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return {}
 
+    # ---- 鉴权守卫 ----
+
+    def _cookie_token(self) -> str | None:
+        raw = self.headers.get("Cookie")
+        if not raw:
+            return None
+        try:
+            jar: SimpleCookie = SimpleCookie()
+            jar.load(raw)
+        except Exception:  # noqa: BLE001 — Cookie 头畸形按未登录处理
+            return None
+        morsel = jar.get(AUTH_COOKIE)
+        return morsel.value if morsel else None
+
+    def _authorized(self) -> bool:
+        return (not self.state.auth_enabled
+                or self.state.token_valid(self._cookie_token()))
+
+    def _deny(self) -> None:
+        self._json({"ok": False, "unauthorized": True,
+                    "message": "未登录或会话已过期"}, 401)
+
+    def _handle_login(self, body: dict) -> None:
+        result = self.state.login(str(body.get("password") or ""))
+        if not result.get("ok"):
+            return self._json(
+                {"ok": False, "message": result.get("message", "密码错误")}, 401)
+        token = result.get("token")
+        if token:
+            cookie = (f"{AUTH_COOKIE}={token}; HttpOnly; Path=/; "
+                      f"Max-Age={SESSION_TTL}; SameSite=Lax")
+            self._json({"ok": True}, extra_headers=[("Set-Cookie", cookie)])
+        else:
+            self._json({"ok": True})  # 鉴权未开启：无需会话
+
     # ---- 路由 ----
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        # 鉴权守卫：SPA 壳（/、/index.html）与 /api/auth 放行，登录界面由页内接管
+        if path not in ("/", "/index.html", "/api/auth") and not self._authorized():
+            return self._deny()
         if path == "/" or path == "/index.html":
             self._html()
+        elif path == "/api/auth":
+            self._json(self.state.auth_status(self._cookie_token()))
         elif path == "/api/state":
             self._json(self.state.full_state())
         elif path == "/api/guide":
@@ -1274,8 +1502,19 @@ class WebHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         try:
+            # 先读净请求体再鉴权：401 拒掉时若留下未读的 body，keep-alive
+            # 连接上的下一个请求会把残留字节当请求行解析（协议失步 → 连接重置）
             body = self._read_body()
-            if path == "/api/scan":
+            # 鉴权守卫：仅登录接口放行（401 走 _json，keep-alive 的 Content-Length 不缺）
+            if path != "/api/login" and not self._authorized():
+                return self._deny()
+            if path == "/api/login":
+                self._handle_login(body)
+            elif path == "/api/logout":
+                clear = f"{AUTH_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"
+                self._json(self.state.logout(self._cookie_token()),
+                           extra_headers=[("Set-Cookie", clear)])
+            elif path == "/api/scan":
                 self._json(self.state.trigger_scan())
             elif path == "/api/task":
                 self._json(self.state.create_or_update_task(body))
@@ -1330,6 +1569,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.open_skill_folder(body))
             elif path == "/api/app-autostart":
                 self._json(self.state.set_app_autostart(body))
+            elif path == "/api/approval":
+                self._json(self.state.approval_respond(body))
             elif path == "/api/update/check":
                 self._json(self.state.update_check(body))
             elif path == "/api/update/apply":

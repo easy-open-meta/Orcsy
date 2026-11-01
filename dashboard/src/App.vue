@@ -1,16 +1,38 @@
 <script setup lang="ts">
-import { NButton, NConfigProvider, NDialogProvider, NMessageProvider, NTab, NTabs, NTag, dateZhCN, zhCN } from 'naive-ui'
+import { NButton, NConfigProvider, NDialogProvider, NInput, NMessageProvider, NTab, NTabs, NTag, dateZhCN, zhCN } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from './api'
 import Dialogs from './components/Dialogs.vue'
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
-import { beginRestartWait, clearPendingUpdate, getPendingUpdate, openProjectNew, refresh, store, ui } from './store'
+import { auth, beginRestartWait, clearPendingUpdate, doLogin, doLogout, getPendingUpdate, initAuth, needLogin, openProjectNew, refresh, store, ui } from './store'
 import SkillsView from './views/SkillsView.vue'
 import { cmpVersion } from './utils'
 import { naiveTheme, theme, themeOverrides, toggleTheme } from './theme'
 
 const scanning = ref(false)
+
+// ---- 登录层：鉴权开启且会话无效时全屏接管（App 壳与轮询全部静默） ----
+const showLogin = computed(() => needLogin())
+const loginPwd = ref('')
+const loginBusy = ref(false)
+const loginErr = ref('')
+
+async function submitLogin(): Promise<void> {
+  if (!loginPwd.value || loginBusy.value) return
+  loginBusy.value = true
+  loginErr.value = ''
+  try {
+    await doLogin(loginPwd.value)
+    loginPwd.value = ''
+  } catch (e: any) {
+    loginErr.value = e.message || '登录失败'
+  } finally { loginBusy.value = false }
+}
+
+async function onLogout(): Promise<void> {
+  await doLogout()
+}
 
 async function doScan(): Promise<void> {
   scanning.value = true
@@ -29,6 +51,8 @@ async function doScan(): Promise<void> {
 // ---- 程序自更新：头部按钮状态机（检查 → 有新版 → 下载安装 → 自动重启） ----
 const updPhase = computed(() => store.state?.update?.phase || 'idle')
 const updLatest = computed(() => store.state?.update?.latest || '')
+// 挂起的人工审批数（>0 时顶栏显示「🔔 待审批」入口；面板在 Dialogs.vue）
+const pendingApprovals = computed(() => store.state?.approvals?.length || 0)
 const pending = computed(() => {
   void store.state // 建立响应式依赖：轮询更新 store 后重新求值（localStorage 本身非响应式）
   return getPendingUpdate()
@@ -77,7 +101,7 @@ function askApply(latest: string, notes: string): void {
 // 不自停：清掉挂单后继续守候，下一次更新的挂单才能被核对（曾因自停导致
 // 第二次更新的结果永远无人核对、按钮永久卡「安装中」）
 onMounted(() => {
-  watch(() => store.state, (s) => {
+  pendingWatch = watch(() => store.state, (s) => {
     if (!s) return
     // 上次升级结果（后端一次性曝光）：失败弹窗提示（安装日志已自动打开）；
     // 成功静默——收尾提示由下方版本核对统一给出，不重复打扰
@@ -112,10 +136,14 @@ const updateOverlayVisible = computed(() =>
   ui.restarting || (!!getPendingUpdate() &&
   ['downloading', 'applying', 'restarting'].includes(store.state?.update?.phase || '')))
 
-// 5s 轮询：页面隐藏或弹窗打开时跳过（弹窗内表单不被覆盖）
+// 版本核对 watch 的停止句柄（组件卸载时停表；曾因未赋值导致 onUnmounted ReferenceError）
+let pendingWatch: (() => void) | undefined
+
+// 5s 轮询：页面隐藏、弹窗打开或未登录时跳过（未登录时 refresh 内部静默短路）
 let timer: number | undefined
-onMounted(() => {
-  void refresh(true)
+onMounted(async () => {
+  await initAuth()          // 先探鉴权：未登录则不拉状态，直接落登录层
+  if (!needLogin()) void refresh(true)
   timer = window.setInterval(() => {
     if (!document.hidden) void refresh()
   }, 5000)
@@ -126,7 +154,8 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
 <template>
   <NConfigProvider :theme="naiveTheme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
     <NMessageProvider><NDialogProvider>
-      <header class="top">
+      <!-- 未登录时隐藏顶栏：登录层视觉已遮住，但键盘 Tab 不应能触达后面的按钮 -->
+      <header class="top" v-show="!showLogin">
         <div class="brand">
           <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <rect x="3" y="5" width="4.5" height="14" rx="1.2"/><rect x="9.75" y="5" width="4.5" height="9" rx="1.2" opacity=".6"/><rect x="16.5" y="5" width="4.5" height="6" rx="1.2" opacity=".35"/>
@@ -146,7 +175,12 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           </NTabs>
           <NTag v-if="updPhase === 'available'" size="small" type="error" :bordered="false"
                 title="发现新版本，点击立即更新">可更新</NTag>
-          <NButton size="small" :loading="updWorking || updating" @click="checkUpdate"
+          <NButton v-if="pendingApprovals > 0" size="small" type="error" secondary
+                   :loading="false" title="Agent 有操作挂起等待人工审批，点击处理"
+                   @click="ui.approvalDlg = true">
+            🔔 待审批 {{ pendingApprovals }}
+          </NButton>
+          <NButton :loading="updWorking || updating" @click="checkUpdate"
                    :title="updPhase === 'available' ? '下载并安装新版本' : '检查是否有新版本'">
             {{ updLabel }}
           </NButton>
@@ -156,6 +190,8 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <NButton quaternary circle :title="theme === 'dark' ? '切换浅色' : '切换深色'" @click="toggleTheme">
             {{ theme === 'dark' ? '☀' : '☾' }}
           </NButton>
+          <NButton v-if="auth.enabled && auth.authed" quaternary size="small"
+                   title="退出登录" @click="onLogout">退出</NButton>
         </div>
       </header>
       <DashboardView v-show="store.view === 'dash'" />
@@ -169,6 +205,22 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <div class="upd-sub">升级在后台静默进行（全程无 UAC 弹窗），应用将自动重启，
             本页将在升级完成后自动刷新以加载新版本页面（请勿关闭本页）</div>
           <pre v-if="store.state?.update?.install_log_tail" class="upd-log">{{ store.state.update.install_log_tail }}</pre>
+        </div>
+      </div>
+      <!-- 登录层：鉴权开启且未登录时全屏接管（覆盖 App 壳，轮询已静默短路） -->
+      <div v-if="showLogin" class="login-overlay">
+        <div class="login-box">
+          <svg class="login-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="3" y="5" width="4.5" height="14" rx="1.2"/><rect x="9.75" y="5" width="4.5" height="9" rx="1.2" opacity=".6"/><rect x="16.5" y="5" width="4.5" height="6" rx="1.2" opacity=".35"/>
+          </svg>
+          <div class="login-title">Orcsy 任务编排中心</div>
+          <div class="login-sub">看板已开启访问鉴权，请输入登录密码</div>
+          <NInput v-model:value="loginPwd" type="password" show-password-on="click"
+                  placeholder="登录密码" :disabled="loginBusy"
+                  @keyup.enter="submitLogin" />
+          <div v-if="loginErr" class="login-err">{{ loginErr }}</div>
+          <NButton type="primary" block :loading="loginBusy" :disabled="!loginPwd"
+                   style="margin-top: 12px" @click="submitLogin">登 录</NButton>
         </div>
       </div>
     </NDialogProvider></NMessageProvider>
@@ -187,6 +239,16 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
   color: var(--dim, #94a2be); background: rgba(128, 128, 160, 0.12);
   border-radius: 6px; padding: 8px 10px; margin-top: 10px; white-space: pre-wrap;
   word-break: break-all; }
+/* 登录层：全屏不透明接管（未登录时不该透出看板骨架），双主题 token 上色 */
+.login-overlay { position: fixed; inset: 0; background: var(--bg, #0b0f17); z-index: 3000;
+  display: flex; align-items: center; justify-content: center; }
+.login-box { background: var(--panel, #131a2a); border: 1px solid var(--line, #253048);
+  border-radius: 12px; padding: 30px 34px; width: 340px; max-width: 90vw;
+  text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35); }
+.login-logo { width: 34px; height: 34px; color: #5b8cff; margin-bottom: 6px; }
+.login-title { font-size: 17px; font-weight: 700; color: var(--text, #e5eaf6); }
+.login-sub { font-size: 12.5px; color: var(--dim, #94a2be); margin: 4px 0 16px; }
+.login-err { font-size: 12.5px; color: #e88080; margin-top: 8px; text-align: left; }
 /* 双主题 token：Naive 只给自家组件上色，裸 HTML 元素（标题/说明/路径/日志等）
    必须用这里的变量，否则暗色主题下黑字黑底不可见 */
 :root[data-theme="dark"]{

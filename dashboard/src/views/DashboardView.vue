@@ -10,6 +10,12 @@ import { api } from '../api'
 // 运行日志按从新到旧展示；💭 思考条目在渲染层折叠成可展开块
 const logEntries = computed(() => parseLogEntries(store.state?.log_tail || ''))
 
+// 任务是否有挂起的人工审批（行内「⏸ 待审批」标签；点击顶栏 🔔 处理）
+function waitingApproval(project: string, taskId: string): boolean {
+  return (store.state?.approvals ?? []).some(
+    a => a.project === project && a.task_id === taskId)
+}
+
 function stats(p: ProjectT): string {
   const c: Record<string, number> = {}
   for (const t of p.tasks) c[t.status] = (c[t.status] || 0) + 1
@@ -57,6 +63,12 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
       max_agent_turns: p.max_agent_turns,
       allowed_branch: p.allowed_branch ?? undefined,
       allowed_commands: p.allowed_commands ?? undefined,
+      // 绑定类字段必须原样回传：后端把缺失键当「清除」处理，
+      // 不带就会把 llm/repo/tools/permission_mode 绑定悄悄抹掉
+      llm: p.llm ?? null,
+      repo: p.repo ?? null,
+      tools: p.tools ?? null,
+      permission_mode: p.permission_mode ?? null,
       original_name: p.name,
     })
     window.$message?.(enabled ? `已启用 ${p.name}` : `已停用 ${p.name}`)
@@ -315,6 +327,10 @@ async function quickAdd(p: ProjectT): Promise<void> {
               <span class="title" :title="t.title">{{ t.title }}</span>
               <NTag size="small" :type="ST_TYPE[t.status] || 'default'" :bordered="false">
                 {{ ST_NAME[t.status] || t.status }}
+              </NTag>
+              <NTag v-if="waitingApproval(p.name, t.id)" size="small" type="warning"
+                    :bordered="false" title="Agent 有操作挂起等待人工审批，点顶栏「🔔 待审批」处理">
+                ⏸ 待审批
               </NTag>
             </div>
             <div class="t-meta">

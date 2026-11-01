@@ -1,10 +1,14 @@
-"""程序自更新：Gitee Release 检查 / 下载 / 手动导入 / 零 UAC 静默换名安装。
+"""程序自更新：Gitee Release 检查 / 下载 / 手动导入 / 静默换名安装。
 
 更新包为 ZIP（orcsy-update-*.zip，含 orcsy-web.exe / orcsy-tray.exe / README*）。
-静默升级由后台线程执行「换名落位」：解压到安装目录暂存区，把运行中的 exe 改名
-*.exe.old（Windows 允许对运行中的 PE 改名，绕开镜像锁），新文件 os.replace 落位，
-再由看护脚本（detached、非提权）等旧进程退出后清理 .old 并拉起新托盘。全程同一
-用户权限、不触发 UAC；安装日志逐步写入，升级结束若有错误自动打开日志文档，
+安装目录用户可写时走零 UAC 静默升级：后台线程「换名落位」——解压到安装目录
+暂存区，把运行中的 exe 改名 *.exe.old（Windows 允许对运行中的 PE 改名，绕开
+镜像锁），新文件 os.replace 落位，再由看护脚本（detached、非提权）等旧进程
+退出后清理 .old 并拉起新托盘，全程同一用户权限、不触发 UAC。
+安装目录不可写时（如默认装进 C:\\Program Files）走提权兜底：解压到用户
+temp，弹一次 UAC 由管理员复制脚本完成替换（失败自动回滚），托盘仍由普通
+权限看护脚本拉起（新程序绝不运行在管理员态）；用户取消 UAC 则如实报错、
+程序继续运行、可重试。安装日志逐步写入，升级结束若有错误自动打开日志文档，
 无错误则不打开。Inno 安装包（orcsy-setup-*.exe）仅用于首次安装（允许 UAC）。
 Docker / Linux / 源码运行只支持检查，应用时给出对应指引。
 """
@@ -269,6 +273,8 @@ RESULT_REASONS = {
     "tray-missing": "升级后未找到 orcsy-tray.exe，无法自动重启；请检查安装目录后手动启动",
     "tray-died-on-start": "新版程序启动后立即退出；可能更新包与当前系统不兼容，详见安装日志",
     "old-process-lingering": "旧进程未在预期时间内退出，升级未完成；请关闭程序后重新安装",
+    "elevated-copy-timeout": "提权复制未在预期时间内完成，已按旧版重新启动；请重试更新或查看安装日志",
+    "elevated-copy-failed": "提权复制文件失败（已回滚为旧版并重新启动）；详见安装日志",
 }
 
 
@@ -322,11 +328,29 @@ def validate_package(path: Path | str) -> dict:
     return {"version": detect_installer_version(pkg.name), "members": members}
 
 
+def is_writable(app_dir: Path | str) -> bool:
+    """探测安装目录当前用户是否可写（写探针文件即删）；不抛错。
+
+    run_local_install 用它分流：可写 → 零 UAC 换名落位；不可写（如
+    Program Files 默认权限）→ 提权兜底（一次 UAC）。
+    """
+    app_dir = Path(app_dir)
+    probe = app_dir / f".orcsy-write-probe-{os.getpid()}"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def check_writable(app_dir: Path) -> None:
     """安装目录可写性预检：换名落位需要当前用户写权限（零 UAC 方案的前提）。
 
     不可写（如 Program Files 默认权限）时明确报错并指引迁移目录——
     不尝试提权，也就不会出现 UAC 窗口。
+    注：run_local_install 现改用 is_writable 分流（不可写走提权兜底），
+    本函数保留给需要硬失败语义的调用方/测试。
     """
     app_dir = Path(app_dir)
     probe = app_dir / f".orcsy-write-probe-{os.getpid()}"
@@ -545,7 +569,9 @@ def run_local_install(package: Path | str, app_dir: Path | str,
     if not can_apply():
         raise UpdateError(apply_gate_message())
     info = validate_package(package)
-    check_writable(app_dir)
+    if not is_writable(app_dir):
+        # Program Files 等系统目录：提权兜底（一次 UAC），不再是死路报错
+        return run_elevated_install(package, app_dir, log, info)
     append_install_log(log, f"==== 开始安装 {package.name}"
                             f"（目标版本 {info['version'] or '未知'}）→ {app_dir} ====")
     # 崩溃面包屑：若进程在完成前被杀，下次启动消费到「中断」并如实提示
@@ -566,3 +592,246 @@ def run_local_install(package: Path | str, app_dir: Path | str,
     (app_dir / _SWAP_FLAG_NAME).write_text("", encoding="utf-8")
     append_install_log(log, "换名落位完成；旧进程退出后看护脚本将拉起新版（成功不打开日志）")
     return {"version": info["version"], "replaced": replaced}
+
+
+# ---- 提权兜底安装（安装目录不可写，如 C:\Program Files\Orcsy） ----
+#
+# 角色分工（新程序绝不运行在管理员态）：
+# - 管理员复制脚本（copier，UAC 提权的 cmd）：等旧进程退出 → 备份 .old →
+#   复制新文件 → 失败整体回滚 → 写纯文本完成标记（OK / FAIL <原因>）；
+# - 看护脚本（watchdog，普通权限，复用 start_watchdog）：等旧进程退出 →
+#   轮询完成标记 → 写 result JSON（先写后拉，契约同零 UAC 版）→ 拉起新托盘
+#   → 健康检查（新进程消费掉 result 即算启动成功）→ 出错才打开安装日志。
+# 两个脚本与暂存区都放在用户 temp（安装目录写不进去）；提权进程按内嵌的
+# 绝对路径访问用户 temp 与安装日志（管理员可写）。
+
+def _copier_bat(staging: Path, app_dir: Path, log: Path, marker: Path,
+                pid: int, members: list[str]) -> str:
+    """构建管理员复制脚本（.bat）：等旧进程退出后备份-复制-回滚-写标记。
+
+    只写 ASCII 行（控制台代码页安全）；成员名来自 validate_package 白名单
+    （纯文件名、无空格），for 列表安全。
+    """
+    member_list = " ".join(f'"{m}"' for m in members)
+    lines = [
+        "@echo off",
+        "setlocal",
+        f'set "STAGING={staging}"',
+        f'set "APPDIR={app_dir}"',
+        f'set "LOG={log}"',
+        f'set "MARKER={marker}"',
+        f"set PID={pid}",
+        f"set MEMBERS={member_list}",
+        "set ERR=0",
+        "rem ---- wait for the old process to exit (max ~60s) ----",
+        'powershell -NoProfile -Command "if (Get-Process -Id %PID% -ErrorAction '
+        'SilentlyContinue) { try { Wait-Process -Id %PID% -Timeout 60 -ErrorAction '
+        'Stop } catch { exit 1 } }"',
+        "if errorlevel 1 goto timeout",
+        'echo [%date% %time%] elevated copy started >> "%LOG%"',
+        "rem ---- backup + copy each member ----",
+        'for %%M in (%MEMBERS%) do call :copy_one "%%~M"',
+        'if "%ERR%"=="1" goto copyfail',
+        'del /f /q "%APPDIR%\\*.old" >nul 2>&1',
+        'echo OK> "%MARKER%"',
+        'echo [%date% %time%] elevated copy completed >> "%LOG%"',
+        "goto end",
+        ":copy_one",
+        'set "SRC=%STAGING%\\%~1"',
+        'set "DST=%APPDIR%\\%~1"',
+        'if not exist "%SRC%" goto :eof',
+        'if exist "%DST%" move /y "%DST%" "%DST%.old" >nul',
+        'copy /y "%SRC%" "%DST%" >nul',
+        "if errorlevel 1 (",
+        "  set ERR=1",
+        '  echo [%date% %time%] ERROR: copy failed for %~1 >> "%LOG%"',
+        '  if exist "%DST%.old" move /y "%DST%.old" "%DST%" >nul',
+        ")",
+        "goto :eof",
+        ":copyfail",
+        "rem ---- full rollback: restore every .old backup ----",
+        'for %%M in (%MEMBERS%) do if exist "%APPDIR%\\%%M.old" '
+        'move /y "%APPDIR%\\%%M.old" "%APPDIR%\\%%M" >nul',
+        'echo FAIL copy-failed> "%MARKER%"',
+        'echo [%date% %time%] ERROR: elevated copy rolled back >> "%LOG%"',
+        "goto end",
+        ":timeout",
+        'echo FAIL old-process-lingering> "%MARKER%"',
+        'echo [%date% %time%] ERROR: old process did not exit within 60s >> "%LOG%"',
+        "goto end",
+        ":end",
+        "exit /b 0",
+    ]
+    return "\r\n".join(lines)
+
+
+def _watchdog_bat_elevated(app_dir: Path, log: Path, result: Path, tray: Path,
+                           pid: int, marker: Path) -> str:
+    """构建提权流程的看护脚本（普通权限）：等复制完成标记 → 写 result → 拉托盘。
+
+    与零 UAC 版 _watchdog_bat 共享同一套 result/健康检查契约（结果标记先写、
+    新进程消费即健康、出错才开日志），但没有 .old 清理与 app_dir swap flag
+    ——那些都由管理员复制脚本在它自己的权限里完成了。
+    """
+    app_dir_s, log_s, result_s, tray_s, marker_s = (
+        str(p) for p in (app_dir, log, result, tray, marker))
+    lines = [
+        "@echo off",
+        "setlocal",
+        # 与零 UAC 版同款：剥离 PyInstaller bootstrap 变量，防新 exe 误认
+        # 自己是已解压子进程（详见 _watchdog_bat 内注释）
+        'set "_PYI_APPLICATION_HOME_DIR="',
+        'set "_PYI_PARENT_PROCESS_LEVEL="',
+        'set "_PYI_ARCHIVE_FILE="',
+        'set "_PYI_SPLASH_IPC="',
+        'set "_MEIPASS="',
+        'set "_MEIPASS2="',
+        'set "PYINSTALLER_RESET_ENVIRONMENT=1"',
+        f'set "APPDIR={app_dir_s}"',
+        f'set "LOG={log_s}"',
+        f'set "RESULT={result_s}"',
+        f'set "TRAY={tray_s}"',
+        f'set "MARKER={marker_s}"',
+        f"set PID={pid}",
+        "set ERR=0",
+        "set REASON=ok",
+        "rem ---- wait for the old process to exit (max ~60s) ----",
+        'powershell -NoProfile -Command "if (Get-Process -Id %PID% -ErrorAction '
+        'SilentlyContinue) { try { Wait-Process -Id %PID% -Timeout 60 -ErrorAction '
+        'Stop } catch { exit 1 } }"',
+        "if errorlevel 1 goto timeout",
+        "rem ---- wait for the elevated copier marker (max ~120s) ----",
+        "set /a W=0",
+        ":waitmarker",
+        'if exist "%MARKER%" goto marker',
+        "ping -n 2 127.0.0.1 >nul",
+        "set /a W+=1",
+        "if %W% GEQ 60 goto markertimeout",
+        "goto waitmarker",
+        ":markertimeout",
+        "set ERR=1",
+        "set REASON=elevated-copy-timeout",
+        'echo [%date% %time%] ERROR: elevated copier marker missing after 120s >> "%LOG%"',
+        "goto start_tray",
+        ":marker",
+        'findstr /b "OK" "%MARKER%" >nul',
+        "if errorlevel 1 (",
+        "  set ERR=1",
+        "  set REASON=elevated-copy-failed",
+        '  type "%MARKER%" >> "%LOG%"',
+        '  echo [%date% %time%] ERROR: elevated copier reported failure >> "%LOG%"',
+        ")",
+        'del /f /q "%MARKER%" >nul 2>&1',
+        ":start_tray",
+        'if not exist "%TRAY%" goto notray',
+        "rem result marker is written BEFORE relaunch: the new process consumes it",
+        "rem on startup, so a later write would race with that read",
+        'if "%ERR%"=="0" goto write_ok',
+        'echo {"ok": false, "reason": "%REASON%"} > "%RESULT%"',
+        "goto relaunch",
+        ":write_ok",
+        'echo {"ok": true} > "%RESULT%"',
+        ":relaunch",
+        'start "" "%TRAY%" --tray',
+        "rem health = the new app consumed the result marker (proves it booted);",
+        "rem a process stuck on an error dialog would fool a liveness probe",
+        "set /a H=0",
+        ":health",
+        "ping -n 2 127.0.0.1 >nul",
+        'if not exist "%RESULT%" goto running',
+        "set /a H+=1",
+        "if %H% GEQ 30 goto boot_failed",
+        "goto health",
+        ":boot_failed",
+        "set ERR=1",
+        "set REASON=tray-died-on-start",
+        'echo {"ok": false, "reason": "tray-died-on-start"} > "%RESULT%"',
+        'echo [%date% %time%] ERROR: new version never finished starting >> "%LOG%"',
+        "goto finish",
+        ":running",
+        "goto finish",
+        ":notray",
+        "set ERR=1",
+        "set REASON=tray-missing",
+        'echo {"ok": false, "reason": "tray-missing"} > "%RESULT%"',
+        'echo [%date% %time%] ERROR: "%TRAY%" not found, cannot restart >> "%LOG%"',
+        "goto finish",
+        ":timeout",
+        "set ERR=1",
+        "set REASON=old-process-lingering",
+        'echo {"ok": false, "reason": "old-process-lingering"} > "%RESULT%"',
+        'echo [%date% %time%] ERROR: old process did not exit within 60s >> "%LOG%"',
+        "goto finish",
+        ":finish",
+        'if "%ERR%"=="0" goto done',
+        'echo [%date% %time%] ERROR: finished with errors, reason=%REASON% >> "%LOG%"',
+        'start "" notepad "%LOG%"',
+        ":done",
+        "exit /b 0",
+    ]
+    return "\r\n".join(lines)
+
+
+def run_elevated_install(package: Path, app_dir: Path, log: Path,
+                         info: dict) -> dict:
+    """提权兜底安装：一次 UAC，管理员复制 + 普通权限看护拉起新托盘。
+
+    调用前提：run_local_install 已判定 app_dir 不可写。UAC 同意框在
+    Start-Process -Verb RunAs 时弹出（阻塞到用户决定）：
+    - 批准 → 复制脚本启动，函数返回，调用方退出进程，看护接管后续；
+    - 拒绝 → 终止看护、清理 temp 与面包屑，抛 UpdateError（程序继续运行）。
+    """
+    work = Path(tempfile.gettempdir()) / f"orcsy-elev-{os.getpid()}"
+    staging = work / "staging"
+    marker = work / "copy-done.txt"
+    shutil.rmtree(work, ignore_errors=True)  # 上次失败残留
+    staging.mkdir(parents=True)
+    append_install_log(log, f"==== 开始提权安装 {package.name}"
+                            f"（目标版本 {info['version'] or '未知'}）→ {app_dir}"
+                            f"（安装目录不可写，将请求一次管理员授权） ====")
+    with zipfile.ZipFile(package) as zf:
+        zf.extractall(staging)
+    members = [n for n in sorted(info["members"]) if (staging / n).is_file()]
+    if not members:
+        shutil.rmtree(work, ignore_errors=True)
+        raise UpdateError("更新包解压后没有可安装的文件")
+
+    pid = os.getpid()
+    copier = work / "orcsy-elev-copy.bat"
+    copier.write_text(_copier_bat(staging, app_dir, log, marker, pid, members),
+                      encoding="gbk")
+    wdog = work / "orcsy-elev-watchdog.bat"
+    wdog.write_text(_watchdog_bat_elevated(app_dir, log, update_result_path(),
+                                           app_dir / "orcsy-tray.exe", pid, marker),
+                    encoding="gbk")
+    # 崩溃面包屑：提权复制完成前进程被杀，下次启动如实报「中断」
+    write_update_result({"ok": False, "reason": "install-interrupted"})
+
+    # 先拉管理员复制脚本（UAC 同意框在这里弹出，阻塞到用户决定），批准成功后
+    # 再启动看护——顺序不能反：看护等旧进程退出只给 60 秒，若用户迟迟不点
+    # UAC，先启动的看护会误报「旧进程未退出」退出，复制完成后就没人拉起新版了
+    # cmd /c ""path"" 的双引号形态处理带空格路径（C:\Program Files\...）
+    ps_cmd = (f'Start-Process -FilePath "$env:SystemRoot\\System32\\cmd.exe" '
+              f'-ArgumentList \'/c ""{copier}""\' -Verb RunAs -WindowStyle Hidden')
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True, timeout=300,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        rc, err_text = r.returncode, (r.stderr or b"").decode("utf-8", "replace").strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        rc, err_text = -1, str(e)
+    if rc != 0:
+        # UAC 被拒绝/取消：清理痕迹、如实报错（程序继续运行，可重试）
+        shutil.rmtree(work, ignore_errors=True)
+        clear_update_result()
+        append_install_log(log, f"提权启动失败或被取消（returncode={rc}）：{err_text[:200]}")
+        raise UpdateError(
+            "用户取消了管理员授权（UAC），更新未开始，程序继续运行。可重试更新；"
+            "或把程序迁移到用户可写目录（如 %LOCALAPPDATA%\\Orcsy）后即可零 UAC 静默更新。")
+    proc = start_watchdog(wdog)
+    append_install_log(log, f"UAC 已批准，复制脚本运行中；启动看护脚本 {wdog.name}"
+                            "（普通权限：等复制完成后拉起新托盘）")
+    append_install_log(log, "旧进程即将退出，复制完成后看护脚本将拉起新版（成功不打开日志）")
+    return {"version": info["version"], "replaced": members, "elevated": True,
+            "watchdog": proc is not None}

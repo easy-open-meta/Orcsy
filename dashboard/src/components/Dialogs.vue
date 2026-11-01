@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { NButton, NInput, NInputNumber, NModal, NSelect, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
-import { api, type DirListing, type ModelInfo } from '../api'
+import { api, type DirListing, type ModelInfo, type PermissionMode } from '../api'
 import { refresh, ui, store } from '../store'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
@@ -28,7 +28,52 @@ const pDraft = reactive({
   use_repo: false, repo_url: '', repo_token: '', repo_user: '', repo_pass: '',
   repo_provider: '' as '' | 'github' | 'gitee' | 'gitlab' | 'gitea',
   repo_auto_pull: 0,
+  // 项目级工具开关覆盖：use_tools 关=跟随全局；开=tools 里的逐项布尔全量覆盖
+  use_tools: false, tools: {} as Record<string, boolean>,
+  // 项目级访问权限覆盖：'' = 跟随全局 permissions.mode
+  perm_mode: '' as '' | PermissionMode,
 })
+
+// ---------- 访问权限（人工审批）公共文案 ----------
+const PERM_LABEL: Record<string, string> = {
+  ask_on_change: '变更前询问',
+  autonomous: '自主模式',
+  full_access: '完全访问',
+}
+const permOptions = computed(() => [
+  { label: `跟随全局（当前：${PERM_LABEL[store.state?.permissions_cfg?.mode || 'full_access']}）`, value: '' },
+  { label: '变更前询问（文件/命令变更都询问）', value: 'ask_on_change' },
+  { label: '自主模式（仅高风险询问：删除/移动/执行命令）', value: 'autonomous' },
+  { label: '完全访问（不询问，减少确认次数）', value: 'full_access' },
+])
+
+// ---------- 人工审批面板 ----------
+// 列表直接绑定 store.state.approvals：5s 轮询自动刷新，被处理/超时的条目自动消失
+const approvalVisible = computed({
+  get: () => ui.approvalDlg,
+  set: (v: boolean) => { ui.approvalDlg = v },
+})
+const approvals = computed(() => store.state?.approvals ?? [])
+const alwaysAllow = reactive<Record<string, boolean>>({})  // 审批 id → 「始终允许」勾选
+const responding = ref('')
+
+function fmtWaited(s: number): string {
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  return m < 60 ? `${m} 分 ${s % 60} 秒` : `${Math.floor(m / 60)} 小时 ${m % 60} 分`
+}
+
+async function respondApproval(id: string, approved: boolean): Promise<void> {
+  responding.value = id
+  try {
+    await api.approvalRespond(id, approved, !!alwaysAllow[id])
+    message(approved ? '已批准，任务继续执行' : '已拒绝，模型将调整方案或按受阻收尾',
+            approved ? 'success' : 'warning')
+    delete alwaysAllow[id]
+  } catch (e: any) { message(e.message, 'error') }
+  finally { responding.value = '' }
+  void refresh(true)
+}
 const pVisible = computed({
   get: () => !!ui.projectDlg,
   set: (v: boolean) => { if (!v) ui.projectDlg = null },
@@ -61,6 +106,16 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.repo_pass = pr?.password ?? ''
   pDraft.repo_provider = (pr?.provider as '' | 'github' | 'gitee' | 'gitlab' | 'gitea') ?? ''
   pDraft.repo_auto_pull = pr?.auto_pull_interval ? Math.round(pr.auto_pull_interval / 60) : 0
+  // 工具开关覆盖：项目已有覆盖用其值；否则以当前全局生效值打底（开覆盖即所见即所得）
+  // finish 只是展示行（常开且禁用），不进覆盖 map
+  const pt = p?.tools ?? null
+  pDraft.use_tools = !!pt
+  pDraft.tools = {}
+  for (const t of store.state?.tools_catalog ?? []) {
+    if (t.name === 'finish') continue
+    pDraft.tools[t.name] = pt?.[t.name] ?? store.state?.tools_cfg?.[t.name] ?? true
+  }
+  pDraft.perm_mode = (p?.permission_mode ?? '') as '' | PermissionMode
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
 })
 
@@ -186,6 +241,10 @@ async function saveProject(): Promise<void> {
         ...(pDraft.repo_auto_pull > 0
           ? { auto_pull_interval: Math.max(1, Math.round(pDraft.repo_auto_pull)) * 60 } : {}),
       } : null,
+      // 工具开关覆盖：关=清除（null，跟随全局）；开=全量布尔 map（后端逐项覆盖全局）
+      tools: pDraft.use_tools ? { ...pDraft.tools } : null,
+      // 访问权限覆盖：'' = 跟随全局（null 清除覆盖）
+      permission_mode: pDraft.perm_mode || null,
       original_name: ui.projectDlg.original ?? undefined,
       // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
       ...(ui.projectDlg.original ? {} : {
@@ -483,6 +542,25 @@ async function newFolder(): Promise<void> {
         <span class="hint">未填写的字段自动继承全局「大模型接入」配置</span>
       </div>
     </template>
+    <label style="margin-top:12px">访问权限（人工审批模式）</label>
+    <NSelect v-model:value="pDraft.perm_mode" :options="permOptions" />
+    <div class="hint">询问 = 任务挂起等待看板顶栏「🔔 待审批」批准/拒绝；超时自动拒绝，任务不会永久挂起。</div>
+    <label class="checkline" style="margin-top:12px">
+      <NSwitch v-model:value="pDraft.use_tools" />
+      覆盖 Agent 工具开关（关闭=跟随全局「Agent 工具能力」配置）
+    </label>
+    <template v-if="pDraft.use_tools">
+      <div class="ptools" style="margin-top:6px">
+        <label v-for="t in store.state?.tools_catalog ?? []" :key="t.name" class="checkline ptool-line">
+          <!-- finish 为协议工具：常开且禁用的展示行，不进覆盖 map -->
+          <NSwitch v-if="t.name === 'finish'" size="small" :value="true" disabled />
+          <NSwitch v-else size="small" v-model:value="pDraft.tools[t.name]" />
+          <span class="ptool-name">{{ t.name }}</span>
+          <span class="hint ptool-desc">{{ t.description }}</span>
+        </label>
+      </div>
+      <div class="hint">finish 为任务结束的协议工具，始终可用（开关仅为展示）；其余开关保存后立即生效（下一轮任务按此执行）。</div>
+    </template>
     <label class="checkline" style="margin-top:12px">
       <NSwitch v-model:value="pDraft.use_repo" />
       绑定远程仓库 Issues（把 open Issue 拉取为任务；单向导入，状态不回写）
@@ -665,6 +743,38 @@ async function newFolder(): Promise<void> {
     </div>
     <div class="dlg-actions"><NButton @click="ui.browserDlg = false">取消</NButton></div>
   </NModal>
+
+  <!-- 人工审批面板：列表绑定 store.state.approvals，5s 轮询自动刷新；
+       本面板故意不暂停轮询（store.anyModal 不含 approvalDlg），处理结果即时可见 -->
+  <NModal v-model:show="approvalVisible" preset="card" title="🔔 待人工审批"
+          style="width: min(640px, 92vw)">
+    <div class="hint">
+      Agent 按访问权限模式（变更前询问 / 自主模式）挂起了以下操作，等待你的决定；
+      批准后任务继续执行。超过配置的时限无人响应将自动拒绝。
+    </div>
+    <div v-if="!approvals.length" class="appr-empty">
+      当前没有挂起的审批请求（已处理或超时的条目会自动消失）。
+    </div>
+    <div v-for="a in approvals" :key="a.id" class="appr">
+      <div class="appr-head">
+        <NTag size="small" :bordered="false" type="info">{{ a.project }}</NTag>
+        <NTag size="small" :bordered="false">{{ a.task_id }}</NTag>
+        <NTag size="small" :bordered="false" type="warning">{{ a.tool }}</NTag>
+        <span class="hint appr-wait">已等待 {{ fmtWaited(a.waited_seconds) }} ·
+          {{ PERM_LABEL[a.mode] || a.mode }}</span>
+      </div>
+      <pre class="appr-args">{{ a.args_preview }}</pre>
+      <div class="appr-ops">
+        <NCheckbox v-model:checked="alwaysAllow[a.id]">本任务内始终允许 {{ a.tool }}</NCheckbox>
+        <div class="btnrow">
+          <NButton size="small" :disabled="responding === a.id"
+                   @click="respondApproval(a.id, false)">拒绝</NButton>
+          <NButton size="small" type="primary" :loading="responding === a.id"
+                   @click="respondApproval(a.id, true)">批准</NButton>
+        </div>
+      </div>
+    </div>
+  </NModal>
 </template>
 
 <style scoped>
@@ -685,6 +795,22 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .bitem { padding: 7px 12px; cursor: pointer; font-size: 13px; }
 .bitem:hover { background: rgba(128, 140, 180, 0.16); }
 .bempty { padding: 12px; font-size: 12.5px; color: var(--faint); }
+.ptools { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
+  max-height: 220px; overflow: auto; margin-bottom: 6px; }
+.ptool-line { align-items: baseline; margin-top: 6px; }
+.ptool-name { font-family: Consolas, monospace; font-size: 12px; color: var(--text);
+  flex: none; min-width: 88px; }
+.ptool-desc { flex: 1; min-width: 0; margin-bottom: 0; }
+.appr { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  margin-bottom: 10px; }
+.appr-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.appr-wait { margin-bottom: 0; }
+.appr-args { font: 12px/1.6 Consolas, "Cascadia Mono", monospace; color: var(--dim);
+  background: rgba(128, 128, 160, 0.1); border-radius: 6px; padding: 8px 10px;
+  margin: 8px 0; white-space: pre-wrap; word-break: break-all; max-height: 160px;
+  overflow: auto; }
+.appr-ops { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.appr-empty { color: var(--faint); font-size: 13px; text-align: center; padding: 22px 0; }
 .geditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
 .keditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
 .scan-group { margin-bottom: 10px; }

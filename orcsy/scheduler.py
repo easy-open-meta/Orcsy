@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
-from .config import AppConfig, resolve_llm
+from .config import AppConfig, resolve_llm, resolve_permission_mode, resolve_tools
 from .issues import sync_issues
 from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
 from .skills import skills_base
@@ -36,7 +36,10 @@ class Scheduler:
         self.agents = [
             ProjectAgent(p, resolve_llm(config.llm, p.llm,
                                         context=f"项目 {p.name} 的 llm"),
-                         skills_base=self.skills_dir)
+                         skills_base=self.skills_dir,
+                         tools=resolve_tools(config.tools, p.tools),
+                         permission_mode=resolve_permission_mode(config.permissions, p),
+                         permission_timeout_minutes=config.permissions.timeout_minutes)
             for p in config.projects
             if p.enabled
         ]
@@ -99,7 +102,10 @@ class Scheduler:
             self.agents = [
                 ProjectAgent(p, resolve_llm(new_config.llm, p.llm,
                                             context=f"项目 {p.name} 的 llm"),
-                             skills_base=self.skills_dir)
+                             skills_base=self.skills_dir,
+                             tools=resolve_tools(new_config.tools, p.tools),
+                             permission_mode=resolve_permission_mode(new_config.permissions, p),
+                             permission_timeout_minutes=new_config.permissions.timeout_minutes)
                 for p in new_config.projects
                 if p.enabled
             ]

@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .approvals import args_preview, get_manager, requires_approval
 from .config import LLMConfig, ProjectConfig, TaskStatus
 from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
@@ -23,7 +24,7 @@ from .logging_setup import get_logger
 from .prompts import build_system_prompt
 from .skills import Skill, skill_bodies
 from .task_model import Task, append_progress
-from .tools import FinishSignal, ToolContext
+from .tools import TOGGLEABLE_TOOLS, FinishSignal, ToolContext
 
 WORKTREE_DIR = ".worktree-arranger"
 
@@ -45,14 +46,72 @@ class TaskResult:
 
 
 class TaskExecutor:
-    def __init__(self, project: ProjectConfig, llm: LLMConfig) -> None:
+    def __init__(self, project: ProjectConfig, llm: LLMConfig,
+                 tools: dict[str, bool] | None = None,
+                 permission_mode: str = "full_access",
+                 permission_timeout_minutes: int = 30) -> None:
         self.project = project
         self.llm = llm
+        # 生效的工具开关 map（resolve_tools 的产物）；未列出的工具默认启用
+        self.tools_map: dict[str, bool] = dict(tools or {})
+        # 生效的访问权限模式（resolve_permission_mode 的产物）与审批超时
+        self.permission_mode = permission_mode
+        self.permission_timeout_minutes = permission_timeout_minutes
         self.git = Git(project.path)
         self.is_git_repo = project.path.is_dir() and self.git.is_repo()
         self.worktree = project.path / WORKTREE_DIR
         self.worktree_git = Git(self.worktree)
         self.log = get_logger(f"executor.{project.name}")
+
+    def _make_approval_gate(self, task: Task):
+        """按访问权限模式构建本任务的审批门；full_access 返回 None（零开销）。
+
+        闭包持有 always_allowed 集合：「本任务内始终允许」批准后，同一工具
+        在本任务剩余轮次不再挂起（任务边界即失效，下个任务重新询问）。
+        """
+        if self.permission_mode == "full_access":
+            return None
+        mode = self.permission_mode
+        timeout_minutes = max(1, int(self.permission_timeout_minutes or 30))
+        timeout_s = timeout_minutes * 60
+        manager = get_manager()
+        project_name = self.project.name
+        always_allowed: set[str] = set()
+
+        def gate(name: str, args: dict) -> str | None:
+            if not requires_approval(mode, name) or name in always_allowed:
+                return None
+            brief = args_preview(args, limit=120)
+            append_progress(task.path,
+                            f"⏸ 等待审批：{name} {brief}"
+                            f"（{timeout_minutes} 分钟未响应将自动拒绝）")
+            outcome = manager.request(project_name, task.id, name, args, mode, timeout_s)
+            if outcome.approved:
+                if outcome.always:
+                    always_allowed.add(name)
+                    append_progress(task.path, f"✅ 审批通过：{name}（本任务内后续不再询问）")
+                else:
+                    append_progress(task.path, f"✅ 审批通过：{name}")
+                return None
+            if outcome.timed_out:
+                append_progress(task.path,
+                                f"⏱ 审批超时（{timeout_minutes} 分钟未响应），已自动拒绝：{name}")
+                return ("错误：用户未在时限内响应审批，该操作已被自动拒绝且未执行。"
+                        "不要原样重试；调整方案继续，或调用 finish（action=blocked）说明受阻原因")
+            append_progress(task.path, f"⛔ 审批被拒绝：{name}")
+            return ("错误：用户拒绝了该操作（未执行）。不要原样重试；"
+                    "调整方案继续，或调用 finish（action=blocked）说明受阻原因")
+
+        return gate
+
+    def _enabled_tools(self) -> frozenset[str] | None:
+        """把开关 map 解析成启用工具名集合；全启用时返回 None（不过滤，保持旧行为）。"""
+        if not self.tools_map:
+            return None
+        enabled = {name for name in TOGGLEABLE_TOOLS if self.tools_map.get(name, True)}
+        if len(enabled) == len(TOGGLEABLE_TOOLS):
+            return None
+        return frozenset(enabled | {"finish"})  # finish 是协议工具，恒可用
 
     # ---- 对外 ----
 
@@ -125,14 +184,17 @@ class TaskExecutor:
             self.log.debug("worktree 就绪，工作分支：%s", branch)
 
         # 技能正文按任务新鲜预载：read_skill 工具直接查内存，不碰文件系统
+        enabled = self._enabled_tools()
         ctx = ToolContext(root=work_root, allowed_commands=self.project.allowed_commands,
-                          skills=skill_bodies(skills))
+                          skills=skill_bodies(skills), enabled_tools=enabled,
+                          approval_gate=self._make_approval_gate(task))
         client = LLMClient(self.llm)
         client.reset(build_system_prompt(self.project, guide_content, self.is_git_repo,
-                                         skills=skills))
+                                         skills=skills, tools=enabled,
+                                         permission_mode=self.permission_mode))
 
         try:
-            resp = client.run_task_loop(self._build_task_prompt(task), ctx,
+            resp = client.run_task_loop(self._build_task_prompt(task, enabled), ctx,
                                         max_turns=self.project.max_agent_turns,
                                         on_progress=on_progress)
         except FinishSignal as sig:
@@ -229,7 +291,31 @@ class TaskExecutor:
 
     # ---- 任务提示词 ----
 
-    def _build_task_prompt(self, task: Task) -> str:
+    def _build_task_prompt(self, task: Task,
+                           enabled: frozenset[str] | None = None) -> str:
+        # 工作要求里点名的工具按启用集过滤：被禁的工具不出现在提示词里，
+        # 避免模型反复尝试调用一个不存在的工具浪费轮次
+        def on(*names: str) -> bool:
+            return enabled is None or any(n in enabled for n in names)
+
+        explore = " / ".join(n for n in ("list_dir", "read_file", "find_files", "grep")
+                             if on(n)) or "可用工具"
+        modify = " / ".join(n for n in ("write_file", "edit_file", "multi_edit",
+                                        "delete_file", "move_file") if on(n))
+        lines = [
+            f"1. 先用 {explore} 了解项目结构与相关代码，遵守 AGENT.md 指引。",
+        ]
+        if modify:
+            lines.append(f"2. 用 {modify} 修改代码"
+                         + ("；用 run_command 运行测试或构建验证。" if on("run_command")
+                            else "。"))
+        elif on("run_command"):
+            lines.append("2. 用 run_command 运行测试或构建验证。")
+        lines += [
+            f"{len(lines) + 1}. 验证通过后调用 finish 工具（action=completed）给出结论与提交信息。",
+            f"{len(lines) + 1}. 无法完成时同样调用 finish（action=blocked 或 cannot_do），说明原因。",
+            f"{len(lines) + 1}. 所有路径都使用相对项目根的相对路径。",
+        ]
         return (
             f"# 当前任务\n\n"
             f"- 任务 ID：{task.id}\n"
@@ -238,10 +324,5 @@ class TaskExecutor:
             f"- 类型：{task.kind}\n"
             f"- 标签：{', '.join(task.labels) if task.labels else '无'}\n\n"
             f"## 任务内容\n\n{task.description}\n\n"
-            f"## 工作要求\n\n"
-            f"1. 先用 list_dir / read_file 了解项目结构与相关代码，遵守 AGENT.md 指引。\n"
-            f"2. 用 write_file / edit_file 修改代码；用 run_command 运行测试或构建验证。\n"
-            f"3. 验证通过后调用 finish 工具（action=completed）给出结论与提交信息。\n"
-            f"4. 无法完成时同样调用 finish（action=blocked 或 cannot_do），说明原因。\n"
-            f"5. 所有路径都使用相对项目根的相对路径。"
+            f"## 工作要求\n\n" + "\n".join(lines)
         )
