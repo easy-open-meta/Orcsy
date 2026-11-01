@@ -1,4 +1,4 @@
-"""一键构建：版本号单源化 → PyInstaller 双产物 → Inno Setup 安装包。
+"""一键构建：版本号单源化 → PyInstaller 双产物 → Inno Setup 安装包 + zip 更新包。
 
 版本号唯一来源：orcsy/__init__.py 的 __version__。
 版本规则：功能大变更（新部署方式/新核心功能）→ 次版本 +1（如 0.12.2 → 0.13.0）；
@@ -6,7 +6,12 @@
 本脚本由它生成两份构建期文件（勿手改）：
   - build/exe-version.txt : PyInstaller exe 的 Windows 版本资源
   - build/version.ini     : installer.iss 的 MyAppVersion（ReadIni 读取）
-之后依次执行 PyInstaller 与 ISCC，保证 exe 自报版本 = 安装包版本。
+之后依次执行 PyInstaller、ISCC 与 zip 打包，保证 exe 自报版本 = 安装包版本。
+
+产物：
+  - build/Setup/orcsy-setup-{ver}.exe   首次安装用 Inno 安装包（允许 UAC）
+  - build/Setup/orcsy-update-{ver}.zip  自更新用 zip 更新包（手动导入/在线更新共用，
+    零 UAC 换名安装；发布 Release 时须将此 zip 一并作为附件上传）
 
 用法：uv run python build/build.py
 """
@@ -17,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +98,28 @@ def build_frontend() -> None:
     run([sys.executable, "tools/gen_page.py"], cwd=ROOT)
 
 
+def build_update_zip(ver: tuple[int, int, int]) -> Path:
+    """打包 zip 更新包（自更新载体）：两个 exe + README，扁平结构。
+
+    成员名与 orcsy/updater.py 的白名单一致：orcsy-web.exe / orcsy-tray.exe /
+    README*；文件名 orcsy-update-{ver}.zip 供版本识别（同/异版本均允许安装）。
+    """
+    dist = ROOT / "dist"
+    out_dir = BUILD / "Setup"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"orcsy-update-{ver[0]}.{ver[1]}.{ver[2]}.zip"
+    members = [dist / "orcsy-web.exe", dist / "orcsy-tray.exe",
+               ROOT / "README.md", ROOT / "README.zh-CN.md"]
+    missing = [m.name for m in members if not m.is_file()]
+    if missing:
+        sys.exit(f"zip 更新包缺少源文件：{', '.join(missing)}")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        for m in members:
+            zf.write(m, arcname=m.name)
+    print(f"zip 更新包：{out}")
+    return out
+
+
 def main() -> int:
     ver = read_version()
     print(f"版本号来源 orcsy/__init__.py：{'.'.join(map(str, ver))}")
@@ -110,8 +138,11 @@ def main() -> int:
         sys.exit("未找到 ISCC.exe（Inno Setup 6），请先安装")
     run([iscc, "installer.iss"], cwd=BUILD)
 
+    zip_pkg = build_update_zip(ver)
     setup = BUILD / "Setup" / f"orcsy-setup-{ver[0]}.{ver[1]}.{ver[2]}.exe"
-    print(f"\n完成：{setup}")
+    print(f"\n完成：\n  首次安装包 {setup}\n  自更新包   {zip_pkg}"
+          f"\n发布 Release 时两者都作为附件上传（在线更新只认 orcsy-update-*.zip）。")
+    print("发布命令（exe + zip 一并上传）：uv run python build/release.py")
     print("校验：dist exe --version 与安装包文件版本应同为 "
           f"{ver[0]}.{ver[1]}.{ver[2]}")
     return 0

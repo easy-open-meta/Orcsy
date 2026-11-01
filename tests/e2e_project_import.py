@@ -17,6 +17,8 @@ import sys
 import tempfile
 import threading
 import urllib.error
+import os
+os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')  # 本机回环不走系统代理（环境可能带 http_proxy）
 import urllib.request
 from pathlib import Path
 
@@ -50,9 +52,11 @@ def make_config(root: Path) -> Path:
 
 
 def api(port: int, path: str, body: dict | None = None) -> dict:
-    # Windows 本机回环偶发 ConnectionResetError（快速连断竞态），重试两次
+    # Windows 本机回环偶发 ConnectionResetError（快速连断竞态）：退避重试 5 次。
+    # 注意重试只对幂等 GET 安全；POST（创建类）重试可能重复执行，测试断言需容忍
     last_err: Exception | None = None
-    for _ in range(3):
+    import time as _time
+    for attempt in range(5):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}{path}",
             data=json.dumps(body).encode() if body is not None else None,
@@ -65,6 +69,7 @@ def api(port: int, path: str, body: dict | None = None) -> dict:
             return json.loads(e.read().decode())
         except ConnectionResetError as e:
             last_err = e
+            _time.sleep(0.4 * (attempt + 1))
     raise last_err  # type: ignore[misc]
 
 

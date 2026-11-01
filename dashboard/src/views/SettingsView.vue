@@ -2,8 +2,8 @@
 import { NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import { api, type ModelInfo } from '../api'
-import { openGuide, openProjectEdit, openProjectNew, openTaskNew, store } from '../store'
-import { fmtTokens } from '../utils'
+import { beginRestartWait, openDirBrowser, openGuide, openProjectEdit, openProjectNew, openTaskNew, store } from '../store'
+import { cmpVersion, fmtTokens } from '../utils'
 
 const message = () => window.$message
 
@@ -15,10 +15,15 @@ const draft = reactive({
   enable_thinking: false, timeout_seconds: 300,
   interval: 300, parallel: 1, port: 5116, retention: 7,
 })
+// ---- 软件更新配置草稿 ----
+const updDraft = reactive({ repo: '', token: '', auto_check: true })
 let inited = false
 watch(() => store.state, (s) => {
   if (!s || inited) return
   inited = true
+  updDraft.repo = s.update_cfg?.repo ?? ''
+  updDraft.token = s.update_cfg?.token ?? ''
+  updDraft.auto_check = s.update_cfg?.auto_check ?? true
   draft.provider = s.llm.provider
   // 清洗历史 bug 写入的模型名：下拉标注「（977K）」曾被当成 id 存进配置
   draft.model = s.llm.model.replace(/（\d+K）$/, '')
@@ -90,6 +95,76 @@ async function openFolder(p: { name: string; path: string }): Promise<void> {
     message()?.(`已打开 ${p.path}`)
   } catch (e: any) { message()?.(e.message, 'error') }
 }
+
+// ---- 软件更新：保存更新源 / 手动检查 / 手动导入本地安装包 ----
+const updSaving = ref(false)
+async function saveUpdate(): Promise<void> {
+  updSaving.value = true
+  try {
+    await api.config({ update: {
+      repo: updDraft.repo.trim(), token: updDraft.token, auto_check: updDraft.auto_check,
+    } })
+    message()?.('更新配置已保存')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { updSaving.value = false }
+}
+
+const updChecking = ref(false)
+async function checkUpdateNow(): Promise<void> {
+  updChecking.value = true
+  try {
+    const r = await api.updateCheck()
+    if (r.phase === 'available') message()?.(`发现新版本 v${r.latest}，可点顶部「更新到 ${r.latest}」安装`, 'success')
+    else message()?.(`已是最新版本（v${r.current}）`, 'success')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { updChecking.value = false }
+}
+
+// ---- 手动导入本地安装包：选 zip → 版本对照（同/异版本均允许） → 零 UAC 静默安装 ----
+const localPkg = ref('')
+const pkgInstalling = ref(false)
+function pickPackage(): void {
+  openDirBrowser('', (p) => { localPkg.value = p }, 'file')
+}
+const pkgName = computed(() => localPkg.value.split(/[\\/]/).pop() || '')
+const pkgVersion = computed(() => {
+  const m = pkgName.value.match(/(\d+\.\d+(?:\.\d+){0,2})/)
+  return m ? m[1] : ''
+})
+const pkgTag = computed(() => {
+  const cur = store.state?.version || ''
+  if (!pkgVersion.value)
+    return { type: 'warning' as const, text: '版本未知（文件名未识别到版本号，仍可安装）' }
+  const c = cmpVersion(pkgVersion.value, cur)
+  if (c === 0) return { type: 'default' as const, text: `同版本 v${pkgVersion.value}（覆盖重装）` }
+  return c > 0
+    ? { type: 'success' as const, text: `升级 v${cur} → v${pkgVersion.value}` }
+    : { type: 'warning' as const, text: `降级 v${cur} → v${pkgVersion.value}` }
+})
+function installPackage(): void {
+  if (!localPkg.value) return
+  const target = pkgVersion.value
+  window.$dialog?.warning({
+    title: target ? `安装更新包 v${target}` : '安装更新包（版本未知）',
+    content: `目标文件：${localPkg.value}\n\n注意：若正在执行任务会被中断。安装在后台静默进行`
+      + '（全程无 UAC 弹窗，装回程序当前目录），完成后应用自动重启，本页面自动刷新。'
+      + '升级过程中出错会写安装日志并自动打开日志文档；全程无错误则不打开日志。',
+    positiveText: '安装更新包',
+    negativeText: '取消',
+    onPositiveClick() {
+      pkgInstalling.value = true
+      api.updateInstall(localPkg.value)
+        .then(() => {
+          // 挂目标版本（未知按当前版本核对）；遮罩立即出现，应用回归后自动刷新
+          beginRestartWait(target || store.state?.version || '')
+          message()?.('正在静默升级，应用将短暂离线并自动重启', 'success')
+        })
+        .catch((e: any) => { message()?.(e.message, 'error') })
+        .finally(() => { pkgInstalling.value = false })
+    },
+  })
+}
+
 
 // ---- 拉取 Issues：项目绑定远程仓库后，把 open Issue 导入任务队列 ----
 const syncing = ref('')
@@ -223,6 +298,38 @@ const providerOptions = [
         <NSwitch :value="store.state.app_autostart.enabled" @update:value="toggleAutostart" />
         开机自动启动（写入当前用户注册表）
       </label>
+      <label class="checkline" style="margin-top:10px">
+        <NSwitch v-model:value="updDraft.auto_check" />
+        启动时自动检查更新（Gitee Release 源）
+      </label>
+      <div class="frow">
+        <div class="f2"><label>更新源仓库 URL（Gitee，Release 附件放安装包）</label>
+          <NInput v-model:value="updDraft.repo" placeholder="https://gitee.com/xxx/orcsy" /></div>
+        <div class="f1"><label>访问 token（私有仓库用）</label>
+          <NInput v-model:value="updDraft.token" type="password" show-password-on="click" placeholder="可选" /></div>
+      </div>
+      <div class="sfoot">
+        <NButton :loading="updSaving" @click="saveUpdate">保存更新配置</NButton>
+        <NButton :loading="updChecking" @click="checkUpdateNow">检查更新</NButton>
+      </div>
+      <div class="pkg-block">
+        <div class="pkg-row">
+          <div class="f2">
+            <label>手动导入本地安装包（orcsy-update-*.zip；同版本覆盖、升/降级均可）</label>
+            <NInput :value="localPkg" readonly placeholder="尚未选择更新包文件" />
+          </div>
+          <div class="f0 pkg-btns">
+            <NButton @click="pickPackage">选择安装包…</NButton>
+            <NButton type="primary" :loading="pkgInstalling" :disabled="!localPkg"
+                     @click="installPackage">安装更新包</NButton>
+          </div>
+        </div>
+        <div v-if="localPkg" class="pkg-meta">
+          <NTag size="small" :bordered="false" :type="pkgTag.type">{{ pkgTag.text }}</NTag>
+          <span class="hint">{{ pkgName }} · 安装全程静默无 UAC，完成后页面自动刷新；
+            出错自动打开安装日志，无错误则不打开</span>
+        </div>
+      </div>
     </NCard>
 
     <NCard title="📁 受管项目" size="small" class="scard">
@@ -263,6 +370,11 @@ const providerOptions = [
 .f1 { flex: 1; } .f14 { flex: 1.4; } .f2 { flex: 2; } .f0 { flex: none; }
 .btnrow { display: flex; gap: 8px; }
 .sfoot { display: flex; justify-content: flex-end; }
+.pkg-block { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.pkg-row { display: flex; gap: 10px; align-items: flex-end; }
+.pkg-row > div { display: flex; flex-direction: column; gap: 4px; }
+.pkg-btns { flex-direction: row !important; gap: 8px; padding-bottom: 1px; }
+.pkg-meta { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 .checkline { display: flex; gap: 10px; align-items: center; }
 .prow { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
 .prow-head { display: flex; gap: 6px; align-items: center; }

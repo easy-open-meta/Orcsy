@@ -77,7 +77,9 @@ Name: "initdata"; Description: "初始化示例任务（首次安装）；config
 Filename: "{app}\{#MyAppExeName}"; Parameters: "init --no-config --dir ""{code:RealUserAppData}\Orcsy"""; Tasks: initdata; Flags: runhidden
 ; 勾选自启动：写 HKCU Run 键（托盘 exe 静默后台）
 Filename: "{app}\{#MyAppNameTray}"; Parameters: "web --tray-autostart-on"; Tasks: autostart; Flags: runhidden
-Filename: "{app}\{#MyAppNameTray}"; Parameters: "--tray"; Description: "启动任务编排系统（托盘后台）"; Flags: nowait postinstall skipifsilent
+; 不带 skipifsilent：静默安装（自更新）结束后也自动拉起托盘——文件已就位，
+; 由安装器启动时序确定，避免更新看护与安装器赛跑
+Filename: "{app}\{#MyAppNameTray}"; Parameters: "--tray"; Description: "启动任务编排系统（托盘后台）"; Flags: nowait postinstall
 
 [UninstallRun]
 ; 卸载时清掉开机自启注册表值（Run 键本身是共享的，只删自己的值）；

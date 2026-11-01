@@ -21,6 +21,8 @@ from orcsy.config import (AppConfig, LLMConfig, LoggingConfig, ProjectConfig,
                           SchedulerConfig, WebConfig)
 from orcsy.scheduler import Scheduler
 from orcsy.web import AppState
+import os
+os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')  # 本机回环不走系统代理（环境可能带 http_proxy）
 
 ISSUES_PAGE1 = [
     {"number": 11, "title": "修复登录超时", "body": "超时 30 秒即断开",

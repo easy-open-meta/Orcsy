@@ -31,6 +31,19 @@ export interface ProjectT {
   /** 远程仓库绑定（Issues 导入）；null = 未绑定；认证 token 与账号密码二选一 */
   repo?: { url: string; token?: string; username?: string
            password?: string; provider?: string; api_base?: string } | null
+  /** 程序自更新状态机 */
+  update?: {
+    phase: 'idle' | 'checking' | 'latest' | 'available' | 'downloading'
+           | 'applying' | 'restarting' | 'error'
+    message?: string
+    current?: string
+    latest?: string
+    notes?: string
+    asset_name?: string
+    percent?: number
+    install_log_tail?: string
+    target_version?: string | null
+  }
   is_git_repo: boolean
   guide_file_path: string
   guide_exists: boolean
@@ -52,6 +65,10 @@ export interface SkillT {
 export interface AppStateT {
   version: string
   config_path: string
+  /** 程序自更新状态机（与 ProjectT.update 同构；看板轮询取这里） */
+  update?: ProjectT['update']
+  /** 上次升级结果：后端一次性曝光（读后即清）；ok=false 时弹窗并已自动打开安装日志 */
+  update_result?: { ok: boolean; message?: string } | null
   llm: {
     provider: 'openai' | 'anthropic'
     model: string
@@ -74,6 +91,7 @@ export interface AppStateT {
   }
   scheduler_cfg: { interval_seconds: number; max_parallel_agents: number }
   web_cfg: { host: string; port: number; open_browser: boolean }
+  update_cfg: { repo: string; token: string; auto_check: boolean }
   logging: { retention_days: number }
   app_autostart: { enabled: boolean }
   skills_dir: string
@@ -93,6 +111,8 @@ export interface DirListing {
   path: string
   parent: string | null
   dirs: string[]
+  /** 目录下的文件（完整路径）；文件选择模式用 */
+  files?: string[]
   note?: string
 }
 
@@ -163,6 +183,7 @@ export const api = {
       ok: boolean; message: string; reply: string; elapsed_seconds: number
     }>,
   browse: (path: string) => post('/api/browse', { path }) as Promise<DirListing>,
+
   probe: (path: string) =>
     post('/api/probe', { path }) as Promise<{ ok: boolean; stack: string; run: string; test: string }>,
   mkdir: (path: string) => post('/api/mkdir', { path }) as Promise<{ ok: boolean; path: string }>,
@@ -202,4 +223,15 @@ export const api = {
   skillOpenFolder: (name: string) => post('/api/skill/open-folder', { name }),
   config: (p: Record<string, unknown>) => post('/api/config', p),
   autostart: (enabled: boolean) => post('/api/app-autostart', { enabled }),
+  updateCheck: () => post('/api/update/check', {}) as Promise<{
+    ok: boolean; phase: string; has_update: boolean; latest: string
+    current: string; notes: string; asset_name: string; download_url: string
+  }>,
+  updateApply: () => post('/api/update/apply', {}) as Promise<{
+    ok: boolean; phase: string; message: string
+  }>,
+  /** 手动导入本地 zip 更新包（服务端本地路径，非上传）；同/异版本均允许 */
+  updateInstall: (path: string) => post('/api/update/install', { path }) as Promise<{
+    ok: boolean; phase: string; message: string; target: string | null
+  }>,
 }

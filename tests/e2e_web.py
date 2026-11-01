@@ -13,6 +13,8 @@ import tempfile
 import threading
 import time
 import urllib.parse
+import os
+os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')  # 本机回环不走系统代理（环境可能带 http_proxy）
 import urllib.request
 from pathlib import Path
 
@@ -165,6 +167,15 @@ def main() -> int:
         g2 = api(5199, "/api/task?project=webproj&id=P2-next")
         assert g2["ok"] and g2["archived"] is False and g2["description"] == "x", g2
         print("ok: Web 建任务 → 状态可见，待办 archived=false 可编辑")
+
+        # 4. 自更新 API：源码运行被门禁拦下（400 + 指引），状态含一次性结果字段
+        r = api(5199, "/api/update/install", {"path": "x/orcsy-update-0.15.0.zip"})
+        assert not r.get("ok") and "源码运行" in r.get("message", ""), r
+        r = api(5199, "/api/update/install", {})
+        assert not r.get("ok"), r  # 门禁先行：无路径/无包都被如实拒绝，不静默
+        s = api(5199, "/api/state")
+        assert "update_result" in s
+        print("ok: /api/update/install 门禁如实报错（源码运行给指引），update_result 字段存在")
 
         server.shutdown()
         print("\nWeb 端到端全部通过 ✅")

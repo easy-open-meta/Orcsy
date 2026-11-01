@@ -1,3 +1,15 @@
+// 版本号比较：返回 >0 / 0 / <0（'V0.14.0' 与 '0.14' 等形态均可，缺段按 0 补）
+export function cmpVersion(a: string, b: string): number {
+  const pa = (a || '').replace(/^[Vv]/, '').split(/[.\-+ ]+/).map(x => parseInt(x) || 0)
+  const pb = (b || '').replace(/^[Vv]/, '').split(/[.\-+ ]+/).map(x => parseInt(x) || 0)
+  const len = Math.max(pa.length, pb.length)
+  for (let i = 0; i < len; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d) return d
+  }
+  return 0
+}
+
 // 相对时间显示：后端时间格式 "YYYY-MM-DD HH:MM[:SS]"
 export function relTime(s: string | undefined | null): string {
   if (!s) return '—'

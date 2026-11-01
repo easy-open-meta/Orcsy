@@ -25,6 +25,12 @@ API（均为 GET/POST JSON）：
   POST /api/config       保存模型/调度/看板配置 {llm:{...}, scheduler:{...}, web:{...}}
                          保存后写回 config.yaml 并热重载调度器
 
+程序自更新（零 UAC 静默换名安装，详见 orcsy/updater.py）：
+  POST /api/update/check   检查 Gitee Release 是否有新版本
+  POST /api/update/apply   在线更新：下载 zip 更新包后走本地安装引擎
+  POST /api/update/install 手动导入本地 zip 更新包 {path}，后台线程静默安装
+                           （校验后立即返回；成功自动重启，出错写安装日志并自动打开）
+
 技能库（存于配置目录 skills/，绝不写入项目目录）：
   GET  /api/skill          读取单个技能 ?name=（编辑弹窗用：字段+正文）
   POST /api/skill          新建/更新技能 {original_name?, name, description, scope, enabled, body}
@@ -42,6 +48,8 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+import time
 import re
 import subprocess
 import sys
@@ -55,8 +63,10 @@ from . import __version__
 from . import skills as skills_lib
 from .agent import ProjectAgent
 from .config import (AppConfig, LLMConfig, ProjectConfig, SchedulerConfig,
-                     TaskStatus, WebConfig, normalize_llm_override, resolve_llm)
+                     TaskStatus, UpdateConfig, WebConfig, normalize_llm_override,
+                     resolve_llm)
 from .issues import IssueError, normalize_repo, sync_issues
+from . import updater
 from .llm import LLMError, list_models, test_connection
 from .logging_setup import get_logger
 from .scheduler import Scheduler
@@ -108,6 +118,23 @@ class AppState:
                                  skills_base=self.skills_dir)
             for p in config.projects
         }
+        # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
+        self.update_state: dict = {"phase": "idle"}
+        # 安装日志：<配置目录>/logs/install.log，升级全程留痕（仅出错时自动打开）
+        self.install_log = updater.install_log_path(config)
+        # 上次升级结果（看护脚本写、启动时消费）；一次曝光后清空
+        self.update_result: dict | None = None
+        self._consume_update_result()
+        if config.update.auto_check and config.update.repo:
+            threading.Thread(target=self._auto_update_check, daemon=True,
+                             name="update-check").start()
+
+    def _auto_update_check(self) -> None:
+        """启动后静默检查一次更新：任何失败都只记日志，不打扰使用。"""
+        try:
+            self.update_check({})
+        except Exception:  # noqa: BLE001 — 自检失败不影响启动
+            log.info("启动自动检查更新失败（可忽略，可在设置页手动重试）")
 
     # ---- 查询 ----
 
@@ -163,6 +190,9 @@ class AppState:
                 "timeout_seconds": self.config.llm.timeout_seconds,
             },
             "scheduler": self.scheduler.status(),
+            "update": self._healed_update_state(),
+            # 上次升级结果：一次性曝光给前端弹窗（读后即清，避免轮询反复弹）
+            "update_result": self._pop_update_result(),
             "scheduler_cfg": {
                 "interval_seconds": self.config.scheduler.interval_seconds,
                 "max_parallel_agents": self.config.scheduler.max_parallel_agents,
@@ -171,6 +201,11 @@ class AppState:
                 "host": self.config.web.host,
                 "port": self.config.web.port,
                 "open_browser": self.config.web.open_browser,
+            },
+            "update_cfg": {
+                "repo": self.config.update.repo,
+                "token": self.config.update.token,
+                "auto_check": self.config.update.auto_check,
             },
             "logging": {"retention_days": self.config.logging.retention_days},
             "app_autostart": self.app_autostart_status(),
@@ -463,7 +498,11 @@ class AppState:
         return name
 
     def browse_dir(self, data: dict) -> dict:
-        """列出指定目录的子目录，供前端逐级选择本地路径。"""
+        """列出指定目录的子目录与文件，供前端逐级选择本地路径/文件。
+
+        dirs 恒返回（目录选择器用）；files 仅在选择文件模式时有意义，
+        由前端按需展示。两者合计上限 300 项。
+        """
         raw = str(data.get("path", "")).strip()
         p = Path(raw).resolve() if raw else None
 
@@ -477,20 +516,24 @@ class AppState:
                     roots.append(str(drive))
             home = Path.home()
             return {"ok": True, "path": "", "parent": None,
-                    "dirs": roots + [str(home / "Documents"), str(home / "Desktop")]}
+                    "dirs": roots + [str(home / "Documents"), str(home / "Desktop")],
+                    "files": []}
 
-        dirs = []
+        dirs, files = [], []
         try:
             for child in sorted(p.iterdir(), key=lambda x: x.name.lower()):
-                if child.is_dir() and child.name not in _DIR_IGNORE and not child.name.startswith("$"):
-                    dirs.append(str(child))
-                if len(dirs) >= 300:
+                if child.is_dir():
+                    if child.name not in _DIR_IGNORE and not child.name.startswith("$"):
+                        dirs.append(str(child))
+                else:
+                    files.append(str(child))
+                if len(dirs) + len(files) >= 300:
                     break
         except PermissionError:
             return {"ok": True, "path": str(p), "parent": None, "dirs": [],
-                    "note": "无权限读取该目录"}
+                    "files": [], "note": "无权限读取该目录"}
         parent = str(p.parent) if p.parent != p else None
-        return {"ok": True, "path": str(p), "parent": parent, "dirs": dirs}
+        return {"ok": True, "path": str(p), "parent": parent, "dirs": dirs, "files": files}
 
     def probe_project_api(self, data: dict) -> dict:
         """静态探测目录的技术栈与常用命令（新建项目对话框自动预填用）。"""
@@ -707,6 +750,173 @@ class AppState:
         return {"ok": True, "path": str(path)}
 
     # ---- AGENT.md 编辑 ----
+
+    # ---- 程序自更新 ----
+
+    def _set_update_state(self, state: dict) -> None:
+        """记录更新状态机快照；带时间戳供超时自愈判断。"""
+        self.update_state = {**state, "ts": time.time()}
+
+    def _healed_update_state(self) -> dict:
+        """读侧超时自愈：进行中状态超过 120 秒（如静默安装被外部打断、进程
+        异常残留）时转为 error，避免看板按钮永久卡在「安装中」。
+        附带安装日志尾部，静默失败可查。"""
+        upd = dict(self.update_state)
+        if upd.get("phase") in ("downloading", "applying", "restarting") \
+                and time.time() - upd.get("ts", 0) > 120:
+            tail = updater.read_install_log(self.install_log)[-800:]
+            upd = {"phase": "error",
+                   "message": "更新流程超时未完成——请重试，或使用设置页的手动导入安装包",
+                   "install_log_tail": tail}
+        return upd
+
+    def _pop_update_result(self) -> dict | None:
+        res, self.update_result = self.update_result, None
+        return res
+
+    def _consume_update_result(self) -> None:
+        """启动时消费上次升级的结果标记（仅 Windows 安装版）。
+
+        成功静默（不打开日志、不打扰）；失败如实弹出并自动打开安装日志文档。
+        看护脚本可能在拉起新版后才补写结果，因此标记允许存在少量延迟。
+        """
+        if not updater.can_apply():
+            return  # 源码/Docker 运行不参与换名安装，不消费标记
+        res = updater.read_update_result()
+        if res is None:
+            return
+        updater.clear_update_result()
+        if res.get("ok"):
+            updater.append_install_log(self.install_log, "上次升级成功，新版本已启动")
+            return
+        reason = str(res.get("reason") or "unknown")
+        msg = updater.result_message(reason)
+        updater.append_install_log(self.install_log, f"上次升级未完成：{msg}")
+        updater.open_install_log(self.install_log)  # 出错才自动打开日志文档
+        self.update_result = {"ok": False, "message": msg}
+        self._set_update_state({"phase": "error", "message": msg,
+                                "install_log_tail":
+                                    updater.read_install_log(self.install_log)})
+
+    def update_check(self, data: dict) -> dict:
+        """检查 Gitee Release 是否有新版本；结果写入 update_state 供头部展示。"""
+        self._set_update_state({"phase": "checking"})
+        try:
+            info = updater.check_update(
+                {"repo": self.config.update.repo, "token": self.config.update.token},
+                current_version=__version__)
+        except updater.UpdateError as e:
+            self._set_update_state({"phase": "error", "message": str(e)})
+            raise ValueError(str(e)) from e
+        phase = "available" if info["has_update"] else "latest"
+        self._set_update_state({"phase": phase, **info})
+        log.info("检查更新：当前 %s，最新 %s%s", __version__, info["latest"],
+                 "（可更新）" if info["has_update"] else "（已是最新）")
+        return {"ok": True, "phase": phase, **info}
+
+    def _reject_if_update_running(self) -> None:
+        """防重入：更新周期进行中（下载/安装/重启，120 秒内）拒绝再次触发，
+        避免重复点击反复重置状态时间戳、导致看板永久卡「安装中」。"""
+        st = self.update_state
+        if st.get("phase") in ("downloading", "applying", "restarting") \
+                and time.time() - st.get("ts", 0) < 120:
+            raise ValueError("已有一次更新正在进行（正在静默安装），请稍候再试；"
+                             "若长时间未完成请刷新页面后重试")
+
+    def _start_install_thread(self, package: Path) -> dict:
+        """校验通过后启动后台安装线程并立即返回（零 UAC 换名安装）。
+
+        响应送达后线程开始换名落位；成功则旧进程退出、看护拉起新版，
+        前端遮罩等待 /api/state 回归后自动刷新。失败在线程里写日志、弹窗
+        并自动打开安装日志（成功不打开）。
+        """
+        self._set_update_state({"phase": "applying", "asset_name": package.name,
+                                "target_version":
+                                    updater.detect_installer_version(package.name)})
+        threading.Thread(target=self._install_worker, args=(package,),
+                         daemon=True, name="update-install").start()
+        log.info("Web 触发静默升级：更新包 %s（后台线程换名落位，零 UAC）", package.name)
+        return {"ok": True, "phase": "applying", "target":
+                updater.detect_installer_version(package.name),
+                "message": "已开始静默升级，应用将短暂离线并自动重启"}
+
+    def _install_worker(self, package: Path) -> None:
+        """后台安装线程：换名落位 → 成功退出进程由看护重启；失败弹窗+开日志。"""
+        try:
+            updater.run_local_install(package, Path(sys.executable).parent,
+                                      self.install_log)
+        except updater.UpdateError as e:
+            # 要求：错误绝不静默吞掉——写安装日志 + 自动打开日志 + 前端弹窗
+            updater.append_install_log(self.install_log, f"静默升级失败：{e}")
+            updater.open_install_log(self.install_log)  # 仅出错时打开
+            self._set_update_state({
+                "phase": "error", "message": str(e),
+                "install_log_tail": updater.read_install_log(self.install_log)})
+            return
+        self._set_update_state({"phase": "restarting", "asset_name": package.name})
+        # 换名落位已完成：收尾后退出本进程，看护脚本等端口释放即拉起新版。
+        # 不走 atexit：os._exit 前手动停调度/收子进程；托盘图标随进程消失。
+        self._exit_for_restart()
+
+    def _exit_for_restart(self) -> None:
+        try:
+            self.scheduler.stop()
+        except Exception:  # noqa: BLE001 — 退出路径不因清理失败而留下活进程
+            pass
+        try:
+            from .tools import kill_running_children
+
+            kill_running_children()
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.3)  # 让在途 HTTP 响应发完
+        os._exit(0)
+
+    def update_apply(self, data: dict) -> dict:
+        """应用更新（在线）：下载 check_update 确认的 zip 更新包后走本地安装引擎。
+
+        成功返回 applying——下载完成即转后台安装线程，进程随后由看护重启。
+        """
+        self._reject_if_update_running()
+        if not updater.can_apply():
+            raise ValueError(updater.apply_gate_message())
+        dl_url = self.update_state.get("download_url")
+        if not dl_url:
+            raise ValueError("请先检查更新（在线更新需要先确认可用的新版本）")
+        try:
+            self._set_update_state({"phase": "downloading", "percent": 0})
+            dest = Path(tempfile.gettempdir())
+            name = self.update_state.get("asset_name") or "orcsy-update-download.zip"
+            path = updater.download_installer(
+                dl_url, dest, progress_cb=lambda pct: self.update_state.update(
+                    {"phase": "downloading", "percent": pct}),
+                filename=name)
+            return self._start_install_thread(path)
+        except updater.UpdateError as e:
+            self._set_update_state({"phase": "error", "message": str(e)})
+            raise ValueError(str(e)) from e
+
+    def update_install(self, data: dict) -> dict:
+        """手动导入本地 zip 更新包：校验后后台线程静默安装（零 UAC）。
+
+        同版本覆盖、升/降级均允许（确认弹窗已展示版本对照）；装回当前程序
+        所在目录。成功自动重启并刷新页面；出错写安装日志并自动打开日志文档。
+        """
+        self._reject_if_update_running()
+        if not updater.can_apply():
+            raise ValueError(updater.apply_gate_message())
+        raw = str(data.get("path") or "").strip()
+        if not raw:
+            raise ValueError("请先选择更新包文件（orcsy-update-*.zip）")
+        package = Path(raw)
+        try:
+            info = updater.validate_package(package)
+            updater.check_writable(Path(sys.executable).parent)
+        except updater.UpdateError as e:
+            raise ValueError(str(e)) from e
+        log.info("Web 手动导入更新包：%s（版本 %s，同/异版本均允许）",
+                 package.name, info["version"] or "未知")
+        return self._start_install_thread(package)
 
     def app_autostart_status(self) -> dict:
         from .autostart import is_enabled
@@ -954,6 +1164,18 @@ class AppState:
                 raise ValueError("日志保留天数应为 0~365（0 表示关闭自动归档清理）")
             self.config.logging.retention_days = rd
 
+        # 软件更新源：分块保存，只带 update 的请求不触碰其它配置
+        if "update" in data:
+            upd = data.get("update") or {}
+            repo = str(upd.get("repo") or "").strip()
+            if repo and not repo.startswith(("http://", "https://")):
+                raise ValueError("更新源仓库 URL 必须以 http(s):// 开头")
+            self.config.update = UpdateConfig(
+                repo=repo,
+                token=str(upd.get("token", self.config.update.token)),
+                auto_check=bool(upd.get("auto_check", self.config.update.auto_check)),
+            )
+
         self.scheduler.reload_config(self.config)
         self._apply_config(self.config)
         self._save_config(self.config)
@@ -1102,6 +1324,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.open_skill_folder(body))
             elif path == "/api/app-autostart":
                 self._json(self.state.set_app_autostart(body))
+            elif path == "/api/update/check":
+                self._json(self.state.update_check(body))
+            elif path == "/api/update/apply":
+                self._json(self.state.update_apply(body))
+            elif path == "/api/update/install":
+                self._json(self.state.update_install(body))
             elif path == "/api/config":
                 self._json(self.state.save_settings(body))
             else:

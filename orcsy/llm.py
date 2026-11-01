@@ -20,6 +20,7 @@ import time
 
 import httpx
 
+from . import USER_AGENT
 from .config import LLMConfig
 from .logging_setup import get_logger
 from .tools import (
@@ -149,7 +150,7 @@ def list_models(provider: str, base_url: str, api_key: str,
         url = _anthropic_base(base_url) + "/models"
     else:
         url = base_url.rstrip("/") + "/models"
-    headers = _auth_headers(provider, api_key)
+    headers = {"User-Agent": USER_AGENT, **_auth_headers(provider, api_key)}
     try:
         resp = httpx.get(url, headers=headers, timeout=min(max(timeout_seconds, 5), 30))
     except httpx.HTTPError as e:
@@ -556,7 +557,8 @@ class LLMClient:
         try:
             resp = httpx.post(
                 url, content=body.encode("utf-8"),
-                headers={**headers, "Content-Type": "application/json"},
+                headers={"User-Agent": USER_AGENT, **headers,
+                         "Content-Type": "application/json"},
                 timeout=self.cfg.timeout_seconds,
             )
         except httpx.HTTPError as e:

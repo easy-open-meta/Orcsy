@@ -4,7 +4,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.13.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.15.2-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -33,6 +33,7 @@
 - **Markdown 即任务** —— 每个任务一个 `.md` 文件，frontmatter 写元信息、正文写需求与验收标准，纯文本可版本化、可人工编辑。
 - **每项目一个专属 Agent** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行；支持绑定**专属模型**（部分覆盖全局 llm 配置，未写字段自动继承），只有绑定的模型处理该项目的任务。
 - **仓库 Issues 集成** —— 项目可绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），看板一键把 open Issue 拉取为任务：优先级默认 P2，Issue 带 P0~P4 标签则按标签；带来源标注，含归档去重；单向导入，Issue 状态不回写。
+- **程序自更新** —— 从 Gitee Release 检查/下载新版本（启动自动检查可关），一键静默安装并自动重启（Windows 安装版；Docker/Linux 按各自方式升级）。
 - **真实执行，安全禁锢** —— 文件工具锁定在项目 worktree 内、命令白名单、轮数上限；git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
 - **开箱即用的项目接入** —— 新建/导入现有项目只新增 `tasks/` 与 `AGENT.md`，不动项目其它文件；自动探测技术栈（Node/Python/Rust/Go/.NET/Java/C++…）预填运行与测试命令，也可手动指定。
 - **技能库（Skill）** —— 支持导入本地技能目录（含 SKILL.md）、看板新建技能，或一键扫描常见 AI 工具（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等）的用户级技能并批量勾选导入（同名去重）；技能可全局生效或绑定单个项目；删除技能只清技能库中的副本——外部导入的原样本仍在各工具目录里，重新扫描即可找回（自建技能删除后不可恢复）；技能统一存放在 Orcsy 数据目录（`%APPDATA%\Orcsy\skills\`），**绝不写入项目目录**；Agent 系统提示词只注入「名称+描述」索引，执行时按需经 `read_skill` 工具读取全文，技能再多也不撑爆上下文。
@@ -322,6 +323,7 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 | `projects[].allowed_branch` | 只在该分支上工作，缺省用当前分支 |
 | `projects[].llm` | 项目专属模型绑定：部分覆盖全局 `llm`（provider / base_url / api_key / model / temperature 等任意字段，未写字段继承全局）；只有绑定的模型处理该项目的任务，看板项目对话框可可视化编辑 |
 | `projects[].repo` | 远程仓库绑定：`{url, token?, provider?, api_base?}`（GitHub / Gitee / GitLab / Gitea，token 公开仓库可省）；绑定后看板项目卡片「拉取 Issues」把 open Issue 导入任务队列 |
+| `update.repo` / `update.token` / `update.auto_check` | 程序自更新：Gitee 更新源仓库 URL（Release 附件含首次安装的 `orcsy-setup-*.exe` 与更新用的 `orcsy-update-*.zip`）、私有仓库令牌、启动自动检查（默认开）；看板头部一键检查/更新，或设置页手动导入安装包（Windows 安装版） |
 
 ## 📊 日志与观测
 
@@ -332,8 +334,12 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 ## 🛠 从源码重新打包
 
 ```bash
-# 一键打包（版本号 -> 前端构建 -> PyInstaller 双 exe -> Inno Setup 安装包）
+# 一键打包（版本号 -> 前端构建 -> PyInstaller 双 exe -> Inno Setup 安装包 + zip 更新包）
 build.bat
+
+# 发布 Gitee Release：一条命令同时上传两个附件（首次安装 exe + 自更新 zip；
+# token 用 --token / 环境变量 GITEE_TOKEN / 配置 update.token 三选一）：
+uv run python build/release.py
 
 # 版本规则：功能大变更 → 次版本 +1（0.13.0）；功能补丁 → 修订号 +1（0.12.3）
 # 版本唯一来源 orcsy/__init__.py 的 __version__，打包前改它即可
@@ -368,10 +374,11 @@ orcsy/
   templates/       AGENT.md 与任务模板
 dashboard/         Web 看板前端工程（Vue 3 + Naive UI，构建产物编译进 exe）
 build/
-  build.py         一键构建流水线（版本号单源化 → PyInstaller → Inno Setup）
+  build.py         一键构建流水线（版本号单源化 → PyInstaller → Inno Setup + zip 更新包）
+  release.py       发布 Gitee Release（首次安装 exe 与自更新 zip 一并上传）
   installer.iss    Inno Setup 安装包脚本
   icon.ico/.png    应用图标
-  Setup/           编译产物 orcsy-setup-*.exe
+  Setup/           编译产物 orcsy-setup-*.exe 与 orcsy-update-*.zip
 tests/             端到端自检（模拟 LLM / 真实 HTTP）
 orcsy.spec PyInstaller 打包配置（产物 dist/*.exe）
 Dockerfile         容器镜像（多阶段 uv 构建，git + Python 精简基础）

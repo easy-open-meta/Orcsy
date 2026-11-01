@@ -88,11 +88,21 @@ class WebConfig:
 
 
 @dataclass
+class UpdateConfig:
+    """程序自更新配置：从 Gitee Release 检查并下载新版本安装包。"""
+
+    repo: str = ""                # 更新源仓库 URL，如 https://gitee.com/xxx/orcsy
+    token: str = ""               # 私有仓库的私人令牌；公开仓库可留空
+    auto_check: bool = True       # 启动后自动检查一次更新
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     web: WebConfig = field(default_factory=WebConfig)
+    update: UpdateConfig = field(default_factory=UpdateConfig)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
 
@@ -215,6 +225,13 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         open_browser=bool(web_raw.get("open_browser", True)),
     )
 
+    upd_raw = raw.get("update") or {}
+    update = UpdateConfig(
+        repo=str(upd_raw.get("repo") or "").strip(),
+        token=str(upd_raw.get("token") or ""),
+        auto_check=bool(upd_raw.get("auto_check", True)),
+    )
+
     projects: list[ProjectConfig] = []
     for i, item in enumerate(raw.get("projects") or []):
         p_path = Path(str(item.get("path", ""))).expanduser()
@@ -257,5 +274,5 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         )
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
-                    projects=projects, source_path=path.resolve())
+                    update=update, projects=projects, source_path=path.resolve())
     return cfg

@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import urllib.error
+import os
+os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')  # 本机回环不走系统代理（环境可能带 http_proxy）
 import urllib.request
 
 BASE = "http://127.0.0.1:5116"

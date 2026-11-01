@@ -22,6 +22,8 @@ from orcsy.config import (AppConfig, LLMConfig, LoggingConfig, ProjectConfig,
 from orcsy.git_ops import Git
 from orcsy.scheduler import Scheduler
 from orcsy.web import AppState
+import os
+os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')  # 本机回环不走系统代理（环境可能带 http_proxy）
 
 GLOBAL_MODEL = "global-model"
 BOUND_MODEL = "bound-model"

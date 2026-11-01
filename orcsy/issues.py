@@ -17,6 +17,8 @@ from urllib.parse import quote
 import httpx
 import yaml
 
+from . import USER_AGENT
+
 # 单次拉取的分页上限：3 页 × 每页 50 条，覆盖绝大多数手工同步场景
 _MAX_PAGES = 3
 _PER_PAGE = 50
@@ -108,6 +110,7 @@ def _get_json(url: str, *, headers: dict[str, str] | None = None,
     from urllib.parse import urlparse
     host = urlparse(url).hostname or ""
     trust_env = host not in ("127.0.0.1", "localhost", "::1")  # 环回地址不走系统代理
+    headers = {"User-Agent": USER_AGENT, **(headers or {})}
     last_err: Exception | None = None
     resp = None
     for attempt in range(3):

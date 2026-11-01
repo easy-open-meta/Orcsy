@@ -34,6 +34,11 @@ web:
   port: 5116                 # 看板端口（被占用时可改这里，或启动时用 --port 覆盖）
   open_browser: true         # 启动时自动打开浏览器
 
+# update:                          # 程序自更新（Windows 安装版）：
+#   repo: https://gitee.com/xxx/orcsy   # Gitee 仓库 URL，Release 附件放安装包
+#   token: gitee私人令牌            # 私有仓库用；公开仓库可省
+#   auto_check: true               # 启动后自动检查一次更新
+
 # 受管项目列表：每个项目由一个独立 Agent 负责。
 # 推荐直接在看板「项目与设置」页可视化新建（会自动创建任务目录与 AGENT.md）；
 # 也可手动添加，格式如下：

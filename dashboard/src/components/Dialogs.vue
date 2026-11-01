@@ -391,6 +391,11 @@ function pickPath(): void {
   if (v) ui.browserPick?.(v)
   ui.browserDlg = false
 }
+// 文件选择模式：点击列表里的文件即确认返回（目录仍可进入）
+function pickFile(f: string): void {
+  ui.browserPick?.(f)
+  ui.browserDlg = false
+}
 
 // 在当前浏览的目录下新建文件夹，成功后自动进入
 async function newFolder(): Promise<void> {
@@ -602,15 +607,23 @@ async function newFolder(): Promise<void> {
     </div>
   </NModal>
 
-  <!-- 目录选择器 -->
-  <NModal v-model:show="bVisible" preset="card" title="选择本地目录" style="width: min(560px, 92vw)">
+  <!-- 目录/文件选择器（browserMode='file' 时点文件即选中，如手动导入更新包） -->
+  <NModal v-model:show="bVisible" preset="card"
+          :title="ui.browserMode === 'file' ? '选择本地文件' : '选择本地目录'"
+          style="width: min(560px, 92vw)">
     <div class="brow-crumb">
       <NButton size="small" @click="browseTo(bStack?.parent || '')" :disabled="!bStack?.parent">⬆ 上一级</NButton>
       <span class="bcur">{{ bStack?.path || '（请选择盘符 / 常用目录）' }}</span>
     </div>
     <div class="blist">
       <div v-for="d in bStack?.dirs || []" :key="d" class="bitem" @click="browseTo(d)">{{ d }}</div>
-      <div v-if="bStack && !bStack.dirs.length" class="bempty">{{ bStack.note || '（没有子目录，可直接用下面的路径框）' }}</div>
+      <template v-if="ui.browserMode === 'file'">
+        <div v-for="f in bStack?.files || []" :key="f" class="bitem bfile" @click="pickFile(f)">
+          {{ f.split('\\').pop()?.split('/').pop() }}
+        </div>
+        <div v-if="bStack && !bStack.files?.length" class="bempty">（当前目录没有文件）</div>
+      </template>
+      <div v-else-if="bStack && !bStack.dirs.length" class="bempty">{{ bStack.note || '（没有子目录，可直接用下面的路径框）' }}</div>
     </div>
     <div class="pathline" style="margin-bottom:8px">
       <NInput v-model:value="bNewFolder" size="small" placeholder="在当前目录下新建文件夹，输入名称"
@@ -619,7 +632,7 @@ async function newFolder(): Promise<void> {
     </div>
     <div class="pathline">
       <NInput v-model:value="bManual" placeholder="或直接粘贴完整路径" @keydown.enter="pickPath" />
-      <NButton type="primary" @click="pickPath">使用此目录</NButton>
+      <NButton type="primary" @click="pickPath">{{ ui.browserMode === 'file' ? '使用此文件' : '使用此目录' }}</NButton>
     </div>
     <div class="dlg-actions"><NButton @click="ui.browserDlg = false">取消</NButton></div>
   </NModal>
