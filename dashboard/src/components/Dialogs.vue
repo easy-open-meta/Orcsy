@@ -23,9 +23,11 @@ const pDraft = reactive({
   // 专属模型绑定：use_llm 关=跟随全局；开=部分覆盖（空字段仍继承全局）
   use_llm: false, ll_provider: '' as '' | 'openai' | 'anthropic',
   ll_base: '', ll_key: '', ll_model: '',
-  // 远程仓库绑定：拉取 open Issues 入任务队列（单向）；token 与账号密码二选一
+  // 远程仓库绑定：拉取 open Issues 入任务队列（单向）；token 与账号密码二选一；
+  // repo_auto_pull 为自动拉取间隔（分钟，0=仅手动）
   use_repo: false, repo_url: '', repo_token: '', repo_user: '', repo_pass: '',
   repo_provider: '' as '' | 'github' | 'gitee' | 'gitlab' | 'gitea',
+  repo_auto_pull: 0,
 })
 const pVisible = computed({
   get: () => !!ui.projectDlg,
@@ -58,6 +60,7 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.repo_user = pr?.username ?? ''
   pDraft.repo_pass = pr?.password ?? ''
   pDraft.repo_provider = (pr?.provider as '' | 'github' | 'gitee' | 'gitlab' | 'gitea') ?? ''
+  pDraft.repo_auto_pull = pr?.auto_pull_interval ? Math.round(pr.auto_pull_interval / 60) : 0
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
 })
 
@@ -104,6 +107,17 @@ const repoProviderOptions = [
   { label: 'GitLab（含自托管）', value: 'gitlab' },
   { label: 'Gitea（含自托管）', value: 'gitea' },
 ]
+// 编辑对话框里回显上次自动拉取结果（状态来自 /api/state 的 issue_auto_pull）
+const repoAutoPullHint = computed(() => {
+  const p = ui.projectDlg?.original
+    ? store.state?.projects.find(x => x.name === ui.projectDlg?.original) : null
+  const s = p?.issue_auto_pull
+  if (pDraft.repo_auto_pull <= 0) return '未启用自动拉取'
+  if (!s) return '尚未自动拉取（保存后生效）'
+  if (s.last_error) return `上次失败：${s.last_error}`
+  if (s.imported || s.skipped) return `上次：导入 ${s.imported}，跳过 ${s.skipped}`
+  return '上次：无新 Issue'
+})
 
 async function testProjectModel(): Promise<void> {
   const eff = effLlm()
@@ -161,13 +175,16 @@ async function saveProject(): Promise<void> {
         ...(pDraft.ll_key.trim() ? { api_key: pDraft.ll_key.trim() } : {}),
         ...(pDraft.ll_model.trim() ? { model: pDraft.ll_model.trim() } : {}),
       } : null,
-      // 远程仓库绑定：关或 URL 空=清除；平台显式选择优先，否则后端按 URL 识别
+      // 远程仓库绑定：关或 URL 空=清除；平台显式选择优先，否则后端按 URL 识别；
+      // 自动拉取间隔分钟换算为秒（0=仅手动）
       repo: pDraft.use_repo && pDraft.repo_url.trim() ? {
         url: pDraft.repo_url.trim(),
         ...(pDraft.repo_provider ? { provider: pDraft.repo_provider } : {}),
         ...(pDraft.repo_token.trim() ? { token: pDraft.repo_token.trim() } : {}),
         ...(pDraft.repo_user.trim() ? { username: pDraft.repo_user.trim() } : {}),
         ...(pDraft.repo_pass ? { password: pDraft.repo_pass } : {}),
+        ...(pDraft.repo_auto_pull > 0
+          ? { auto_pull_interval: Math.max(1, Math.round(pDraft.repo_auto_pull)) * 60 } : {}),
       } : null,
       original_name: ui.projectDlg.original ?? undefined,
       // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
@@ -490,6 +507,18 @@ async function newFolder(): Promise<void> {
       </div>
       <div class="hint" style="margin-top:6px">
         认证二选一：token 优先；GitHub 只支持 token。自托管 Gitea / GitLab 请在「平台」里显式选择。绑定后在项目卡片点「拉取 Issues」导入任务，优先级默认 P2（带 P0~P4 标签按标签）。
+      </div>
+      <div class="duo" style="margin-top:6px">
+        <div class="f1"><label>自动拉取间隔（分钟，0 = 仅手动）</label>
+          <NInputNumber v-model:value="pDraft.repo_auto_pull" :min="0" :step="5"
+                        :disabled="!pDraft.repo_url.trim()"
+                        placeholder="0 表示只在点「拉取 Issues」时拉取" /></div>
+        <div class="f2"><label>上次自动拉取</label>
+          <div class="hint" style="padding-top:6px">
+            {{ repoAutoPullHint }}</div></div>
+      </div>
+      <div class="hint">
+        填写间隔后后台线程每 N 分钟自动把 open Issue 拉取为任务（去重规则与手动拉取相同）。
       </div>
     </template>
     <template v-if="!ui.projectDlg?.original">

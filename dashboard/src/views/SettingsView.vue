@@ -342,6 +342,9 @@ const providerOptions = [
           <NTag size="small" :bordered="false" :type="p.is_git_repo ? 'default' : 'warning'">{{ p.is_git_repo ? 'git' : '非 git' }}</NTag>
           <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
           <NTag v-if="p.repo" size="small" :bordered="false" type="success">issues</NTag>
+          <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
+                :type="p.issue_auto_pull.last_error ? 'error' : 'success'">
+            自动拉取 {{ Math.round(p.issue_auto_pull.interval / 60) }}min</NTag>
         </div>
         <div class="prow-meta">
           {{ p.path }} · 任务目录 {{ p.tasks_dir || 'tasks' }} · 每轮 {{ p.max_tasks_per_cycle || 1 }} 任务

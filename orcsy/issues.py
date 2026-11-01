@@ -61,7 +61,8 @@ def detect_repo(url: str, provider: str | None = None) -> dict[str, str]:
 
 def normalize_repo(data: dict[str, Any], context: str = "repo") -> dict[str, Any]:
     """清洗/校验项目 repo 绑定字典：url 必填、provider 可显式、token 或
-    账号密码（HTTP Basic）二选一认证、api_base 可选（自托管/测试桩）。
+    账号密码（HTTP Basic）二选一认证、api_base 可选（自托管/测试桩）、
+    auto_pull_interval 可选（定时自动拉取 Issues 的间隔秒数，0/缺省=关闭）。
 
     供 load_config 与 Web 保存路径共用，保证两路行为一致。
     """
@@ -82,6 +83,14 @@ def normalize_repo(data: dict[str, Any], context: str = "repo") -> dict[str, Any
     api_base = str(data.get("api_base") or "").strip()
     if api_base:
         out["api_base"] = api_base
+    # 自动拉取间隔（秒）：0/缺省=关闭（仅手动拉取）；>0 时钳制最小 60，
+    # 避免误填过小值打爆仓库 API。非数字容忍处理为关闭。
+    try:
+        interval = int(data.get("auto_pull_interval") or 0)
+    except (TypeError, ValueError):
+        interval = 0
+    if interval > 0:
+        out["auto_pull_interval"] = max(60, interval)
     return out
 
 

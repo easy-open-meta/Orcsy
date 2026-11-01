@@ -28,9 +28,14 @@ export interface ProjectT {
   allowed_commands: string[] | null
   /** 项目专属模型绑定（部分覆盖全局 llm）；null = 未绑定 */
   llm?: Record<string, string> | null
-  /** 远程仓库绑定（Issues 导入）；null = 未绑定；认证 token 与账号密码二选一 */
+  /** 远程仓库绑定（Issues 导入）；null = 未绑定；认证 token 与账号密码二选一；
+   * auto_pull_interval 为定时自动拉取间隔（秒），缺省 = 仅手动拉取 */
   repo?: { url: string; token?: string; username?: string
-           password?: string; provider?: string; api_base?: string } | null
+           password?: string; provider?: string; api_base?: string
+           auto_pull_interval?: number } | null
+  /** 定时拉取 Issues 状态（repo.auto_pull_interval 启用时非空） */
+  issue_auto_pull?: { interval: number; imported?: number; skipped?: number
+                      total?: number; last_error?: string } | null
   /** 程序自更新状态机 */
   update?: {
     phase: 'idle' | 'checking' | 'latest' | 'available' | 'downloading'

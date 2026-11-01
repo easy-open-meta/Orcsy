@@ -166,6 +166,12 @@ class AppState:
                 "allowed_commands": p.allowed_commands,
                 "llm": p.llm or None,
                 "repo": p.repo or None,
+                # 定时拉取 Issues：repo.auto_pull_interval 启用时附最近一次自动拉取状态
+                "issue_auto_pull": (
+                    {**(self.scheduler.issue_pull_status.get(name) or {}),
+                     "interval": p.repo["auto_pull_interval"]}
+                    if (p.repo or {}).get("auto_pull_interval") else None
+                ),
                 "is_git_repo": agent.executor.is_git_repo,
                 "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),

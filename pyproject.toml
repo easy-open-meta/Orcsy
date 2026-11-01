@@ -1,6 +1,6 @@
 [project]
 name = "orcsy"
-version = "0.15.2"
+version = "0.15.3"
 description = "项目任务编排系统：定时扫描各项目任务列表，由接入大模型的 Agent 按优先级完成功能开发与 bug 修复"
 requires-python = ">=3.11"
 dependencies = [

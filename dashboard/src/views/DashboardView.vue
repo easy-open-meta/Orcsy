@@ -252,6 +252,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
               {{ p.is_git_repo ? 'git' : '非 git' }}
             </NTag>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
+            <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
+                  :type="p.issue_auto_pull.last_error ? 'error' : 'success'"
+                  :title="p.issue_auto_pull.last_error || undefined">
+              自动拉取 {{ Math.round(p.issue_auto_pull.interval / 60) }}min
+            </NTag>
           </div>
         </template>
         <template #footer>

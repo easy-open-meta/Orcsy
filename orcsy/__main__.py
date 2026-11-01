@@ -78,6 +78,7 @@ projects: []
 #    # repo:                           # 绑定远程仓库（GitHub/Gitee/GitLab/Gitea），
 #    #   url: https://github.com/owner/repo   # 看板「拉取 Issues」把 open Issue 导入任务
 #    #   token: ghp_xxx               # token 可选：私有仓库必填，公开仓库可省
+#    #   auto_pull_interval: 600      # 定时自动拉取间隔（秒），最小 60；缺省 = 仅手动拉取
 """
 
 
@@ -472,6 +473,8 @@ def cmd_web(args: argparse.Namespace) -> int:
         pass  # 只由看板按钮手动触发
     else:
         scheduler.run_forever_background()
+    # 定时拉取 Issues：独立线程，与调度周期解耦（间隔可短于调度周期）
+    scheduler.run_issues_forever_background()
 
     if config.web.open_browser and not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()

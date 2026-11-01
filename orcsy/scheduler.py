@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
 from .config import AppConfig, resolve_llm
+from .issues import sync_issues
 from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
 from .skills import skills_base
 
@@ -43,6 +44,12 @@ class Scheduler:
             log.warning("配置中没有启用的项目")
         self._cycle_lock = threading.Lock()
         self._stop_event = threading.Event()
+        # 定时拉取 Issues：独立后台线程（拉取是网络 I/O，不占用调度周期锁）。
+        # _issue_timers：项目名 → 下次应拉取的 time.monotonic() 时刻；
+        # issue_pull_status：项目名 → 最近一次拉取结果（供看板展示）。
+        self._issue_stop_event = threading.Event()
+        self._issue_timers: dict[str, float] = {}
+        self.issue_pull_status: dict[str, dict] = {}
         self.is_running = False          # 当前是否有一轮扫描在执行
         self.last_cycle_stats: dict[str, int] = {}
         self.last_cycle_at: str = ""
@@ -190,6 +197,59 @@ class Scheduler:
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._issue_stop_event.set()
+
+    # ---- 定时拉取远程 Issues（独立后台线程） ----
+
+    def run_issues_forever_background(self) -> threading.Thread:
+        t = threading.Thread(target=self._issues_loop, name="issue-pull-loop", daemon=True)
+        t.start()
+        return t
+
+    def _issues_loop(self) -> None:
+        """按各项目 repo.auto_pull_interval 定时拉取 open Issues 入任务队列。
+
+        分片等待 + 每次唤醒遍历到期项目（首次见到立即拉一次）；单项目失败只
+        记状态不中断循环。reload_config 原子替换 agents 列表，这里每次醒来
+        重读，间隔变更无需重启即生效。
+        """
+        log.info("Issue 自动拉取循环启动")
+        while not self._issue_stop_event.is_set():
+            self._pull_due_issues()
+            waited = 0.0
+            while waited < 10 and not self._issue_stop_event.is_set():
+                self._issue_stop_event.wait(1.0)
+                waited += 1.0
+        log.info("Issue 自动拉取循环已退出")
+
+    def _pull_due_issues(self) -> None:
+        now = time.monotonic()
+        for agent in list(self.agents):
+            repo = agent.project.repo
+            interval = (repo or {}).get("auto_pull_interval") or 0
+            if not interval:
+                continue
+            name = agent.project.name
+            due = self._issue_timers.get(name, now)  # 首次见到：立即拉取
+            if now < due:
+                continue
+            try:
+                result = sync_issues(name, repo, agent.tasks_dir)
+            except Exception:  # noqa: BLE001 — 网络失败不能拖垮自动拉取循环
+                agent.log.exception("自动拉取 Issues 失败")
+                self.issue_pull_status[name] = {
+                    "interval": interval, "last_error": "拉取失败（详见日志）",
+                    "imported": 0, "skipped": 0,
+                }
+            else:
+                agent.log.info("自动拉取 Issues：导入 %d，跳过 %d（共 %d）",
+                               result["imported"], result["skipped"], result["total"])
+                self.issue_pull_status[name] = {
+                    "interval": interval,
+                    "imported": result["imported"], "skipped": result["skipped"],
+                    "total": result["total"], "last_error": "",
+                }
+            self._issue_timers[name] = time.monotonic() + interval
 
     # ---- 前台阻塞模式（CLI run 命令） ----
 
@@ -198,6 +258,7 @@ class Scheduler:
             "进入持续调度：每 %d 秒扫描 %d 个项目（Ctrl+C 退出）",
             max(30, self.config.scheduler.interval_seconds), len(self.agents),
         )
+        self.run_issues_forever_background()
         try:
             self._loop()
         except KeyboardInterrupt:

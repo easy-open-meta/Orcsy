@@ -36,8 +36,10 @@ class ProjectConfig:
     # 项目专属模型绑定：部分覆盖全局 llm 配置（只写需要换的字段，其余继承全局）。
     # 存原始字典而非 LLMConfig——全局配置改动后，未覆盖字段始终继承最新全局值。
     llm: dict[str, Any] | None = None
-    # 远程仓库绑定（GitHub/Gitee/GitLab）：{url, token?, provider?, api_base?}。
-    # 绑定后可从仓库 Issues 导入任务队列（看板「拉取 Issues」）；token 可选（公开仓库免认证）。
+    # 远程仓库绑定（GitHub/Gitee/GitLab）：{url, token?, provider?, api_base?,
+    # auto_pull_interval?}。绑定后可从仓库 Issues 导入任务队列（看板「拉取 Issues」）；
+    # auto_pull_interval 为定时自动拉取间隔（秒），0/缺省=仅手动拉取。
+    # token 可选（公开仓库免认证）。
     repo: dict[str, Any] | None = None
 
 
