@@ -508,7 +508,9 @@ async function newFolder(): Promise<void> {
       <div class="f1"><label>指引文件</label><NInput v-model:value="pDraft.guide_file" /></div>
     </div>
     <div class="duo">
-      <div class="f1"><label>工具循环轮数上限</label><NInputNumber v-model:value="pDraft.max_turns" :min="5" :max="200" /></div>
+      <div class="f1"><label>工具循环轮数上限（-1 = 不设上限）</label>
+        <NInputNumber v-model:value="pDraft.max_turns" :min="-1" :max="200"
+                      placeholder="40；填 -1 不设上限（靠 finish/强制停止兜底）" /></div>
       <div class="f1"><label>工作分支（可选，默认当前分支）</label><NInput v-model:value="pDraft.branch" placeholder="main" /></div>
     </div>
     <label>命令白名单（逗号分隔，留空用默认：python/pytest/node/npm/git…）</label>
@@ -719,7 +721,9 @@ async function newFolder(): Promise<void> {
           :title="ui.browserMode === 'file' ? '选择本地文件' : '选择本地目录'"
           style="width: min(560px, 92vw)">
     <div class="brow-crumb">
-      <NButton size="small" @click="browseTo(bStack?.parent || '')" :disabled="!bStack?.parent">⬆ 上一级</NButton>
+      <!-- parent=="" 是盘符列表根入口（可点）；仅 null/undefined 才禁用 -->
+      <NButton size="small" @click="browseTo(bStack?.parent ?? '')"
+               :disabled="bStack?.parent == null">⬆ 上一级</NButton>
       <span class="bcur">{{ bStack?.path || '（请选择盘符 / 常用目录）' }}</span>
     </div>
     <div class="blist">

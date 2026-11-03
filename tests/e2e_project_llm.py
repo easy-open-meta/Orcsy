@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
 
-from orcsy.config import (AppConfig, LLMConfig, LoggingConfig, ProjectConfig,
+from orcsy.config import (AppConfig, UpdateConfig, LLMConfig, LoggingConfig, ProjectConfig,
                           SchedulerConfig, WebConfig)
 from orcsy.git_ops import Git
 from orcsy.scheduler import Scheduler
@@ -94,6 +94,8 @@ def main() -> int:
         bound.llm = {"model": BOUND_MODEL}  # 只换模型名：api_key/base_url 继承全局
 
         cfg = AppConfig(
+
+        update=UpdateConfig(auto_check=False),  # 测试不触发后台更新检查
             llm=LLMConfig(api_key="sk-global", base_url="http://localhost:9/v1",
                           model=GLOBAL_MODEL),
             scheduler=SchedulerConfig(run_once=True),

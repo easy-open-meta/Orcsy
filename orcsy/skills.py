@@ -11,6 +11,7 @@ scope 语义：global 对所有项目生效；值为项目名时仅该项目生�
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -21,6 +22,7 @@ import yaml
 
 from .config import AppConfig
 from .logging_setup import get_logger
+from .templates import TEMPLATES_DIR
 
 log = get_logger("skills")
 
@@ -117,6 +119,77 @@ def load_skills(base: Path) -> list[Skill]:
     out = [parse_skill_dir(d) for d in sorted(base.iterdir())
            if d.is_dir() and (d / "SKILL.md").is_file()]
     return sorted(out, key=lambda s: s.name.lower())
+
+
+# 内置技能：随程序分发（orcsy/templates/skills/<名>/SKILL.md），播种到技能库后
+# 归用户所有——用户改过的副本绝不覆盖；从未改动的副本在模板修订时自动升级
+# （判定依据：播种时写下的 .builtin-sha256 边车哈希，或旧版播种的 legacy 哈希）
+_BUILTIN_SKILLS = ("env-setup",)
+_BUILTIN_HASH_FILE = ".builtin-sha256"
+
+# 历史模板哈希（边车机制上线前播种的副本没有边车文件，内容命中这里 = 用户
+# 从未改过，可安全升级）。模板每次修订时把旧哈希追加进来。
+_LEGACY_BUILTIN_HASHES: dict[str, tuple[str, ...]] = {
+    # env-setup 初版（仅包管理器安装，无镜像直下章节）
+    "env-setup": ("7d545b1cecd7c89fc8af0042c3d1a6f19ff7c006693fe661e8e3c295f808d65d",),
+}
+
+
+def _text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _builtin_needs_upgrade(md: Path, template: str, name: str) -> bool:
+    """已播种的内置技能副本能否安全升级到最新模板：仅当内容未被用户改动。"""
+    try:
+        current = md.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if current == template:
+        return False  # 已是最新
+    marker = md.parent / _BUILTIN_HASH_FILE
+    try:
+        if marker.is_file():
+            # 有边车：记录哈希 == 当前内容哈希 = 播种后没动过
+            return marker.read_text(encoding="utf-8").strip() == _text_sha256(current)
+    except OSError:
+        return False
+    # 无边车的旧播种：内容命中任一历史模板哈希 = 没动过
+    return _text_sha256(current) in _LEGACY_BUILTIN_HASHES.get(name, ())
+
+
+def _write_builtin_skill(d: Path, template: str) -> None:
+    """写入内置技能正文并刷新边车哈希（保留目录内其它附属文件）。"""
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(template, encoding="utf-8")
+    (d / _BUILTIN_HASH_FILE).write_text(_text_sha256(template), encoding="utf-8")
+
+
+def ensure_builtin_skills(base: Path) -> list[str]:
+    """把内置技能播种/升级到技能库（幂等）。
+
+    Scheduler/AppState 初始化时调用——老用户升级后既能拿到新内置技能，也能
+    在模板修订后刷新未改动的存量副本；用户改过（或删掉边车文件）的副本永不
+    覆盖。返回本次实际写入/升级的技能名（用于日志）。
+    """
+    seeded: list[str] = []
+    for name in _BUILTIN_SKILLS:
+        try:
+            d = skill_dir(base, name)
+            template = (TEMPLATES_DIR / "skills" / name / "SKILL.md").read_text(
+                encoding="utf-8")
+            md = d / "SKILL.md"
+            if md.is_file():
+                if _builtin_needs_upgrade(md, template, name):
+                    _write_builtin_skill(d, template)
+                    log.info("内置技能 %s 模板已修订，副本未被用户改动，同步升级", name)
+                    seeded.append(name)
+                continue  # 用户改过的版本 / 已是最新：绝不覆盖
+            _write_builtin_skill(d, template)
+            seeded.append(name)
+        except (OSError, ValueError):
+            log.warning("内置技能 %s 播种失败（可忽略）", name, exc_info=True)
+    return seeded
 
 
 def skills_for_project(skills: list[Skill], project_name: str) -> list[Skill]:

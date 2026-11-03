@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
 
-from orcsy.config import (AppConfig, LLMConfig, LoggingConfig, ProjectConfig,
+from orcsy.config import (AppConfig, UpdateConfig, LLMConfig, LoggingConfig, ProjectConfig,
                           SchedulerConfig, WebConfig)
 from orcsy.scheduler import Scheduler
 from orcsy.web import AppState
@@ -64,6 +64,7 @@ def main() -> int:
         proj = tmp / "proj"
         proj.mkdir()
         cfg = AppConfig(
+        update=UpdateConfig(auto_check=False),  # 测试不触发后台更新检查
             llm=LLMConfig(api_key="sk-x", base_url="http://localhost:9/v1"),
             scheduler=SchedulerConfig(run_once=True),
             logging=LoggingConfig(), web=WebConfig(),

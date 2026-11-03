@@ -201,21 +201,60 @@ def install_log_path(config: Any = None) -> Path:
 
 
 def append_install_log(log: Path, text: str) -> None:
-    """往安装日志追加一行（带时间戳）。日志写失败不掩盖主错误——调用方仍会弹窗。"""
+    """往安装日志追加一行（带时间戳）。日志写失败不掩盖主错误——调用方仍会弹窗。
+
+    编码约定：整份日志统一 UTF-8（新建时带 BOM，Notepad/VS Code 据此识别）。
+    bat 脚本只写纯 ASCII 行（时间戳用 powershell 的 ASCII 格式，不用 %date%——
+    中文系统下它带「周一」字样、按控制台 GBK 码页落盘，与 UTF-8 行混编后
+    任何编辑器都只能正确显示一半）。历史混编码旧日志由 _heal_install_log
+    改名归档后重开新文件。
+    """
     try:
         log = Path(log)
         log.parent.mkdir(parents=True, exist_ok=True)
-        with open(log, "a", encoding="utf-8") as f:
+        _heal_install_log(log)
+        fresh = not log.exists() or log.stat().st_size == 0
+        with open(log, "a", encoding="utf-8-sig" if fresh else "utf-8") as f:
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {text}\n")
     except OSError:
         pass
 
 
+# 每个路径每进程只体检一次，避免每次追加都读全文件
+_HEALED_LOGS: set[str] = set()
+
+
+def _heal_install_log(log: Path) -> None:
+    """旧日志若是混编码（GBK 的 bat 行 + UTF-8 的 Python 行），改名归档重开。
+
+    混编码文件不存在「正确打开方式」：Notepad 按 ANSI 读则 UTF-8 行乱码，
+    按 UTF-8 读则 GBK 行乱码。归档名保留 .legacy-gbk 后缀供人工翻查。
+    """
+    key = str(log)
+    if key in _HEALED_LOGS:
+        return
+    _HEALED_LOGS.add(key)
+    try:
+        if not log.exists() or log.stat().st_size == 0:
+            return
+        raw = log.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            raw = raw[3:]
+        raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            log.replace(log.with_name(log.name + ".legacy-gbk"))
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
 def read_install_log(log: Path | None = None, max_chars: int = 4000) -> str:
-    """读取安装日志的尾部（诊断静默安装失败用）。"""
+    """读取安装日志的尾部（诊断静默安装失败用）。utf-8-sig 兼容带 BOM 的新日志。"""
     log = Path(log) if log else install_log_path()
     try:
-        return log.read_text(encoding="utf-8", errors="replace")[-max_chars:]
+        return log.read_text(encoding="utf-8-sig", errors="replace")[-max_chars:]
     except OSError:
         return ""
 
@@ -438,6 +477,12 @@ def _watchdog_bat(app_dir: Path, log: Path, result: Path, tray: Path,
         f'set "RESULT={result_s}"',
         f'set "TRAY={tray_s}"',
         f"set PID={pid}",
+        # 时间戳统一 ASCII：zh-CN 系统的 %date% 带「周一」字样、按控制台 GBK
+        # 码页落盘，与 Python 写的 UTF-8 行混编后任何编辑器都只显示对一半
+        'set "NOW="',
+        'for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command '
+        '"(Get-Date).ToString(\'yyyy-MM-dd HH:mm:ss\')"`) do set "NOW=%%T"',
+        'if not defined NOW set "NOW=%time%"',
         "set ERR=0",
         "set REASON=ok",
         "rem ---- wait for the old process to exit (max ~60s) ----",
@@ -454,7 +499,7 @@ def _watchdog_bat(app_dir: Path, log: Path, result: Path, tray: Path,
         ":noswap",
         "set ERR=1",
         "set REASON=interrupted",
-        'echo [%date% %time%] ERROR: update interrupted before files swapped >> "%LOG%"',
+        'echo [%NOW%] ERROR: update interrupted before files swapped >> "%LOG%"',
         ":start_tray",
         'if not exist "%TRAY%" goto notray',
         "rem result marker is written BEFORE relaunch: the new process consumes it",
@@ -479,7 +524,7 @@ def _watchdog_bat(app_dir: Path, log: Path, result: Path, tray: Path,
         "set ERR=1",
         "set REASON=tray-died-on-start",
         'echo {"ok": false, "reason": "tray-died-on-start"} > "%RESULT%"',
-        'echo [%date% %time%] ERROR: new version never finished starting >> "%LOG%"',
+        'echo [%NOW%] ERROR: new version never finished starting >> "%LOG%"',
         "goto finish",
         ":running",
         "goto finish",
@@ -487,27 +532,27 @@ def _watchdog_bat(app_dir: Path, log: Path, result: Path, tray: Path,
         "set ERR=1",
         "set REASON=tray-missing",
         'echo {"ok": false, "reason": "tray-missing"} > "%RESULT%"',
-        'echo [%date% %time%] ERROR: "%TRAY%" not found, cannot restart >> "%LOG%"',
+        'echo [%NOW%] ERROR: "%TRAY%" not found, cannot restart >> "%LOG%"',
         "goto finish",
         ":timeout",
         "set ERR=1",
         "set REASON=old-process-lingering",
         'echo {"ok": false, "reason": "old-process-lingering"} > "%RESULT%"',
-        'echo [%date% %time%] ERROR: old process did not exit within 60s >> "%LOG%"',
+        'echo [%NOW%] ERROR: old process did not exit within 60s >> "%LOG%"',
         "goto finish",
         ":handle_old",
         'if exist "%~2" goto old_del',
         'move /y "%~1" "%~2" >nul',
         "set ERR=1",
         'if "%REASON%"=="ok" set REASON=partial-swap-rolled-back',
-        'echo [%date% %time%] rolled back %~nx1 >> "%LOG%"',
+        'echo [%NOW%] rolled back %~nx1 >> "%LOG%"',
         "goto :eof",
         ":old_del",
         'del /f /q "%~1" >nul 2>&1',
         "goto :eof",
         ":finish",
         'if "%ERR%"=="0" goto done',
-        'echo [%date% %time%] ERROR: finished with errors, reason=%REASON% >> "%LOG%"',
+        'echo [%NOW%] ERROR: finished with errors, reason=%REASON% >> "%LOG%"',
         'start "" notepad "%LOG%"',
         ":done",
         "exit /b 0",
@@ -622,19 +667,24 @@ def _copier_bat(staging: Path, app_dir: Path, log: Path, marker: Path,
         f'set "MARKER={marker}"',
         f"set PID={pid}",
         f"set MEMBERS={member_list}",
+        # 时间戳统一 ASCII（理由同 _watchdog_bat：避免 GBK/UTF-8 混编乱码）
+        'set "NOW="',
+        'for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command '
+        '"(Get-Date).ToString(\'yyyy-MM-dd HH:mm:ss\')"`) do set "NOW=%%T"',
+        'if not defined NOW set "NOW=%time%"',
         "set ERR=0",
         "rem ---- wait for the old process to exit (max ~60s) ----",
         'powershell -NoProfile -Command "if (Get-Process -Id %PID% -ErrorAction '
         'SilentlyContinue) { try { Wait-Process -Id %PID% -Timeout 60 -ErrorAction '
         'Stop } catch { exit 1 } }"',
         "if errorlevel 1 goto timeout",
-        'echo [%date% %time%] elevated copy started >> "%LOG%"',
+        'echo [%NOW%] elevated copy started >> "%LOG%"',
         "rem ---- backup + copy each member ----",
         'for %%M in (%MEMBERS%) do call :copy_one "%%~M"',
         'if "%ERR%"=="1" goto copyfail',
         'del /f /q "%APPDIR%\\*.old" >nul 2>&1',
         'echo OK> "%MARKER%"',
-        'echo [%date% %time%] elevated copy completed >> "%LOG%"',
+        'echo [%NOW%] elevated copy completed >> "%LOG%"',
         "goto end",
         ":copy_one",
         'set "SRC=%STAGING%\\%~1"',
@@ -644,7 +694,7 @@ def _copier_bat(staging: Path, app_dir: Path, log: Path, marker: Path,
         'copy /y "%SRC%" "%DST%" >nul',
         "if errorlevel 1 (",
         "  set ERR=1",
-        '  echo [%date% %time%] ERROR: copy failed for %~1 >> "%LOG%"',
+        '  echo [%NOW%] ERROR: copy failed for %~1 >> "%LOG%"',
         '  if exist "%DST%.old" move /y "%DST%.old" "%DST%" >nul',
         ")",
         "goto :eof",
@@ -653,11 +703,11 @@ def _copier_bat(staging: Path, app_dir: Path, log: Path, marker: Path,
         'for %%M in (%MEMBERS%) do if exist "%APPDIR%\\%%M.old" '
         'move /y "%APPDIR%\\%%M.old" "%APPDIR%\\%%M" >nul',
         'echo FAIL copy-failed> "%MARKER%"',
-        'echo [%date% %time%] ERROR: elevated copy rolled back >> "%LOG%"',
+        'echo [%NOW%] ERROR: elevated copy rolled back >> "%LOG%"',
         "goto end",
         ":timeout",
         'echo FAIL old-process-lingering> "%MARKER%"',
-        'echo [%date% %time%] ERROR: old process did not exit within 60s >> "%LOG%"',
+        'echo [%NOW%] ERROR: old process did not exit within 60s >> "%LOG%"',
         "goto end",
         ":end",
         "exit /b 0",
@@ -711,7 +761,7 @@ def _watchdog_bat_elevated(app_dir: Path, log: Path, result: Path, tray: Path,
         ":markertimeout",
         "set ERR=1",
         "set REASON=elevated-copy-timeout",
-        'echo [%date% %time%] ERROR: elevated copier marker missing after 120s >> "%LOG%"',
+        'echo [%NOW%] ERROR: elevated copier marker missing after 120s >> "%LOG%"',
         "goto start_tray",
         ":marker",
         'findstr /b "OK" "%MARKER%" >nul',
@@ -719,7 +769,7 @@ def _watchdog_bat_elevated(app_dir: Path, log: Path, result: Path, tray: Path,
         "  set ERR=1",
         "  set REASON=elevated-copy-failed",
         '  type "%MARKER%" >> "%LOG%"',
-        '  echo [%date% %time%] ERROR: elevated copier reported failure >> "%LOG%"',
+        '  echo [%NOW%] ERROR: elevated copier reported failure >> "%LOG%"',
         ")",
         'del /f /q "%MARKER%" >nul 2>&1',
         ":start_tray",
@@ -746,7 +796,7 @@ def _watchdog_bat_elevated(app_dir: Path, log: Path, result: Path, tray: Path,
         "set ERR=1",
         "set REASON=tray-died-on-start",
         'echo {"ok": false, "reason": "tray-died-on-start"} > "%RESULT%"',
-        'echo [%date% %time%] ERROR: new version never finished starting >> "%LOG%"',
+        'echo [%NOW%] ERROR: new version never finished starting >> "%LOG%"',
         "goto finish",
         ":running",
         "goto finish",
@@ -754,17 +804,17 @@ def _watchdog_bat_elevated(app_dir: Path, log: Path, result: Path, tray: Path,
         "set ERR=1",
         "set REASON=tray-missing",
         'echo {"ok": false, "reason": "tray-missing"} > "%RESULT%"',
-        'echo [%date% %time%] ERROR: "%TRAY%" not found, cannot restart >> "%LOG%"',
+        'echo [%NOW%] ERROR: "%TRAY%" not found, cannot restart >> "%LOG%"',
         "goto finish",
         ":timeout",
         "set ERR=1",
         "set REASON=old-process-lingering",
         'echo {"ok": false, "reason": "old-process-lingering"} > "%RESULT%"',
-        'echo [%date% %time%] ERROR: old process did not exit within 60s >> "%LOG%"',
+        'echo [%NOW%] ERROR: old process did not exit within 60s >> "%LOG%"',
         "goto finish",
         ":finish",
         'if "%ERR%"=="0" goto done',
-        'echo [%date% %time%] ERROR: finished with errors, reason=%REASON% >> "%LOG%"',
+        'echo [%NOW%] ERROR: finished with errors, reason=%REASON% >> "%LOG%"',
         'start "" notepad "%LOG%"',
         ":done",
         "exit /b 0",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -10,7 +12,9 @@ import yaml
 
 from .approvals import PERMISSION_MODES
 from .issues import IssueError, normalize_repo
-from .tools import validate_tools_map
+from .mirrors import validate_mirrors
+from .tools import (DEFAULT_ALLOWED_COMMANDS, validate_commands_map,
+                    validate_tools_map)
 
 # 任务状态机：open → in_progress → done / blocked / cancelled
 TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
@@ -68,6 +72,9 @@ class LLMConfig:
     # 请求侧开启模型思考（Anthropic extended thinking / OpenAI 兼容服务的
     # enable_thinking 参数）；默认关闭——多数服务默认返回思考内容，无需开启
     enable_thinking: bool = False
+    # 单次模型请求超时（秒）。-1（或任何 ≤0，解析时归一为 -1）= 不超时：
+    # 无限等待响应，挂起时靠看板「强制停止」打断（HTTP 请求在子线程执行、
+    # 主线程轮询停止信号，见 llm.py）。思考型模型/长任务建议 600~900 或 -1
     timeout_seconds: int = 300
 
 
@@ -87,6 +94,10 @@ class LoggingConfig:
     # 日志归档与清理的保留天数：活动日志写满 N 天归档进 logs/archive/，
     # 归档及大小滚动的旧日志超过 N 天删除；0 表示关闭自动归档与清理
     retention_days: int = 7
+    # 日志体系总占用上限（MB）：活动日志 + 滚动备份 + 归档合计超过即从最旧
+    # 的备份/归档删起（活动日志不可删，另有 5MB 滚动兜底）；0 表示不限制。
+    # 与 retention_days 相互独立，任一命中即清
+    max_total_mb: int = 200
 
 
 @dataclass
@@ -101,11 +112,16 @@ class WebConfig:
     auth_password: str = ""
 
 
+# 官方更新源：配置未写 update.repo 时作为默认值（零配置即可检查更新）
+DEFAULT_UPDATE_REPO = "https://gitee.com/java-and-net/agent-task-arrangement-system"
+
+
 @dataclass
 class UpdateConfig:
     """程序自更新配置：从 Gitee Release 检查并下载新版本安装包。"""
 
-    repo: str = ""                # 更新源仓库 URL，如 https://gitee.com/xxx/orcsy
+    # 默认官方 Gitee 源：装好即可用「检查更新」，免用户手动填写
+    repo: str = DEFAULT_UPDATE_REPO
     token: str = ""               # 私有仓库的私人令牌；公开仓库可留空
     auto_check: bool = True       # 启动后自动检查一次更新
 
@@ -122,6 +138,48 @@ class ToolsConfig:
 
 
 @dataclass
+class CommandsConfig:
+    """全局命令白名单开关：{命令: bool}，未列出的默认启用。
+
+    值域是 DEFAULT_ALLOWED_COMMANDS（默认白名单）的成员；置 false 的命令从
+    默认白名单移除（run_command 直接拒绝）。项目级 allowed_commands 语义不变：
+    显式列表整表替换、None 跟随全局（resolve_commands 解析）。
+    """
+
+    enabled: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass
+class EnvConfig:
+    """注入 Agent 子进程（run_command）的自定义环境变量。
+
+    典型用途：网络代理与国内镜像——HTTP_PROXY/HTTPS_PROXY、GOPROXY=
+    https://goproxy.cn,direct（Go 模块）、npm config registry（Node）、
+    PIP_INDEX_URL（Python）。键名校验为合法环境变量名；OS 常规安全变量
+    （PATH/SYSTEMROOT 等由程序维护，不在此覆盖）。
+    """
+
+    vars: dict[str, str] = field(default_factory=dict)
+
+
+def validate_env_vars(data: object, context: str = "env") -> dict[str, str]:
+    """校验 env.vars：键必须像环境变量名（大写字母/数字/下划线开头），值转字符串。"""
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} 必须是「变量名: 值」的键值对")
+    out: dict[str, str] = {}
+    for key, value in data.items():
+        name = str(key).strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError(f"{context} 含非法变量名：{name}")
+        if name.upper() in ("PATH", "SYSTEMROOT", "COMSPEC", "WINDIR"):
+            raise ValueError(f"{context} 不允许覆盖 {name}（由程序维护）")
+        out[name] = str(value)
+    return out
+
+
+@dataclass
 class PermissionsConfig:
     """全局访问权限：Agent 敏感操作的人工审批策略。
 
@@ -132,6 +190,20 @@ class PermissionsConfig:
 
     mode: str = "full_access"
     timeout_minutes: int = 30
+
+
+@dataclass
+class MirrorsConfig:
+    """镜像源管理：用户在内置源之外追加的自定义源 + 禁用源清单。
+
+    custom：{类别: [URL]}，类别见 orcsy/mirrors.py 的 CATEGORY_KEYS（go_dist /
+    goproxy / npm / pip / node_dist / jdk / python_dist）；disabled：被关掉的源
+    URL（内置或自定义皆可）。测速结果不落这里——存边车 mirror_speeds.json
+    （高频变动、看板与 Agent 共享，不污染用户手编的 config.yaml）。
+    """
+
+    custom: dict[str, list[str]] = field(default_factory=dict)
+    disabled: list[str] = field(default_factory=list)
 
 
 def validate_permission_mode(value: object, context: str = "permissions.mode") -> str:
@@ -149,7 +221,10 @@ class AppConfig:
     web: WebConfig = field(default_factory=WebConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    commands: CommandsConfig = field(default_factory=CommandsConfig)
+    env: EnvConfig = field(default_factory=EnvConfig)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
+    mirrors: MirrorsConfig = field(default_factory=MirrorsConfig)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
 
@@ -172,6 +247,12 @@ def _coerce_llm(data: dict[str, Any], *, require_api_key: bool = False,
         raise ValueError(
             f"{context}.base_url 必须以 http:// 或 https:// 开头（当前：{base_url}）。")
     try:
+        # 超时 ≤0（如 -1）归一为 -1 = 不超时（无限等待，靠看板强制停止兜底）；
+        # 键缺失/空值回退默认 300
+        raw_timeout = data.get("timeout_seconds")
+        timeout = 300 if raw_timeout is None else int(raw_timeout)
+        if timeout <= 0:
+            timeout = -1
         cfg = LLMConfig(
             provider=provider,  # type: ignore[arg-type]
             api_key=str(data.get("api_key") or ""),
@@ -181,7 +262,7 @@ def _coerce_llm(data: dict[str, Any], *, require_api_key: bool = False,
             max_tokens=int(data.get("max_tokens", 8192)),
             max_context_tokens=int(data.get("max_context_tokens", 131072)),
             enable_thinking=bool(data.get("enable_thinking", False)),
-            timeout_seconds=int(data.get("timeout_seconds", 300)),
+            timeout_seconds=timeout,
         )
     except (TypeError, ValueError) as e:
         raise ValueError(f"{context} 配置项类型有误：{e}") from e
@@ -244,6 +325,21 @@ def resolve_permission_mode(global_perms: PermissionsConfig,
     return project.permission_mode or global_perms.mode
 
 
+def resolve_commands(global_cfg: CommandsConfig,
+                     project: ProjectConfig) -> list[str]:
+    """解析项目生效的命令白名单。
+
+    项目 allowed_commands 显式列表 = 整表替换（历史语义不变）；None = 默认
+    白名单剔除全局禁用项后的列表。
+    """
+    if project.allowed_commands is not None:
+        return list(project.allowed_commands)
+    disabled = {k for k, v in global_cfg.enabled.items() if not v}
+    if not disabled:
+        return list(DEFAULT_ALLOWED_COMMANDS)
+    return [c for c in DEFAULT_ALLOWED_COMMANDS if c not in disabled]
+
+
 def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     """解析 YAML 配置文件为 AppConfig，缺失字段回退到默认值。
 
@@ -281,6 +377,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         level=str(log_raw.get("level", "INFO")).upper(),
         file=log_raw.get("file", "logs/orcsy.log"),
         retention_days=max(0, min(int(log_raw.get("retention_days", 7)), 365)),
+        # 0 = 不限制；上限给个 sanity 夹取（100GB）
+        max_total_mb=max(0, min(int(log_raw.get("max_total_mb", 200)), 100000)),
     )
 
     web_raw = raw.get("web") or {}
@@ -293,7 +391,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
 
     upd_raw = raw.get("update") or {}
     update = UpdateConfig(
-        repo=str(upd_raw.get("repo") or "").strip(),
+        # 缺失/留空都回退官方源：老配置文件（没有 update 节）也享受零配置检查更新
+        repo=str(upd_raw.get("repo") or DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO,
         token=str(upd_raw.get("token") or ""),
         auto_check=bool(upd_raw.get("auto_check", True)),
     )
@@ -303,6 +402,24 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         tools = ToolsConfig(enabled=validate_tools_map(raw.get("tools"), context="tools"))
     except ValueError as e:
         raise ValueError(str(e)) from e
+
+    # 全局命令白名单开关：键必须是默认白名单成员，加载期即校验
+    commands = CommandsConfig(
+        enabled=validate_commands_map(raw.get("commands"), context="commands"))
+
+    # Agent 子进程自定义环境变量（代理/国内镜像等），加载期即校验。
+    # YAML 形态两种都收：env: {vars: {KEY: value}}（看板保存结构）与
+    # env: {KEY: value}（手写平铺）——平铺形态此前会被读成空、下次保存静默丢失
+    env_raw = raw.get("env") or {}
+    if not isinstance(env_raw, dict):
+        raise ValueError("env 配置必须是字典（含 vars 键值对）。")
+    env_map = env_raw.get("vars") if "vars" in env_raw else env_raw
+    env = EnvConfig(vars=validate_env_vars(env_map, context="env.vars"))
+
+    # 镜像源管理（内置 + 用户添加源，HTTP 测速选最快），加载期即校验
+    mirrors_clean = validate_mirrors(raw.get("mirrors"), context="mirrors")
+    mirrors = MirrorsConfig(custom=mirrors_clean["custom"],
+                            disabled=mirrors_clean["disabled"])
 
     # 全局访问权限：模式枚举 + 超时范围，加载期即校验
     perm_raw = raw.get("permissions") or {}
@@ -373,6 +490,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         )
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
-                    update=update, tools=tools, permissions=permissions,
-                    projects=projects, source_path=path.resolve())
+                    update=update, tools=tools, commands=commands, env=env,
+                    permissions=permissions, mirrors=mirrors, projects=projects,
+                    source_path=path.resolve())
     return cfg

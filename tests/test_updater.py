@@ -176,6 +176,8 @@ def check_watchdog_script() -> None:
     # 零 UAC：绝不出现提权动词
     assert "runas" not in cmd and "ShellExecute" not in cmd
     assert '\\"' not in cmd, f"引号被转义，cmd 会解析失败：{cmd}"
+    # 时间戳纯 ASCII（%date% 在中文系统带「周一」，GBK 落盘与 UTF-8 行混编必乱码）
+    assert "%date%" not in cmd and "[%NOW%]" in cmd and "Get-Date" in cmd
     assert "set PID=4321" in cmd and "Wait-Process" in cmd  # 按 PID 等旧进程退出
     assert "*.old" in cmd and "move /y" in cmd              # 清理 + 回滚残留
     # 脚本内剥 PyInstaller bootstrap 变量（防新 exe 误认「已解压子进程」）
@@ -251,7 +253,26 @@ def check_install_log() -> None:
         append_install_log(log, "第二步：失败样例")
         tail = read_install_log(log, max_chars=1000)
         assert "第一步" in tail and "第二步" in tail
-        print("安装日志路径锚定 + 追加/读取 ✅")
+        # 新建日志带 UTF-8 BOM（Notepad/VS Code 据此识别，且全文仅一个 BOM）
+        raw = log.read_bytes()
+        assert raw.startswith(b"\xef\xbb\xbf") and raw.count(b"\xef\xbb\xbf") == 1
+        # 混编码旧日志（GBK 的 bat 行 + UTF-8 的 Python 行）自愈：改名归档重开
+        mixed = tmp / "logs" / "mixed.log"
+        mixed.write_bytes(
+            "[2026/11/02 周一 3:31:07.39] elevated copy started\r\n".encode("gbk")
+            + "[2026-11-02 03:31:03] UTF-8 中文行\n".encode("utf-8"))
+        append_install_log(mixed, "新行")
+        legacy = tmp / "logs" / "mixed.log.legacy-gbk"
+        assert legacy.is_file(), "混编码旧日志应改名归档"
+        assert mixed.read_bytes().startswith(b"\xef\xbb\xbf")
+        assert "新行" in read_install_log(mixed)
+        # 纯 UTF-8 旧日志不误伤
+        clean = tmp / "logs" / "clean.log"
+        clean.write_text("[x] 中文旧行\n", encoding="utf-8")
+        append_install_log(clean, "追加")
+        assert clean.is_file()
+        assert not (tmp / "logs" / "clean.log.legacy-gbk").exists()
+        print("安装日志路径锚定 + 追加/读取 + BOM + 混编码自愈 ✅")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -344,7 +365,15 @@ def check_config_roundtrip() -> None:
         cfg = load_config(tmp / "config.yaml")
         assert cfg.update.repo == "https://gitee.com/o/r"
         assert cfg.update.token == "tok-1" and cfg.update.auto_check is False
-        print("config.yaml update 节读回 ✅")
+        # 老配置没有 update 节（或 repo 留空）→ 回退官方默认源，零配置可检查更新
+        from orcsy.config import DEFAULT_UPDATE_REPO
+        bare = tmp / "bare.yaml"
+        bare.write_text("llm:\n  api_key: sk-x\n", encoding="utf-8")
+        assert load_config(bare, require_api_key=False).update.repo == DEFAULT_UPDATE_REPO
+        empty = tmp / "empty.yaml"
+        empty.write_text("llm:\n  api_key: sk-x\nupdate:\n  repo: \"\"\n", encoding="utf-8")
+        assert load_config(empty, require_api_key=False).update.repo == DEFAULT_UPDATE_REPO
+        print("config.yaml update 节读回（含缺省回退官方源）✅")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

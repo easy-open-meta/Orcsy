@@ -33,7 +33,8 @@ llm:
   max_tokens: 8192
   max_context_tokens: 131072 # 模型上下文窗口（tokens）；看板选模型时可自动填充
   enable_thinking: false     # 请求侧开启模型思考（anthropic 必须；多数兼容服务默认返回）
-  timeout_seconds: 300
+  timeout_seconds: 300       # 单次模型请求超时（秒）；-1 = 不超时（挂起时看板「强制停止」
+                             # 可打断）；思考型模型/长任务建议 600~900 或 -1
 
 scheduler:
   interval_seconds: 300      # 每轮扫描间隔（秒）
@@ -44,6 +45,7 @@ logging:
   level: INFO
   file: logs/orcsy.log
   retention_days: 7          # 日志保留天数：写满 N 天归档进 logs/archive/，超过 N 天的旧日志清理；0 关闭
+  max_total_mb: 200          # 日志总占用上限（MB）：活动日志+滚动备份+归档合计超限即从最旧删起；0 不限制
 
 web:
   host: 127.0.0.1            # 看板监听地址
@@ -58,6 +60,30 @@ web:
 #                            #   run_command / read_skill / web_fetch；
 #                            #   finish 是任务结束的协议工具，不可禁用
 
+# commands:                  # 命令白名单开关（对默认白名单逐命令禁用/启用）：
+#   git: false               # 例：禁用 git（run_command 将拒绝一切 git 命令）；
+#   msbuild: false           # 未列出的命令保持默认放行。项目级 allowed_commands
+#                            # 仍可整表替换默认（见 projects 示例）
+#                            # 默认白名单含 python/node/cargo/go/dotnet/mvn/
+#                            # gradle/cmake/git、winget/scoop/choco 等包管理器、
+#                            # powershell/curl/tar/setx（env-setup 镜像直下需要）
+#                            # 及 where/cmd/dir 等探测命令
+
+# env:                       # 注入 Agent 子进程（run_command）的环境变量：
+#   vars:                    #   国内网络拉依赖失败（EOF/超时）时配镜像/代理即可，
+#     GOPROXY: https://goproxy.cn,direct      # Go 模块镜像
+#     # HTTP_PROXY: http://127.0.0.1:7890    # 有代理时（Node/Python 一并生效）
+#     # PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+#                            # 不允许覆盖 PATH/SYSTEMROOT/COMSPEC/WINDIR
+
+# mirrors:                   # 镜像源管理（看板设置页「镜像源管理与测速选源」可视化编辑）：
+#   custom:                  #   用户添加的镜像源（按类别分组）；Agent 下载安装包/配依赖
+#     goproxy:               #   代理前测速，自动用最快的源。类别：go_dist（Go 安装包）/
+#       - https://goproxy.internal.example.com/  # goproxy（Go 模块代理）/ npm / pip /
+#   disabled:                #   node_dist（Node 安装包）/ jdk / python_dist（Python 安装包）
+#     - https://goproxy.io   #   disabled 为禁用的源 URL（内置/自定义皆可禁用）；
+#                            #   测速结果存同目录 mirror_speeds.json，不写入本文件
+
 permissions:
   mode: full_access          # Agent 访问权限（全局默认）：
                              #   full_access   完全访问——不询问，减少确认次数（默认，与历史行为一致）
@@ -67,10 +93,10 @@ permissions:
                              # projects[].permission_mode 覆盖
   timeout_minutes: 30        # 审批挂起超时（分钟，1~1440）：无人响应自动拒绝，任务不会永久挂起
 
-# update:                          # 程序自更新（Windows 安装版）：
-#   repo: https://gitee.com/xxx/orcsy   # Gitee 仓库 URL，Release 附件放安装包
-#   token: gitee私人令牌            # 私有仓库用；公开仓库可省
-#   auto_check: true               # 启动后自动检查一次更新
+update:
+  repo: https://gitee.com/java-and-net/agent-task-arrangement-system   # Gitee 更新源仓库（默认官方源，可改成自己的镜像；Release 附件放安装包）
+  token: ""                    # 私有仓库的私人令牌；公开仓库可留空
+  auto_check: true             # 启动后自动检查一次更新
 
 # 受管项目列表：每个项目由一个独立 Agent 负责。
 # 推荐直接在看板「项目与设置」页可视化新建（会自动创建任务目录与 AGENT.md）；
@@ -82,10 +108,10 @@ projects: []
 #    tasks_dir: tasks                  # 项目内任务清单目录（相对项目根）
 #    guide_file: AGENT.md              # 项目内开发指引文件（相对项目根）
 #    max_tasks_per_cycle: 1            # 每轮最多处理的任务数
-#    max_agent_turns: 40               # 单个任务的 Agent 工具循环轮数上限
+#    max_agent_turns: 40               # 单个任务的 Agent 工具循环轮数上限（-1 = 不设上限）
 #    # allowed_commands:               # Agent 可执行的命令白名单（缺省用内置默认：
-#    #   - python                      #   python/pytest/node/npm/cargo/go/dotnet/git/uv 等）
-#    #   - pytest
+#    #   - python                      #   python/pytest/node/npm/pnpm/yarn/cargo/go/
+#    #   - pytest                      #   dotnet/mvn/gradle/cmake/ctest/git 等）
 #    # allowed_branch: main            # 只在该分支上工作；缺省用项目当前分支
 #    # llm:                            # 项目专属模型绑定（部分覆盖：只写要换的字段，
 #    #   provider: openai              # 其余继承全局 llm 配置；删除本节即回到全局）
@@ -201,7 +227,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         config.scheduler.run_once = True
 
     log_file = anchored_log_path(config)
-    rotate_msg = rotate_and_cleanup(log_file, config.logging.retention_days)
+    rotate_msg = rotate_and_cleanup(log_file, config.logging.retention_days,
+                                config.logging.max_total_mb)
     if rotate_msg:
         print(f"日志维护：{rotate_msg}", file=sys.stderr, flush=True)
     setup_logging(config.logging.level, str(log_file))
@@ -468,7 +495,8 @@ def cmd_web(args: argparse.Namespace) -> int:
     # 相对日志路径锚定到配置文件所在目录：工作目录可能在 Program Files（不可写）
     log_file = anchored_log_path(config)
     # 启动即做一次日志归档/清理（此刻文件尚未打开，改名无阻）
-    rotate_msg = rotate_and_cleanup(log_file, config.logging.retention_days)
+    rotate_msg = rotate_and_cleanup(log_file, config.logging.retention_days,
+                                config.logging.max_total_mb)
     if rotate_msg:
         print(f"日志维护：{rotate_msg}", file=sys.stderr, flush=True)
     setup_logging(config.logging.level, str(log_file))

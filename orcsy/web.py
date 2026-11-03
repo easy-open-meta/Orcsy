@@ -7,6 +7,9 @@ API（均为 GET/POST JSON）：
   POST /api/task         创建/更新任务  {project, id, title, priority, status, description}
   POST /api/task/delete  删除任务       {project, id}
   POST /api/task/status  修改任务状态   {project, id, status}（blocked→open 重新入队等）
+  POST /api/task/reorder 看板拖拽排序落盘 {project, ids:[拖拽后的完整任务 id 顺序]}
+                         （重写 frontmatter 的 order: N；仅影响显示，Agent 仍按优先级领取）
+  POST /api/task/stop    强制停止执行中的任务 {project, id}（工具边界收尾为 cancelled，可重新入队）
   POST /api/models       拉取大模型列表 {provider?, base_url?, api_key?}（缺省用已存配置）
   POST /api/llm/test     测试大模型连通性 {provider?, base_url?, api_key?, model?}
                          （一条极短对话；缺省回退已存配置；失败返回 ok:false+原因）
@@ -38,6 +41,11 @@ API（均为 GET/POST JSON）：
                          （always=true 且批准时，该工具在本任务内不再询问；
                          挂起列表经 GET /api/state 的 approvals 字段曝光；
                          超时 permissions.timeout_minutes 自动拒绝）
+
+镜像源管理（内置+用户添加源，HTTP 测速选最快；详见 orcsy/mirrors.py）：
+  POST /api/mirror/test   测速 {category?}（缺省测全部类别），结果存边车并返回
+  POST /api/mirror/apply  把代理类最快源写进 env.vars（GOPROXY/PIP_INDEX_URL/
+                          npm_config_registry），需先有测速成功的结果
 
 登录鉴权（web.auth_password 非空时，除白名单外所有页面/API 需先登录）：
   GET  /api/auth         查询鉴权状态 {enabled, authed}（凭会话 Cookie 判定）
@@ -85,19 +93,24 @@ from . import __version__
 from . import skills as skills_lib
 from .agent import ProjectAgent
 from .approvals import get_manager
-from .config import (AppConfig, LLMConfig, PermissionsConfig, ProjectConfig,
-                     SchedulerConfig, TaskStatus, ToolsConfig, UpdateConfig,
-                     WebConfig, normalize_llm_override, resolve_llm,
-                     resolve_permission_mode, resolve_tools,
-                     validate_permission_mode)
+from .config import (AppConfig, CommandsConfig, EnvConfig, LLMConfig,
+                     MirrorsConfig, PermissionsConfig, ProjectConfig,
+                     SchedulerConfig, TaskStatus,
+                     ToolsConfig, UpdateConfig, WebConfig, normalize_llm_override,
+                     resolve_commands, resolve_llm, resolve_permission_mode,
+                     resolve_tools, validate_env_vars, validate_permission_mode)
 from .issues import IssueError, normalize_repo, sync_issues
 from . import updater
 from .llm import LLMError, list_models, test_connection
 from .logging_setup import get_logger
+from .mirrors import (CATEGORIES, CATEGORY_KEYS, mirror_runtime_for,
+                      validate_mirrors)
 from .scheduler import Scheduler
 from .skills import Skill
-from .task_model import Task, parse_task_file, priority_rank, scan_tasks
-from .tools import TOOLS, validate_tools_map
+from .task_model import (Task, _next_requeue_seq, parse_task_file, priority_rank,
+                         scan_tasks, set_task_file_order)
+from .tools import TOOLS, DEFAULT_ALLOWED_COMMANDS, validate_commands_map, validate_tools_map
+from .usage import get_usage_store, init_usage_store
 
 log = get_logger("web")
 
@@ -142,13 +155,21 @@ class AppState:
         self.log_path = log_path
         # 技能库根目录（配置文件同级 skills/），运行期不变
         self.skills_dir = skills_lib.skills_base(config)
+        # 用量台账锚定到配置目录（Scheduler 若已初始化则同路径幂等）
+        init_usage_store(config)
+        # 镜像源运行时（测速边车与 config.yaml 同目录；与 Scheduler 各持一份，
+        # 数据经边车文件天然共享）
+        self.mirror_runtime = mirror_runtime_for(config)
         self.agents: dict[str, ProjectAgent] = {
             p.name: ProjectAgent(p, resolve_llm(config.llm, p.llm,
                                                 context=f"项目 {p.name} 的 llm"),
                                  skills_base=self.skills_dir,
                                  tools=resolve_tools(config.tools, p.tools),
                                  permission_mode=resolve_permission_mode(config.permissions, p),
-                                 permission_timeout_minutes=config.permissions.timeout_minutes)
+                                 permission_timeout_minutes=config.permissions.timeout_minutes,
+                                 allowed_commands=resolve_commands(config.commands, p),
+                                 extra_env=config.env.vars or None,
+                                 mirror_runtime=self.mirror_runtime)
             for p in config.projects
         }
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
@@ -237,6 +258,55 @@ class AppState:
             raise ValueError("审批请求不存在或已处理（可能已被响应或超时自动拒绝）")
         return {"ok": True}
 
+    # ---- 强制停止 ----
+
+    def stop_task(self, data: dict) -> dict:
+        """强制停止执行中的任务：置位停止信号，循环在工具边界收尾为 cancelled。"""
+        from .task_control import get_task_controls
+
+        project = str(data.get("project") or "")
+        task_id = str(data.get("id") or "").strip()
+        if project not in self.agents:
+            raise ValueError(f"未知项目：{project}")
+        if not task_id:
+            raise ValueError("缺少任务 id")
+        if not get_task_controls().stop(project, task_id):
+            raise ValueError("该任务当前不在执行中（可能已结束）")
+        log.info("Web 强制停止任务 %s/%s", project, task_id)
+        return {"ok": True,
+                "message": "已发送停止信号，任务将在当前工具调用边界中止并标记为已取消"}
+
+    # ---- 镜像源测速与应用 ----
+
+    def mirror_test(self, data: dict) -> dict:
+        """测速镜像源（可只测单类别），结果落边车并返回。
+
+        HTTP 直连探测（绕过系统代理），全量约 20 个源并发测，最坏 ~15s——
+        ThreadingHTTPServer 下不阻塞其它请求；前端按钮转 loading。
+        """
+        category = str((data or {}).get("category") or "").strip() or None
+        if category and category not in CATEGORY_KEYS:
+            raise ValueError(f"未知镜像类别：{category}（可用：{', '.join(CATEGORY_KEYS)}）")
+        results = self.mirror_runtime.run_speedtest(category)
+        ok = sum(1 for v in results.values() if v is not None)
+        log.info("Web 镜像测速%s：%d/%d 可达",
+                 f"（{category}）" if category else "", ok, len(results))
+        return {"ok": True, "results": results,
+                "speeds": self.mirror_runtime.load_speeds(),
+                "message": f"测速完成：{ok}/{len(results)} 个源可达"}
+
+    def mirror_apply(self, data: dict) -> dict:
+        """把代理类（GOPROXY/pip/npm）最快源写进 env.vars（覆盖同名旧值）。"""
+        fastest = self.mirror_runtime.apply_fastest()
+        if not fastest:
+            raise ValueError("没有可用的测速结果：请先点「测速」，成功后再应用最快源")
+        merged = {**self.config.env.vars, **fastest}
+        self.save_settings({"env": {"vars": merged}})
+        log.info("Web 应用最快镜像源到 env.vars：%s", fastest)
+        return {"ok": True, "applied": fastest,
+                "message": "已写入 Agent 子进程环境变量："
+                           + "，".join(f"{k}={v}" for k, v in fastest.items())}
+
     # ---- 查询 ----
 
     def full_state(self) -> dict:
@@ -322,7 +392,8 @@ class AppState:
                 "token": self.config.update.token,
                 "auto_check": self.config.update.auto_check,
             },
-            "logging": {"retention_days": self.config.logging.retention_days},
+            "logging": {"retention_days": self.config.logging.retention_days,
+                        "max_total_mb": self.config.logging.max_total_mb},
             # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
             # finish 也进目录——前端把它渲染成「常开且禁用」的展示行，
             # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
@@ -338,6 +409,25 @@ class AppState:
                 "timeout_minutes": self.config.permissions.timeout_minutes,
             },
             "approvals": get_manager().pending(),
+            # 命令白名单开关：全局生效 map + 默认白名单目录（逐命令 NSwitch 用）
+            "commands_cfg": dict(self.config.commands.enabled),
+            "commands_catalog": list(DEFAULT_ALLOWED_COMMANDS),
+            # Agent 子进程自定义环境变量（代理/国内镜像），设置页可视化编辑
+            "env_cfg": dict(self.config.env.vars),
+            # 镜像源管理：类别表 + 各类别源清单（内置在前、含启用态）+ 用户配置
+            # + 测速结果边车（设置页「镜像源管理与测速选源」卡片全量数据）
+            "mirror_categories": [
+                {"key": c.key, "label": c.label, "kind": c.kind, "env_var": c.env_var}
+                for c in CATEGORIES
+            ],
+            "mirrors_catalog": self.mirror_runtime.sources(),
+            "mirrors_cfg": {
+                "custom": {k: list(v) for k, v in self.config.mirrors.custom.items()},
+                "disabled": list(self.config.mirrors.disabled),
+            },
+            "mirror_speeds": self.mirror_runtime.load_speeds(),
+            # 模型用量：总体 + 各项目 + 近 12 周逐日（热力图按周分列）+ 最近记录
+            "usage": get_usage_store().summary(days=84),
             "app_autostart": self.app_autostart_status(),
             "skills_dir": str(self.skills_dir),
             "skills": [self._skill_dict(s) for s in skills_lib.load_skills(self.skills_dir)],
@@ -353,6 +443,8 @@ class AppState:
             "assignee": t.assignee, "error": t.error,
             "file": str(t.path),
             "description": t.description[:2000],
+            # 看板拖拽排序的手动序号；null = 未手动排过（显示回退状态→优先级）
+            "order": t.order,
         }
 
     # ---- 操作 ----
@@ -406,9 +498,13 @@ class AppState:
         ]
         if labels_line:
             fm.append(f"labels: [{labels_line}]")
-        assignee = str(data.get("assignee", "")).strip()
+        assignee = str(data.get("assignee") or "").strip()
         if assignee:
             fm.append(f"assignee: {assignee}")
+        # 新建任务排到手动序末尾（已有 order 的最大值 +1）：看板里新建的
+        # 任务接在已排序列后面，而不是插队到最前；更新已有任务不动 order
+        if not path.exists():
+            fm.append(f"order: {self._next_task_order(project)}")
         fm.append("---")
         path.parent.mkdir(parents=True, exist_ok=True)
         # 描述留空用标题兜底：空正文会被解析器判为格式错误任务
@@ -416,6 +512,49 @@ class AppState:
         path.write_text("\n".join(fm) + "\n\n" + body + "\n", encoding="utf-8")
         log.info("Web 创建/更新任务 %s/%s [%s]", project, task_id, priority)
         return {"ok": True, "file": str(path), "id": task_id}
+
+    def _next_task_order(self, project: str) -> int:
+        """新建任务的手动序号：项目内已有 order 的最大值 +1（无则 1）。"""
+        agent = self.agents.get(project)
+        if agent is None or not agent.tasks_dir.is_dir():
+            return 1
+        orders = []
+        for f in agent.tasks_dir.glob("*.md"):
+            t = parse_task_file(f)
+            if t.order is not None:
+                orders.append(t.order)
+        return max(orders) + 1 if orders else 1
+
+    def reorder_tasks(self, data: dict) -> dict:
+        """看板拖拽排序落盘：按给定 id 顺序重写 frontmatter 的 order（1..N）。
+
+        只写发生变化的文件；ids 里不存在的任务跳过（并发删除等竞态 tolerable）。
+        仅影响看板显示顺序，Agent 领取仍按优先级（scan_tasks 不受影响）。
+        """
+        project = str(data.get("project") or "")
+        ids = data.get("ids")
+        if project not in self.agents:
+            raise ValueError(f"未知项目：{project}")
+        if not isinstance(ids, list) or not ids:
+            raise ValueError("ids 必须是非空数组（拖拽后的完整任务顺序）")
+        agent = self.agents[project]
+        updated = 0
+        for i, tid in enumerate(ids, 1):
+            tid = str(tid).strip()
+            if not tid:
+                continue
+            path = agent.tasks_dir / f"{tid}.md"
+            if not path.is_file():
+                continue  # 并发删除/改名：跳过，不让整次排序失败
+            t = parse_task_file(path)
+            if t.error:
+                continue  # 解析失败的文件不碰，避免把脏 frontmatter 写得更脏
+            if t.order != i:
+                if set_task_file_order(path, i):
+                    updated += 1
+        log.info("Web 拖拽排序 %s：%d 个任务重编号（%d 个文件落盘）",
+                 project, len(ids), updated)
+        return {"ok": True, "updated": updated}
 
     def _auto_task_id(self, project: str, priority: str, title: str) -> str:
         """从优先级 + 标题生成唯一任务 ID：P2-修复登录超时 / P1-fix-login。"""
@@ -451,6 +590,13 @@ class AppState:
         else:
             front += f"\nstatus: {status}"
         path.write_text(f"---\n{front}\n---\n{rest}", encoding="utf-8")
+        # 受阻重入队插队戳：→ open 时递增（下一轮扫描优先领取），离开 open 清除
+        from .task_model import _set_frontmatter_field
+        if status == "open":
+            _set_frontmatter_field(path, None, "requeue_seq",
+                                   str(_next_requeue_seq(path.parent)))
+        else:
+            _set_frontmatter_field(path, None, "requeue_seq", None)
         log.info("Web 修改任务状态 %s/%s -> %s", project, task_id, status)
         return {"ok": True}
 
@@ -662,7 +808,9 @@ class AppState:
         except PermissionError:
             return {"ok": True, "path": str(p), "parent": None, "dirs": [],
                     "files": [], "note": "无权限读取该目录"}
-        parent = str(p.parent) if p.parent != p else None
+        # 盘符根（pathlib 里 p.parent == p）的上一级是「盘符列表」根入口（path=""），
+        # 返回 "" 而非 None——None 会让前端把「上一级」按钮禁掉，用户回不到盘符列表
+        parent = "" if p.parent == p else str(p.parent)
         return {"ok": True, "path": str(p), "parent": parent, "dirs": dirs, "files": files}
 
     def probe_project_api(self, data: dict) -> dict:
@@ -684,11 +832,14 @@ class AppState:
         tasks_dir = str(data.get("tasks_dir") or "tasks").strip().replace("\\", "/")
         guide_file = str(data.get("guide_file") or "AGENT.md").strip()
         max_tasks = int(data.get("max_tasks_per_cycle") or 1)
-        max_turns = int(data.get("max_agent_turns") or 40)
+        # 不能用 `or 40` 兜底：0 是非法值该报错，且 -1 是合法语义不能被吞
+        raw_turns = data.get("max_agent_turns")
+        max_turns = 40 if raw_turns is None else int(raw_turns)
         if not (1 <= max_tasks <= 50):
             raise ValueError("每轮任务数应为 1~50")
-        if not (5 <= max_turns <= 200):
-            raise ValueError("工具循环轮数应为 5~200")
+        # -1 = 不设轮数上限（由强制停止/finish/审批兜底）
+        if max_turns != -1 and not (5 <= max_turns <= 200):
+            raise ValueError("工具循环轮数应为 5~200，或 -1 表示不设上限")
         cmds = data.get("allowed_commands")
         allowed = [str(c).strip() for c in cmds if str(c).strip()] if isinstance(cmds, list) else None
         branch = str(data.get("allowed_branch") or "").strip() or None
@@ -750,14 +901,26 @@ class AppState:
                 "run_once": cfg.scheduler.run_once,
             },
             "logging": {"level": cfg.logging.level, "file": cfg.logging.file,
-                        "retention_days": cfg.logging.retention_days},
+                        "retention_days": cfg.logging.retention_days,
+                        "max_total_mb": cfg.logging.max_total_mb},
             "web": {"host": cfg.web.host, "port": cfg.web.port,
                     "open_browser": cfg.web.open_browser,
                     "auth_password": cfg.web.auth_password},
             # 全局工具开关：只落盘显式关闭/开启的项（空 dict = 全默认启用）
             "tools": dict(cfg.tools.enabled),
+            # 命令白名单开关：只落盘显式禁用/启用的项（空 dict = 默认全放行）
+            "commands": dict(cfg.commands.enabled),
+            # Agent 子进程环境变量（代理/镜像）：整体落盘（空 dict = 不注入）
+            "env": {"vars": dict(cfg.env.vars)},
+            # 镜像源管理：用户添加源 + 禁用清单（测速结果在边车 JSON，不落这里）
+            "mirrors": {"custom": {k: list(v) for k, v in cfg.mirrors.custom.items()},
+                        "disabled": list(cfg.mirrors.disabled)},
             "permissions": {"mode": cfg.permissions.mode,
                             "timeout_minutes": cfg.permissions.timeout_minutes},
+            # 自更新源必须一起写回：此前漏写，看板任意一次保存都会把
+            # 用户填的 update.repo/token 从 config.yaml 里静默抹掉
+            "update": {"repo": cfg.update.repo, "token": cfg.update.token,
+                       "auto_check": cfg.update.auto_check},
             "projects": [
                 {
                     "name": p.name, "path": str(p.path), "enabled": p.enabled,
@@ -782,6 +945,8 @@ class AppState:
 
     def _apply_config(self, new_cfg: AppConfig) -> None:
         self.config = new_cfg
+        # 镜像源运行时随配置重建（custom/disabled 可能变了；测速边车路径不变）
+        self.mirror_runtime = mirror_runtime_for(new_cfg)
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
         self.agents = {p.name: ProjectAgent(p, resolve_llm(new_cfg.llm, p.llm,
@@ -790,7 +955,10 @@ class AppState:
                                             tools=resolve_tools(new_cfg.tools, p.tools),
                                             permission_mode=resolve_permission_mode(
                                                 new_cfg.permissions, p),
-                                            permission_timeout_minutes=new_cfg.permissions.timeout_minutes)
+                                            permission_timeout_minutes=new_cfg.permissions.timeout_minutes,
+                                            allowed_commands=resolve_commands(new_cfg.commands, p),
+                                            extra_env=new_cfg.env.vars or None,
+                                            mirror_runtime=self.mirror_runtime)
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
@@ -1294,6 +1462,12 @@ class AppState:
                 raise ValueError("最大输出 max_tokens 应为 256~200000")
             if not (4096 <= max_context <= 2_000_000):
                 raise ValueError("上下文窗口 max_context_tokens 应为 4096~2000000")
+            # 超时 ≤0（如 -1）归一为 -1 = 不超时（挂起靠「强制停止」打断）；
+            # 不能用 `or` 兜底——0 是显式意图该归一，而不是被当成「未填」回退 300
+            raw_ts = llm.get("timeout_seconds")
+            ts = 300 if raw_ts is None else int(raw_ts)
+            if ts <= 0:
+                ts = -1
             self.config.llm = LLMConfig(
                 provider=provider,
                 api_key=str(llm.get("api_key", "")).strip(),
@@ -1303,7 +1477,7 @@ class AppState:
                 max_context_tokens=max_context,
                 enable_thinking=bool(llm.get("enable_thinking",
                                              self.config.llm.enable_thinking)),
-                timeout_seconds=int(llm.get("timeout_seconds") or 300),
+                timeout_seconds=ts,
             )
         self.config.scheduler = SchedulerConfig(
             interval_seconds=interval, max_parallel_agents=parallel,
@@ -1323,13 +1497,20 @@ class AppState:
             open_browser=bool(web.get("open_browser", self.config.web.open_browser)),
             auth_password=auth_password,
         )
-        # 日志保留天数：0 表示关闭自动归档与清理
+        # 日志保留天数：0 表示关闭自动归档与清理；体积上限同理（0 = 不限制）。
+        # 都不能用 `or` 兜底——0 是显式关闭意图，不是「未填」
         log_cfg = data.get("logging") or {}
         if "logging" in data:
             rd = int(log_cfg.get("retention_days", self.config.logging.retention_days))
             if not (0 <= rd <= 365):
                 raise ValueError("日志保留天数应为 0~365（0 表示关闭自动归档清理）")
             self.config.logging.retention_days = rd
+            raw_mb = log_cfg.get("max_total_mb")
+            mb = (self.config.logging.max_total_mb if raw_mb is None
+                  else int(raw_mb))
+            if not (0 <= mb <= 100000):
+                raise ValueError("日志总占用上限应为 0~100000 MB（0 表示不限制）")
+            self.config.logging.max_total_mb = mb
 
         # 软件更新源：分块保存，只带 update 的请求不触碰其它配置
         if "update" in data:
@@ -1348,6 +1529,28 @@ class AppState:
         if "tools" in data:
             self.config.tools = ToolsConfig(
                 enabled=validate_tools_map(data.get("tools"), context="tools"))
+
+        # 命令白名单开关：分块保存；键必须是默认白名单成员（400 透传看板）
+        if "commands" in data:
+            self.config.commands = CommandsConfig(
+                enabled=validate_commands_map(data.get("commands"), context="commands"))
+
+        # Agent 子进程环境变量（代理/国内镜像）：分块保存，键名与保留变量校验。
+        # 兼容 {vars:{...}} 与平铺 {...} 两种前端/手写形态
+        if "env" in data:
+            raw_env = data.get("env")
+            if isinstance(raw_env, dict):
+                env_map = raw_env.get("vars") if "vars" in raw_env else raw_env
+            else:
+                env_map = raw_env
+            self.config.env = EnvConfig(
+                vars=validate_env_vars(env_map, context="env.vars"))
+
+        # 镜像源管理：分块保存（整块替换语义）；类别/URL 校验 400 透传看板
+        if "mirrors" in data:
+            mirrors_clean = validate_mirrors(data.get("mirrors"), context="mirrors")
+            self.config.mirrors = MirrorsConfig(
+                custom=mirrors_clean["custom"], disabled=mirrors_clean["disabled"])
 
         # 访问权限：分块保存；模式枚举与超时范围校验（400 透传看板）
         if "permissions" in data:
@@ -1378,7 +1581,8 @@ class AppState:
             log_path = (Path(self.log_path) if self.log_path
                         else Path(self.config.logging.file))
             try:
-                msg = rotate_and_cleanup(log_path, rd)
+                msg = rotate_and_cleanup(log_path, rd,
+                                         self.config.logging.max_total_mb)
                 if msg:
                     log.info("日志维护：%s", msg)
             except OSError as e:
@@ -1520,6 +1724,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.create_or_update_task(body))
             elif path == "/api/task/status":
                 self._json(self.state.set_task_status(body))
+            elif path == "/api/task/reorder":
+                self._json(self.state.reorder_tasks(body))
+            elif path == "/api/task/stop":
+                self._json(self.state.stop_task(body))
             elif path == "/api/task/delete-batch":
                 self._json(self.state.delete_tasks_batch(body))
             elif path == "/api/task/clear":
@@ -1571,6 +1779,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.set_app_autostart(body))
             elif path == "/api/approval":
                 self._json(self.state.approval_respond(body))
+            elif path == "/api/mirror/test":
+                self._json(self.state.mirror_test(body))
+            elif path == "/api/mirror/apply":
+                self._json(self.state.mirror_apply(body))
             elif path == "/api/update/check":
                 self._json(self.state.update_check(body))
             elif path == "/api/update/apply":

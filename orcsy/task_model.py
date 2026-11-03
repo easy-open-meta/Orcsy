@@ -58,6 +58,13 @@ class Task:
     assignee: str = ""    # 留空表示任意 Agent 均可领取
     description: str = ""
     error: str = ""       # 解析失败原因（仅在 parse_errors 中出现）
+    # 看板拖拽排序的手动序号（frontmatter order: N）；None = 未手动排过，
+    # 同优先级内决定显示与领取顺序
+    order: int | None = None
+    # 最近一次受阻的轮次戳（frontmatter requeue_seq: N，重新入队时写入）。
+    # 领取排序的最高优先信号：数值越大 = 越近被重新入队，越先领取——
+    # 受阻任务（如后端失败）重跑不应排到队尾等所有新任务跑完
+    requeue_seq: int = 0
 
     @property
     def rank(self) -> int:
@@ -108,6 +115,20 @@ def parse_task_file(path: Path) -> Task:
         [str(x).strip() for x in labels_raw if str(x).strip()]
         if isinstance(labels_raw, list) else []
     )
+    # order 非法/缺失都当 None（未手动排序），不让脏值把任务判成解析失败
+    order: int | None = None
+    order_raw = meta.get("order")
+    if isinstance(order_raw, int) and not isinstance(order_raw, bool):
+        order = order_raw
+    elif isinstance(order_raw, str) and order_raw.strip().lstrip("-").isdigit():
+        order = int(order_raw.strip())
+    # 受阻重入队轮次戳：缺失/非法按 0（从未受阻重入队）
+    requeue_seq = 0
+    seq_raw = meta.get("requeue_seq")
+    if isinstance(seq_raw, int) and not isinstance(seq_raw, bool) and seq_raw > 0:
+        requeue_seq = seq_raw
+    elif isinstance(seq_raw, str) and seq_raw.strip().isdigit():
+        requeue_seq = int(seq_raw.strip())
 
     if not title:
         return Task(id=task_id, path=path, error="缺少 frontmatter 中的 title 字段")
@@ -127,6 +148,8 @@ def parse_task_file(path: Path) -> Task:
         labels=labels,
         assignee=str(meta.get("assignee") or "").strip(),
         description=body,
+        order=order,
+        requeue_seq=requeue_seq,
     )
 
 
@@ -147,7 +170,17 @@ def scan_tasks(tasks_dir: Path) -> tuple[list[Task], list[Task]]:
         elif task.is_actionable:
             tasks.append(task)
 
-    tasks.sort(key=lambda t: (t.rank, t.id))
+    # 领取顺序：**受阻后重新入队的任务最优先**（requeue_seq 越大 = 越近受阻，
+    # 如后端失败重跑应接着上次的上下文继续，而不是排到队尾等所有新任务），
+    # 其次看板拖拽的手动序（同优先级内），最后回退优先级 → id
+    tasks.sort(key=lambda t: (
+        0 if t.requeue_seq > 0 else 1,
+        -t.requeue_seq,
+        t.rank,
+        0 if t.order is not None else 1,
+        t.order if t.order is not None else 0,
+        t.id,
+    ))
     return tasks, errors
 
 
@@ -190,22 +223,113 @@ def append_progress(path: Path, entry: str, keep_last: int = 40) -> None:
         pass
 
 
-def set_task_file_status(path: Path, status: str) -> bool:
-    """改写任务文件 frontmatter 的 status 字段（无 frontmatter 时补一个）。"""
+def _insert_frontmatter_field(text: str, head: str, rest_start: int,
+                              line: str) -> str:
+    """把一行字段插进已有 frontmatter 的收尾 --- 之前。
+
+    _FRONTMATTER_SPLIT_RE 的 group(0) 含收尾的 "---\\n"——直接往后拼会把字段
+    写到 frontmatter 外面（曾导致 order 行落在正文前、且每次重排叠加一段）。
+    """
+    assert head.endswith("---\n")
+    return head[: -len("---\n")] + line + "---\n" + text[rest_start:]
+
+
+def set_task_file_order(path: Path, order: int | None) -> bool:
+    """改写/清除任务文件 frontmatter 的 order 字段（看板拖拽排序落盘用）。
+
+    order=None 时删除该行（回到「未手动排序」）；写法与 set_task_file_status 同构。
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return False
     m = _FRONTMATTER_SPLIT_RE.match(text)
-    if not m:
-        text = f"---\nstatus: {status}\n---\n\n{text}"
-    elif re.search(r"^status:.*$", m.group(0), re.MULTILINE):
-        front = re.sub(r"^status:.*$", f"status: {status}", m.group(0), flags=re.MULTILINE)
+    if order is None:
+        if not m or not re.search(r"^order:.*$", m.group(0), re.MULTILINE):
+            return True  # 本就没有 order 行，无需写盘
+        front = re.sub(r"^order:.*\n?", "", m.group(0), flags=re.MULTILINE)
+        text = front + text[m.end():]
+    elif not m:
+        text = f"---\norder: {order}\n---\n\n{text}"
+    elif re.search(r"^order:.*$", m.group(0), re.MULTILINE):
+        front = re.sub(r"^order:.*$", f"order: {order}", m.group(0), flags=re.MULTILINE)
         text = front + text[m.end():]
     else:
-        text = m.group(0).rstrip("\n") + f"\nstatus: {status}\n---\n" + text[m.end():]
+        text = _insert_frontmatter_field(text, m.group(0), m.end(),
+                                         f"order: {order}\n")
     try:
         path.write_text(text, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def set_task_file_status(path: Path, status: str) -> bool:
+    """改写任务文件 frontmatter 的 status 字段（无 frontmatter 时补一个）。
+
+    重新入队（→ open）时同时写递增的 requeue_seq：受阻任务重入队后下一轮
+    扫描优先领取（不排到队尾）；离开 open（标 done/blocked 等）时清除该戳。
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if status == "open":
+        seq = _next_requeue_seq(path.parent)
+        return (_set_frontmatter_field(path, text, "status", str(status))
+                and _set_frontmatter_field(path, None, "requeue_seq", str(seq)))
+    changed = _set_frontmatter_field(path, text, "status", str(status))
+    if changed:
+        _set_frontmatter_field(path, None, "requeue_seq", None)  # 清除受阻戳
+    return changed
+
+
+def _next_requeue_seq(tasks_dir: Path) -> int:
+    """下一个受阻重入队轮次戳：全项目现有最大值 +1（无则 1）。"""
+    seq = 0
+    try:
+        for f in tasks_dir.glob("*.md"):
+            t = parse_task_file(f)
+            seq = max(seq, t.requeue_seq)
+        for f in (tasks_dir / "done").glob("*.md"):
+            t = parse_task_file(f)
+            seq = max(seq, t.requeue_seq)
+    except OSError:
+        pass
+    return seq + 1
+
+
+def _set_frontmatter_field(path: Path, text: str | None, field: str,
+                           value: str | None) -> bool:
+    """写入/更新/删除 frontmatter 的单行字段（value=None 表示删除该行）。
+
+    text=None 时自行读文件；frontmatter 不存在则新建。任何 I/O 失败返回 False。
+    """
+    if text is None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return False
+    m = _FRONTMATTER_SPLIT_RE.match(text)
+    if m:
+        if value is None:
+            if not re.search(rf"^{field}:.*$", m.group(0), re.MULTILINE):
+                return True  # 本就没有该行，无需写盘
+            front = re.sub(rf"^{field}:.*\n?", "", m.group(0), flags=re.MULTILINE)
+            new_text = front + text[m.end():]
+        elif re.search(rf"^{field}:.*$", m.group(0), re.MULTILINE):
+            front = re.sub(rf"^{field}:.*$", f"{field}: {value}",
+                           m.group(0), flags=re.MULTILINE)
+            new_text = front + text[m.end():]
+        else:
+            new_text = _insert_frontmatter_field(text, m.group(0), m.end(),
+                                                 f"{field}: {value}\n")
+    elif value is not None:
+        new_text = f"---\n{field}: {value}\n---\n\n{text}"
+    else:
+        return True  # 无 frontmatter 也没有可删的字段
+    try:
+        path.write_text(new_text, encoding="utf-8")
         return True
     except OSError:
         return False

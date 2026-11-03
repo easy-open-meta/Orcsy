@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orcsy.config import AppConfig, LLMConfig, ProjectConfig, WebConfig
+from orcsy.config import AppConfig, UpdateConfig, LLMConfig, ProjectConfig, WebConfig
 from orcsy.executor import TaskExecutor
 from orcsy.git_ops import Git
 from orcsy.logging_setup import setup_logging
@@ -77,6 +77,7 @@ def main() -> int:
     try:
         proj = make_project(tmp)
         cfg = AppConfig(
+        update=UpdateConfig(auto_check=False),  # 测试不触发后台更新检查
             llm=LLMConfig(api_key="fake", base_url="http://localhost:9", model="fake"),
             projects=[proj],
             web=WebConfig(host="127.0.0.1", port=5199, open_browser=False),
@@ -168,6 +169,45 @@ def main() -> int:
         assert g2["ok"] and g2["archived"] is False and g2["description"] == "x", g2
         print("ok: Web 建任务 → 状态可见，待办 archived=false 可编辑")
 
+        # 3b. 拖拽排序：order 重编号落盘 frontmatter；未知 id 跳过；新建任务接手动序末尾
+        for tid in ("P2-aaa", "P2-bbb"):
+            r = api(5199, "/api/task", {"project": "webproj", "id": tid, "title": tid,
+                                        "priority": "P2", "status": "open", "description": "x"})
+            assert r["ok"]
+        s = api(5199, "/api/state")
+        orders0 = {t["id"]: t["order"] for t in s["projects"][0]["tasks"]}
+        assert orders0.get("P2-aaa") is not None, "新建任务应带手动 order"
+        r = api(5199, "/api/task/reorder",
+                {"project": "webproj", "ids": ["P2-bbb", "P2-next", "P2-aaa"]})
+        # 只断言 ok + 最终状态：api() 对连接重置会重试 POST，首个响应丢失后
+        # 重试返回 updated=0（实际已生效），按 updated 计数断言会偶发失败
+        assert r["ok"], r
+        assert "order: 1" in (proj.path / "tasks" / "P2-bbb.md").read_text(encoding="utf-8")
+        s = api(5199, "/api/state")
+        got = {t["id"]: t["order"] for t in s["projects"][0]["tasks"]}
+        assert got["P2-bbb"] == 1 and got["P2-next"] == 2 and got["P2-aaa"] == 3, got
+        r = api(5199, "/api/task/reorder",
+                {"project": "webproj", "ids": ["no-such-task", "P2-aaa"]})
+        assert r["ok"], r  # 未知 id 跳过，不让整次失败
+        got = {t["id"]: t["order"] for t in api(5199, "/api/state")["projects"][0]["tasks"]}
+        assert got["P2-aaa"] == 2, got
+        # 外部放入的任务文件（frontmatter 无 order 行）被重排：order 必须插进
+        # frontmatter 内部（曾 bug：写到收尾 --- 外面，每次重排叠加一段）
+        ext = proj.path / "tasks" / "P2-ext.md"
+        ext.write_text("---\ntitle: 外部任务\npriority: P3\nstatus: open\n---\n\n外部放入。\n",
+                       encoding="utf-8")
+        r = api(5199, "/api/task/reorder",
+                {"project": "webproj", "ids": ["P2-ext", "P2-bbb"]})
+        assert r["ok"], r
+        fm = ext.read_text(encoding="utf-8").split("---")
+        assert len(fm) == 3 and "order: 1" in fm[1], fm  # 恰好一对 --- 且 order 在其中
+        assert "外部放入" in fm[2]
+        got = {t["id"]: t["order"] for t in api(5199, "/api/state")["projects"][0]["tasks"]}
+        assert got["P2-ext"] == 1 and got["P2-bbb"] == 2, got
+        r = api(5199, "/api/task/reorder", {"project": "nope", "ids": ["x"]})
+        assert not r.get("ok"), "未知项目应报错"
+        print("ok: 拖拽排序落盘（order 重编号/未知 id 跳过/未知项目报错/新建接末尾）")
+
         # 4. 自更新 API：源码运行被门禁拦下（400 + 指引），状态含一次性结果字段
         r = api(5199, "/api/update/install", {"path": "x/orcsy-update-0.15.0.zip"})
         assert not r.get("ok") and "源码运行" in r.get("message", ""), r
@@ -176,6 +216,16 @@ def main() -> int:
         s = api(5199, "/api/state")
         assert "update_result" in s
         print("ok: /api/update/install 门禁如实报错（源码运行给指引），update_result 字段存在")
+
+        # 5. 目录选择器：盘符根的「上一级」应回盘符列表根入口（parent=""），
+        # 而不是 None（None 会让前端禁用按钮，用户回不到盘符列表）
+        import pathlib
+        anchor = pathlib.Path.cwd().anchor  # 如 "C:\\" 或 "/"
+        b = api(5199, "/api/browse", {"path": anchor})
+        assert b["ok"] and b["parent"] == "", b
+        b0 = api(5199, "/api/browse", {"path": ""})
+        assert b0["ok"] and b0["parent"] is None and b0["dirs"], b0
+        print("ok: 目录选择器盘符根上一级回盘符列表（parent=''）")
 
         server.shutdown()
         print("\nWeb 端到端全部通过 ✅")

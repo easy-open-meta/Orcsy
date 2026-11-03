@@ -6,6 +6,7 @@ logs/
 config.yaml
 uv.lock
 *.zip
+ZCode/
 
 *.exe
 build/task-arranger

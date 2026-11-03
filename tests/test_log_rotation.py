@@ -97,7 +97,95 @@ def check_config_parse(tmp: Path) -> None:
         "llm:\n  api_key: sk-test\n"
         "logging:\n  retention_days: 9999\n", encoding="utf-8")
     assert load_config(cfg, require_api_key=False).logging.retention_days == 365, "应夹取到 365"
-    print("4. 配置：logging.retention_days 解析与 0~365 夹取 ✅")
+    # max_total_mb：默认 200；0 = 不限制；超大夹取到 100000
+    cfg.write_text(
+        "llm:\n  api_key: sk-test\n"
+        "logging:\n  retention_days: 3\n  max_total_mb: 0\n", encoding="utf-8")
+    assert load_config(cfg, require_api_key=False).logging.max_total_mb == 0
+    cfg.write_text(
+        "llm:\n  api_key: sk-test\n"
+        "logging:\n  max_total_mb: 99999999\n", encoding="utf-8")
+    assert load_config(cfg, require_api_key=False).logging.max_total_mb == 100000
+    print("4. 配置：retention_days / max_total_mb 解析与夹取 ✅")
+
+
+def _seed_logs(tmp: Path) -> Path:
+    """构造 4 个可清理日志（mtime 从旧到新）+ 活动日志 + 非日志文件。"""
+    MB = 1024 * 1024
+    log = tmp / "logs" / "orcsy.log"
+    for rel, days, size in (
+            ("logs/orcsy.log.3", 1.0, 0.6),
+            ("logs/archive/orcsy-20250101-000000.log", 0.8, 0.6),
+            ("logs/archive/orcsy-20260101-000000.log", 0.5, 0.6),
+            ("logs/orcsy.log.4", 0.3, 0.6)):
+        p = tmp / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x" * int(size * MB))
+        os.utime(p, (NOW - days * DAY,) * 2)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_bytes(b"x" * int(0.5 * MB))  # 活动日志 0.5MB
+    os.utime(log, (NOW - 0.2 * DAY,) * 2)
+    (tmp / "logs" / "install.log").write_bytes(b"x" * int(3 * MB))  # 非日志体系
+    return log
+
+
+def check_size_partial(tmp: Path) -> None:
+    """上限 2MB：删最旧的两个回到限额内即停，较新的保留。"""
+    log = _seed_logs(tmp)
+    msg = ls.rotate_and_cleanup(log, 0, max_total_mb=2, now=NOW)
+    assert not (tmp / "logs" / "orcsy.log.3").exists(), "最旧的应先删"
+    assert not (tmp / "logs" / "archive" / "orcsy-20250101-000000.log").exists()
+    assert (tmp / "logs" / "archive" / "orcsy-20260101-000000.log").is_file()
+    assert (tmp / "logs" / "orcsy.log.4").is_file()
+    assert log.is_file(), "活动日志不可删"
+    assert (tmp / "logs" / "install.log").is_file(), "非日志体系不计入也不可删"
+    assert "按大小清理完成" in (msg or ""), msg
+    print("5. 按大小清理：超限从最旧删起、回到限额即停，活动日志与 install.log 不动 ✅")
+
+
+def check_size_full_and_off(tmp: Path) -> None:
+    """上限 1MB：候选全删干净；上限 0：一个都不动（两开关独立）。"""
+    log = _seed_logs(tmp)
+    msg = ls.rotate_and_cleanup(log, 0, max_total_mb=1, now=NOW)
+    for rel in ("logs/orcsy.log.3", "logs/orcsy.log.4",
+                "logs/archive/orcsy-20250101-000000.log",
+                "logs/archive/orcsy-20260101-000000.log"):
+        assert not (tmp / rel).exists(), rel
+    assert log.is_file() and "按大小清理完成" in (msg or "")
+
+    log2 = _seed_logs(tmp / "off")
+    assert ls.rotate_and_cleanup(log2, 0, max_total_mb=0, now=NOW) is None, \
+        "max_total_mb=0 应为不限制"
+    assert (tmp / "off" / "logs" / "orcsy.log.3").is_file()
+    print("6. 按大小清理：限额足够小时删净候选；=0 完全关闭 ✅")
+
+
+def check_web_roundtrip(tmp: Path) -> None:
+    """Web 层：save_settings 校验/落盘 + full_state 回显。"""
+    from orcsy.config import AppConfig, LLMConfig
+    from orcsy.scheduler import Scheduler
+    from orcsy.web import AppState
+    tmp.mkdir(parents=True, exist_ok=True)
+    cfg_file = tmp / "config.yaml"
+    cfg_file.write_text("llm: {}\n", encoding="utf-8")
+    cfg = AppConfig(llm=LLMConfig(api_key="k", base_url="http://localhost:9",
+                                  model="m"), source_path=cfg_file)
+    st = AppState(cfg, Scheduler(cfg))
+    st.save_settings({"logging": {"retention_days": 14, "max_total_mb": 50}})
+    assert st.config.logging.max_total_mb == 50
+    assert st.full_state()["logging"]["max_total_mb"] == 50
+    from orcsy.config import load_config
+    disk = load_config(cfg_file, require_api_key=False)
+    assert disk.logging.max_total_mb == 50
+    # 0 = 不限制是合法显式值；负数拒绝
+    st.save_settings({"logging": {"retention_days": 14, "max_total_mb": 0}})
+    assert st.config.logging.max_total_mb == 0
+    try:
+        st.save_settings({"logging": {"retention_days": 14, "max_total_mb": -5}})
+        raise AssertionError("应拒绝负数")
+    except ValueError:
+        pass
+    print("7. Web 层：max_total_mb 校验/落盘/回显，0 = 不限制、负数拒绝 ✅")
 
 
 def main() -> int:
@@ -107,6 +195,9 @@ def main() -> int:
         check_rotate_due(tmp / "c2")
         check_not_due_and_disabled(tmp / "c3")
         check_config_parse(tmp / "c4")
+        check_size_partial(tmp / "c5")
+        check_size_full_and_off(tmp / "c6")
+        check_web_roundtrip(tmp / "c7")
         print("\n日志归档清理自检全部通过 ✅")
         return 0
     finally:

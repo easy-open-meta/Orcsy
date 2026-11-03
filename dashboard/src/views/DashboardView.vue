@@ -26,11 +26,67 @@ function stats(p: ProjectT): string {
   return parts.join(' · ') || '无待办'
 }
 
+const STATUS_ORD: Record<string, number> = { open: 0, in_progress: 1, blocked: 2, cancelled: 3 }
 const sorted = (p: ProjectT) =>
-  [...p.tasks].sort((a, b) =>
-    (({ open: 0, in_progress: 1, blocked: 2, cancelled: 3 } as any)[a.status] ?? 9)
-    - (({ open: 0, in_progress: 1, blocked: 2, cancelled: 3 } as any)[b.status] ?? 9)
-    || a.rank - b.rank || a.id.localeCompare(b.id))
+  [...p.tasks].sort((a, b) => {
+    // 与 Agent 领取顺序一致：状态分组 → 优先级 → 同 P 内按拖拽 order
+    // （无 order 的排在同 P 已排序任务之后）→ id
+    const st = (STATUS_ORD[a.status] ?? 9) - (STATUS_ORD[b.status] ?? 9)
+    if (st) return st
+    if (a.rank !== b.rank) return a.rank - b.rank
+    const oa = a.order, ob = b.order
+    if (oa != null && ob != null && oa !== ob) return oa - ob
+    if (oa != null && ob == null) return -1
+    if (oa == null && ob != null) return 1
+    return a.id.localeCompare(b.id)
+  })
+
+// ---- 拖拽排序：行内 HTML5 DnD，落点画指示线，drop 后整项目顺序落盘 ----
+const dragId = ref<string | null>(null)
+const dropAt = ref<{ id: string; before: boolean } | null>(null)
+
+function onDragStart(e: DragEvent, t: TaskT): void {
+  dragId.value = t.id
+  ui.dragTask = t.id           // 暂停轮询，防 5s 刷新冲掉拖拽中的列表
+  e.dataTransfer?.setData('text/plain', t.id)  // Firefox 要求 setData 才起拖
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+function onDragOver(e: DragEvent, t: TaskT): void {
+  if (!dragId.value || dragId.value === t.id) return
+  const el = e.currentTarget as HTMLElement
+  const r = el.getBoundingClientRect()
+  dropAt.value = { id: t.id, before: e.clientY < r.top + r.height / 2 }
+}
+function onDragEnd(): void {
+  dragId.value = null
+  dropAt.value = null
+  ui.dragTask = null
+}
+async function onDrop(p: ProjectT, t: TaskT): Promise<void> {
+  const src = dragId.value
+  const at = dropAt.value
+  onDragEnd()
+  if (!src || !at || src === t.id) return
+  const all = sorted(p)
+  const moved = all.find(x => x.id === src)
+  const anchorTask = all.find(x => x.id === at.id)
+  if (!moved || !anchorTask) return
+  // 排序只在同「状态 + 优先级」分组内有效（跨级拖拽会被优先级重新归位），
+  // 明确提示而不是让用户以为拖拽失灵
+  if (moved.status !== anchorTask.status || moved.rank !== anchorTask.rank) {
+    window.$message?.('任务顺序仅在同一优先级分组内生效（跨优先级请先改优先级）', 'warning')
+    return
+  }
+  // 以当前显示序为基准重排：摘出被拖任务，插到落点行的前/后
+  const ids = all.map(x => x.id).filter(id => id !== src)
+  const anchor = ids.indexOf(at.id)
+  if (anchor < 0) return
+  ids.splice(at.before ? anchor : anchor + 1, 0, src)
+  try {
+    await api.taskReorder(p.name, ids)
+  } catch (e: any) { window.$message?.(e.message, 'error') }
+  void import('../store').then(m => m.refresh(true))
+}
 
 // ---- 任务列表分页：批量导入 Issue 后卡片不至于无限长 ----
 const TASK_PAGE_SIZE = 10
@@ -96,6 +152,25 @@ async function delTask(p: ProjectT, t: TaskT): Promise<void> {
     async onPositiveClick() {
       try { await api.taskDelete(p.name, t.id); window.$message?.('已删除') }
       catch (e: any) { window.$message?.(e.message, 'error') }
+      void import('../store').then(m => m.refresh(true))
+    },
+  })
+}
+
+// 强制停止执行中的任务：置位停止信号，执行器在工具边界收尾为 cancelled
+function stopTask(p: ProjectT, t: TaskT): void {
+  window.$dialog?.warning({
+    title: '强制停止任务',
+    content: `确定立即停止正在执行的任务 ${t.id}？\n\n`
+      + '当前工具调用（含正在跑的命令）会被中止，worktree 里未提交的改动将被丢弃，'
+      + '任务标记为「已取消」——之后可点「重新入队」再跑。',
+    positiveText: '强制停止',
+    negativeText: '取消',
+    async onPositiveClick() {
+      try {
+        const r = await api.taskStop(p.name, t.id)
+        window.$message?.(r.message || '已发送停止信号', 'success')
+      } catch (e: any) { window.$message?.(e.message, 'error') }
       void import('../store').then(m => m.refresh(true))
     },
   })
@@ -314,7 +389,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <div class="t-meta">{{ e.error }}</div>
           </div>
 
-          <div v-for="t in pageTasks(p)" :key="t.id" class="task">
+          <div v-for="t in pageTasks(p)" :key="t.id" class="task"
+               :class="{ 'drop-before': dropAt?.id === t.id && dropAt.before,
+                         'drop-after': dropAt?.id === t.id && !dropAt.before,
+                         dragging: dragId === t.id }"
+               draggable="true" title="拖拽调整顺序（同一优先级内生效，同时决定 Agent 领取顺序）"
+               @dragstart="onDragStart($event, t)" @dragend="onDragEnd()"
+               @dragover.prevent="onDragOver($event, t)" @drop.prevent="onDrop(p, t)">
             <div class="t-main clickable"
                  :title="t.status === 'open' ? '点击编辑任务内容' : '点击查看任务内容（只读）'"
                  @click="clickTask(p.name, t)">
@@ -345,6 +426,9 @@ async function quickAdd(p: ProjectT): Promise<void> {
                        @click="setStatus(p, t, 'open')">重新入队</NButton>
               <NButton v-if="t.status === 'open' || t.status === 'in_progress'" size="tiny"
                        @click="setStatus(p, t, 'done')">标记完成</NButton>
+              <NButton v-if="t.status === 'in_progress'" size="tiny" type="warning" secondary
+                       title="立即中止正在执行的 Agent 循环（丢弃 worktree 改动，可重新入队）"
+                       @click="stopTask(p, t)">强制停止</NButton>
               <NButton size="tiny" quaternary type="error" @click="delTask(p, t)">删除</NButton>
             </div>
           </div>
@@ -404,6 +488,10 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .tcheck { display: flex; align-items: center; }
 .task { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .task.err { border-color: var(--n-error-color); }
+/* 拖拽排序：落点指示线 + 被拖行半透明 */
+.task.drop-before { box-shadow: 0 -2px 0 0 var(--acc, #5b8cff); }
+.task.drop-after { box-shadow: 0 2px 0 0 var(--acc, #5b8cff); }
+.task.dragging { opacity: .45; }
 .t-main { display: flex; gap: 8px; align-items: center; }
 .t-main.clickable { cursor: pointer; }
 .task .title { flex: 1; font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

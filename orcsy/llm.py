@@ -16,6 +16,7 @@ Agent 循环（run_task_loop）：
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 import httpx
@@ -25,6 +26,7 @@ from .config import LLMConfig
 from .logging_setup import get_logger
 from .tools import (
     FinishSignal,
+    TaskStopped,
     ToolContext,
     dispatch_tool,
     tool_definitions_anthropic,
@@ -111,7 +113,9 @@ def test_connection(provider: str, base_url: str, api_key: str, model: str,
         raise LLMError("model 不能为空")
     client = LLMClient(LLMConfig(
         provider=provider, api_key=api_key, base_url=base_url, model=model,
-        timeout_seconds=max(5, min(int(timeout_seconds), 120)),
+        # -1（不超时）对一次性探活没有意义：按 30s 兜底
+        timeout_seconds=(30 if int(timeout_seconds) <= 0
+                         else max(5, min(int(timeout_seconds), 120))),
     ))
     if provider == "anthropic":
         url = _anthropic_base(base_url) + "/messages"
@@ -151,8 +155,11 @@ def list_models(provider: str, base_url: str, api_key: str,
     else:
         url = base_url.rstrip("/") + "/models"
     headers = {"User-Agent": USER_AGENT, **_auth_headers(provider, api_key)}
+    # -1（不超时）对拉取列表没有意义：按 30s 兜底
+    list_timeout = (30 if int(timeout_seconds) <= 0
+                    else min(max(timeout_seconds, 5), 30))
     try:
-        resp = httpx.get(url, headers=headers, timeout=min(max(timeout_seconds, 5), 30))
+        resp = httpx.get(url, headers=headers, timeout=list_timeout)
     except httpx.HTTPError as e:
         raise LLMError(f"获取模型列表失败：{e}") from e
     if resp.status_code == 404:
@@ -248,7 +255,7 @@ def finish_response(payload: dict) -> AgentResponse:
     """把 finish 参数转成 AgentResponse，协议不完整时返回 blocked 兜底。"""
     action = str(payload.get("action", "")).strip().lower()
     summary = str(payload.get("summary", "")).strip()
-    if action not in ("completed", "blocked", "cannot_do") or not summary:
+    if action not in ("completed", "blocked", "cannot_do", "split") or not summary:
         return AgentResponse.fallback(f"finish 参数不完整：action={action!r}")
     files = payload.get("files_changed") or []
     return AgentResponse(
@@ -270,6 +277,10 @@ class LLMClient:
         self.usage = {"turns": 0, "prompt_tokens": 0, "completion_tokens": 0}
         # 启用的工具名集合（run_task_loop 从 ToolContext 取）；None = 全量下发
         self._enabled_tools: frozenset[str] | None = None
+        # 强制停止信号（run_task_loop 从 ToolContext 取）：HTTP 请求在子线程
+        # 执行、主线程 0.2s 轮询它——不超时（timeout_seconds=-1）时挂起的
+        # 请求也能被看板「强制停止」秒级打断
+        self._stop_event: object | None = None
 
     def _acc_usage(self, data: dict, provider: str) -> None:
         u = data.get("usage") or {}
@@ -321,9 +332,18 @@ class LLMClient:
         self.messages.append(self._user(task_prompt))
         # 工具开关：schema 按启用集过滤下发（dispatch_tool 里还有兜底拦截）
         self._enabled_tools = ctx.enabled_tools
+        # 停止信号传到 HTTP 层：请求挂起期间「强制停止」也能生效
+        self._stop_event = ctx.stop_event
         use_tools = True
 
-        for turn in range(1, max_turns + 1):
+        turn = 0
+        # max_turns <= 0（如 -1）= 不设轮数上限：只有 finish / 停止信号 / 异常能结束循环
+        unlimited = max_turns is None or max_turns <= 0
+        while unlimited or turn < max_turns:
+            turn += 1
+            # 强制停止（看板置位）：在模型请求之前先看一眼，避免多跑一轮
+            if ctx.stop_event is not None and ctx.stop_event.is_set():
+                raise TaskStopped()
             if self.cfg.provider == "anthropic":
                 assistant_msg, tool_calls, reasoning = self._step_anthropic(use_tools)
             else:
@@ -347,6 +367,9 @@ class LLMClient:
                 continue
 
             for call in tool_calls:
+                # 同一轮多个工具调用之间也检查：停止请求一个工具周期内即生效
+                if ctx.stop_event is not None and ctx.stop_event.is_set():
+                    raise TaskStopped()
                 call_id, name, args_json = call
                 log.info("工具调用 [%d] %s %s", turn, name,
                          (args_json or "")[:120].replace("\n", " "))
@@ -364,8 +387,11 @@ class LLMClient:
 
             self._trim_context()
 
-        # 轮数耗尽：要求强制收尾
+        # 轮数耗尽（不设上限时循环只能被 finish/停止/异常离开，到不了这里）：
+        # 要求强制收尾
         log.warning("工具循环达到最大轮数 %d，要求强制收尾", max_turns)
+        if ctx.stop_event is not None and ctx.stop_event.is_set():
+            raise TaskStopped()
         if on_progress is not None:
             try:
                 on_progress(f"达到最大轮数 {max_turns}，要求强制收尾")
@@ -555,21 +581,76 @@ class LLMClient:
 
     # ---- HTTP ----
 
+    def _request_timeout(self):
+        """httpx 超时值：timeout_seconds <= 0（约定 -1）= 不超时，无限等待响应。"""
+        return None if self.cfg.timeout_seconds <= 0 else self.cfg.timeout_seconds
+
+    def _timeout_error(self, e: Exception) -> LLMError:
+        # 可行动指引：思考型模型 + 长上下文时单轮 300s 常不够，用户需要
+        # 知道去哪儿调、任务怎么恢复，而不是只看到一个裸的 timed out
+        return LLMError(
+            f"请求大模型超时：{self.cfg.timeout_seconds} 秒内未返回。"
+            "思考型模型/长上下文单轮生成常需更久，可在看板设置页「大模型接入」"
+            "把「超时秒数」调大（如 600~900；-1 = 不超时，挂起时靠「强制停止」"
+            "打断）后重试；本任务会被标为 blocked，重置为待办即可按原优先级重跑"
+            "（已完成的进度不受影响）。")
+
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
-        body = json.dumps(payload, ensure_ascii=False)
-        log.debug("LLM 请求 %s model=%s msgs=%d", url, self.cfg.model, len(self.messages))
-        try:
-            resp = httpx.post(
-                url, content=body.encode("utf-8"),
-                headers={"User-Agent": USER_AGENT, **headers,
-                         "Content-Type": "application/json"},
-                timeout=self.cfg.timeout_seconds,
-            )
-        except httpx.HTTPError as e:
-            raise LLMError(f"请求大模型失败：{e}") from e
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req_headers = {"User-Agent": USER_AGENT, **headers,
+                       "Content-Type": "application/json"}
+        timeout = self._request_timeout()
+        log.debug("LLM 请求 %s model=%s msgs=%d timeout=%s",
+                  url, self.cfg.model, len(self.messages), timeout)
+        if self._stop_event is not None:
+            resp = self._post_stop_aware(url, body, req_headers, timeout,
+                                         self._stop_event)
+        else:
+            try:
+                resp = httpx.post(url, content=body, headers=req_headers,
+                                  timeout=timeout)
+            except httpx.TimeoutException as e:
+                raise self._timeout_error(e) from e
+            except httpx.HTTPError as e:
+                raise LLMError(f"请求大模型失败：{e}") from e
         if resp.status_code != 200:
             raise LLMError(f"大模型返回 HTTP {resp.status_code}：{resp.text[:500]}")
         try:
             return resp.json()
         except ValueError as e:
             raise LLMError(f"大模型返回非 JSON：{resp.text[:500]}") from e
+
+    def _post_stop_aware(self, url: str, body: bytes, headers: dict,
+                         timeout, stop) -> "httpx.Response":
+        """子线程发请求，主线程 0.2s 轮询强制停止信号。
+
+        不超时（-1）时请求可能无限挂起，停止信号必须能打断等待；有限超时
+        也顺带受益——「强制停止」秒级生效，而不是最长等满 timeout_seconds。
+        打断后子线程（daemon）自生自灭：聊天完成是只读请求，服务端即使
+        生成完也无人消费，零副作用。
+        """
+        out: dict = {}
+
+        def worker() -> None:
+            try:
+                out["resp"] = httpx.post(url, content=body, headers=headers,
+                                         timeout=timeout)
+            except BaseException as e:  # noqa: BLE001 — 带回主线程按类型处理
+                out["err"] = e
+
+        t = threading.Thread(target=worker, daemon=True, name="llm-request")
+        t.start()
+        while True:
+            if stop.is_set():
+                raise TaskStopped()
+            t.join(0.2)
+            if not t.is_alive():
+                break
+        if "err" in out:
+            e = out["err"]
+            if isinstance(e, httpx.TimeoutException):
+                raise self._timeout_error(e) from e
+            if isinstance(e, httpx.HTTPError):
+                raise LLMError(f"请求大模型失败：{e}") from e
+            raise e
+        return out["resp"]

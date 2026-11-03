@@ -17,10 +17,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
-from .config import AppConfig, resolve_llm, resolve_permission_mode, resolve_tools
+from .config import AppConfig, resolve_commands, resolve_llm, resolve_permission_mode, resolve_tools
 from .issues import sync_issues
 from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
-from .skills import skills_base
+from .mirrors import mirror_runtime_for
+from .skills import ensure_builtin_skills, skills_base
+from .usage import init_usage_store
 
 log = get_logger("scheduler")
 
@@ -33,13 +35,25 @@ class Scheduler:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.skills_dir = skills_base(config)
+        # 内置技能播种/升级（幂等）：老用户拿到新内置技能，未改动副本随模板刷新
+        seeded = ensure_builtin_skills(self.skills_dir)
+        if seeded:
+            log.info("已播种/升级内置技能：%s", ", ".join(seeded))
+        # 用量台账按配置锚定路径（executor 记录、看板聚合共用同一单例）
+        init_usage_store(config)
+        # 镜像源运行时（测速结果边车与 config.yaml 同目录）：executor 的
+        # speedtest_mirrors 工具与 env-setup 技能动态优选段共用
+        self.mirror_runtime = mirror_runtime_for(config)
         self.agents = [
             ProjectAgent(p, resolve_llm(config.llm, p.llm,
                                         context=f"项目 {p.name} 的 llm"),
                          skills_base=self.skills_dir,
                          tools=resolve_tools(config.tools, p.tools),
                          permission_mode=resolve_permission_mode(config.permissions, p),
-                         permission_timeout_minutes=config.permissions.timeout_minutes)
+                         permission_timeout_minutes=config.permissions.timeout_minutes,
+                         allowed_commands=resolve_commands(config.commands, p),
+                         extra_env=config.env.vars or None,
+                         mirror_runtime=self.mirror_runtime)
             for p in config.projects
             if p.enabled
         ]
@@ -99,13 +113,19 @@ class Scheduler:
         with self._cycle_lock:
             self.config = new_config
             self.skills_dir = skills_base(new_config)
+            ensure_builtin_skills(self.skills_dir)
+            # 镜像源运行时随配置重建（custom/disabled 可能变了；测速边车路径不变）
+            self.mirror_runtime = mirror_runtime_for(new_config)
             self.agents = [
                 ProjectAgent(p, resolve_llm(new_config.llm, p.llm,
                                             context=f"项目 {p.name} 的 llm"),
                              skills_base=self.skills_dir,
                              tools=resolve_tools(new_config.tools, p.tools),
                              permission_mode=resolve_permission_mode(new_config.permissions, p),
-                             permission_timeout_minutes=new_config.permissions.timeout_minutes)
+                             permission_timeout_minutes=new_config.permissions.timeout_minutes,
+                             allowed_commands=resolve_commands(new_config.commands, p),
+                             extra_env=new_config.env.vars or None,
+                             mirror_runtime=self.mirror_runtime)
                 for p in new_config.projects
                 if p.enabled
             ]
@@ -149,7 +169,8 @@ class Scheduler:
             return
         try:
             msg = rotate_and_cleanup(anchored_log_path(self.config),
-                                     self.config.logging.retention_days)
+                                     self.config.logging.retention_days,
+                                     self.config.logging.max_total_mb)
         except Exception:  # noqa: BLE001 — 日志维护失败不影响调度
             log.exception("日志归档/清理失败")
             return

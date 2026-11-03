@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orcsy.config import (AppConfig, LLMConfig, ProjectConfig, ToolsConfig,
+from orcsy.config import (AppConfig, UpdateConfig, LLMConfig, ProjectConfig, ToolsConfig,
                           load_config, resolve_tools)
 from orcsy.executor import TaskExecutor
 from orcsy.prompts import _output_contract, _skills_section, build_system_prompt
@@ -179,6 +179,7 @@ def check_web_roundtrip() -> None:
         proj_dir = tmp / "proj"
         proj_dir.mkdir()
         cfg = AppConfig(
+        update=UpdateConfig(auto_check=False),  # 测试不触发后台更新检查
             llm=LLMConfig(api_key="fake", base_url="http://localhost:9", model="fake"),
             source_path=cfg_file)
         state = AppState(cfg, Scheduler(cfg))
@@ -224,6 +225,11 @@ def check_web_roundtrip() -> None:
         disk = load_config(cfg_file, require_api_key=False)
         assert disk.tools.enabled == {"web_fetch": False, "delete_file": False}
         assert disk.projects[0].tools is None
+        # 看板保存必须把 update 节一起写回（曾漏写：任意一次保存都会静默
+        # 抹掉用户填的更新源），缺失时落盘为官方默认源
+        from orcsy.config import DEFAULT_UPDATE_REPO
+        saved_text = cfg_file.read_text(encoding="utf-8")
+        assert "update:" in saved_text and DEFAULT_UPDATE_REPO in saved_text, saved_text
         state.save_project({"name": "proj1", "path": str(proj_dir),
                             "original_name": "proj1",
                             "tools": {"grep": False}})

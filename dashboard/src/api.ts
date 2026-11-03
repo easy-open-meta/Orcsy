@@ -14,6 +14,8 @@ export interface TaskT {
   error: string
   file: string
   description: string
+  /** 看板拖拽排序的手动序号；null = 未手动排过（显示回退 状态→优先级→id） */
+  order: number | null
 }
 
 export interface ProjectT {
@@ -88,6 +90,31 @@ export interface ApprovalT {
   waited_seconds: number
 }
 
+/** 一条模型用量记录（任务级台账，logs/usage.jsonl） */
+export interface UsageEntryT {
+  at: string
+  project: string
+  task_id: string
+  outcome: string
+  turns: number
+  prompt_tokens: number
+  completion_tokens: number
+  model: string
+}
+export interface UsageAggT {
+  tasks: number
+  turns: number
+  prompt_tokens: number
+  completion_tokens: number
+}
+/** 模型用量聚合：总体 + 各项目 + 近 14 天逐日 + 最近记录 */
+export interface UsageT {
+  total: UsageAggT
+  projects: (UsageAggT & { name: string; last_at?: string })[]
+  days: (UsageAggT & { date: string })[]
+  recent: UsageEntryT[]
+}
+
 export interface AppStateT {
   version: string
   config_path: string
@@ -118,7 +145,7 @@ export interface AppStateT {
   scheduler_cfg: { interval_seconds: number; max_parallel_agents: number }
   web_cfg: { host: string; port: number; open_browser: boolean; auth_enabled: boolean }
   update_cfg: { repo: string; token: string; auto_check: boolean }
-  logging: { retention_days: number }
+  logging: { retention_days: number; max_total_mb: number }
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
   /** 可开关工具目录（名称+中文描述；finish 为协议工具不在其中） */
@@ -127,6 +154,22 @@ export interface AppStateT {
   permissions_cfg: { mode: PermissionMode; timeout_minutes: number }
   /** 当前挂起的人工审批请求（5s 轮询刷新；处理后条目消失） */
   approvals: ApprovalT[]
+  /** 全局命令白名单开关：只含显式设置过的项，未列出的命令默认放行 */
+  commands_cfg: Record<string, boolean>
+  /** 默认命令白名单目录（逐命令开关用，含通配符模式如 gradle*） */
+  commands_catalog: string[]
+  /** Agent 子进程自定义环境变量（代理 / 国内镜像，注入 run_command） */
+  env_cfg: Record<string, string>
+  /** 镜像源管理：类别表（kind=proxy 的类别参与「应用最快源」写 env.vars） */
+  mirror_categories: MirrorCategoryT[]
+  /** 各类别源清单：内置在前、用户添加在后，含启用态（disabled 的 enabled=false） */
+  mirrors_catalog: Record<string, MirrorRowT[]>
+  /** 用户镜像配置：custom 按类别分组的添加源；disabled 为禁用源 URL */
+  mirrors_cfg: { custom: Record<string, string[]>; disabled: string[] }
+  /** 测速结果边车：tested_at 为空串 = 从未测速；results 值 null = 探测失败 */
+  mirror_speeds: { tested_at: string; results: Record<string, number | null> }
+  /** 模型用量台账聚合（「用量」页签） */
+  usage: UsageT
   app_autostart: { enabled: boolean }
   skills_dir: string
   skills: SkillT[]
@@ -138,6 +181,23 @@ export interface ModelInfo {
   id: string
   context_window: number | null
   max_output_tokens: number | null
+}
+
+/** 镜像源类别（go_dist=Go 安装包 / goproxy / npm / pip / node_dist / jdk / python_dist） */
+export interface MirrorCategoryT {
+  key: string
+  label: string
+  kind: 'dist' | 'proxy'
+  env_var: string
+}
+
+/** 一个镜像源行：builtin=内置（不可删只可禁用）；test_url 为测速探测地址 */
+export interface MirrorRowT {
+  url: string
+  label: string
+  builtin: boolean
+  enabled: boolean
+  test_url: string
 }
 
 export interface DirListing {
@@ -222,6 +282,12 @@ export const api = {
   }) => post('/api/task', p),
   taskStatus: (project: string, id: string, status: string) =>
     post('/api/task/status', { project, id, status }),
+  /** 拖拽排序落盘：ids 为拖拽后该项目的完整任务顺序 */
+  taskReorder: (project: string, ids: string[]) =>
+    post('/api/task/reorder', { project, ids }) as Promise<{ ok: boolean; updated: number }>,
+  /** 强制停止执行中的任务（工具边界收尾为 cancelled，可重新入队） */
+  taskStop: (project: string, id: string) =>
+    post('/api/task/stop', { project, id }) as Promise<{ ok: boolean; message: string }>,
   taskDelete: (project: string, id: string) => post('/api/task/delete', { project, id }),
   taskDeleteBatch: (project: string, ids: string[]) =>
     post('/api/task/delete-batch', { project, ids }) as Promise<{
@@ -279,6 +345,16 @@ export const api = {
   /** 响应一条挂起的审批：approved=批准/拒绝；always=本任务内始终允许该工具（仅批准时有意义） */
   approvalRespond: (id: string, approved: boolean, always = false) =>
     post('/api/approval', { id, approved, always }),
+  /** 镜像源测速（category 缺省测全部）：HTTP 直连探测（绕过系统代理），结果存服务端边车 */
+  mirrorTest: (category?: string) => post('/api/mirror/test', { category: category ?? '' }) as Promise<{
+    ok: boolean; message: string
+    results: Record<string, number | null>
+    speeds: { tested_at: string; results: Record<string, number | null> }
+  }>,
+  /** 应用最快源：代理类（GOPROXY / PIP_INDEX_URL / npm_config_registry）最快源写入 env.vars */
+  mirrorApply: () => post('/api/mirror/apply', {}) as Promise<{
+    ok: boolean; message: string; applied: Record<string, string>
+  }>,
   autostart: (enabled: boolean) => post('/api/app-autostart', { enabled }),
   updateCheck: () => post('/api/update/check', {}) as Promise<{
     ok: boolean; phase: string; has_update: boolean; latest: string

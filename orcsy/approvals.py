@@ -37,9 +37,12 @@ MODE_LABELS = {
 MUTATING_TOOLS = frozenset({
     "write_file", "edit_file", "multi_edit",
     "delete_file", "move_file", "run_command",
+    "create_tasks",   # 拆分任务会写任务文件并关闭原任务，按写操作对待
 })
 
-# 高风险操作（autonomous 也询问）：破坏性文件操作 + 执行命令
+# 高风险操作（autonomous 也询问）：破坏性文件操作 + 执行命令。
+# 包管理器（装环境）也在内——装系统软件影响整台机器，即使 full_access 之外的
+# 任何模式都应过一道人工确认
 RISKY_TOOLS = frozenset({"delete_file", "move_file", "run_command"})
 
 # 审批请求 args 预览的截断长度（看板卡片展示用）

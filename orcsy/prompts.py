@@ -26,7 +26,8 @@ _FINISH_PROTOCOL = """\
 结束任务时**必须调用 finish 工具**，参数字段：
 
 - action："completed"（已完成且按指引验证通过）| "blocked"（尝试后受阻，notes 写清原因）
-  | "cannot_do"（超出能力或需人工决策，notes 说明原因）
+  | "cannot_do"（超出能力或需人工决策，notes 说明原因）| "split"（任务过大，已用
+  create_tasks 拆分为子任务并交接，summary 写拆成了哪几块）
 - summary：一句话说明做了什么或为何受阻
 - files_changed：相对项目根的变更文件路径数组；未改动则空数组
 - commit_message：Conventional Commits 风格提交信息（如 fix: ... / feat: ...）；
@@ -40,7 +41,7 @@ _FINISH_PROTOCOL = """\
 def _output_contract(enabled: frozenset[str] | None = None) -> str:
     """按启用工具集动态生成工作方式与资源约定。
 
-    enabled=None（全启用）时文案覆盖全部 13 个工具；被禁用的工具不出现在
+    enabled=None（全启用）时文案覆盖全部 14 个工具；被禁用的工具不出现在
     提示词里——模型反复尝试调用一个 schema 里不存在的工具纯属浪费轮次。
     """
     def on(name: str) -> bool:
@@ -58,6 +59,10 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
         clauses.append("run_command 运行测试与构建")
     if on("web_fetch"):
         clauses.append("web_fetch 查阅公网文档资料")
+    if on("speedtest_mirrors"):
+        clauses.append("speedtest_mirrors 测镜像源延迟选最快的下载")
+    if on("create_tasks"):
+        clauses.append("create_tasks 在任务过大时自主拆分子任务")
     work_line = ("你通过工具完成一切工作：" + "，".join(clauses) + "。") if clauses else (
         "你当前没有可用的工作工具：直接调用 finish（action=cannot_do）说明受阻原因。")
 
@@ -75,6 +80,16 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
     if on("web_fetch"):
         bullets.append("- web_fetch 只取正文文本，单次结果可能较长：优先抓权威文档页，"
                        "不要连续抓取大量页面。")
+    if on("speedtest_mirrors"):
+        bullets.append("- speedtest_mirrors 结果会持久化：技能正文的「镜像源测速优选」段"
+                       "已有较新数据时直接用，不要重复测速。")
+    if on("create_tasks"):
+        bullets.append(
+            "- 任务体量远超单轮预算时**主动拆分**，不要硬撑到轮数耗尽：执行早期"
+            "（读完需求、动手前）就判断——预计 15+ 轮、要新写大量文件、或验证清单"
+            "明显做不完，即用 create_tasks 拆成可独立验证的子任务（每个带明确验收"
+            "命令），再 finish(action=split)。拆分前把已验证的现状写进子任务描述，"
+            "避免后续任务重做或误判已有文件损坏。")
     resources = ("## 资源约定（上下文成本控制，必须遵守）\n\n"
                  "对话历史每一轮都会整体重发，冗长的工具结果会按轮次重复计费：\n\n"
                  + "\n".join(bullets) + "\n") if bullets else ""

@@ -21,10 +21,12 @@ from .config import LLMConfig, ProjectConfig, TaskStatus
 from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
 from .logging_setup import get_logger
+from .mirrors import decorate_skill_body
 from .prompts import build_system_prompt
 from .skills import Skill, skill_bodies
+from .task_control import get_task_controls
 from .task_model import Task, append_progress
-from .tools import TOGGLEABLE_TOOLS, FinishSignal, ToolContext
+from .tools import TOGGLEABLE_TOOLS, FinishSignal, TaskStopped, ToolContext
 
 WORKTREE_DIR = ".worktree-arranger"
 
@@ -49,7 +51,10 @@ class TaskExecutor:
     def __init__(self, project: ProjectConfig, llm: LLMConfig,
                  tools: dict[str, bool] | None = None,
                  permission_mode: str = "full_access",
-                 permission_timeout_minutes: int = 30) -> None:
+                 permission_timeout_minutes: int = 30,
+                 allowed_commands: list[str] | None = None,
+                 extra_env: dict[str, str] | None = None,
+                 mirror_runtime=None) -> None:
         self.project = project
         self.llm = llm
         # 生效的工具开关 map（resolve_tools 的产物）；未列出的工具默认启用
@@ -57,6 +62,13 @@ class TaskExecutor:
         # 生效的访问权限模式（resolve_permission_mode 的产物）与审批超时
         self.permission_mode = permission_mode
         self.permission_timeout_minutes = permission_timeout_minutes
+        # 生效的命令白名单（resolve_commands 的产物）；None = 工具层回退默认表
+        self.allowed_commands = list(allowed_commands) if allowed_commands else None
+        # 注入子进程的自定义环境变量（config env.vars，代理/国内镜像等）
+        self.extra_env = dict(extra_env or {})
+        # 镜像源运行时（mirrors.MirrorRuntime）：speedtest_mirrors 工具 + env-setup
+        # 技能正文动态追加「测速优选」段用；None = 未接线（技能保持静态默认序）
+        self.mirror_runtime = mirror_runtime
         self.git = Git(project.path)
         self.is_git_repo = project.path.is_dir() and self.git.is_repo()
         self.worktree = project.path / WORKTREE_DIR
@@ -121,14 +133,21 @@ class TaskExecutor:
         started = time.monotonic()
         self.log.info("开始执行任务 %s [%s] %s", task.id, task.priority, task.title)
         # 进度实时落盘到任务文件：进程被强杀时，已完成的轮次都留在文件里
+        turns_desc = ("不限轮数" if self.project.max_agent_turns is not None
+                      and self.project.max_agent_turns <= 0
+                      else f"最多 {self.project.max_agent_turns} 轮")
         append_progress(task.path,
-                        f"开始执行（{task.priority}，最多 {self.project.max_agent_turns} 轮）")
+                        f"开始执行（{task.priority}，{turns_desc}）")
 
         result = TaskResult(task_id=task.id, outcome="blocked")
         usage: dict = {}
+        # 强制停止注册：看板可随时置位，工具循环在轮次/工具边界响应
+        controls = get_task_controls()
+        stop_event = controls.begin(self.project.name, task.id)
         try:
             response = self._agent_loop(
                 task, guide_content, skills or [], usage_out=usage,
+                stop_event=stop_event,
                 on_progress=lambda line: append_progress(task.path, line))
             result.turns = int(usage.get("turns", 0))
             result.prompt_tokens = int(usage.get("prompt_tokens", 0))
@@ -153,6 +172,15 @@ class TaskExecutor:
             result.prompt_tokens = int(usage.get("prompt_tokens", 0))
             result.completion_tokens = int(usage.get("completion_tokens", 0))
             self._cleanup_worktree_changes()
+        except TaskStopped:
+            self.log.warning("任务 %s 已被用户在看板强制停止", task.id)
+            result.outcome = "cancelled"
+            result.notes = "已被用户在看板强制停止"
+            result.turns = int(usage.get("turns", 0))
+            result.prompt_tokens = int(usage.get("prompt_tokens", 0))
+            result.completion_tokens = int(usage.get("completion_tokens", 0))
+            append_progress(task.path, "⏹ 已被用户在看板强制停止（可按需重新入队）")
+            self._cleanup_worktree_changes()
         except Exception as e:  # noqa: BLE001 — 单任务失败不能拖垮调度循环
             self.log.exception("任务 %s 执行出现未预期异常", task.id)
             result.llm_error = str(e)
@@ -166,28 +194,48 @@ class TaskExecutor:
         if result.outcome in ("done", "cancelled"):
             self.remove_worktree()
 
+        controls.end(self.project.name, task.id)
         result.duration_seconds = round(time.monotonic() - started, 1)
         self.log.info(
             "任务 %s 结束：%s（%.1fs）%s",
             task.id, result.outcome, result.duration_seconds,
             result.commit and f"commit={result.commit}",
         )
+        # 用量台账：失败的任务也记（token 已真实消耗）；记录失败绝不影响任务
+        try:
+            from .usage import get_usage_store
+            get_usage_store().record(
+                self.project.name, task.id, result.outcome, result.turns,
+                result.prompt_tokens, result.completion_tokens, self.llm.model)
+        except Exception:  # noqa: BLE001 — 台账是旁路，任何异常都吞掉
+            self.log.warning("用量记录失败（可忽略）", exc_info=True)
         return result
 
     # ---- Agent 循环 ----
 
     def _agent_loop(self, task: Task, guide_content: str, skills: list[Skill],
-                    on_progress=None, usage_out: dict | None = None) -> AgentResponse:
+                    on_progress=None, usage_out: dict | None = None,
+                    stop_event=None) -> AgentResponse:
         work_root = self.worktree if self.is_git_repo else self.project.path
         if self.is_git_repo:
             branch = self._prepare_worktree()
             self.log.debug("worktree 就绪，工作分支：%s", branch)
 
-        # 技能正文按任务新鲜预载：read_skill 工具直接查内存，不碰文件系统
+        # 技能正文按任务新鲜预载：read_skill 工具直接查内存，不碰文件系统；
+        # env-setup 正文动态追加「镜像源测速优选」段（有测速结果时）——模型
+        # 无需先调 speedtest_mirrors 也能按最快源下载
         enabled = self._enabled_tools()
-        ctx = ToolContext(root=work_root, allowed_commands=self.project.allowed_commands,
-                          skills=skill_bodies(skills), enabled_tools=enabled,
-                          approval_gate=self._make_approval_gate(task))
+        bodies = skill_bodies(skills)
+        if self.mirror_runtime is not None and "env-setup" in bodies:
+            bodies["env-setup"] = decorate_skill_body(
+                "env-setup", bodies["env-setup"], self.mirror_runtime)
+        ctx = ToolContext(root=work_root,
+                          allowed_commands=self.allowed_commands,
+                          skills=bodies, enabled_tools=enabled,
+                          approval_gate=self._make_approval_gate(task),
+                          stop_event=stop_event, extra_env=self.extra_env,
+                          mirror_runtime=self.mirror_runtime,
+                          current_task=task)
         client = LLMClient(self.llm)
         client.reset(build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,

@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orcsy.approvals import (MUTATING_TOOLS, RISKY_TOOLS, ApprovalManager,
                              requires_approval)
-from orcsy.config import (AppConfig, LLMConfig, PermissionsConfig, ProjectConfig,
+from orcsy.config import (AppConfig, UpdateConfig, LLMConfig, PermissionsConfig, ProjectConfig,
                           load_config, resolve_permission_mode, validate_permission_mode)
 from orcsy.scheduler import Scheduler
 from orcsy.tools import TOOLS, ToolContext, dispatch_tool
@@ -183,6 +183,7 @@ def check_web_layer() -> None:
         proj_dir = tmp / "proj"
         proj_dir.mkdir()
         cfg = AppConfig(
+        update=UpdateConfig(auto_check=False),  # 测试不触发后台更新检查
             llm=LLMConfig(api_key="fake", base_url="http://localhost:9", model="fake"),
             source_path=cfg_file)
         state = AppState(cfg, Scheduler(cfg))

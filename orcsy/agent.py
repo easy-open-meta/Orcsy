@@ -69,13 +69,20 @@ class ProjectAgent:
     def __init__(self, project: ProjectConfig, llm, skills_base=None,
                  tools: dict[str, bool] | None = None,
                  permission_mode: str = "full_access",
-                 permission_timeout_minutes: int = 30) -> None:
+                 permission_timeout_minutes: int = 30,
+                 allowed_commands: list[str] | None = None,
+                 extra_env: dict[str, str] | None = None,
+                 mirror_runtime=None) -> None:
         self.project = project
-        # tools / permission_*：构造方按全局+项目覆盖解析后的生效值
-        # （resolve_tools / resolve_permission_mode，与 llm 的 resolve_llm 同型）
+        # tools / permission_* / allowed_commands / extra_env：构造方按全局+
+        # 项目覆盖解析后的生效值（resolve_tools / resolve_permission_mode /
+        # resolve_commands，与 llm 的 resolve_llm 同型）
         self.executor = TaskExecutor(project, llm, tools=tools,
                                      permission_mode=permission_mode,
-                                     permission_timeout_minutes=permission_timeout_minutes)
+                                     permission_timeout_minutes=permission_timeout_minutes,
+                                     allowed_commands=allowed_commands,
+                                     extra_env=extra_env,
+                                     mirror_runtime=mirror_runtime)
         self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
         self.log = get_logger(f"agent.{project.name}")
 
@@ -197,10 +204,36 @@ class ProjectAgent:
         except OSError as e:
             self.log.error("回写任务状态失败（无法写入 %s）：%s", path, e)
 
+        # 受阻戳：标 blocked 保留（等人工重入队）；离开 blocked/done/cancelled
+        # 的写入由 set_task_file_status 统一处理
+        if status == "blocked":
+            from .task_model import _set_frontmatter_field
+            _set_frontmatter_field(path, None, "requeue_seq", None)
+
     def _mark_in_progress(self, task: Task) -> None:
+        # 标 in_progress 也清除受阻戳：任务已重新开工，不再享受插队优先
+        from .task_model import _set_frontmatter_field
         self._set_status(task.path, "in_progress")
+        _set_frontmatter_field(task.path, None, "requeue_seq", None)
 
     def _write_back_result(self, task: Task, result: TaskResult) -> None:
+        # 大模型基础设施错误（HTTP 429/500、网络超时等）：只标状态 + 进度留痕，
+        # 不写结果节。结果节固定插在正文最前，把错误文本写进去会把任务原内容
+        # 顶到下面——看板描述与文件开头看起来就像被错误信息覆盖了。
+        # 模型自己给出的 blocked 结论（summary 非空）仍按正常结果节回写。
+        if result.llm_error and not result.summary:
+            detail = (result.llm_error if len(result.llm_error) <= 300
+                      else result.llm_error[:300] + "…")
+            append_progress(
+                task.path,
+                f"⚠ 调用大模型失败：{detail}"
+                f"（{result.turns} 轮，输入 {result.prompt_tokens} / "
+                f"输出 {result.completion_tokens} tokens）；任务已标为受阻，可重新入队")
+            self._set_status(task.path, result.outcome)
+            self.log.warning("任务 %s 因大模型错误标为 %s（任务正文未改动）",
+                             task.id, result.outcome)
+            return
+
         lines = [f"- 时间：{_now_str()}",
                  f"- 结果：{result.outcome}"]
         if result.commit:

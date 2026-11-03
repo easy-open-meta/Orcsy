@@ -5,6 +5,7 @@ import { api } from './api'
 import Dialogs from './components/Dialogs.vue'
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
+import UsageView from './views/UsageView.vue'
 import { auth, beginRestartWait, clearPendingUpdate, doLogin, doLogout, getPendingUpdate, initAuth, needLogin, openProjectNew, refresh, store, ui } from './store'
 import SkillsView from './views/SkillsView.vue'
 import { cmpVersion } from './utils'
@@ -172,6 +173,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
             <NTab name="dash">看板</NTab>
             <NTab name="settings">项目与设置</NTab>
             <NTab name="skills">技能</NTab>
+            <NTab name="usage">用量</NTab>
           </NTabs>
           <NTag v-if="updPhase === 'available'" size="small" type="error" :bordered="false"
                 title="发现新版本，点击立即更新">可更新</NTag>
@@ -197,6 +199,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <DashboardView v-show="store.view === 'dash'" />
       <SettingsView v-show="store.view === 'settings'" />
       <SkillsView v-show="store.view === 'skills'" />
+      <UsageView v-show="store.view === 'usage'" />
       <Dialogs />
       <!-- 自更新进行中：全屏状态提示（禁止点击；应用重启后本页自动 reload 加载新版页面） -->
       <div v-if="updateOverlayVisible" class="upd-overlay">
@@ -254,10 +257,13 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
 :root[data-theme="dark"]{
   --bg:#0b0f17; --panel:#131a2a; --card:#1a2235; --line:#253048; --line2:#31405f;
   --text:#e5eaf6; --dim:#94a2be; --faint:#64748f;
+  /* 用量热力图色阶（蓝系，与主色同源） */
+  --hm0:rgba(128,140,180,.14); --hm1:#16305c; --hm2:#1e4a97; --hm3:#3568d4; --hm4:#5b8cff;
 }
 :root[data-theme="light"]{
   --bg:#f2f4f9; --panel:#ffffff; --card:#f7f8fc; --line:#e4e9f3; --line2:#cbd5ea;
   --text:#1d2637; --dim:#5c6b85; --faint:#8e9bb3;
+  --hm0:rgba(29,38,55,.08); --hm1:#cfe0ff; --hm2:#9dc0fb; --hm3:#5f93f7; --hm4:#2f6bff;
 }
 html { background: var(--bg); scrollbar-color: rgba(128, 128, 160, 0.4) transparent; }
 body {
@@ -281,6 +287,6 @@ body {
 .brand h1 { margin: 0; font-size: 17px; line-height: 1.3; color: var(--text); }
 .brand .sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actions { display: flex; gap: 8px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
-.navseg { width: 300px; max-width: 46vw; }
+.navseg { width: 360px; max-width: 52vw; }
 @media (max-width: 640px) { .brand .sub { display: none; } .navseg { width: auto; } }
 </style>

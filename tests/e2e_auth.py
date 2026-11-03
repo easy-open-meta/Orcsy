@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orcsy.config import AppConfig, LLMConfig, WebConfig
+from orcsy.config import AppConfig, UpdateConfig, LLMConfig, WebConfig
 from orcsy.logging_setup import setup_logging
 from orcsy.scheduler import Scheduler
 from orcsy.web import AppState, make_server
@@ -82,6 +82,7 @@ def main() -> int:
         cfg_file = tmp / "config.yaml"
         cfg_file.write_text("llm: {}\n", encoding="utf-8")
         cfg = AppConfig(
+        update=UpdateConfig(auto_check=False),  # 测试不触发后台更新检查
             llm=LLMConfig(api_key="fake", base_url="http://localhost:9", model="fake"),
             web=WebConfig(host="127.0.0.1", port=PORT, open_browser=False,
                           auth_password="secret-123"),

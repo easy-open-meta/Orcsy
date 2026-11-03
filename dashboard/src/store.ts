@@ -4,7 +4,7 @@ import { api, setUnauthorizedHandler, type AppStateT } from './api'
 
 export const store = reactive({
   state: null as AppStateT | null,
-  view: 'dash' as 'dash' | 'settings' | 'skills',
+  view: 'dash' as 'dash' | 'settings' | 'skills' | 'usage',
 })
 
 // ---- 登录鉴权状态：enabled=配置了登录密码；authed=当前会话有效 ----
@@ -63,6 +63,8 @@ export const ui = reactive({
   // 审批面板：故意不进 anyModal——面板打开时轮询必须继续，
   // pending 列表（store.state.approvals）才能实时刷新、处理后即时消失
   approvalDlg: false,
+  // 拖拽排序进行中的任务 id：期间暂停轮询，避免 5s 刷新把拖拽中的列表冲掉
+  dragTask: null as string | null,
 })
 
 // ---- 自更新收尾：记录目标版本，应用回归后核对并明确提示成功 ----
@@ -105,7 +107,7 @@ export const anyModal = computed(() =>
 
 export async function refresh(force = false): Promise<void> {
   if (needLogin()) return  // 未登录：静默跳过（401 已由全局回调处理）
-  if (!force && anyModal.value) return
+  if (!force && (anyModal.value || ui.dragTask)) return  // 弹窗/拖拽中不覆盖列表
   try { store.state = await api.state() } catch { /* 服务瞬时不可达时保持旧数据 */ }
 }
 

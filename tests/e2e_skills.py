@@ -44,7 +44,9 @@ def make_config(root: Path) -> Path:
         "scheduler:\n"
         "  interval_seconds: 300\n"
         "logging:\n"
-        f"  file: {root / 'logs' / 'test.log'}\n",
+        f"  file: {root / 'logs' / 'test.log'}\n"
+        "update:\n"
+        "  auto_check: false\n",
         encoding="utf-8",
     )
     return cfg

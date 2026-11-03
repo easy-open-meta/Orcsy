@@ -10,31 +10,57 @@
 
 from __future__ import annotations
 
+import difflib
 import fnmatch
 import ipaddress
 import json
+import os
+import re
 import shutil
 import socket
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .logging_setup import get_logger
+from .mirrors import CATEGORY_BY_KEY, CATEGORY_KEYS
 
 log = get_logger("tools")
 
 # 无窗口实例（托盘 exe）派生控制台程序会闪黑窗，CREATE_NO_WINDOW 抑制之
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-# 只读命令白名单：测试、构建、lint 等 Agent 自验证所需的常见命令。
-# 通配符按 argv[0] 的文件名匹配；不在表内的命令一律拒绝。
+# 命令白名单：测试、构建、lint 等 Agent 自验证所需的常见命令。
+# 通配符按 argv[0] 的文件名匹配（小写、fnmatch）；不在表内的命令一律拒绝。
+# 列表需覆盖 orcsy/probe.py 为各技术栈推荐的命令（pnpm/yarn 项目、CMake
+# 项目的 ctest）——否则自动写进 AGENT.md 的测试命令会被自家白名单拦下。
 DEFAULT_ALLOWED_COMMANDS = [
-    "python", "python3", "pytest", "node", "npm", "npx",
-    "cargo", "go", "dotnet", "gradle*", "mvn", "make", "git",
-    "uv", "pip",
+    # Python 生态（python* 覆盖 python3.11 等带版本解释器）
+    "python*", "py", "pip*", "pytest", "uv", "uvx", "poetry", "tox",
+    "ruff", "mypy", "black", "flake8",
+    # Node / 前端
+    "node", "npm", "npx", "pnpm", "yarn", "bun",
+    "tsc", "eslint", "prettier", "vitest", "jest",
+    # Rust / Go / .NET / Java
+    "cargo", "go", "dotnet", "gradle*", "mvn", "java", "javac",
+    # C/C++
+    "make", "cmake", "ctest", "ninja",
+    "gcc", "g++", "clang", "clang++", "msbuild",
+    # 通用
+    "git",
+    # 包管理器（环境引导：缺工具链时静默安装；受访问权限审批约束——
+    # autonomous/ask_on_change 模式下安装会挂起等人工批准，详见 env-setup 技能）
+    "winget*", "choco", "scoop", "brew", "apt*", "apt-get", "dnf", "nvm",
+    # 系统 shell/下载/解压（env-setup 阶段二B 镜像直下流程需要；cmd 本就在
+    # 名单内，白名单挡的是误操作而非恶意，真正的安全边界是访问权限审批门）
+    "powershell", "pwsh", "curl", "tar", "setx",
+    # Windows 环境探测/文件查看（模型排障常用：找解释器、看目录、查环境变量）
+    "where", "cmd", "dir", "type", "echo", "set", "tasklist", "systeminfo",
+    "findstr", "more", "ver", "hostname", "whoami",
 ]
 
 MAX_OUTPUT_CHARS = 6000
@@ -43,6 +69,137 @@ MAX_SKILL_CHARS = 24000  # 技能全文上限，对齐 prompts 的 guide_max_cha
 DEFAULT_READ_LINES = 250
 MAX_WEB_FETCH_CHARS = 20000   # web_fetch 正文默认上限
 MAX_WEB_FETCH_BYTES = 4_000_000  # web_fetch 下载字节硬上限（防超大响应撑爆内存）
+
+# ---- 新装工具的可发现性 ----
+# 本进程的 PATH 是启动时的快照：env-setup 技能用 winget 等装完工具后，新命令
+# 不在快照里，run_command 会误报「命令不存在」。三招兜底：
+# 1) 现读注册表用户/系统 PATH（Windows）：技能用 setx / SetEnvironmentVariable
+#    (…,"User") 注册后，下一条命令立即可见，无需重启看板（ZCode 的 login-shell
+#    环境捕获在 Windows 的等价物——GUI 进程的 PATH 不经过 shell 初始化）；
+# 2) 常见安装目录（下表）每次调用现查，装到这些位置的工具立即可用；
+# 3) 绝对路径调用按 basename（去 .exe/.cmd/.bat 后缀）过白名单，basename
+#    在名单内即放行（如 D:\...\go.exe 等价于 go）。
+_TOOL_PATH_DIRS = (
+    r"%ProgramFiles%\Go\bin", r"%ProgramFiles%\nodejs", r"%ProgramFiles%\CMake\bin",
+    r"%LOCALAPPDATA%\Programs\Go\bin", r"%LOCALAPPDATA%\Programs\Python",
+    r"%LOCALAPPDATA%\Microsoft\WinGet\Links",   # winget 的命令符号链接目录
+    r"%LOCALAPPDATA%\Microsoft\WindowsApps",
+    r"%ProgramFiles%\Eclipse Adoptium",         # Temurin JDK（winget 装的 JDK 家）
+    r"%ProgramFiles%\Java",                     # Oracle/Zulu 等其它 JDK
+    r"~\.cargo\bin", r"~\go\bin", r"~\scoop\shims", r"~\.local\bin",
+    "/usr/local/bin", "/usr/local/go/bin", "/opt/homebrew/bin",
+)
+_EXE_SUFFIX_RE = re.compile(r"\.(exe|cmd|bat)$", re.IGNORECASE)
+
+# Windows 注册表 PATH 的两个来源：用户级（HKCU\Environment，setx 与
+# [Environment]::SetEnvironmentVariable(…,"User") 写这里）与系统级
+REG_PATH_KEYS = (
+    ("HKEY_CURRENT_USER", r"Environment"),
+    ("HKEY_LOCAL_MACHINE",
+     r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+)
+
+
+def _registry_path_entries() -> list[str]:
+    """现读注册表里的用户/系统 PATH 目录（仅 Windows；失败静默返回空）。
+
+    进程 PATH 是启动快照，Agent 装完工具注册新用户级 PATH 后看不到——这里
+    每次调用现读（注册表查询开销可忽略），让新目录下一条命令即生效。
+    REG_EXPAND_SZ 里的 %VAR% 用 expandvars 展开；跳过空串与未展开残留。
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import winreg
+    except ImportError:  # pragma: no cover - 非 Windows 平台
+        return []
+    out: list[str] = []
+    for hive_name, subkey in REG_PATH_KEYS:
+        try:
+            with winreg.OpenKey(getattr(winreg, hive_name), subkey) as key:
+                raw, _ = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            continue
+        for entry in str(raw).split(os.pathsep):
+            p = os.path.expandvars(entry.strip().strip('"'))
+            if p and "%" not in p:
+                out.append(p)
+    return out
+
+# 依赖拉取类网络失败的常见特征（用于给出镜像/代理提示，而不是让模型瞎重试）
+_NETWORK_FAIL_RE = re.compile(
+    r"unexpected EOF|i/o timeout|connection reset|connection refused|"
+    r"TLS handshake|proxyconnect|dial tcp|no such host|temporary failure|"
+    r"ETIMEDOUT|ECONNRESET|ECONNREFUSED|network is unreachable|"
+    r"Failed to establish a new connection|Read timed out|"
+    r"could not fetch|cannot download|连接被重置|连接超时|网络不可达",
+    re.IGNORECASE,
+)
+
+
+def _path_key(p: str) -> str:
+    """PATH 目录去重键（Windows 大小写不敏感，尾部分隔符归一）。"""
+    p = p.rstrip("/\\")
+    return p.lower() if os.name == "nt" else p
+
+
+def _tool_path_dirs() -> list[str]:
+    """子进程 PATH 需要追加的目录：注册表最新 PATH + 常见安装目录（每次现查）。
+
+    已在本进程 PATH 里的目录不重复追加；只保留真实存在的（目录可能刚被装出来，
+    也可能卸载后残留注册表项）。注册表目录在前——用户真实 PATH 的优先级高于
+    硬编码兜底目录。
+    """
+    seen = {_path_key(p) for p in os.environ.get("PATH", "").split(os.pathsep)
+            if p.strip()}
+    out: list[str] = []
+    candidates = _registry_path_entries() + [
+        os.path.expandvars(os.path.expanduser(raw)) for raw in _TOOL_PATH_DIRS]
+    for p in candidates:
+        key = _path_key(p)
+        if key in seen or not os.path.isdir(p):
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
+def _augmented_env(ctx: "ToolContext | None" = None) -> dict[str, str]:
+    """子进程环境：PATH 追加常见安装目录 + 注入配置的自定义变量（代理/镜像等）。
+
+    工具链 home 类约定变量（JAVA_HOME 等）若在系统环境里已存在则原样保留；
+    用户可在 config env.vars 显式设置（如 JAVA_HOME 指向新装 JDK）以影响
+    sdkmanager/gradle 这类按约定变量找工具链的命令。
+    """
+    env = dict(os.environ)
+    extra = os.pathsep.join(_tool_path_dirs())
+    if extra:
+        env["PATH"] = env.get("PATH", "") + os.pathsep + extra
+    if ctx is not None and ctx.extra_env:
+        env.update(ctx.extra_env)  # 用户显式配置优先于默认
+    return env
+
+
+def _resolve_new_install(command: list[str]) -> list[str]:
+    """命令在本进程 PATH 找不到时，到常见安装目录里找（裸名与 .exe/.cmd/.bat）。
+
+    PATH 里已能解析的命令绝不改写（shutil.which 优先）——WindowsApps 的 0 字节
+    执行别名等坑不碰；本目录候选也跳过 0 字节文件（同款别名陷阱）。
+    """
+    exe = command[0]
+    if os.sep in exe or "/" in exe or Path(exe).anchor:
+        return command  # 已是路径形态，交给 Popen
+    if shutil.which(exe):
+        return command  # 进程 PATH（含父进程注入的部分）能找到：保持原样
+    suffixes = ("", ".exe", ".cmd", ".bat") if os.name == "nt" else ("",)
+    for d in _tool_path_dirs():
+        if "windowsapps" in d.lower():
+            continue  # Microsoft Store 执行别名目录：0 字节占位，调了必 9009
+        for suffix in suffixes:
+            cand = Path(d) / (exe + suffix)
+            if cand.is_file() and cand.stat().st_size > 0:
+                return [str(cand), *command[1:]]
+    return command
 
 
 @dataclass
@@ -61,6 +218,17 @@ class ToolContext:
     # 回给模型（操作不执行、零副作用）。由执行器按访问权限模式构建；
     # None = 完全访问（不询问，与历史行为一致）
     approval_gate: object | None = None
+    # 强制停止信号（看板「强制停止」设置）：工具循环在轮次/工具边界检查，
+    # run_command 等待期间按 0.2s 切片轮询、置位即杀子进程并抛 TaskStopped
+    stop_event: object | None = None
+    # 注入子进程的自定义环境变量（config env.vars，如代理/国内镜像 GOPROXY）
+    extra_env: dict[str, str] | None = None
+    # 镜像源运行时（orcsy/mirrors.MirrorRuntime）：speedtest_mirrors 工具专用；
+    # None = 配置来源未知（如单元测试直构），工具返回指引而非崩溃
+    mirror_runtime: object | None = None
+    # 当前正在执行的任务（task_model.Task）：create_tasks 拆分工具用它定位
+    # 任务目录并关闭原任务；None（如单元测试直构）时工具拒绝拆分
+    current_task: object | None = None
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()
@@ -114,6 +282,48 @@ def tool_write_file(ctx: ToolContext, args: dict) -> str:
     return f"已{'更新' if existed else '创建'} {args['path']}（{len(str(args.get('content', '')))} 字符）"
 
 
+def _closest_snippet(content: str, old: str, max_lines: int = 10) -> str:
+    """文件中与 old_string 最接近的片段（edit 失败时的自纠提示）。
+
+    背景：长任务里模型对「自己刚写的内容」会记忆漂移（把 tx 记成 db、变量
+    重构后仍用旧锚点），edit 报「不存在」后模型看不到差异点，容易升级成
+    「文件系统不可信」的错误结论并整文件重写——给它看真实片段即可当场自纠。
+
+    锚定策略：取 old_string 里最长的一行当锚（区分度最高），在文件各行里找
+    与它最相似的一行，按锚在 old_string 中的位置对齐出等长窗口；整窗相似度
+    太低就不提示（宁缺毋滥，避免误导）。O(文件行数) 次短串比较，开销可忽略。
+    """
+    if not content or not old.strip():
+        return ""
+    old_lines = old.splitlines()
+    if not old_lines:
+        return ""
+    anchor_idx = max(range(len(old_lines)), key=lambda i: len(old_lines[i].strip()))
+    anchor = old_lines[anchor_idx].strip()
+    if not anchor:
+        return ""
+    file_lines = content.splitlines()
+    best_ratio, best_i = 0.0, -1
+    for i, fl in enumerate(file_lines):
+        r = difflib.SequenceMatcher(None, fl.strip(), anchor).ratio()
+        if r > best_ratio:
+            best_ratio, best_i = r, i
+    if best_i < 0 or best_ratio < 0.5:
+        return ""
+    start = max(0, best_i - anchor_idx)
+    window = file_lines[start:start + len(old_lines)]
+    whole = difflib.SequenceMatcher(None, "\n".join(window), old).ratio()
+    if whole < 0.4:
+        return ""
+    shown = window
+    if len(shown) > max_lines:
+        shown = shown[:max_lines - 2] + ["…（中间省略）"] + shown[-2:]
+    first_no = start + 1
+    last_no = start + len(window)
+    body = "\n".join(f"{first_no + k:4d} | {ln}" for k, ln in enumerate(shown))
+    return f"第 {first_no}–{last_no} 行（相似度 {int(whole * 100)}%）：\n{body}"
+
+
 def tool_edit_file(ctx: ToolContext, args: dict) -> str:
     """精确文本替换：old_string 必须唯一匹配。适合小改动，避免整文件重写。"""
     path = _resolve_in_root(ctx, str(args["path"]))
@@ -123,7 +333,13 @@ def tool_edit_file(ctx: ToolContext, args: dict) -> str:
     old, new = str(args["old_string"]), str(args["new_string"])
     count = text.count(old)
     if count == 0:
-        return "错误：old_string 在文件中不存在（注意空白与换行需完全一致）"
+        msg = "错误：old_string 在文件中不存在（注意空白与换行需完全一致）"
+        hint = _closest_snippet(text, old)
+        if hint:
+            msg += (f"\n文件中最接近的片段，{hint}\n"
+                    "请以文件实际内容为准修正 old_string（变量名/空格/标点常是差异点），"
+                    "或先 read_file 该区域确认后再编辑；不要凭记忆整文件重写。")
+        return msg
     if count > 1:
         return f"错误：old_string 匹配了 {count} 处，请提供更长的上下文使其唯一"
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
@@ -219,7 +435,13 @@ def tool_multi_edit(ctx: ToolContext, args: dict) -> str:
             return f"错误：第 {i} 条 edit 的 old_string 为空（文件未改动）"
         count = text.count(old)
         if count == 0:
-            return f"错误：第 {i} 条 edit 的 old_string 在文件中不存在（文件未改动）"
+            msg = f"错误：第 {i} 条 edit 的 old_string 在文件中不存在（文件未改动）"
+            hint = _closest_snippet(text, old)
+            if hint:
+                msg += (f"\n文件中最接近的片段，{hint}\n"
+                        "以文件实际内容修正本条 old_string 后重试"
+                        "（全部条目要么一起成功、要么都不落盘）。")
+            return msg
         if count > 1:
             return (f"错误：第 {i} 条 edit 的 old_string 匹配了 {count} 处，"
                     f"请提供更长上下文使其唯一（文件未改动）")
@@ -251,32 +473,40 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
     command = [str(c) for c in args.get("command", [])]
     if not command:
         return "错误：command 不能为空"
-    exe = Path(command[0]).name.lower()
+    # 白名单按 basename 过（.exe/.cmd/.bat 后缀不参与）：绝对路径调用
+    # D:\...\go.exe 与 go 等价——新装工具未进 PATH 时的官方出路
+    exe = _EXE_SUFFIX_RE.sub("", Path(command[0]).name.lower())
     allowed = ctx.allowed_commands if ctx.allowed_commands is not None else DEFAULT_ALLOWED_COMMANDS
     if not any(fnmatch.fnmatch(exe, pat.lower()) for pat in allowed):
         return f"错误：命令 {exe} 不在白名单内（{', '.join(allowed)}），如需放开请修改配置 allowed_commands"
     timeout = min(int(args.get("timeout_seconds", 120)), 600)
+    # 新装工具（本进程 PATH 快照里没有）自动到常见安装目录解析
+    command = _resolve_new_install(command)
     log.debug("run_command: %s (cwd=%s)", command, ctx.root)
     try:
-        # Windows 上用任务对象/进程树终止：start_new_session 让整组进程可一并 kill
+        # Windows 上用任务对象/进程树终止：start_new_session 让整组进程可一并 kill；
+        # env 带上扩充 PATH：go 等工具派生子进程（编译器/链接器）时也能找到兄弟工具
         proc = subprocess.Popen(
             command, cwd=str(ctx.root), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", shell=False,
+            env=_augmented_env(ctx),
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _NO_WINDOW,
         )
     except FileNotFoundError:
-        return f"错误：命令不存在：{command[0]}"
+        # 给可行动指引：模型常据此判断工具链缺失并转 blocked/调整方案，
+        # 而不是反复盲试同一条命令浪费轮次
+        return (f"错误：命令 {command[0]} 不存在（未安装或不在 PATH）。"
+                "若是刚通过包管理器安装的工具，用绝对路径调用（如 "
+                "\"C:\\Program Files\\Go\\bin\\go.exe\" version，白名单按文件名匹配）；"
+                "若确认未安装，按 env-setup 技能安装；该项目若无法安装此工具链，"
+                "不要反复重试，调用 finish（action=blocked）说明缺少的环境。")
     with _CHILD_PROCS_LOCK:
         _CHILD_PROCS.add(proc)
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        stdout, stderr = _wait_with_stop(ctx, proc, timeout)
         code = proc.returncode
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout, stderr = proc.communicate()
-        code = -1
-        out = (stdout or "") + (("\n[stderr]\n" + stderr) if stderr else "")
-        return f"错误：命令超时（>{timeout}s）\n{out[:MAX_OUTPUT_CHARS]}"
+    except _CommandTimeout as e:
+        return f"错误：命令超时（>{timeout}s）\n{e.out[:MAX_OUTPUT_CHARS]}"
     finally:
         with _CHILD_PROCS_LOCK:
             _CHILD_PROCS.discard(proc)
@@ -285,7 +515,53 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
         # 头尾保留：命令回显/进度在头部，报错摘要多在尾部
         out = out[:4000] + "\n…（中间输出过长，已省略）\n" + out[-2000:] + \
             f"\n…（输出过长，截断，退出码 {code}）"
+    # 网络类失败（模块/依赖拉取 EOF、超时）：提示国内镜像与代理，别反复重试
+    if code != 0 and _NETWORK_FAIL_RE.search(out):
+        out += ("\n\n[环境提示] 该失败疑似网络问题（依赖拉取中断/超时）。"
+                "国内网络建议在 config.yaml 的 env.vars 配置：\n"
+                "  GOPROXY: https://goproxy.cn,direct   # Go 模块镜像\n"
+                "  HTTP_PROXY / HTTPS_PROXY: http://127.0.0.1:<port>   # 有代理时\n"
+                "Node 可用 npm config set registry https://registry.npmmirror.com；"
+                "Python 可用 PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple。"
+                "若是安装包本身下载失败（winget/官网不可达），按 env-setup 技能"
+                "阶段二B 改国内镜像直下（如 Go 用 https://golang.google.cn/dl/，"
+                "无需代理）。改配置后重试即可，不要盲目重复同一条命令。")
     return f"退出码 {code}\n{out or '（无输出）'}"
+
+
+class _CommandTimeout(Exception):
+    """run_command 超时的内部控制流异常（携带已捕获输出，由调用方转错误文本）。"""
+
+    def __init__(self, out: str, timeout: int) -> None:
+        self.out = out
+        super().__init__(f"命令超时（>{timeout}s）")
+
+
+def _wait_with_stop(ctx: ToolContext, proc: "subprocess.Popen",
+                    timeout: int) -> tuple[str, str]:
+    """等待子进程结束，期间按 0.2s 切片检查强制停止信号。
+
+    置位即杀进程并抛 TaskStopped（让工具循环立刻收尾，而不是等命令跑完）；
+    超时仍返回 ("", "") 并让调用方按超时错误回报——回滚语义与旧版一致。
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return proc.communicate(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            if ctx.stop_event is not None and ctx.stop_event.is_set():
+                proc.kill()
+                try:
+                    proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                log.info("任务被用户强制停止：已终止子进程 %s", proc.args)
+                raise TaskStopped() from None
+            if time.monotonic() >= deadline:
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                out = (stdout or "") + (("\n[stderr]\n" + stderr) if stderr else "")
+                raise _CommandTimeout(out, timeout)
 
 
 def tool_grep(ctx: ToolContext, args: dict) -> str:
@@ -446,6 +722,115 @@ def tool_web_fetch(ctx: ToolContext, args: dict) -> str:
     return f"[HTTP {resp.status_code} · {ctype or '未知类型'}]\n{text or '（空正文）'}"
 
 
+def tool_speedtest_mirrors(ctx: ToolContext, args: dict) -> str:
+    """测速镜像源（内置+用户添加），返回最快优先排序；结果落盘与看板共享。
+
+    纯只读探测（HTTP Range GET 前 1KB，绕过系统代理直连），不改项目文件——
+    不属于 MUTATING_TOOLS，各审批模式下都不挂起。
+    """
+    rt = ctx.mirror_runtime
+    if rt is None:
+        return ("错误：镜像源运行时不可用（配置来源未知）。"
+                "请按 env-setup 技能文档的默认镜像顺序下载。")
+    category = str(args.get("category") or "").strip() or None
+    if category is not None and category not in CATEGORY_KEYS:
+        return (f"错误：未知镜像类别 {category}"
+                f"（可用：{', '.join(CATEGORY_KEYS)}；留空测全部）")
+    results = rt.run_speedtest(category)
+    if not results:
+        return "没有可测速的镜像源（可能全部被禁用），按 env-setup 技能文档默认顺序处理。"
+    ok = sum(1 for v in results.values() if v is not None)
+    lines = [f"测速完成：{ok}/{len(results)} 个源可达（HTTP 直连探测，ms 越低越快）。"
+             "各类别最快优先："]
+    for cat in ([category] if category else CATEGORY_KEYS):
+        parts = []
+        for r in rt.preferred(cat):
+            if r["url"] not in results:
+                continue  # 本次没测的（禁用/未涉及类别）不列
+            ms = results[r["url"]]
+            parts.append(f"{r['url']} {ms:.0f}ms" if isinstance(ms, (int, float))
+                         else f"{r['url']} 失败")
+        if parts:
+            lines.append(f"- {CATEGORY_BY_KEY[cat].label}：" + " | ".join(parts))
+    lines.append("下载安装包/配置依赖代理（GOPROXY、pip、npm）时按上面顺序用最快的可达源；"
+                 "结果已同步到看板设置页与 env-setup 技能的动态优选段。")
+    return "\n".join(lines)
+
+
+def tool_create_tasks(ctx: ToolContext, args: dict) -> str:
+    """把当前任务拆分为若干子任务（写入本项目任务队列），并可选关闭当前任务。
+
+    延迟导入 task_model：它经 config 依赖本模块，模块级导入会成环。
+    """
+    from .task_model import append_progress, parse_task_file, priority_rank, \
+        set_task_file_status
+
+    task = ctx.current_task
+    if task is None or getattr(task, "path", None) is None:
+        return "错误：无法确定当前任务（上下文未注入任务信息），不能拆分"
+    items = args.get("tasks")
+    if not isinstance(items, list) or not (1 <= len(items) <= 10):
+        return "错误：tasks 必须是 1~10 个 {title, description?, priority?} 的数组"
+    tasks_dir = Path(task.path).parent
+    existing_stems = {p.stem for p in tasks_dir.glob("*.md")} if tasks_dir.is_dir() else set()
+    orders = []
+    for p in tasks_dir.glob("*.md"):
+        try:
+            o = parse_task_file(p).order
+        except Exception:  # noqa: BLE001 — 坏文件跳过，不挡拆分
+            continue
+        if o is not None:
+            orders.append(o)
+    next_order = (max(orders) + 1) if orders else 1
+    # 优先级缺省继承当前任务；合法性与 web 层同标准（P0~P3）
+    default_priority = str(getattr(task, "priority", "") or "P2").upper()
+
+    created: list[str] = []
+    for it in items:
+        if not isinstance(it, dict):
+            return "错误：tasks 的每项必须是 {title, description?, priority?} 对象"
+        title = str(it.get("title") or "").strip()
+        if not title:
+            return "错误：子任务 title 不能为空"
+        if len(title) > 80:
+            return f"错误：子任务 title 过长（≤80 字符）：{title[:30]}…"
+        priority = str(it.get("priority") or default_priority).strip().upper()
+        if priority_rank(priority) > 4:
+            return f"错误：子任务优先级不合法：{priority}（P0~P3）"
+        description = str(it.get("description") or "").strip()
+        # 文件名与 web 层 _auto_task_id 同规则：空白转 -、去非法字符、截 40
+        slug = re.sub(r"\s+", "-", title)
+        slug = re.sub(r"[^\w\-]", "", slug).strip("-")[:40].strip("-") or "task"
+        base = f"{priority}-{slug}"
+        stem, n = base, 2
+        while stem in existing_stems:
+            stem = f"{base}-{n}"
+            n += 1
+        existing_stems.add(stem)
+        fm = ["---", f"title: {title}", f"priority: {priority}", "status: open",
+              f"order: {next_order}", "---"]
+        next_order += 1
+        body = description or title
+        (tasks_dir / f"{stem}.md").write_text(
+            "\n".join(fm) + "\n\n" + body + "\n", encoding="utf-8")
+        created.append(stem)
+
+    lines = [f"已创建 {len(created)} 个子任务（status=open，按优先级与手动序领取）："
+             + "、".join(created)]
+    if bool(args.get("close_current", True)):
+        set_task_file_status(Path(task.path), "cancelled")
+        append_progress(Path(task.path),
+                        f"✂ 已拆分为 {len(created)} 个子任务：{'、'.join(created)}"
+                        "（原任务关闭，由子任务接力）")
+        lines.append("当前任务已标记为已取消（因拆分关闭）。"
+                     "请立即 finish(action=split, summary=一句话拆分说明)，"
+                     "不要再继续当前任务的实现。")
+    else:
+        lines.append("当前任务保持原状态。")
+    log.info("create_tasks：%s（当前任务 %s）", created, task.id)
+    return "\n".join(lines)
+
+
 def tool_finish(ctx: ToolContext, args: dict) -> str:
     """Agent 主动结束任务并给出结构化结论；由执行器捕获处理。"""
     raise FinishSignal(args)
@@ -457,6 +842,13 @@ class FinishSignal(Exception):
     def __init__(self, payload: dict) -> None:
         self.payload = payload
         super().__init__("finish")
+
+
+class TaskStopped(Exception):
+    """用户在看板强制停止任务：循环在轮次/工具边界抛出，执行器按 cancelled 收尾。
+
+    不放在 dispatch_tool 的兜底 except 里吞掉——必须一路冒到执行器。
+    """
 
 
 # ---- 工具注册表 ----
@@ -625,12 +1017,71 @@ TOOLS: dict[str, tuple[str, dict, object]] = {
         },
         tool_web_fetch,
     ),
+    "speedtest_mirrors": (
+        "测速镜像源的 HTTP 延迟（内置+用户添加的语言安装包/依赖代理源），返回最快"
+        "优先排序并持久化结果（与看板设置页共享）。下载安装包（Go/Node/Python/JDK）"
+        "或配置依赖代理（GOPROXY/pip/npm）前调用它选最快的源；若 env-setup 技能正文"
+        "已带「镜像源测速优选」段且时间较新，直接用即可、不必重测。",
+        {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["", *CATEGORY_KEYS],
+                    "description": "只测某类别：go_dist=Go 安装包 / goproxy=Go 模块代理 / "
+                                   "npm / pip / node_dist=Node 安装包 / jdk / "
+                                   "python_dist=Python 安装包；留空 = 测全部",
+                },
+            },
+            "required": [],
+        },
+        tool_speedtest_mirrors,
+    ),
+    "create_tasks": (
+        "把当前任务拆分为若干子任务并写入本项目任务队列（每条生成规范任务文件，"
+        "状态 open，优先级缺省继承当前任务，手动序接在现有任务之后）。用于执行"
+        "**早期**（前几轮）就发现任务体量明显超出单轮预算（预计 15+ 轮、大量新"
+        "文件、或设计文档明确要 2 天+ 工作量）时：先拆分，再 finish(action=split)"
+        "收尾，拆分后不要再继续当前任务的实现。子任务 title 建议带执行序号"
+        "（如「1 model 层补全」）；description 写清范围、对应设计文档章节与"
+        "可执行的验收命令（如 go build ./internal/model），并把已验证的现状"
+        "（哪些文件已完成可用）写给后续任务，避免重复劳动或误判损坏。",
+        {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string",
+                                      "description": "子任务标题（≤80 字符，建议带序号）"},
+                            "description": {"type": "string",
+                                            "description": "任务正文：范围/验收命令/已知现状"},
+                            "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"],
+                                         "description": "缺省继承当前任务优先级"},
+                        },
+                        "required": ["title"],
+                    },
+                    "description": "1~10 个子任务，按建议执行顺序排列",
+                },
+                "close_current": {"type": "boolean",
+                                  "description": "拆分后关闭当前任务（默认 true）"},
+            },
+            "required": ["tasks"],
+        },
+        tool_create_tasks,
+    ),
     "finish": (
         "任务完成或受阻时调用，给出最终结论。必须提供 action/summary 等字段。",
         {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["completed", "blocked", "cannot_do"]},
+                "action": {"type": "string",
+                           "enum": ["completed", "blocked", "cannot_do", "split"],
+                           "description": "completed=已完成且验证通过；blocked=受阻；"
+                                          "cannot_do=超出能力或需人工决策；"
+                                          "split=任务过大，已用 create_tasks 拆分为子任务"},
                 "summary": {"type": "string"},
                 "files_changed": {"type": "array", "items": {"type": "string"}},
                 "commit_message": {"type": "string"},
@@ -687,6 +1138,28 @@ def validate_tools_map(data: object, context: str = "tools") -> dict[str, bool]:
             if value is True:
                 continue
             raise ValueError(f"{context}：finish 是任务结束的协议工具，不可禁用")
+        if not isinstance(value, bool):
+            raise ValueError(f"{context}.{name} 必须是布尔值（true/false）")
+        out[name] = value
+    return out
+
+
+def validate_commands_map(data: object, context: str = "commands") -> dict[str, bool]:
+    """校验「命令 → bool」映射（全局命令白名单开关）：键必须是默认白名单成员。
+
+    返回清洗后的 dict（空 dict = 默认全放行）。项目级 allowed_commands（整表
+    替换语义）不经过这里——那是自由列表，不属于开关。
+    """
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} 必须是「命令: true/false」的键值对")
+    out: dict[str, bool] = {}
+    for key, value in data.items():
+        name = str(key).strip()
+        if name not in DEFAULT_ALLOWED_COMMANDS:
+            raise ValueError(f"{context} 含未知命令：{name}"
+                             f"（默认白名单：{', '.join(DEFAULT_ALLOWED_COMMANDS)}）")
         if not isinstance(value, bool):
             raise ValueError(f"{context}.{name} 必须是布尔值（true/false）")
         out[name] = value
