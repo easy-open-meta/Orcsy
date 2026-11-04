@@ -58,6 +58,9 @@ API（均为 GET/POST JSON）：
   POST /api/update/install 手动导入本地 zip 更新包 {path}，后台线程静默安装
                            （校验后立即返回；成功自动重启，出错写安装日志并自动打开）
 
+程序手动重启（看护脚本等本进程退出后拉起当前 exe，仅 Windows 安装版）：
+  POST /api/app-restart    重启程序：看板右上角「重启」按钮 / 托盘菜单「重启程序」
+
 技能库（存于配置目录 skills/，绝不写入项目目录）：
   GET  /api/skill          读取单个技能 ?name=（编辑弹窗用：字段+正文）
   POST /api/skill          新建/更新技能 {original_name?, name, description, scope, enabled, body}
@@ -1446,6 +1449,37 @@ class AppState:
                 "message": "开机自启动已" + ("开启" if want else "关闭")
                 if changed else "设置未变化"}
 
+    def restart_app(self) -> dict:
+        """手动重启程序（看板按钮/托盘菜单）：看护脚本等本进程退出后拉起新进程。
+
+        仅 Windows 安装版支持（源码/Docker 由 updater.plan_restart 给出指引）。
+        先置更新状态 restarting（让前端遮罩与「重启等待」探测复用自更新同一套
+        UI 流程），再后台线程启动看护并退出本进程——启动看护必须在本进程退出前
+        完成，而退出会打断 HTTP 响应，所以响应先行、线程收尾。
+        """
+        try:
+            bat, _exe = updater.plan_restart()
+        except updater.UpdateError as e:
+            raise ValueError(str(e)) from e
+        self._reject_if_update_running()
+        log.info("Web 请求重启程序（看护脚本 %s）", bat.name)
+        self._set_update_state({"phase": "restarting"})
+        threading.Thread(target=self._restart_worker, args=(bat,),
+                         daemon=True, name="app-restart").start()
+        return {"ok": True, "phase": "restarting",
+                "message": "正在重启，应用将短暂离线并在数秒后自动回来"}
+
+    def _restart_worker(self, bat: Path) -> None:
+        """后台重启线程：启动看护 → 收尾 → 立即退出本进程（看护拉起新进程）。"""
+        try:
+            updater.start_watchdog(bat)
+        except Exception:  # noqa: BLE001 — 启动失败时如实报错，程序继续运行
+            log.exception("重启看护脚本启动失败")
+            self._set_update_state({"phase": "error",
+                                    "message": "重启失败：看护脚本启动出错，程序未重启"})
+            return
+        self._exit_for_restart()
+
     def get_guide(self, data: dict) -> dict:
         project = str(data.get("project", "")).strip()
         agent = self.agents.get(project)
@@ -2009,6 +2043,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.open_skill_folder(body))
             elif path == "/api/app-autostart":
                 self._json(self.state.set_app_autostart(body))
+            elif path == "/api/app-restart":
+                self._json(self.state.restart_app())
             elif path == "/api/approval":
                 self._json(self.state.approval_respond(body))
             elif path == "/api/mirror/test":

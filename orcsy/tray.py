@@ -1,6 +1,6 @@
 """系统托盘图标：与控制台并存（由 cmd_web 放在后台线程启动）。
 
-菜单项：显示主界面 / 立即扫描 / 开机自启动（勾选）/ 退出。
+菜单项：显示主界面 / 立即扫描 / 重启程序 / 开机自启动（勾选）/ 退出。
 托盘图标状态：扫描执行中显示黄色点，空闲为默认蓝。
 退出统一路径：菜单「退出」调 server.shutdown() 唤醒主线程的
 serve_forever，由 cmd_web 的 _cleanup 统一收尾；Ctrl+C 退出时
@@ -82,6 +82,20 @@ def run_tray(state, scheduler, url: str, server=None) -> None:
         threading.Thread(target=scheduler.run_cycle, daemon=True).start()
         icon.notify("已触发一轮扫描", "Orcsy")
 
+    def restart_app(icon, item):
+        """重启程序：复用看板同一入口（看护脚本拉起新进程，配置/代码变更生效）。
+
+        restart_app 自带环境门槛检查（源码/Docker 抛 ValueError）；任何失败
+        都气泡如实告知——pystray 会静默吞掉菜单回调异常，不兜底的话用户
+        眼里就是「点了没反应」。
+        """
+        try:
+            state.restart_app()
+            icon.notify("正在重启，程序将在数秒后自动回来", "Orcsy")
+        except Exception as e:  # noqa: BLE001 — 门槛拦截（ValueError）与意外失败都告知
+            log.warning("托盘重启程序失败", exc_info=True)
+            icon.notify(f"重启失败：{e}", "Orcsy")
+
     def toggle_autostart(icon, item):
         on = toggle()
         icon.notify("开机自启动已" + ("开启" if on else "关闭"), "Orcsy")
@@ -97,6 +111,7 @@ def run_tray(state, scheduler, url: str, server=None) -> None:
     menu = pystray.Menu(
         pystray.MenuItem("显示主界面", open_dashboard, default=True),
         pystray.MenuItem("立即扫描", trigger_scan),
+        pystray.MenuItem("重启程序", restart_app),
         pystray.MenuItem("开机自启动", toggle_autostart, checked=lambda item: is_enabled()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("退出", quit_app),

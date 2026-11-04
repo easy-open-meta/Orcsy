@@ -98,6 +98,26 @@ function askApply(latest: string, notes: string): void {
   })
 }
 
+// ---- 手动重启：右上角重启按钮。同一套「重启等待」UI：遮罩 + 应用回归自动 reload。
+// reload 后版本号不变（无版本核对），靠挂单超时（10 分钟）自动失效收尾。
+const restartingNow = ref(false)
+
+function askRestart(): void {
+  window.$dialog?.warning({
+    title: '重启程序？',
+    content: '重启后配置与代码变更即时生效。若正在执行任务会被中断（任务保留为进行中，'
+      + '重启完成后重新入队执行）。',
+    positiveText: '立即重启',
+    negativeText: '取消',
+    onPositiveClick() {
+      restartingNow.value = true
+      beginRestartWait() // 不带目标版本：仅遮罩 + 探测回归后 reload
+      api.restartApp().catch(() => { /* 退出瞬间的连接失败属预期（已进入重启等待） */ })
+      window.$message?.('正在重启，应用将短暂离线并在数秒后自动回来', 'success')
+    },
+  })
+}
+
 // ---- 更新收尾核对：常驻 watch——挂单存在时核对版本并明确提示成功/失败 ----
 // 不自停：清掉挂单后继续守候，下一次更新的挂单才能被核对（曾因自停导致
 // 第二次更新的结果永远无人核对、按钮永久卡「安装中」）
@@ -187,6 +207,8 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
             {{ updLabel }}
           </NButton>
           <NButton type="primary" :loading="scanning" @click="doScan">▶ 立即扫描</NButton>
+          <NButton :loading="restartingNow" title="重启程序：配置与代码变更即时生效"
+                   @click="askRestart">⟳ 重启</NButton>
           <NButton @click="openProjectNew">＋ 新建项目</NButton>
           <NButton quaternary circle title="刷新" @click="refresh(true)">↻</NButton>
           <NButton quaternary circle :title="theme === 'dark' ? '切换浅色' : '切换深色'" @click="toggleTheme">

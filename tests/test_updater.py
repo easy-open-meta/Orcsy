@@ -691,6 +691,48 @@ def check_prune_stale_dirs() -> None:
         shutil.rmtree(fresh, ignore_errors=True)
 
 
+def check_restart_watchdog() -> None:
+    """手动重启看护：源码运行拒绝；frozen 时脚本落 %TEMP%、按 PID 等退出、
+    cd 回安装目录再拉起（托盘版补 --tray）。
+
+    背景 bug：脚本原本写进安装目录——用户装在 Program Files 时
+    PermissionError，托盘回调被 pystray 静默吞掉，表现为「点了没反应」。
+    """
+    import tempfile
+    import orcsy.updater as U
+
+    # 源码运行（本测试即非 frozen）：拒绝并给指引
+    try:
+        U.plan_restart()
+        raise AssertionError("非 frozen 应拒绝手动重启")
+    except UpdateError as e:
+        assert "重启" in str(e)
+
+    orig = (U.sys.platform, getattr(U.sys, "frozen", False), U.sys.executable)
+    try:
+        U.sys.platform = "win32"
+        U.sys.frozen = True
+        with tempfile.TemporaryDirectory() as d:
+            U.sys.executable = str(Path(d) / "orcsy-web.exe")
+            bat, exe = U.plan_restart()
+            assert exe == Path(U.sys.executable)
+            # 脚本必须落在一次性 %TEMP% 目录（安装目录可能不可写）
+            assert bat.parent.name.startswith("orcsy-restart-"), bat.parent
+            assert bat.parent.parent == Path(tempfile.gettempdir())
+            cmd = bat.read_text(encoding="gbk")
+            assert f"set PID={U.os.getpid()}" in cmd and "Wait-Process" in cmd
+            assert f'cd /d "{d}"' in cmd            # 新进程工作目录 = 安装目录
+            assert "orcsy-web.exe" in cmd.split("start", 1)[1]
+            assert "--tray" not in cmd.split("start", 1)[1]
+
+            U.sys.executable = str(Path(d) / "orcsy-tray.exe")
+            bat, _ = U.plan_restart()
+            assert "--tray" in bat.read_text(encoding="gbk").split("start", 1)[1]
+    finally:
+        (U.sys.platform, U.sys.frozen, U.sys.executable) = orig
+    print("手动重启看护（%TEMP% 落盘/等退出/工作目录/托盘参数/源码拒绝）✅")
+
+
 def main() -> int:
     check_parse_version()
     check_detect_installer()
@@ -698,6 +740,7 @@ def main() -> int:
     check_stage_package()
     check_apply_gate()
     check_watchdog_script()
+    check_restart_watchdog()
     check_clean_env()
     check_update_result_marker()
     check_install_log()

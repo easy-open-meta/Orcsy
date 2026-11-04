@@ -371,6 +371,10 @@ export const api = {
     ok: boolean; message: string; applied: Record<string, string>
   }>,
   autostart: (enabled: boolean) => post('/api/app-autostart', { enabled }),
+  /** 手动重启程序：看护脚本等旧进程退出后拉起新进程（仅 Windows 安装版） */
+  restartApp: () => post('/api/app-restart', {}) as Promise<{
+    ok: boolean; phase: string; message: string
+  }>,
   updateCheck: () => post('/api/update/check', {}) as Promise<{
     ok: boolean; phase: string; has_update: boolean; latest: string
     current: string; notes: string; asset_name: string; download_url: string

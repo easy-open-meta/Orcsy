@@ -683,6 +683,60 @@ def start_watchdog(bat: Path) -> subprocess.Popen | None:
                             creationflags=_WATCHDOG_FLAGS, close_fds=True)
 
 
+# ---- 手动重启：看护脚本等旧进程退出后拉起当前 exe 本身（同更新重启的简化版） ----
+
+def write_restart_watchdog(app_dir: Path | str, pid: int) -> Path:
+    """生成手动重启看护脚本并返回其路径（调用方负责 start_watchdog 启动）。
+
+    与升级看护（write_watchdog）同思路但职责单一：不碰文件、不写结果标记，
+    只等当前进程退出（最多 60s）→ cd 到安装目录 → 拉起当前 exe 本身。
+    托盘版补 --tray 参数（与升级看护的 start "" "%TRAY%" --tray 一致）。
+    脚本写进 %TEMP% 下的一次性目录而不是安装目录：装在 Program Files 时
+    安装目录不可写（写入会 PermissionError），而重启看护本不需要落在那里。
+    环境清洗依赖 start_watchdog 的 _clean_env，脚本里无需再剥 _PYI_*。
+    """
+    app_dir = Path(app_dir)
+    exe = Path(sys.executable)
+    args = f'"{exe}"' + (" --tray" if exe.name.lower() == "orcsy-tray.exe" else "")
+    lines = [
+        "@echo off",
+        "setlocal",
+        f"set PID={pid}",
+        # 等旧进程退出（最多 ~60s）：失败即放弃（旧进程可能卡在退出清理上，
+        # 此时贸然拉新会撞端口/双实例；用户可手动再启动）
+        'powershell -NoProfile -Command "if (Get-Process -Id %PID% -ErrorAction '
+        'SilentlyContinue) { try { Wait-Process -Id %PID% -Timeout 60 -ErrorAction '
+        'Stop } catch { exit 1 } }"',
+        "if errorlevel 1 exit /b 1",
+        # 新进程工作目录与升级看护拉起时一致（安装目录），不留在 %TEMP%
+        f'cd /d "{app_dir}"',
+        f'start "" {args}',
+        "exit /b 0",
+    ]
+    # 一次性子目录 + 独占创建：不可预测路径 + 不覆盖既有文件（同更新下载的
+    # 本地 TOCTOU 防护思路；脚本内容只是拉起本机自己的 exe，无提权面）
+    holder = Path(tempfile.mkdtemp(prefix="orcsy-restart-"))
+    bat = holder / "orcsy-restart-watchdog.bat"
+    bat.write_text("\r\n".join(lines), encoding="gbk")
+    return bat
+
+
+def plan_restart() -> tuple[Path, Path]:
+    """手动重启的前置计算：返回 (看护脚本路径, 待启动的 exe)。
+
+    仅 Windows 安装版支持（同 can_apply 门槛）；不满足时抛 UpdateError，
+    由 Web 层转 400 提示（源码：git pull 自行重启；Docker：重启容器）。
+    """
+    if not can_apply():
+        raise UpdateError(
+            "当前运行环境不支持程序内重启：" +
+            ("请源码方式自行 Ctrl+C 后重新启动（改动在下次启动生效）。"
+             if sys.platform == "win32" and not getattr(sys, "frozen", False)
+             else "请按部署方式手动重启（Docker 重启容器 / Linux 重启进程）。"))
+    app_dir = Path(sys.executable).parent
+    return write_restart_watchdog(app_dir, os.getpid()), Path(sys.executable)
+
+
 def run_local_install(package: Path | str, app_dir: Path | str,
                       log: Path | str) -> dict:
     """静默安装主流程（后台线程调用，零 UAC）：校验 → 启动看护 → 换名落位。

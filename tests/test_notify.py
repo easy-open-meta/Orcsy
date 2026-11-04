@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):  # GBK 控制台打不出 ✅ 等字符
@@ -37,16 +38,17 @@ class FakeIcon:
 
 
 class FakeWinsound:
-    """替身 winsound：只记录 PlaySound 的别名，不发声。"""
+    """替身 winsound：只记录 PlaySound 的目标（文件路径或系统音别名），不发声。"""
 
     SND_ALIAS = 0x10000
     SND_ASYNC = 0x0001
+    SND_FILENAME = 0x20000
 
     def __init__(self):
         self.played: list[str] = []
 
-    def PlaySound(self, alias, flags):
-        self.played.append(alias)
+    def PlaySound(self, target, flags):
+        self.played.append(target)
 
 
 def _fake_env(fake_icon):
@@ -70,18 +72,24 @@ def _fake_env(fake_icon):
     return fake_ws, restore
 
 
+def _expected_builtin(outcome: str) -> str:
+    """内置音的绝对路径字符串（源码运行时直接存在）。"""
+    return str(notify_mod.SOUNDS_DIR / ("ding-dong.wav" if outcome == "done"
+                                        else "blocked.wav"))
+
+
 def check_done_blocked_notify() -> None:
-    """done/blocked 触发气泡+系统音；cancelled 什么都不发。"""
+    """done/blocked 触发气泡+内置提示音；cancelled 什么都不发。"""
     icon = FakeIcon()
     ws, restore = _fake_env(icon)
     try:
         notify_mod.notify_task_end("demo", "T-1", "登录页改造", "done")
         assert icon.calls == [("✅ 任务完成", "【demo】登录页改造")], icon.calls
-        assert ws.played == ["SystemAsterisk"], ws.played
+        assert ws.played == [_expected_builtin("done")], ws.played
 
         notify_mod.notify_task_end("demo", "T-2", "支付接口联调", "blocked")
         assert icon.calls[-1] == ("⚠️ 任务受阻", "【demo】支付接口联调"), icon.calls
-        assert ws.played == ["SystemAsterisk", "SystemExclamation"], ws.played
+        assert ws.played == [_expected_builtin("done"), _expected_builtin("blocked")], ws.played
 
         # cancelled（用户手动停止）不提醒——刚操作完不需要打扰
         notify_mod.notify_task_end("demo", "T-3", "手动停", "cancelled")
@@ -89,6 +97,21 @@ def check_done_blocked_notify() -> None:
     finally:
         restore()
     print("ok: done/blocked 提醒、cancelled 静默")
+
+
+def check_builtin_sound_fallback() -> None:
+    """内置音频文件缺失时回退 Windows 系统音（老版本包/裁剪场景不哑火）。"""
+    from unittest.mock import patch
+
+    icon = FakeIcon()
+    ws, restore = _fake_env(icon)
+    try:
+        with patch.object(notify_mod, "SOUNDS_DIR", Path(tempfile.gettempdir()) / "no-such-dir"):
+            notify_mod.notify_task_end("demo", "T-1", "无内置音", "done")
+        assert ws.played == ["SystemAsterisk"], ws.played
+    finally:
+        restore()
+    print("ok: 内置音缺失回退系统音")
 
 
 def check_flags_independent() -> None:
@@ -102,7 +125,7 @@ def check_flags_independent() -> None:
 
         notify_mod.configure(NotifyConfig(sound=True, system=False))
         notify_mod.notify_task_end("demo", "T-2", "只声音", "done")
-        assert len(icon.calls) == 1 and ws.played == ["SystemAsterisk"]
+        assert len(icon.calls) == 1 and ws.played == [_expected_builtin("done")]
     finally:
         restore()
     print("ok: sound/system 开关独立生效")
@@ -113,7 +136,7 @@ def check_no_tray_icon() -> None:
     ws, restore = _fake_env(None)
     try:
         notify_mod.notify_task_end("demo", "T-1", "无托盘", "done")
-        assert ws.played == ["SystemAsterisk"]
+        assert ws.played == [_expected_builtin("done")], ws.played
     finally:
         restore()
     print("ok: 无托盘不报错，提示音照常")
@@ -125,7 +148,7 @@ def check_bubble_failure_swallowed() -> None:
     ws, restore = _fake_env(icon)
     try:
         notify_mod.notify_task_end("demo", "T-1", "气泡失败", "done")
-        assert ws.played == ["SystemAsterisk"]
+        assert ws.played == [_expected_builtin("done")], ws.played
     finally:
         restore()
     print("ok: 气泡失败被吞掉，旁路语义成立")
@@ -162,6 +185,7 @@ def main() -> int:
     check_flags_independent()
     check_no_tray_icon()
     check_bubble_failure_swallowed()
+    check_builtin_sound_fallback()
     check_notify_config_parse()
     print("\n任务结束提醒自检全部通过 ✅")
     return 0

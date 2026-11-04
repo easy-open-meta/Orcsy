@@ -543,6 +543,26 @@ _CHILD_PROCS: set = set()
 _CHILD_PROCS_LOCK = threading.Lock()
 
 
+def _kill_process_tree(proc: "subprocess.Popen") -> None:
+    """终止子进程及其整棵进程树。
+
+    proc.kill() 只杀直接子进程：Windows 上孙进程（如 powershell 里 Start-Job
+    拉起的服务器）继承 stdout/stderr 管道句柄，仍握着管道就等不到 EOF，
+    调用方随后的 communicate() 会永久挂起。taskkill /T 按父子关系整树终止，
+    管道句柄随之释放；非 Windows 无此问题（进程组已隔离），kill 即可。
+    """
+    if not proc.poll():
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True, creationflags=_NO_WINDOW,
+            )
+            if proc.poll() is None:  # taskkill 失败（如权限）：兜底直杀
+                proc.kill()
+        else:
+            proc.kill()
+
+
 def kill_running_children() -> int:
     """终止所有仍在运行的 Agent 子进程，返回终止数量。供程序退出时调用。"""
     killed = 0
@@ -629,8 +649,11 @@ def _wait_with_stop(ctx: ToolContext, proc: "subprocess.Popen",
                     timeout: int) -> tuple[str, str]:
     """等待子进程结束，期间按 0.2s 切片检查强制停止信号。
 
-    置位即杀进程并抛 TaskStopped（让工具循环立刻收尾，而不是等命令跑完）；
-    超时仍返回 ("", "") 并让调用方按超时错误回报——回滚语义与旧版一致。
+    置位即整树杀进程并抛 TaskStopped（让工具循环立刻收尾，而不是等命令
+    跑完）；超时仍返回 ("", "") 并让调用方按超时错误回报——回滚语义与
+    旧版一致。两处收尾都必须用带超时的 communicate：杀进程树后若仍有
+    句柄遗留（如孙进程未被 taskkill 覆盖的边角情况），无界 communicate
+    会把执行线程永久挂住，停止信号也就再无人检查。
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -638,18 +661,24 @@ def _wait_with_stop(ctx: ToolContext, proc: "subprocess.Popen",
             return proc.communicate(timeout=0.2)
         except subprocess.TimeoutExpired:
             if ctx.stop_event is not None and ctx.stop_event.is_set():
-                proc.kill()
-                try:
-                    proc.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
+                _kill_process_tree(proc)
+                _drain_after_kill(proc)
                 log.info("任务被用户强制停止：已终止子进程 %s", proc.args)
                 raise TaskStopped() from None
             if time.monotonic() >= deadline:
-                proc.kill()
-                stdout, stderr = proc.communicate()
+                _kill_process_tree(proc)
+                stdout, stderr = _drain_after_kill(proc)
                 out = (stdout or "") + (("\n[stderr]\n" + stderr) if stderr else "")
                 raise _CommandTimeout(out, timeout)
+
+
+def _drain_after_kill(proc: "subprocess.Popen",
+                      grace: float = 5.0) -> tuple[str, str]:
+    """杀掉进程树后回收管道内容；EOF 仍不来的话到点放弃并返回空。"""
+    try:
+        return proc.communicate(timeout=grace)
+    except subprocess.TimeoutExpired:
+        return "", ""
 
 
 def tool_grep(ctx: ToolContext, args: dict) -> str:
