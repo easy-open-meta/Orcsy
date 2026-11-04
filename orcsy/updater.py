@@ -15,6 +15,8 @@ Docker / Linux / 源码运行只支持检查，应用时给出对应指引。
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -66,8 +68,9 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
     """查询 Gitee Release 最新版本，与当前版本比较。
 
     update_cfg: {repo: 'https://gitee.com/xxx/orcsy', token?: str}
-    返回 {has_update, current, latest, notes, asset_name, download_url}。
-    附件只认 orcsy-update-*.zip 更新包（exe 安装包仅首次安装用，不走在线更新）。
+    返回 {has_update, current, latest, notes, asset_name, download_url,
+          sha256_url, sha256_value}。附件只认 orcsy-update-*.zip 更新包及
+    同名 .sha256 校验文件（exe 安装包仅首次安装用，不走在线更新）。
     """
     info = detect_repo(str(update_cfg.get("repo") or ""), "gitee")
     token = str(update_cfg.get("token") or "").strip()
@@ -120,20 +123,45 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
     if token:
         sep = "&" if "?" in download_url else "?"
         download_url += f"{sep}access_token={token}"
-    return {
+
+    # 完整性校验来源（安全审计 2026-11-04 M2）：优先 Release 附件里的同名
+    # .sha256 文件（build.bat 发布时成对产出）；GitHub 新版 API 的 asset 带
+    # digest 字段时直接采信。两者皆无 = 无哈希，在线更新将被拒绝（宁可不更，
+    # 不可无校验提权执行）
+    result = {
         "has_update": version_newer(latest, current_version),
         "current": current_version,
         "latest": latest,
         "notes": str(data.get("body") or ""),
         "asset_name": str(asset.get("name") or ""),
         "download_url": download_url,
+        "sha256_url": "",     # .sha256 附件的下载地址（空 = 无附件）
+        "sha256_value": "",   # API digest 字段给的哈希值本身（空 = 无）
     }
+    zip_name = str(asset.get("name") or "")
+    sha_asset = next((a for a in assets
+                      if str(a.get("name", "")).lower() == f"{zip_name}.sha256"), None)
+    if sha_asset is not None:
+        sha_url = str(sha_asset.get("browser_download_url") or "")
+        if sha_url and token:
+            sep = "&" if "?" in sha_url else "?"
+            sha_url += f"{sep}access_token={token}"
+        result["sha256_url"] = sha_url
+    digest = str(asset.get("digest") or "")
+    if digest.lower().startswith("sha256:"):
+        result["sha256_value"] = digest.split(":", 1)[1].strip().lower()
+    return result
 
 
 def download_installer(download_url: str, dest_dir: Path,
                        progress_cb: Callable[[int], None] | None = None,
-                       filename: str = "orcsy-update-download.zip") -> Path:
-    """流式下载更新包到 dest_dir，progress_cb 收到 0~100 的百分比。"""
+                       filename: str = "orcsy-update-download.zip",
+                       expected_sha256: str = "") -> Path:
+    """流式下载更新包到 dest_dir，progress_cb 收到 0~100 的百分比。
+
+    expected_sha256 非空时下载完成后校验（安全审计 2026-11-04 M2）：不符则
+    删除落盘文件并抛 UpdateError——哈希不符的包绝不能留在磁盘上进安装环节。
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / filename
     # 环回地址绕过系统代理（Shadowsocks/Clash 类工具会把 127.0.0.1 的下载
@@ -163,7 +191,60 @@ def download_installer(download_url: str, dest_dir: Path,
             raise UpdateError(f"下载更新包失败：{e}") from e
     if not dest.exists() or dest.stat().st_size == 0:
         raise UpdateError("下载更新包失败：文件为空。")
+    if expected_sha256:
+        h = hashlib.sha256()
+        with open(dest, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        actual = h.hexdigest()
+        if not hmac.compare_digest(actual, expected_sha256.strip().lower()):
+            dest.unlink(missing_ok=True)  # 坏包不留在磁盘上
+            raise UpdateError(
+                f"更新包校验失败（sha256 不符）：期望 {expected_sha256.strip()[:12]}…，"
+                f"实际 {actual[:12]}…。可能下载损坏或来源被篡改，请重试或从官方"
+                "仓库手动下载。")
     return dest
+
+
+def parse_sha256_file(path: Path) -> str:
+    """解析 .sha256 校验文件：sha256sum 标准格式「<hex>  <文件名>」，取首个字段。
+
+    返回小写十六进制哈希；内容无法识别（非 64 位十六进制）抛 UpdateError。
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise UpdateError(f"读取校验文件失败：{e}") from e
+    value = text.strip().split()[0].strip().lower() if text.strip() else ""
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise UpdateError(f"校验文件内容无法识别（期望 sha256 十六进制哈希）：{text[:80]!r}")
+    return value
+
+
+def fetch_expected_sha256(sha256_url: str, dest_dir: Path) -> str:
+    """下载并解析 .sha256 校验文件，返回期望的 sha256 十六进制值。
+
+    下载或解析失败抛 UpdateError——调用方应中止在线更新（缺校验不装）。
+    """
+    dest = download_installer(sha256_url, dest_dir, filename="checksum.sha256")
+    return parse_sha256_file(dest)
+
+
+def prune_stale_download_dirs(keep_seconds: float = 86400.0) -> None:
+    """清理历史在线更新下载残留的 orcsy-update-* 临时目录（保留 1 天内的）。
+
+    更新包现落在随机名私有目录（mkdtemp），成功路径进程直接退出、无人清理；
+    每次在线更新前顺手扫一遍 temp，超龄的删掉，避免 zip 体积的残留越积越多。
+    只动目录（orcsy-update-result.json 等文件不受影响），失败静默跳过。
+    """
+    tmp = Path(tempfile.gettempdir())
+    now = time.time()
+    for d in tmp.glob("orcsy-update-*"):
+        try:
+            if d.is_dir() and now - d.stat().st_mtime > keep_seconds:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            continue
 
 
 def detect_installer_version(filename: str) -> str | None:

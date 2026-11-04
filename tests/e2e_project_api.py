@@ -32,7 +32,10 @@ def main() -> int:
     r = api("/api/project", {"name": "web-proj", "path": r"D:\tmp\newproj",
                              "tasks_dir": "tasks", "guide_file": "AGENT.md",
                              "max_tasks_per_cycle": 2, "max_agent_turns": 60,
-                             "enabled": True})
+                             "enabled": True,
+                             "llm": {"api_key": "{{SECRET_ll7k2m9p}}"},
+                             "repo": {"url": "https://github.com/o/r",
+                                      "token": "{{SECRET_px7d9k2m}}"}})
     assert r["ok"], r
     assert set(r["created"]) == {"tasks/", "AGENT.md"}, r
     print("1. 新建项目 + 自动初始化:", r["message"])
@@ -49,6 +52,31 @@ def main() -> int:
     names = [p["name"] for p in s["projects"]]
     assert "web-proj" in names, names
     print("4. state 可见:", names)
+
+    # 4b. 项目级密钥脱敏（H2 同规则）：/api/state 只回掩码与「已配置」标记
+    p = [x for x in s["projects"] if x["name"] == "web-proj"][0]
+    blob = json.dumps(s, ensure_ascii=False)
+    assert "api_key" not in (p["llm"] or {}), p["llm"]
+    assert p["llm"]["api_key_configured"] is True and "…" in p["llm"]["api_key_masked"]
+    assert "token" not in (p["repo"] or {}), p["repo"]
+    assert p["repo"]["token_configured"] is True and "…" in p["repo"]["token_masked"]
+    assert "{{SECRET_ll7k2m9p}}" not in blob and "{{SECRET_px7d9k2m}}" not in blob
+    # 编辑项目不带密钥键 → 保持原值；显式空串 → 清除
+    r = api("/api/project", {"name": "web-proj", "path": r"D:\tmp\newproj",
+                             "llm": {"model": "deepseek-chat"},
+                             "repo": {"url": "https://github.com/o/r"},
+                             "original_name": "web-proj"})
+    assert r["ok"], r
+    p = [x for x in api("/api/state")["projects"] if x["name"] == "web-proj"][0]
+    assert p["repo"]["token_configured"] is True, "不带 token 键应保持原令牌"
+    assert p["llm"]["api_key_configured"] is True, "不带 api_key 键应保持原密钥"
+    r = api("/api/project", {"name": "web-proj", "path": r"D:\tmp\newproj",
+                             "repo": {"url": "https://github.com/o/r", "token": ""},
+                             "original_name": "web-proj"})
+    assert r["ok"], r
+    p = [x for x in api("/api/state")["projects"] if x["name"] == "web-proj"][0]
+    assert p["repo"]["token_configured"] is False, "空串应清除令牌"
+    print("4b. 项目 llm/repo 密钥脱敏 + 三态（保持/清除）ok")
 
     g = api("/api/guide?project=web-proj")
     assert g["ok"] and g["content"], g

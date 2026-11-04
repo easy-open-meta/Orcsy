@@ -51,8 +51,9 @@ web:
   host: 127.0.0.1            # 看板监听地址
   port: 5116                 # 看板端口（被占用时可改这里，或启动时用 --port 覆盖）
   open_browser: true         # 启动时自动打开浏览器
-  auth_password: ""          # 看板登录密码：非空则所有页面/API 需先登录（外网部署务必设置）；
-                             # 留空 = 关闭鉴权，本机使用零打扰
+  auth_password: ""          # 看板登录密码：非空则所有页面/API 需先登录；
+                             # host 非回环（0.0.0.0 / 局域网 IP）时必须设置，否则拒绝启动；
+                             # 留空 = 关闭鉴权，仅限 127.0.0.1 本机使用（零打扰）
 
 # tools:                     # Agent 工具开关（全局默认）：未列出的工具默认启用。
 #   run_command: false       # 可开关 12 个：list_dir / read_file / write_file / edit_file /
@@ -427,7 +428,7 @@ def cmd_web(args: argparse.Namespace) -> int:
     import threading
     import webbrowser
 
-    from .config import load_config
+    from .config import load_config, validate_web_security
     from .logging_setup import anchored_log_path, rotate_and_cleanup, setup_logging
     from .scheduler import Scheduler
     from .web import AppState, _load_page, make_server
@@ -499,6 +500,12 @@ def cmd_web(args: argparse.Namespace) -> int:
             print(f"端口 {port} 被占用，且自动寻找空闲端口失败，请手动指定 --port。")
             return 1
 
+    # CLI --host 覆盖绕过了配置文件加载期的 bind 守卫，必须单独再验一次（M1）
+    try:
+        validate_web_security(host, config.web.auth_password, context="命令行")
+    except ValueError as e:
+        print(str(e))
+        return 1
     config.web.host, config.web.port = host, port
     # 相对日志路径锚定到配置文件所在目录：工作目录可能在 Program Files（不可写）
     log_file = anchored_log_path(config)

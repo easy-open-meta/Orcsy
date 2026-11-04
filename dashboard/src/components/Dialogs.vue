@@ -33,6 +33,31 @@ const pDraft = reactive({
   // 项目级访问权限覆盖：'' = 跟随全局 permissions.mode
   perm_mode: '' as '' | PermissionMode,
 })
+// 密钥类字段三态（H2）：看板只回显掩码，不回填明文。未触碰的字段保存时不带
+// 对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除
+const llKeyTouched = ref(false)
+const repoTokenTouched = ref(false)
+const repoPassTouched = ref(false)
+// 正在编辑的项目（占位符展示已配置掩码用；新建时为空）
+const editingProject = computed(() =>
+  ui.projectDlg?.original
+    ? store.state?.projects.find(x => x.name === ui.projectDlg?.original) ?? null
+    : null)
+const llKeyPlaceholder = computed(() => {
+  const pl = editingProject.value?.llm
+  if (pl?.api_key_configured) return `已配置：${pl.api_key_masked}（留空保持不变）`
+  return store.state?.llm.key_configured ? '留空继承全局密钥' : 'sk-...'
+})
+const repoTokenPlaceholder = computed(() => {
+  const r = editingProject.value?.repo
+  if (r?.token_configured) return `已配置：${r.token_masked}（留空保持不变）`
+  return 'ghp_... / gitee私人令牌 / glpat-... / gitea token'
+})
+const repoPassPlaceholder = computed(() => {
+  const r = editingProject.value?.repo
+  if (r?.password_configured) return `已配置：${r.password_masked}（留空保持不变）`
+  return 'password'
+})
 
 // ---------- 访问权限（人工审批）公共文案 ----------
 const PERM_LABEL: Record<string, string> = {
@@ -95,15 +120,18 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.use_llm = !!pl
   pDraft.ll_provider = (pl?.provider as '' | 'openai' | 'anthropic') ?? ''
   pDraft.ll_base = pl?.base_url ?? ''
-  pDraft.ll_key = pl?.api_key ?? ''
+  pDraft.ll_key = ''  // 不回填明文：只显示掩码占位，留空即保持原值
+  llKeyTouched.value = false
   pDraft.ll_model = pl?.model ?? ''
   pModels.value = []
   const pr = p?.repo ?? null
   pDraft.use_repo = !!pr
   pDraft.repo_url = pr?.url ?? ''
-  pDraft.repo_token = pr?.token ?? ''
+  pDraft.repo_token = ''  // 同上：token/密码均只回掩码
   pDraft.repo_user = pr?.username ?? ''
-  pDraft.repo_pass = pr?.password ?? ''
+  pDraft.repo_pass = ''
+  repoTokenTouched.value = false
+  repoPassTouched.value = false
   pDraft.repo_provider = (pr?.provider as '' | 'github' | 'gitee' | 'gitlab' | 'gitea') ?? ''
   pDraft.repo_auto_pull = pr?.auto_pull_interval ? Math.round(pr.auto_pull_interval / 60) : 0
   // 工具开关覆盖：项目已有覆盖用其值；否则以当前全局生效值打底（开覆盖即所见即所得）
@@ -132,7 +160,8 @@ const llProviderOptions = [
 const effLlm = () => ({
   provider: pDraft.ll_provider || store.state?.llm.provider || 'openai',
   base_url: pDraft.ll_base.trim() || store.state?.llm.base_url || '',
-  api_key: pDraft.ll_key.trim() || store.state?.llm.api_key || '',
+  // 明文密钥不再下发；留空时后端自动回退已存密钥（fetch_models/test_model 逻辑）
+  api_key: pDraft.ll_key.trim(),
   model: pDraft.ll_model.trim() || store.state?.llm.model || '',
 })
 
@@ -223,21 +252,22 @@ async function saveProject(): Promise<void> {
       allowed_branch: pDraft.branch.trim() || undefined,
       allowed_commands: pDraft.cmds.split(/[,，]/).map(s => s.trim()).filter(Boolean) || undefined,
       enabled: pDraft.enabled,
-      // 专属模型绑定：关=清除（null）；开=只提交非空字段（其余继承全局，后端清洗）
+      // 专属模型绑定：关=清除（null）；开=只提交非空字段（其余继承全局，后端清洗）。
+      // api_key 三态：未触碰不带键（后端保持原值）；触碰过按输入上报，空串=清除回继承全局
       llm: pDraft.use_llm ? {
         ...(pDraft.ll_provider ? { provider: pDraft.ll_provider } : {}),
         ...(pDraft.ll_base.trim() ? { base_url: pDraft.ll_base.trim() } : {}),
-        ...(pDraft.ll_key.trim() ? { api_key: pDraft.ll_key.trim() } : {}),
+        ...(llKeyTouched.value ? { api_key: pDraft.ll_key.trim() } : {}),
         ...(pDraft.ll_model.trim() ? { model: pDraft.ll_model.trim() } : {}),
       } : null,
       // 远程仓库绑定：关或 URL 空=清除；平台显式选择优先，否则后端按 URL 识别；
-      // 自动拉取间隔分钟换算为秒（0=仅手动）
+      // 自动拉取间隔分钟换算为秒（0=仅手动）。token/password 同三态（H2 脱敏配套）
       repo: pDraft.use_repo && pDraft.repo_url.trim() ? {
         url: pDraft.repo_url.trim(),
         ...(pDraft.repo_provider ? { provider: pDraft.repo_provider } : {}),
-        ...(pDraft.repo_token.trim() ? { token: pDraft.repo_token.trim() } : {}),
+        ...(repoTokenTouched.value ? { token: pDraft.repo_token.trim() } : {}),
         ...(pDraft.repo_user.trim() ? { username: pDraft.repo_user.trim() } : {}),
-        ...(pDraft.repo_pass ? { password: pDraft.repo_pass } : {}),
+        ...(repoPassTouched.value ? { password: pDraft.repo_pass } : {}),
         ...(pDraft.repo_auto_pull > 0
           ? { auto_pull_interval: Math.max(1, Math.round(pDraft.repo_auto_pull)) * 60 } : {}),
       } : null,
@@ -533,7 +563,7 @@ async function newFolder(): Promise<void> {
           <NInput v-model:value="pDraft.ll_base" :placeholder="(pDraft.ll_provider === 'anthropic' ? '填官方根地址即可（自动补 /v1）；' : '') + '留空继承全局（当前 ' + (store.state?.llm.base_url || '-') + '）'" /></div>
         <div class="f1"><label>密钥 api_key</label>
           <NInput v-model:value="pDraft.ll_key" type="password" show-password-on="click"
-                  :placeholder="store.state?.llm.api_key ? '留空继承全局密钥' : 'sk-...'" /></div>
+                  :placeholder="llKeyPlaceholder" @update:value="llKeyTouched = true" /></div>
       </div>
       <div class="hint" v-if="pDraft.ll_provider === 'anthropic'">
         Anthropic 协议：程序自动补 /v1（已含 /v1 则不重复）；多数兼容服务不提供 /models 列表端点，拉取 404 时直接手填模型名即可。
@@ -577,12 +607,12 @@ async function newFolder(): Promise<void> {
       <div class="duo">
         <div class="f1"><label>访问 token（与账号密码二选一）</label>
           <NInput v-model:value="pDraft.repo_token" type="password" show-password-on="click"
-                  placeholder="ghp_... / gitee私人令牌 / glpat-... / gitea token" /></div>
+                  :placeholder="repoTokenPlaceholder" @update:value="repoTokenTouched = true" /></div>
         <div class="f1"><label>账号 + 密码（可选，GitLab / Gitee / Gitea 支持）</label>
           <div class="duo">
             <NInput v-model:value="pDraft.repo_user" placeholder="username" />
             <NInput v-model:value="pDraft.repo_pass" type="password" show-password-on="click"
-                    placeholder="password" />
+                    :placeholder="repoPassPlaceholder" @update:value="repoPassTouched = true" />
           </div></div>
       </div>
       <div class="hint" style="margin-top:6px">

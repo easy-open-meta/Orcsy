@@ -116,15 +116,20 @@ def _fake_pkg_dir() -> Path:
     d = Path(tempfile.mkdtemp(prefix="orcsy-rel-pkg-"))
     (d / "orcsy-setup-0.15.0.exe").write_bytes(b"MZ" + b"x" * 2048)
     (d / "orcsy-update-0.15.0.zip").write_bytes(b"PK" + b"y" * 1024)
+    (d / "orcsy-update-0.15.0.zip.sha256").write_text(
+        "0" * 64 + "  orcsy-update-0.15.0.zip\n", encoding="ascii")
     return d
+
+
+EXPECTED_NAMES = ["orcsy-setup-0.15.0.exe", "orcsy-update-0.15.0.zip",
+                  "orcsy-update-0.15.0.zip.sha256"]
 
 
 def check_artifacts() -> None:
     d = _fake_pkg_dir()
     try:
         files = release.check_artifacts((0, 15, 0), setup_dir=d)
-        assert [f.name for f in files] == ["orcsy-setup-0.15.0.exe",
-                                           "orcsy-update-0.15.0.zip"], files
+        assert [f.name for f in files] == EXPECTED_NAMES, files
         # 缺 zip（只发了 exe）→ 明确报错，不许「顺手」漏发
         (d / "orcsy-update-0.15.0.zip").unlink()
         try:
@@ -132,7 +137,15 @@ def check_artifacts() -> None:
             raise AssertionError("缺 zip 应报错")
         except release.ReleaseError as e:
             assert "orcsy-update-0.15.0.zip" in str(e) and "build" in str(e)
-        print("check_artifacts（两附件齐全/缺 zip 拦下）✅")
+        # 缺 .sha256（在线更新的完整性依据）→ 同样拦下
+        (d / "orcsy-update-0.15.0.zip").write_bytes(b"PK" + b"y" * 1024)
+        (d / "orcsy-update-0.15.0.zip.sha256").unlink()
+        try:
+            release.check_artifacts((0, 15, 0), setup_dir=d)
+            raise AssertionError("缺 .sha256 应报错")
+        except release.ReleaseError as e:
+            assert ".sha256" in str(e) and "build" in str(e)
+        print("check_artifacts（三附件齐全/缺 zip/缺 sha256 拦下）✅")
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -151,8 +164,8 @@ def check_upload_flow() -> None:
                                  api_base=base)
         names = release.verify_assets("https://gitee.com/o/r", rel["id"], files,
                                       "tk", api_base=base)
-        assert names == ["orcsy-setup-0.15.0.exe", "orcsy-update-0.15.0.zip"], names
-        print("发布流程（建 Release → 上传 exe+zip → 核对）✅")
+        assert names == EXPECTED_NAMES, names
+        print("发布流程（建 Release → 上传 exe+zip+sha256 → 核对）✅")
     finally:
         srv.shutdown()
         shutil.rmtree(d, ignore_errors=True)
@@ -176,10 +189,11 @@ def check_idempotent_replace() -> None:
         for f in files:
             release.upload_asset("https://gitee.com/o/r", rel["id"], f, "tk",
                                  api_base=base)
-        assert len(STATE["uploads"]) == n_first + 2  # 各重传一次
+        # 各附件重传至少一次（本机回环 RST 触发传输层重试时会上报多于一次）
+        assert len(STATE["uploads"]) >= n_first + 3
         names = release.verify_assets("https://gitee.com/o/r", rel["id"], files,
                                       "tk", api_base=base)
-        assert names == ["orcsy-setup-0.15.0.exe", "orcsy-update-0.15.0.zip"]
+        assert names == EXPECTED_NAMES
         # 核对兜底：服务端丢件必须报错，不许「发了半个包」放行
         del STATE["releases"][rel["id"]]["assets"]["orcsy-update-0.15.0.zip"]
         try:
@@ -205,7 +219,9 @@ def check_dry_run() -> None:
         shutil.copy(Path(__file__).resolve().parents[1] / "build" / "build.py",
                     fake / "build" / "build.py")
         for name, data in (("orcsy-setup-0.15.0.exe", b"MZ" + b"x" * 100),
-                           ("orcsy-update-0.15.0.zip", b"PK" + b"y" * 100)):
+                           ("orcsy-update-0.15.0.zip", b"PK" + b"y" * 100),
+                           ("orcsy-update-0.15.0.zip.sha256",
+                            ("0" * 64 + "  orcsy-update-0.15.0.zip\n").encode())):
             (fake / "build" / "Setup" / name).write_bytes(data)
         old_root = release.ROOT
         release.ROOT = fake

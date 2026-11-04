@@ -15,8 +15,30 @@ const draft = reactive({
   enable_thinking: false, timeout_seconds: 300,
   interval: 300, parallel: 1, port: 5116, retention: 7, max_total_mb: 200,
 })
+// ---- 密钥/令牌三态（H2）：后端只回掩码，不回填明文。未触碰的字段保存时不带
+//      对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除 ----
+const apiKeyMasked = ref('')
+const apiKeyConfigured = ref(false)
+const apiKeyTouched = ref(false)
+const updTokenMasked = ref('')
+const updTokenConfigured = ref(false)
+const updTokenTouched = ref(false)
 // ---- 软件更新配置草稿 ----
 const updDraft = reactive({ repo: '', token: '', auto_check: true })
+// 掩码占位跟随轮询刷新（保存新密钥/令牌后不用刷新页面就能看到新掩码；
+// 只动展示用的掩码，不碰用户正在输入的草稿）
+watch(() => store.state?.llm.api_key_masked, (v) => {
+  if (v !== undefined) apiKeyMasked.value = v
+})
+watch(() => store.state?.llm.key_configured, (v) => {
+  if (v !== undefined) apiKeyConfigured.value = v
+})
+watch(() => store.state?.update_cfg?.token_masked, (v) => {
+  if (v !== undefined) updTokenMasked.value = v
+})
+watch(() => store.state?.update_cfg?.token_configured, (v) => {
+  if (v !== undefined) updTokenConfigured.value = v
+})
 // ---- Agent 工具开关草稿（全局默认；只上报关闭项，未列出 = 启用） ----
 const toolsCatalog = ref<{ name: string; description: string }[]>([])
 const toolsDraft = reactive<Record<string, boolean>>({})
@@ -57,7 +79,10 @@ watch(() => store.state, (s) => {
   if (!s || inited) return
   inited = true
   updDraft.repo = s.update_cfg?.repo ?? ''
-  updDraft.token = s.update_cfg?.token ?? ''
+  updDraft.token = ''  // 不回填明文：只显示掩码占位，留空即保持原值
+  updTokenMasked.value = s.update_cfg?.token_masked ?? ''
+  updTokenConfigured.value = s.update_cfg?.token_configured ?? false
+  updTokenTouched.value = false
   updDraft.auto_check = s.update_cfg?.auto_check ?? true
   toolsCatalog.value = s.tools_catalog ?? []
   // finish 只是展示行（常开且禁用），不进草稿、不参与保存
@@ -81,7 +106,10 @@ watch(() => store.state, (s) => {
   // 清洗历史 bug 写入的模型名：下拉标注「（977K）」曾被当成 id 存进配置
   draft.model = s.llm.model.replace(/（\d+K）$/, '')
   draft.base_url = s.llm.base_url
-  draft.api_key = s.llm.api_key || ''
+  draft.api_key = ''  // 同上：后端只回掩码，明文密钥不再下发
+  apiKeyMasked.value = s.llm.api_key_masked ?? ''
+  apiKeyConfigured.value = s.llm.key_configured ?? false
+  apiKeyTouched.value = false
   draft.temperature = s.llm.temperature
   draft.max_tokens = s.llm.max_tokens
   draft.max_context_tokens = s.llm.max_context_tokens
@@ -96,14 +124,19 @@ watch(() => store.state, (s) => {
 
 async function saveLlm(): Promise<void> {
   try {
-    await api.config({ llm: {
+    const llm: Record<string, unknown> = {
       provider: draft.provider, model: draft.model, base_url: draft.base_url,
-      api_key: draft.api_key, temperature: draft.temperature,
+      temperature: draft.temperature,
       max_tokens: draft.max_tokens, max_context_tokens: draft.max_context_tokens,
       enable_thinking: draft.enable_thinking,
       timeout_seconds: draft.timeout_seconds,
-    } })
+    }
+    // 三态：未触碰不带键（后端保留已存密钥）；触碰过按输入上报，空串 = 清除
+    if (apiKeyTouched.value) llm.api_key = draft.api_key.trim()
+    await api.config({ llm })
     message()?.('已保存并生效')
+    draft.api_key = ''
+    apiKeyTouched.value = false
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
@@ -353,10 +386,15 @@ const updSaving = ref(false)
 async function saveUpdate(): Promise<void> {
   updSaving.value = true
   try {
-    await api.config({ update: {
-      repo: updDraft.repo.trim(), token: updDraft.token, auto_check: updDraft.auto_check,
-    } })
+    const update: Record<string, unknown> = {
+      repo: updDraft.repo.trim(), auto_check: updDraft.auto_check,
+    }
+    // 三态：未触碰不带键（后端保留已存令牌）；触碰过按输入上报，空串 = 清除
+    if (updTokenTouched.value) update.token = updDraft.token.trim()
+    await api.config({ update })
     message()?.('更新配置已保存')
+    updDraft.token = ''
+    updTokenTouched.value = false
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { updSaving.value = false }
 }
@@ -506,7 +544,11 @@ const providerOptions = [
       </div>
       <div class="frow">
         <div class="f2"><label>API 地址 base_url</label><NInput v-model:value="draft.base_url" :placeholder="draft.provider === 'anthropic' ? 'https://api.anthropic.com（自动补 /v1）' : 'https://api.deepseek.com/v1'" /></div>
-        <div class="f14"><label>API Key</label><NInput v-model:value="draft.api_key" type="password" show-password-on="click" placeholder="sk-..." /></div>
+        <div class="f14"><label>API Key</label>
+          <NInput v-model:value="draft.api_key" type="password" show-password-on="click"
+                  :placeholder="apiKeyConfigured
+                    ? `已配置：${apiKeyMasked}（留空保持不变）` : 'sk-...'"
+                  @update:value="apiKeyTouched = true" /></div>
       </div>
       <div class="hint" v-if="draft.provider === 'anthropic'">
         Anthropic 协议：直接填官方/兼容服务公布的根地址即可，程序自动补 /v1（已含 /v1 则不重复）；多数兼容服务不提供 /models 列表端点，拉取 404 时直接手填模型名即可。
@@ -703,7 +745,10 @@ const providerOptions = [
         <div class="f2"><label>更新源仓库 URL（Gitee，Release 附件放安装包）</label>
           <NInput v-model:value="updDraft.repo" placeholder="https://gitee.com/xxx/orcsy" /></div>
         <div class="f1"><label>访问 token（私有仓库用）</label>
-          <NInput v-model:value="updDraft.token" type="password" show-password-on="click" placeholder="可选" /></div>
+          <NInput v-model:value="updDraft.token" type="password" show-password-on="click"
+                  :placeholder="updTokenConfigured
+                    ? `已配置：${updTokenMasked}（留空保持不变）` : '可选'"
+                  @update:value="updTokenTouched = true" /></div>
       </div>
       <div class="sfoot">
         <NButton :loading="updSaving" @click="saveUpdate">保存更新配置</NButton>

@@ -107,6 +107,8 @@ sudo bash deploy/linux/install.sh
 
 镜像基于 Python 3.12 slim，多阶段 uv 构建、按 `uv.lock` 可复现；内置 `git` 与 tini（PID 1 转发信号），应用进程以非 root 用户（orcsy）运行，宿主挂载卷权限由入口脚本自动修正。容器内自动关闭托盘与自动开浏览器（`--no-tray --no-browser`），核心能力（看板 + 定时调度 + Agent 执行）与桌面版一致。
 
+> ⚠️ **容器以 `--host 0.0.0.0` 对外监听，必须设置登录密码。** 首次启动会自动生成 `/data/config.yaml` 模板，随后因「非回环绑定 + 空 `web.auth_password`」拒绝启动（日志里有一条可行动提示）。编辑 `./orcsy-data/config.yaml`，把 `web.auth_password` 设为强密码，再 `docker compose restart` 即可；之后也可在看板设置页改密码。
+
 ### 数据与挂载
 
 | 宿主目录 | 容器内 | 内容 |
@@ -173,6 +175,8 @@ sudo bash deploy/linux/install.sh
 
 打开 `http://<服务器IP>:5116`,在看板「项目与设置」页填写 `llm.api_key` 并新建/导入项目(路径填 `/srv/orcsy-projects/<项目名>`,需是 git 仓库)。
 
+服务以 `--host 0.0.0.0` 监听,因此安装脚本首装时会生成 `/var/lib/orcsy/config.yaml` 并写入随机登录密码(安装输出里打印;可用 `ORCSY_AUTH_PASSWORD` 环境变量指定)。已有配置文件不会被覆盖——若其中的 `web.host` 非回环而 `web.auth_password` 为空,服务会拒绝启动,补上密码后 `systemctl restart orcsy` 即可。
+
 ### 服务管理与日志
 
 ```bash
@@ -201,7 +205,7 @@ sudo bash deploy/linux/uninstall.sh
 
 ## 🔐 看板登录鉴权（外网部署必读）
 
-看板默认只监听 `127.0.0.1` 且无鉴权（本机使用零打扰）。一旦以 Docker / systemd / `--host 0.0.0.0` 等方式对外暴露，**务必设置登录密码**，否则任何能访问该端口的人都可以操作看板（含浏览服务器目录、读写项目、看到 `llm.api_key`）：
+看板默认只监听 `127.0.0.1` 且无鉴权（本机使用零打扰）。以 Docker / systemd / `--host 0.0.0.0` 等方式对外暴露时**必须设置登录密码**——host 非回环且密码为空时程序会直接拒绝启动、看板也会拒绝保存该配置（看板可浏览服务器目录、写入任务、启停 Agent）。密钥类信息（LLM API Key、更新源 token、项目仓库 token）在 `/api/state` 中只返回掩码，输入新值才会替换、留空即保持原值：
 
 ```yaml
 web:
@@ -419,8 +423,9 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 # 一键打包（版本号 -> 前端构建 -> PyInstaller 双 exe -> Inno Setup 安装包 + zip 更新包）
 build.bat
 
-# 发布 Gitee Release：一条命令同时上传两个附件（首次安装 exe + 自更新 zip；
-# token 用 --token / 环境变量 GITEE_TOKEN / 配置 update.token 三选一）：
+# 发布 Gitee Release：一条命令同时上传三个附件（首次安装 exe + 自更新 zip
+# + 同名 zip.sha256 校验文件；缺 sha256 时在线更新会拒绝安装）；
+# token 用 --token / 环境变量 GITEE_TOKEN / 配置 update.token 三选一：
 uv run python build/release.py
 
 # 版本规则：功能大变更 → 次版本 +1（0.13.0）；功能补丁 → 修订号 +1（0.12.3）

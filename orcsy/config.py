@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 
 from dataclasses import asdict, dataclass, field
@@ -352,6 +353,26 @@ def resolve_commands(global_cfg: CommandsConfig,
     return [c for c in DEFAULT_ALLOWED_COMMANDS if c not in disabled]
 
 
+def validate_web_security(host: str, auth_password: str,
+                          context: str = "web") -> None:
+    """非回环绑定必须配置登录密码（安全审计 2026-11-04 M1）。
+
+    看板含全盘文件浏览、任务写档与 Agent 启停控制，把无鉴权的服务暴露到
+    局域网等同把机器交给同网段任何人——host 非回环时拒绝（而非仅告警，
+    托盘应用里告警几乎不会被看到）。三条配置入口（配置文件加载 / 看板保存 /
+    CLI --host 覆盖）都须经过本守卫。
+    """
+    h = (host or "127.0.0.1").strip().lower()
+    try:
+        loopback = h == "localhost" or ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        loopback = False  # 无法解析的主机名一律按非回环从严处理
+    if not loopback and not (auth_password or "").strip():
+        raise ValueError(
+            f"{context}: web.host 绑定到非回环地址（{host}）时必须设置 web.auth_password "
+            f"登录密码。请设置密码，或将 host 改回 127.0.0.1（仅本机访问）。")
+
+
 def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     """解析 YAML 配置文件为 AppConfig，缺失字段回退到默认值。
 
@@ -400,6 +421,9 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         open_browser=bool(web_raw.get("open_browser", True)),
         auth_password=str(web_raw.get("auth_password") or ""),
     )
+    # 非回环绑定 + 无鉴权的组合直接拒绝启动（M1）：错误经 _config_fatal 呈现，
+    # 文案给出两条可行动出路（设密码 / 改回 127.0.0.1）
+    validate_web_security(web.host, web.auth_password, context="配置文件")
 
     upd_raw = raw.get("update") or {}
     update = UpdateConfig(

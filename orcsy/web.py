@@ -77,6 +77,7 @@ import json
 import hmac
 import os
 import secrets
+import shutil
 import tempfile
 import time
 import re
@@ -87,7 +88,7 @@ import yaml
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from . import __version__
 from . import skills as skills_lib
@@ -98,7 +99,8 @@ from .config import (AppConfig, CommandsConfig, EnvConfig, LLMConfig,
                      ProjectConfig, SchedulerConfig, TaskStatus,
                      ToolsConfig, UpdateConfig, WebConfig, normalize_llm_override,
                      resolve_commands, resolve_llm, resolve_permission_mode,
-                     resolve_tools, validate_env_vars, validate_permission_mode)
+                     resolve_tools, validate_env_vars, validate_permission_mode,
+                     validate_web_security)
 from .issues import IssueError, normalize_repo, sync_issues
 from . import notify
 from . import updater
@@ -128,6 +130,20 @@ _DIR_IGNORE = {"$Recycle.Bin", "System Volume Information", "Windows", "AppData"
                "node_modules", ".git", ".venv", "__pycache__", ".worktree-arranger"}
 
 
+def mask_secret(value: str) -> str:
+    """设置页展示用的掩码：保留首尾各 4 位可辨认，其余打码；短值/空值全打码。
+
+    密钥/令牌绝不随 /api/state 明文外发（安全审计 2026-11-04 H2）：已配置的
+    事实 + 首尾可辨认片段足够设置页提示「留空保持不变」。
+    """
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if len(v) <= 12:
+        return "••••••••"
+    return f"{v[:4]}…{v[-4:]}"
+
+
 # 新项目/导入项目的 AGENT.md 初始内容：统一走 templates.default_guide（唯一来源）
 
 
@@ -146,6 +162,14 @@ def read_log_tail(path: str, max_bytes: int = 60000) -> str:
 
 class AppState:
     """Web 层共享的应用状态与操作。"""
+
+    # /api/login 限速参数（L1）：同 IP 滑窗内失败达上限即锁定，锁定期间直接
+    # 拒绝不做密码比对。类属性便于测试缩短窗口；不采信 X-Forwarded-For（本
+    # 工具部署形态是直连，该头可伪造）
+    LOGIN_WINDOW = 600.0      # 失败计数滑窗：10 分钟
+    LOGIN_MAX_FAILS = 5       # 窗口内允许的失败次数
+    LOGIN_LOCKOUT = 900.0     # 触发后的锁定时长：15 分钟
+    LOGIN_FAIL_DELAY = 0.8    # 每次失败/锁定响应的延迟：抬高暴力破解成本
 
     def __init__(self, config: AppConfig, scheduler: Scheduler,
                  log_path: str | None = None) -> None:
@@ -185,6 +209,10 @@ class AppState:
         # 登录会话：token -> 过期时间戳（内存态，进程重启即全部失效）
         self._auth_tokens: dict[str, float] = {}
         self._auth_lock = threading.Lock()
+        # 登录限速（L1）：ip -> 滑窗内失败时间戳 / 锁定到期时间戳。
+        # 内存态，重启清零可接受
+        self._login_failures: dict[str, list[float]] = {}
+        self._login_locked_until: dict[str, float] = {}
         # 安装日志：<配置目录>/logs/install.log，升级全程留痕（仅出错时自动打开）
         self.install_log = updater.install_log_path(config)
         # 上次升级结果（看护脚本写、启动时消费）；一次曝光后清空
@@ -208,18 +236,53 @@ class AppState:
         """配置了登录密码即开启鉴权；留空 = 关闭（本机使用零打扰）。"""
         return bool(self.config.web.auth_password)
 
-    def login(self, password: str) -> dict:
-        """校验登录密码；成功颁发会话 token（由 handler 负责下发 Cookie）。"""
+    def login(self, password: str, client_ip: str = "") -> dict:
+        """校验登录密码；成功颁发会话 token（由 handler 负责下发 Cookie）。
+
+        限速（L1）：同 IP 滑窗内失败达 LOGIN_MAX_FAILS 次即锁定 LOGIN_LOCKOUT
+        秒，锁定期间直接拒绝、不做密码比对；登录成功清零该 IP 的失败计数。
+        """
         if not self.auth_enabled:
             return {"ok": True, "token": None}
+        now = time.time()
+        with self._auth_lock:
+            locked_until = self._login_locked_until.get(client_ip, 0.0)
+            if locked_until and now >= locked_until:  # 锁定期满：恢复尝试
+                self._login_locked_until.pop(client_ip, None)
+                locked_until = 0.0
+            if not locked_until:
+                stamps = [t for t in self._login_failures.get(client_ip, [])
+                          if now - t < self.LOGIN_WINDOW]
+                if len(stamps) >= self.LOGIN_MAX_FAILS:
+                    # 滑窗内失败达上限：锁定 LOGIN_LOCKOUT（独立于滑窗——
+                    # 不是等 10 分钟窗口过期就自动解锁），期满重新计数
+                    locked_until = now + self.LOGIN_LOCKOUT
+                    self._login_locked_until[client_ip] = locked_until
+                    self._login_failures[client_ip] = []
+                else:
+                    self._login_failures[client_ip] = stamps
+        if locked_until > now:
+            time.sleep(self.LOGIN_FAIL_DELAY)  # 与失败延迟一致：锁定期间也抬高探测成本
+            return {"ok": False,
+                    "message": "尝试次数过多，账号已临时锁定，请 15 分钟后再试"}
         if not hmac.compare_digest(str(password or ""), self.config.web.auth_password):
-            time.sleep(0.8)  # 失败延迟：抬高暴力破解成本
+            time.sleep(self.LOGIN_FAIL_DELAY)  # 失败延迟：抬高暴力破解成本
+            with self._auth_lock:
+                self._login_failures.setdefault(client_ip, []).append(now)
             return {"ok": False, "message": "密码错误"}
         token = secrets.token_urlsafe(32)
         with self._auth_lock:
+            self._login_failures.pop(client_ip, None)  # 成功即清零失败计数
+            self._login_locked_until.pop(client_ip, None)
             self._prune_sessions()
             self._auth_tokens[token] = time.time() + SESSION_TTL
         return {"ok": True, "token": token}
+
+    def _clear_login_throttle(self) -> None:
+        """清空登录限速状态（密码变更/测试重置用）：旧失败不应继续锁新密码。"""
+        with self._auth_lock:
+            self._login_failures.clear()
+            self._login_locked_until.clear()
 
     def logout(self, token: str | None) -> dict:
         with self._auth_lock:
@@ -249,9 +312,14 @@ class AppState:
         self._auth_tokens = {t: e for t, e in self._auth_tokens.items() if e >= now}
 
     def _invalidate_sessions(self) -> None:
-        """密码变更/清除后注销全部会话：旧 Cookie 立即失效，需用新密码重登。"""
+        """密码变更/清除后注销全部会话：旧 Cookie 立即失效，需用新密码重登。
+
+        顺带清空登录限速状态：旧密码时期的失败/锁定不应妨碍新密码登录。
+        """
         with self._auth_lock:
             self._auth_tokens.clear()
+            self._login_failures.clear()
+            self._login_locked_until.clear()
 
     # ---- 人工审批 ----
 
@@ -343,8 +411,10 @@ class AppState:
                 "max_agent_turns": p.max_agent_turns,
                 "allowed_branch": p.allowed_branch,
                 "allowed_commands": p.allowed_commands,
-                "llm": p.llm or None,
-                "repo": p.repo or None,
+                # 项目级密钥同样只出掩码（H2 同规则）：项目专属模型 api_key 与
+                # 仓库 token/密码都随 /api/state 外发，不能给明文
+                "llm": self._project_llm_public(p.llm),
+                "repo": self._repo_public(p.repo),
                 # 项目级工具开关覆盖；null = 跟随全局（前端显示「跟随全局」态）
                 "tools": p.tools or None,
                 # 项目级访问权限覆盖（原始值）+ 当前生效值（前端展示用）
@@ -373,7 +443,8 @@ class AppState:
                 "model": self.config.llm.model,
                 "base_url": self.config.llm.base_url,
                 "key_configured": bool(self.config.llm.api_key),
-                "api_key": self.config.llm.api_key,       # 设置页回显（本机使用，无外发）
+                # 密钥只出掩码不出明文（H2）：看板设置页用它提示「已配置，留空保持」
+                "api_key_masked": mask_secret(self.config.llm.api_key),
                 "temperature": self.config.llm.temperature,
                 "max_tokens": self.config.llm.max_tokens,
                 "max_context_tokens": self.config.llm.max_context_tokens,
@@ -397,7 +468,9 @@ class AppState:
             },
             "update_cfg": {
                 "repo": self.config.update.repo,
-                "token": self.config.update.token,
+                # 令牌只出掩码不出明文（H2），与 llm.api_key 同规则
+                "token_masked": mask_secret(self.config.update.token),
+                "token_configured": bool(self.config.update.token),
                 "auto_check": self.config.update.auto_check,
             },
             "notify_cfg": {
@@ -449,6 +522,28 @@ class AppState:
             "projects": projects,
             "log_tail": read_log_tail(self.log_path or self.config.logging.file),
         }
+
+    @staticmethod
+    def _project_llm_public(llm: dict | None) -> dict | None:
+        """项目专属模型绑定的可外发形态：api_key 只出掩码与「已配置」标记（H2 同规则）。"""
+        if not llm:
+            return None
+        out = {k: v for k, v in llm.items() if k != "api_key"}
+        out["api_key_masked"] = mask_secret(str(llm.get("api_key") or ""))
+        out["api_key_configured"] = bool(llm.get("api_key"))
+        return out
+
+    @staticmethod
+    def _repo_public(repo: dict | None) -> dict | None:
+        """项目仓库绑定的可外发形态：token/密码只出掩码与「已配置」标记（H2 同规则）。"""
+        if not repo:
+            return None
+        out = {k: v for k, v in repo.items() if k not in ("token", "password")}
+        out["token_masked"] = mask_secret(str(repo.get("token") or ""))
+        out["token_configured"] = bool(repo.get("token"))
+        out["password_masked"] = mask_secret(str(repo.get("password") or ""))
+        out["password_configured"] = bool(repo.get("password"))
+        return out
 
     @staticmethod
     def _task_dict(t: Task) -> dict:
@@ -862,23 +957,37 @@ class AppState:
         cmds = data.get("allowed_commands")
         allowed = [str(c).strip() for c in cmds if str(c).strip()] if isinstance(cmds, list) else None
         branch = str(data.get("allowed_branch") or "").strip() or None
-        # 项目专属模型绑定：字典则清洗+校验（值非法立刻报错），显式 null 或全空=清除绑定
+        # 编辑现有项目时取原配置：密钥类字段的「三态」合并需要它（H2 脱敏配套）
+        existing = (next((p for p in self.config.projects if p.name == original_name), None)
+                    if original_name else None)
+        # 项目专属模型绑定：字典则清洗+校验（值非法立刻报错），显式 null 或全空=清除绑定。
+        # api_key 三态：键缺失=保持原值（看板只拿到掩码，未输入就不带键）；带键
+        # （含空串）=按新值处理，空串即清除绑定回「继承全局」
         llm_raw = data.get("llm")
         if llm_raw is not None and not isinstance(llm_raw, dict):
             raise ValueError("llm 绑定必须是键值对字典或 null")
         llm = None
         if isinstance(llm_raw, dict):
-            llm = normalize_llm_override(llm_raw) or None
+            llm_data = dict(llm_raw)
+            if existing is not None and existing.llm and "api_key" not in llm_data:
+                llm_data["api_key"] = existing.llm.get("api_key", "")
+            llm = normalize_llm_override(llm_data) or None
             if llm:
                 resolve_llm(self.config.llm, llm, context=f"项目 {name} 的 llm")
-        # 远程仓库绑定（Issues 导入用）：null/空=清除；平台由 URL 识别或显式 provider
+        # 远程仓库绑定（Issues 导入用）：null/空=清除；平台由 URL 识别或显式 provider。
+        # token/password 同三态：键缺失=保持原值；带键（含空串）=新值/清除
         repo_raw = data.get("repo")
         if repo_raw is not None and not isinstance(repo_raw, dict):
             raise ValueError("repo 绑定必须是键值对字典或 null")
         repo = None
         if isinstance(repo_raw, dict) and repo_raw:
+            repo_data = dict(repo_raw)
+            if existing is not None and existing.repo:
+                for key in ("token", "password"):
+                    if key not in repo_data and existing.repo.get(key):
+                        repo_data[key] = existing.repo[key]
             try:
-                repo = normalize_repo(repo_raw, context=f"项目 {name} 的 repo")
+                repo = normalize_repo(repo_data, context=f"项目 {name} 的 repo")
             except IssueError as e:
                 raise ValueError(str(e)) from e
         # 项目级工具开关覆盖：字典则校验（未知工具名/禁 finish/非 bool 立刻报错），
@@ -1106,11 +1215,28 @@ class AppState:
         """记录更新状态机快照；带时间戳供超时自愈判断。"""
         self.update_state = {**state, "ts": time.time()}
 
+    @staticmethod
+    def _strip_url_token(url: str) -> str:
+        """去掉下载地址里的 access_token 查询参数（H2 同类：令牌不随状态外发）。
+
+        私有仓库的附件下载地址带 ?access_token=...（Gitee 仅支持查询串鉴权），
+        内部状态保留原值供下载，但 /api/state 只返回脱敏后的地址。
+        """
+        if not url:
+            return url
+        parts = urlsplit(url)
+        query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                 if k.lower() != "access_token"]
+        return urlunsplit(parts._replace(query=urlencode(query)))
+
     def _healed_update_state(self) -> dict:
         """读侧超时自愈：进行中状态超过 120 秒（如静默安装被外部打断、进程
         异常残留）时转为 error，避免看板按钮永久卡在「安装中」。
-        附带安装日志尾部，静默失败可查。"""
+        附带安装日志尾部，静默失败可查；下载地址里的令牌脱敏后再外发。"""
         upd = dict(self.update_state)
+        for key in ("download_url", "sha256_url"):
+            if upd.get(key):
+                upd[key] = self._strip_url_token(str(upd[key]))
         if upd.get("phase") in ("downloading", "applying", "restarting") \
                 and time.time() - upd.get("ts", 0) > 120:
             tail = updater.read_install_log(self.install_log)[-800:]
@@ -1205,6 +1331,7 @@ class AppState:
             # 要求：错误绝不静默吞掉——写安装日志 + 自动打开日志 + 前端弹窗
             updater.append_install_log(self.install_log, f"静默升级失败：{e}")
             updater.open_install_log(self.install_log)  # 仅出错时打开
+            self._cleanup_download_dir(package)  # 失败重试会重新下载，不留残包
             self._set_update_state({
                 "phase": "error", "message": str(e),
                 "install_log_tail": updater.read_install_log(self.install_log)})
@@ -1239,18 +1366,48 @@ class AppState:
         dl_url = self.update_state.get("download_url")
         if not dl_url:
             raise ValueError("请先检查更新（在线更新需要先确认可用的新版本）")
+        dest: Path | None = None
         try:
             self._set_update_state({"phase": "downloading", "percent": 0})
-            dest = Path(tempfile.gettempdir())
+            # 下载落私有临时目录（mkdtemp 随机名 + 用户级 %TEMP% ACL）：替换
+            # 共享目录固定文件名，消除可预测路径的本地 TOCTOU 窗口（M2）。
+            # 成功路径进程直接退出没机会清，残留由开头的超龄清理兜底回收
+            updater.prune_stale_download_dirs()
+            dest = Path(tempfile.mkdtemp(prefix="orcsy-update-"))
             name = self.update_state.get("asset_name") or "orcsy-update-download.zip"
+            # 完整性校验（M2）：优先 API digest 字段给的哈希值；否则下载同名
+            # .sha256 附件解析。两者皆无 = 无校验依据，拒绝在线更新——宁可这
+            # 一版不能在线更新，不可无校验提权执行（手动导入不受影响）
+            expected = str(self.update_state.get("sha256_value") or "")
+            if not expected:
+                sha_url = str(self.update_state.get("sha256_url") or "")
+                if sha_url:
+                    expected = updater.fetch_expected_sha256(sha_url, dest)
+            if not expected:
+                raise updater.UpdateError(
+                    "本次 Release 未提供 sha256 校验文件，在线更新已拒绝；"
+                    "请用设置页「选择安装包」手动导入更新包，或联系发布方补齐"
+                    ".sha256 校验文件。")
             path = updater.download_installer(
                 dl_url, dest, progress_cb=lambda pct: self.update_state.update(
                     {"phase": "downloading", "percent": pct}),
-                filename=name)
+                filename=name, expected_sha256=expected)
             return self._start_install_thread(path)
         except updater.UpdateError as e:
+            if dest is not None:
+                shutil.rmtree(dest, ignore_errors=True)  # 失败不残留半截包
             self._set_update_state({"phase": "error", "message": str(e)})
             raise ValueError(str(e)) from e
+
+    @staticmethod
+    def _cleanup_download_dir(package: Path) -> None:
+        """清理在线更新下载的私有临时目录（orcsy-update- 前缀才动，手动导入不涉及）。"""
+        try:
+            parent = package.parent
+            if parent.name.startswith("orcsy-update-"):
+                shutil.rmtree(parent, ignore_errors=True)
+        except OSError:
+            pass
 
     def update_install(self, data: dict) -> dict:
         """手动导入本地 zip 更新包：校验后后台线程静默安装（零 UAC）。
@@ -1512,9 +1669,15 @@ class AppState:
             ts = 300 if raw_ts is None else int(raw_ts)
             if ts <= 0:
                 ts = -1
+            # api_key 三态（H2 脱敏的配套）：键缺失=保持原值（看板不再回显明文，
+            # 未输入新密钥时前端不带该键——若按旧的「缺失=清空」语义，改任意
+            # 设置保存一次就会把已配好的密钥抹掉）；空字符串=清除；非空=换新密钥
+            api_key = self.config.llm.api_key
+            if "api_key" in llm:
+                api_key = str(llm.get("api_key") or "").strip()
             self.config.llm = LLMConfig(
                 provider=provider,
-                api_key=str(llm.get("api_key", "")).strip(),
+                api_key=api_key,
                 base_url=base_url, model=model,
                 temperature=float(llm.get("temperature", 0.2)),
                 max_tokens=max_tokens,
@@ -1535,8 +1698,12 @@ class AppState:
             if new_pwd != auth_password:
                 auth_password = new_pwd
                 self._invalidate_sessions()  # 密码变更后旧会话全部作废
+        cfg_host = str(web.get("host") or self.config.web.host)
+        # 非回环绑定必须带登录密码（M1）：host 与密码都已定案后校验，
+        # 不合规抛 ValueError → 400 透传看板，配置不落盘
+        validate_web_security(cfg_host, auth_password, context="看板保存的 web 配置")
         self.config.web = WebConfig(
-            host=str(web.get("host") or self.config.web.host),
+            host=cfg_host,
             port=port,
             open_browser=bool(web.get("open_browser", self.config.web.open_browser)),
             auth_password=auth_password,
@@ -1709,7 +1876,10 @@ class WebHandler(BaseHTTPRequestHandler):
                     "message": "未登录或会话已过期"}, 401)
 
     def _handle_login(self, body: dict) -> None:
-        result = self.state.login(str(body.get("password") or ""))
+        # client_address[0] 是真实对端 IP（直连部署，无反代）；不采信
+        # X-Forwarded-For——可伪造，限速会失去意义
+        result = self.state.login(str(body.get("password") or ""),
+                                  client_ip=self.client_address[0])
         if not result.get("ok"):
             return self._json(
                 {"ok": False, "message": result.get("message", "密码错误")}, 401)

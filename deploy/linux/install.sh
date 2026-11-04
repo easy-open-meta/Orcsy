@@ -53,6 +53,25 @@ id -u "$SERVICE_USER" >/dev/null 2>&1 \
     || useradd -r -M -d "$DATA_DIR" -s /usr/sbin/nologin "$SERVICE_USER"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR" "$DATA_DIR" "$PROJECTS_DIR"
 
+echo "==> 初始化配置(非回环绑定必须带登录密码)"
+CONFIG="$DATA_DIR/config.yaml"
+if [ -f "$CONFIG" ]; then
+    echo "    已存在 $CONFIG,保留不动;若 web.host 为 0.0.0.0 且未设 web.auth_password,"
+    echo "    服务会拒绝启动——请先补上密码再 systemctl restart orcsy"
+else
+    # 首次安装:从模板生成,随机强密码(可用 ORCSY_AUTH_PASSWORD 指定)。
+    # 服务以 --host 0.0.0.0 监听,空密码会被安全守卫拒绝启动(M1)
+    # cut 而非 head 截取尾段：pipefail 下 head 提前退出会让上游 SIGPIPE 失败
+    AUTH_PW="${ORCSY_AUTH_PASSWORD:-$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-20)}"
+    sed "s|auth_password: \"\"|auth_password: \"$AUTH_PW\"|" \
+        "$REPO_DIR/config.example.yaml" > "$CONFIG"
+    chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG"
+    chmod 600 "$CONFIG"
+    echo "    已生成 $CONFIG"
+    echo "    看板登录密码:$AUTH_PW"
+    echo "    (请妥善保存;安装后可在看板「设置 → 调度与看板」修改)"
+fi
+
 echo "==> 初始化 git 环境($SERVICE_USER 用户)"
 GITCONFIG="$DATA_DIR/.gitconfig"
 touch "$GITCONFIG"
@@ -74,4 +93,4 @@ IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo "==> 完成:看板 http://${IP:-127.0.0.1}:5116"
 echo "    首次使用在看板「项目与设置」页填写 llm.api_key;受管项目放 $PROJECTS_DIR"
 echo "    服务管理:systemctl status|restart|stop orcsy;日志:journalctl -u orcsy -f"
-echo "    提醒:看板无鉴权,建议用防火墙限制 5116 来源,或套带认证的反向代理。"
+echo "    提醒:看板已要求登录密码(见上方安装输出);对外暴露仍建议用防火墙限制 5116 来源,或套 TLS 反向代理。"

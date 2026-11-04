@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 from .logging_setup import get_logger
 from .mirrors import CATEGORY_BY_KEY, CATEGORY_KEYS
@@ -768,6 +768,55 @@ def _html_to_text(html: str) -> str:
     return parser.text()
 
 
+class _WebFetchReject(Exception):
+    """web_fetch 的业务性拒绝（HTTP 状态/内容类型），消息直接回给模型。"""
+
+
+# 手动重定向循环：跳数上限与报告建议一致，超限报错而非静默返回
+_REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
+_MAX_REDIRECT_HOPS = 5
+
+
+def _fetch_with_guard(client, url: str) -> tuple[int, str, bytearray, str, str]:
+    """手动重定向循环：每一跳都重过 SSRF 校验（含第 0 跳）。
+
+    本工具的威胁模型就是攻击者控制的页面——重定向目标同样不可信，故关闭
+    httpx 自动跟随、逐跳校验后再发，任何一跳解析到非公网 IP 即拒绝。
+    返回 (status, content_type, body, encoding, final_url)。
+    """
+    import httpx  # 延迟导入，同 tool_web_fetch
+
+    for _hop in range(_MAX_REDIRECT_HOPS):
+        _assert_public_url(url)
+        with client.stream("GET", url) as resp:
+            if resp.status_code in _REDIRECT_STATUSES:
+                loc = (resp.headers.get("location") or "").strip()
+                if not loc:
+                    raise httpx.HTTPError(
+                        f"重定向缺少 Location（HTTP {resp.status_code}）")
+                url = urljoin(url, loc)  # Location 可能是相对路径
+                scheme = urlparse(url).scheme
+                if scheme not in ("http", "https"):
+                    raise httpx.HTTPError(f"重定向到不支持的协议 {scheme or '空'}")
+                continue  # with 块退出即关闭未读完的流（连接归还连接池）
+            if resp.status_code >= 400:
+                raise _WebFetchReject(f"HTTP {resp.status_code}（{url}）")
+            ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+            ok_types = ("text/", "application/json", "application/xml",
+                        "application/xhtml+xml", "application/javascript")
+            if ctype and not any(ctype.startswith(t) or ctype == t for t in ok_types):
+                raise _WebFetchReject(
+                    f"不支持的内容类型 {ctype}（只抓取文本/HTML/JSON 类资源）")
+            buf = bytearray()
+            for chunk in resp.iter_bytes(65536):
+                buf.extend(chunk)
+                if len(buf) >= MAX_WEB_FETCH_BYTES:
+                    break
+            return resp.status_code, ctype, buf, (resp.encoding or "utf-8"), url
+    raise httpx.HTTPError(
+        f"重定向超过 {_MAX_REDIRECT_HOPS} 跳，已中止（可能的重定向循环）")
+
+
 def tool_web_fetch(ctx: ToolContext, args: dict) -> str:
     """抓取一个公网 URL 的正文（HTML 剥标签 / 文本类原样），供查文档、读 issue 等。"""
     url = str(args.get("url", "")).strip()
@@ -783,31 +832,23 @@ def tool_web_fetch(ctx: ToolContext, args: dict) -> str:
         return f"错误：{e}"
     import httpx  # 延迟导入：不联网的进程不为它付启动成本
     try:
-        with httpx.Client(follow_redirects=True, timeout=20.0,
+        # follow_redirects=False：重定向目标同样不可信，自动跟随等于绕过上面的
+        # SSRF 硬边界（恶意页面可 302 → 内网/元数据服务）。_fetch_with_guard
+        # 手动循环，每一跳都重新过校验
+        with httpx.Client(follow_redirects=False, timeout=20.0,
                           headers={"User-Agent": "Mozilla/5.0 (compatible; OrcsyAgent)"}) as client:
-            with client.stream("GET", url) as resp:
-                if resp.status_code >= 400:
-                    return f"错误：HTTP {resp.status_code}（{url}）"
-                ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
-                ok_types = ("text/", "application/json", "application/xml",
-                            "application/xhtml+xml", "application/javascript")
-                if ctype and not any(ctype.startswith(t) or ctype == t for t in ok_types):
-                    return f"错误：不支持的内容类型 {ctype}（只抓取文本/HTML/JSON 类资源）"
-                buf = bytearray()
-                for chunk in resp.iter_bytes(65536):
-                    buf.extend(chunk)
-                    if len(buf) >= MAX_WEB_FETCH_BYTES:
-                        break
-                encoding = resp.encoding or "utf-8"
+            status, ctype, buf, encoding, final_url = _fetch_with_guard(client, url)
     except httpx.HTTPError as e:
         return f"错误：请求失败：{e}"
+    except (_WebFetchReject, ValueError) as e:
+        return f"错误：{e}"
     text = bytes(buf).decode(encoding, errors="replace")
     if ctype in ("text/html", "application/xhtml+xml") or (
             not ctype and text.lstrip()[:1] == "<"):
         text = _html_to_text(text)
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n\n…（正文过长，已截断至前 {max_chars} 字符）"
-    return f"[HTTP {resp.status_code} · {ctype or '未知类型'}]\n{text or '（空正文）'}"
+    return f"[HTTP {status} · {ctype or '未知类型'}]\n{text or '（空正文）'}"
 
 
 def tool_speedtest_mirrors(ctx: ToolContext, args: dict) -> str:

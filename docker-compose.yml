@@ -7,6 +7,10 @@
 # 数据布局(首次启动自动生成模板配置,在看板「项目与设置」页填 llm.api_key):
 #   ./orcsy-data  -> 容器 /data     config.yaml、skills/、logs/
 #   ./projects    -> 容器 /projects 受管 git 仓库(config 里 path 写 /projects/<名称>)
+#
+# 注意: 容器以 --host 0.0.0.0 监听,必须在 ./orcsy-data/config.yaml 里设置
+# web.auth_password(非回环绑定 + 空密码会被拒绝启动)。首次启动生成模板后
+# 按日志提示改好配置再 docker compose restart。
 
 services:
   orcsy:

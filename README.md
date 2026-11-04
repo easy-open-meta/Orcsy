@@ -107,6 +107,8 @@ See the "Native Linux Deployment" section below.
 
 The image is based on Python 3.12 slim, built in multi-stage uv steps and reproducible from `uv.lock`; it ships `git` and tini (PID 1 signal forwarding), and the app process runs as a non-root user (`orcsy`) with bind-mount permissions fixed automatically by the entrypoint. Tray and browser-opening are disabled in containers (`--no-tray --no-browser`); core capabilities (dashboard + scheduler + Agent execution) are identical to the desktop edition.
 
+> ⚠️ **The container listens on `--host 0.0.0.0`, so a login password is required.** The first start generates a `/data/config.yaml` template, then refuses to run because of "non-loopback bind with an empty `web.auth_password`" (an actionable message appears in the logs). Edit `./orcsy-data/config.yaml`, set `web.auth_password` to a strong password, and run `docker compose restart`; you can change it from the Settings page afterwards.
+
 ### Data & mounts
 
 | Host directory | In container | Contents |
@@ -174,6 +176,8 @@ sudo bash deploy/linux/install.sh
 
 Open `http://<server IP>:5116`, fill in `llm.api_key` on the "Projects & Settings" page, and create/import projects (path `/srv/orcsy-projects/<project name>`, must be a git repo).
 
+The service listens on `--host 0.0.0.0`, so the installer generates `/var/lib/orcsy/config.yaml` with a random login password on first install (printed in the install output; override with the `ORCSY_AUTH_PASSWORD` env var). Existing config files are left untouched — if their `web.host` is non-loopback with an empty `web.auth_password`, the service refuses to start; add a password and `systemctl restart orcsy`.
+
 ### Service management & logs
 
 ```bash
@@ -203,7 +207,7 @@ sudo bash deploy/linux/uninstall.sh
 
 ## 🔐 Dashboard Login Auth (required for external deployments)
 
-The dashboard binds to `127.0.0.1` with no auth by default (zero friction for local use). Once you expose it via Docker / systemd / `--host 0.0.0.0`, **always set a login password** — otherwise anyone who can reach the port can drive the dashboard (browse server directories, read/write projects, see `llm.api_key`):
+The dashboard binds to `127.0.0.1` with no auth by default (zero friction for local use). Exposing it via Docker / systemd / `--host 0.0.0.0` **requires** a login password — with a non-loopback host and an empty password the program refuses to start and the dashboard refuses to save that config (the dashboard can browse server directories, write tasks and start/stop agents). Secrets (LLM API key, update token, project repo tokens) are only ever returned masked by `/api/state`; enter a new value to replace one, leave the field empty to keep the stored value:
 
 ```yaml
 web:
@@ -421,8 +425,8 @@ See `config.example.yaml` at the repo root (kept identical to the `CONFIG_EXAMPL
 # One-click packaging (version -> frontend build -> PyInstaller dual exe -> Inno Setup installer + zip update package)
 build.bat
 
-# Publish a Gitee Release with BOTH assets at once (setup exe + zip update package;
-# token via --token / GITEE_TOKEN env / config update.token):
+# Publish a Gitee Release with ALL THREE assets at once (setup exe + zip update
+# package + its .sha256 checksum; online update refuses to install without it):
 uv run python build/release.py
 
 # Version rule: feature-level changes bump the minor digit (0.13.0);

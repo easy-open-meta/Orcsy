@@ -23,3 +23,4 @@ build/version.ini
 dashboard/components.d.ts
 # PyInstaller 中间产物目录（orcsy.spec 产物工作区）
 build/orcsy/
+*.sha256

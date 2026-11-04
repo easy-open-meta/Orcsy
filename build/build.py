@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -116,7 +117,14 @@ def build_update_zip(ver: tuple[int, int, int]) -> Path:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         for m in members:
             zf.write(m, arcname=m.name)
+    # sha256 校验文件（sha256sum 标准格式「<hex>  <文件名>」）：在线更新下载后
+    # 校验哈希才允许进安装环节（安全审计 2026-11-04 M2）。发布 Release 时
+    # zip 与 zip.sha256 必须成对上传，缺一不可
+    digest = hashlib.sha256(out.read_bytes()).hexdigest()
+    sha = out.with_name(out.name + ".sha256")
+    sha.write_text(f"{digest}  {out.name}\n", encoding="ascii")
     print(f"zip 更新包：{out}")
+    print(f"sha256 校验：{sha}")
     return out
 
 
@@ -141,7 +149,7 @@ def main() -> int:
     zip_pkg = build_update_zip(ver)
     setup = BUILD / "Setup" / f"orcsy-setup-{ver[0]}.{ver[1]}.{ver[2]}.exe"
     print(f"\n完成：\n  首次安装包 {setup}\n  自更新包   {zip_pkg}"
-          f"\n发布 Release 时两者都作为附件上传（在线更新只认 orcsy-update-*.zip）。")
+          f"\n发布 Release 时 zip 与 zip.sha256 成对上传（在线更新校验哈希，缺 sha256 拒绝更新）。")
     print("发布命令（exe + zip 一并上传）：uv run python build/release.py")
     print("校验：dist exe --version 与安装包文件版本应同为 "
           f"{ver[0]}.{ver[1]}.{ver[2]}")

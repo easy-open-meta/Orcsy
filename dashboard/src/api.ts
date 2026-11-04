@@ -28,13 +28,19 @@ export interface ProjectT {
   max_agent_turns: number
   allowed_branch: string | null
   allowed_commands: string[] | null
-  /** 项目专属模型绑定（部分覆盖全局 llm）；null = 未绑定 */
-  llm?: Record<string, string> | null
+  /** 项目专属模型绑定（部分覆盖全局 llm）；null = 未绑定；
+   * api_key 只回掩码（api_key_masked + api_key_configured），绝不下发明文（安全审计 H2） */
+  llm?: (Record<string, string> & {
+    api_key_masked?: string
+    api_key_configured?: boolean
+  }) | null
   /** 远程仓库绑定（Issues 导入）；null = 未绑定；认证 token 与账号密码二选一；
-   * auto_pull_interval 为定时自动拉取间隔（秒），缺省 = 仅手动拉取 */
-  repo?: { url: string; token?: string; username?: string
-           password?: string; provider?: string; api_base?: string
-           auto_pull_interval?: number } | null
+   * auto_pull_interval 为定时自动拉取间隔（秒），缺省 = 仅手动拉取。
+   * token/password 只回掩码与「已配置」标记，绝不下发明文（安全审计 H2） */
+  repo?: { url: string; username?: string; provider?: string; api_base?: string
+           auto_pull_interval?: number
+           token_masked?: string; token_configured?: boolean
+           password_masked?: string; password_configured?: boolean } | null
   /** 项目级工具开关覆盖 {工具名: bool}；null = 跟随全局 tools_cfg */
   tools?: Record<string, boolean> | null
   /** 项目级访问权限覆盖；null = 跟随全局 permissions_cfg.mode */
@@ -127,7 +133,8 @@ export interface AppStateT {
     model: string
     base_url: string
     key_configured: boolean
-    api_key: string
+    /** 掩码回显（如 sk-1…abcd），绝不返回明文（安全审计 H2） */
+    api_key_masked: string
     temperature: number
     max_tokens: number
     max_context_tokens: number
@@ -144,7 +151,13 @@ export interface AppStateT {
   }
   scheduler_cfg: { interval_seconds: number; max_parallel_agents: number }
   web_cfg: { host: string; port: number; open_browser: boolean; auth_enabled: boolean }
-  update_cfg: { repo: string; token: string; auto_check: boolean }
+  update_cfg: {
+    repo: string
+    /** 掩码回显（如 ghp_…abcd），绝不返回明文（安全审计 H2） */
+    token_masked: string
+    token_configured: boolean
+    auto_check: boolean
+  }
   /** 任务结束提醒开关（完成/受阻时提示音 + 系统通知；cancelled 不提醒） */
   notify_cfg: { sound: boolean; system: boolean }
   logging: { retention_days: number; max_total_mb: number }

@@ -1,7 +1,8 @@
-"""发布 Gitee Release：一条命令同时上传 首次安装包(exe) 与 自更新包(zip)。
+"""发布 Gitee Release：一条命令同时上传 首次安装包(exe)、自更新包(zip) 与其 sha256 校验文件。
 
-发版流程：build.bat（产出两个附件）→ 本脚本（建 Release 并上传全部附件）。
-在线更新只认 orcsy-update-*.zip，exe 只用于首次安装——两个附件必须一起发。
+发版流程：build.bat（产出三个附件）→ 本脚本（建 Release 并上传全部附件）。
+在线更新只认 orcsy-update-*.zip 且校验同名 .sha256 哈希（缺校验文件直接拒绝
+在线更新）——zip 与 zip.sha256 必须成对发布。
 
 用法：
   uv run python build/release.py                       # 读配置 update.repo / token
@@ -21,6 +22,7 @@ import importlib.util
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -53,11 +55,16 @@ def read_version() -> tuple[int, int, int]:
 
 def expected_artifacts(ver: tuple[int, int, int],
                       setup_dir: Path | str | None = None) -> list[Path]:
-    """本次发布应上传的附件：首次安装包 + 自更新包（缺一不可）。"""
+    """本次发布应上传的附件：首次安装包 + 自更新包 + 哈希校验文件（缺一不可）。
+
+    .sha256 是在线更新的完整性依据（安全审计 2026-11-04 M2）：缺了它新版
+    在线更新会被直接拒绝，所以发布检查把它当成必需附件。
+    """
     v = ".".join(map(str, ver))
     d = Path(setup_dir) if setup_dir else ROOT / "build" / "Setup"
     return [d / f"orcsy-setup-{v}.exe",
-            d / f"orcsy-update-{v}.zip"]
+            d / f"orcsy-update-{v}.zip",
+            d / f"orcsy-update-{v}.zip.sha256"]
 
 
 def check_artifacts(ver: tuple[int, int, int],
@@ -67,7 +74,7 @@ def check_artifacts(ver: tuple[int, int, int],
     if missing:
         raise ReleaseError(
             f"缺少发布附件：{', '.join(missing)}。请先运行 build.bat（或 "
-            f"uv run python build/build.py）产出两个安装包后再发布。")
+            f"uv run python build/build.py）产出安装包与 .sha256 校验文件后再发布。")
     return files
 
 
@@ -94,23 +101,59 @@ def _trust_env(url: str) -> bool:
     return urlparse(url).hostname not in ("127.0.0.1", "localhost", "::1")
 
 
+# 本机回环 RST 常成串出现（与 orcsy/updater.py 的下载重试同款经验），
+# 3 次往往落在同一突发窗口里，取 5 次 + 递进退避覆盖
+_RETRY_ATTEMPTS = 5
+
+
+def _get(url: str, **kwargs) -> httpx.Response:
+    """幂等 GET：Windows 本机回环偶发 ConnectionResetError（快速连断竞态）。
+
+    与 orcsy/issues.py 的 _get_json 同款处理：重试最多 3 次、递进退避。
+    只包 GET（幂等）；上传/删除等非幂等请求不重试。
+    """
+    last: Exception | None = None
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            return httpx.get(url, **kwargs)
+        except httpx.TransportError as e:
+            last = e
+            if attempt < _RETRY_ATTEMPTS - 1:
+                time.sleep(0.2 * (attempt + 1))
+    raise last  # type: ignore[misc]
+
+
+def _post_retry(url: str, **kwargs) -> httpx.Response:
+    """POST 重试（建 Release）：同 tag 重复创建会返回「已存在」并由调用方取回，
+    因此「已成功但响应丢失」时重试是幂等的。"""
+    last: Exception | None = None
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            return httpx.post(url, **kwargs)
+        except httpx.TransportError as e:
+            last = e
+            if attempt < _RETRY_ATTEMPTS - 1:
+                time.sleep(0.2 * (attempt + 1))
+    raise last  # type: ignore[misc]
+
+
 def create_or_get_release(repo_url: str, tag: str, name: str, body: str,
                           token: str, api_base: str | None = None) -> dict:
     """建 Release（已存在则取回），返回 {id, html_url, created}。"""
     info, headers = _http(repo_url, api_base)
     base = (api_base or info["origin"]).rstrip("/")
     url = f"{base}/api/v1/repos/{info['owner']}/{info['repo']}/releases"
-    resp = httpx.post(url, timeout=60, headers=headers, trust_env=_trust_env(url),
-                      data={"access_token": token, "tag_name": tag, "name": name,
-                            "body": body, "prerelease": "false", "draft": "false"})
+    resp = _post_retry(url, timeout=60, headers=headers, trust_env=_trust_env(url),
+                       data={"access_token": token, "tag_name": tag, "name": name,
+                             "body": body, "prerelease": "false", "draft": "false"})
     if resp.status_code in (200, 201):
         data = resp.json()
         return {"id": data["id"], "html_url": data.get("html_url", ""),
                 "created": True}
     # 已存在同 tag 的 Release（400/422）→ 按 tag 取回，走附件替换
     get_url = f"{url}/tags/{tag}"
-    got = httpx.get(get_url, params={"access_token": token}, timeout=60,
-                    headers=headers, trust_env=_trust_env(get_url))
+    got = _get(get_url, params={"access_token": token}, timeout=60,
+               headers=headers, trust_env=_trust_env(get_url))
     if got.status_code == 200:
         data = got.json()
         return {"id": data["id"], "html_url": data.get("html_url", ""),
@@ -129,28 +172,42 @@ def upload_asset(repo_url: str, release_id: int, path: Path, token: str,
     url = f"{base}/api/v1/repos/{info['owner']}/{info['repo']}/releases/{release_id}/attach_files"
 
     def _list() -> list[dict]:
-        r = httpx.get(url, params={"access_token": token}, timeout=60,
-                      headers=headers, trust_env=_trust_env(url))
+        r = _get(url, params={"access_token": token}, timeout=60,
+                 headers=headers, trust_env=_trust_env(url))
         if r.status_code != 200:
             raise ReleaseError(f"读取附件列表失败：HTTP {r.status_code} {r.text[:200]}")
         return [a for a in r.json() if isinstance(a, dict)]
 
-    for old in _list():
-        if str(old.get("name") or "") == path.name:
-            d = httpx.delete(f"{url}/{old['id']}",
-                             params={"access_token": token}, timeout=60,
-                             headers=headers, trust_env=_trust_env(url))
-            if d.status_code not in (200, 204):
-                raise ReleaseError(
-                    f"删除同名旧附件 {path.name} 失败：HTTP {d.status_code} {d.text[:200]}")
-    with open(path, "rb") as f:
-        resp = httpx.post(url, timeout=600, headers=headers,
-                          trust_env=_trust_env(url),
-                          data={"access_token": token, "name": path.name},
-                          files={"_file": (path.name, f, "application/octet-stream")})
-    if resp.status_code not in (200, 201):
-        raise ReleaseError(f"上传附件 {path.name} 失败：HTTP {resp.status_code} {resp.text[:200]}")
-    return resp.json()
+    def _upload_once() -> dict:
+        for old in _list():
+            if str(old.get("name") or "") == path.name:
+                d = httpx.delete(f"{url}/{old['id']}",
+                                 params={"access_token": token}, timeout=60,
+                                 headers=headers, trust_env=_trust_env(url))
+                if d.status_code not in (200, 204):
+                    raise ReleaseError(
+                        f"删除同名旧附件 {path.name} 失败：HTTP {d.status_code} {d.text[:200]}")
+        with open(path, "rb") as f:
+            resp = httpx.post(url, timeout=600, headers=headers,
+                              trust_env=_trust_env(url),
+                              data={"access_token": token, "name": path.name},
+                              files={"_file": (path.name, f, "application/octet-stream")})
+        if resp.status_code not in (200, 201):
+            raise ReleaseError(
+                f"上传附件 {path.name} 失败：HTTP {resp.status_code} {resp.text[:200]}")
+        return resp.json()
+
+    # 传输层失败（Windows 本机回环偶发 RST）整轮重试：下一轮会先删同名再传，
+    # 天然幂等——「上次其实已上传成功」也不会留下重复附件
+    last: Exception | None = None
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            return _upload_once()
+        except httpx.TransportError as e:
+            last = e
+            if attempt < _RETRY_ATTEMPTS - 1:
+                time.sleep(0.2 * (attempt + 1))
+    raise ReleaseError(f"上传附件 {path.name} 失败（网络传输错误）：{last}") from last
 
 
 def verify_assets(repo_url: str, release_id: int, expected: list[Path],
@@ -159,8 +216,8 @@ def verify_assets(repo_url: str, release_id: int, expected: list[Path],
     info, headers = _http(repo_url, api_base)
     base = (api_base or info["origin"]).rstrip("/")
     url = f"{base}/api/v1/repos/{info['owner']}/{info['repo']}/releases/{release_id}/attach_files"
-    r = httpx.get(url, params={"access_token": token}, timeout=60,
-                  headers=headers, trust_env=_trust_env(url))
+    r = _get(url, params={"access_token": token}, timeout=60,
+             headers=headers, trust_env=_trust_env(url))
     if r.status_code != 200:
         raise ReleaseError(f"核对附件失败：HTTP {r.status_code} {r.text[:200]}")
     remote = {str(a.get("name") or ""): a for a in r.json() if isinstance(a, dict)}
@@ -214,7 +271,8 @@ def main(argv: list[str] | None = None) -> int:
         if not body.strip():
             body = (f"Orcsy {tag}\n\n"
                     f"- `{files[0].name}`：首次安装包（exe 安装向导）\n"
-                    f"- `{files[1].name}`：自更新包（zip，看板「手动导入安装包」或在线更新使用）")
+                    f"- `{files[1].name}`：自更新包（zip，看板「手动导入安装包」或在线更新使用）\n"
+                    f"- `{files[2].name}`：自更新包 sha256 校验文件（在线更新完整性校验用）")
 
         rel = create_or_get_release(repo, tag, f"Orcsy {tag}", body, token,
                                     api_base=args.api_base)

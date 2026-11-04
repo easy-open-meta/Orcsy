@@ -23,11 +23,12 @@ from orcsy.config import load_config
 from orcsy.updater import (UpdateError, _clean_env, _copier_bat, _watchdog_bat,
                            _watchdog_bat_elevated, _WATCHDOG_FLAGS,
                            append_install_log, check_update, clear_update_result,
-                           detect_installer_version, install_log_path,
-                           is_writable, parse_version, read_install_log,
-                           read_update_result, result_message, run_local_install,
-                           stage_package, validate_package, version_newer,
-                           write_update_result)
+                           detect_installer_version, download_installer,
+                           fetch_expected_sha256, install_log_path, is_writable,
+                           parse_sha256_file, parse_version, prune_stale_download_dirs,
+                           read_install_log, read_update_result, result_message,
+                           run_local_install, stage_package, update_result_path,
+                           validate_package, version_newer, write_update_result)
 
 AUTH: dict[str, str] = {}  # 假服务捕获的请求头（User-Agent / Authorization 断言用）
 
@@ -552,6 +553,144 @@ def check_elevated_reasons() -> None:
     print("提权流程 reason 码转述 ✅")
 
 
+# ---- sha256 完整性校验（安全审计 2026-11-04 M2） ----
+
+class _ReleaseSrv(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def _serve_release(release: dict) -> tuple[_ReleaseSrv, str]:
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps(release).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a): pass
+
+    srv = _ReleaseSrv(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def check_check_update_sha256() -> None:
+    """Release 里同名 .sha256 附件 → sha256_url；asset.digest → sha256_value。"""
+    zip_url = "https://gitee.com/o/r/releases/download/V0.19.0/orcsy-update-0.19.0.zip"
+    release = {
+        "tag_name": "V0.19.0",
+        "assets": [
+            {"name": "orcsy-update-0.19.0.zip", "browser_download_url": zip_url},
+            {"name": "orcsy-update-0.19.0.zip.sha256",
+             "browser_download_url": zip_url + ".sha256"},
+        ],
+    }
+    srv, base = _serve_release(release)
+    try:
+        r = check_update({"repo": "https://gitee.com/o/r", "api_base": base}, "0.18.0")
+        assert r["sha256_url"] == zip_url + ".sha256", r
+        assert r["sha256_value"] == "", r
+        # 私有仓库：token 同样追加到校验文件下载地址
+        r = check_update({"repo": "https://gitee.com/o/r", "api_base": base,
+                          "token": "tk"}, "0.18.0")
+        assert "access_token=tk" in r["sha256_url"], r
+        # GitHub 新版 API：asset.digest 直接给哈希值
+        release["assets"] = [{
+            "name": "orcsy-update-0.19.0.zip", "browser_download_url": zip_url,
+            "digest": "sha256:" + "a" * 64,
+        }]
+        r = check_update({"repo": "https://gitee.com/o/r", "api_base": base}, "0.18.0")
+        assert r["sha256_value"] == "a" * 64 and r["sha256_url"] == "", r
+        # 都没有 → 两个键为空（上层据此拒绝在线更新）
+        release["assets"] = [{"name": "orcsy-update-0.19.0.zip",
+                              "browser_download_url": zip_url}]
+        r = check_update({"repo": "https://gitee.com/o/r", "api_base": base}, "0.18.0")
+        assert r["sha256_value"] == "" and r["sha256_url"] == "", r
+        print("check_update sha256 来源（同名附件/digest/缺省为空 + token 透传）✅")
+    finally:
+        srv.shutdown()
+
+
+def check_download_sha256_verify() -> None:
+    """download_installer 校验：正确通过；篡改拒绝并删包；.sha256 解析。"""
+    import hashlib
+
+    payload = b"PK" + b"update-payload" * 500
+    good_hash = hashlib.sha256(payload).hexdigest()
+    sha_text = f"{good_hash}  orcsy-update-0.19.0.zip\n".encode()
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = payload if self.path == "/pkg.zip" else sha_text
+            self.send_response(200)
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a): pass
+
+    srv = _ReleaseSrv(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    tmp = Path(tempfile.mkdtemp(prefix="orcsy-upd-sha-"))
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        # 正确哈希 → 通过
+        dest = download_installer(f"{base}/pkg.zip", tmp, filename="ok.zip",
+                                  expected_sha256=good_hash)
+        assert dest.read_bytes() == payload
+        # 篡改（期望哈希不符）→ 报错且不落盘
+        try:
+            download_installer(f"{base}/pkg.zip", tmp, filename="bad.zip",
+                               expected_sha256="f" * 64)
+            raise AssertionError("哈希不符应报错")
+        except UpdateError as e:
+            assert "sha256" in str(e) and "校验" in str(e), e
+        assert not (tmp / "bad.zip").exists(), "哈希不符的包不能留在磁盘上"
+        # .sha256 解析（sha256sum 标准格式）+ 下载解析
+        sha_file = tmp / "x.zip.sha256"
+        sha_file.write_text(f"{good_hash}  x.zip\n", encoding="ascii")
+        assert parse_sha256_file(sha_file) == good_hash
+        sha_file.write_text(good_hash.upper() + "\n", encoding="ascii")
+        assert parse_sha256_file(sha_file) == good_hash  # 大小写归一
+        sha_file.write_text("not-a-hash\n", encoding="ascii")
+        try:
+            parse_sha256_file(sha_file)
+            raise AssertionError("非法校验文件应报错")
+        except UpdateError as e:
+            assert "无法识别" in str(e), e
+        assert fetch_expected_sha256(f"{base}/pkg.zip.sha256", tmp) == good_hash
+        print("download_installer 哈希校验（通过/篡改删包/.sha256 解析与下载）✅")
+    finally:
+        srv.shutdown()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def check_prune_stale_dirs() -> None:
+    """在线更新残留临时目录：超龄清理、新鲜的保留。"""
+    import os
+    import time
+
+    tmp_root = Path(tempfile.gettempdir())
+    stale = tmp_root / f"orcsy-update-test-stale-{os.getpid()}"
+    fresh = tmp_root / f"orcsy-update-test-fresh-{os.getpid()}"
+    try:
+        stale.mkdir()
+        fresh.mkdir()
+        old = time.time() - 2 * 86400
+        os.utime(stale, (old, old))
+        prune_stale_download_dirs()
+        assert not stale.exists(), "超龄下载目录应清理"
+        assert fresh.exists(), "1 天内的下载目录应保留"
+        assert update_result_path().name == "orcsy-update-result.json"
+        print("prune_stale_download_dirs（超龄清理/新鲜保留）✅")
+    finally:
+        shutil.rmtree(stale, ignore_errors=True)
+        shutil.rmtree(fresh, ignore_errors=True)
+
+
 def main() -> int:
     check_parse_version()
     check_detect_installer()
@@ -570,6 +709,9 @@ def main() -> int:
     check_elevated_install_flow()
     check_uac_cancel_flow()
     check_elevated_reasons()
+    check_check_update_sha256()
+    check_download_sha256_verify()
+    check_prune_stale_dirs()
     print("\n全部断言通过 ✅")
     return 0
 

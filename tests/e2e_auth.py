@@ -82,8 +82,10 @@ def main() -> int:
         cfg_file = tmp / "config.yaml"
         cfg_file.write_text("llm: {}\n", encoding="utf-8")
         cfg = AppConfig(
-        update=UpdateConfig(auto_check=False),  # 测试不触发后台更新检查
-            llm=LLMConfig(api_key="fake", base_url="http://localhost:9", model="fake"),
+            update=UpdateConfig(auto_check=False,  # 测试不触发后台更新检查
+                                token="upd-token-1234567890"),
+            llm=LLMConfig(api_key="sk-e2e-secret-key-1234567890",
+                          base_url="http://localhost:9", model="fake"),
             web=WebConfig(host="127.0.0.1", port=PORT, open_browser=False,
                           auth_password="secret-123"),
             source_path=cfg_file,
@@ -122,6 +124,53 @@ def main() -> int:
         assert body["authed"] is True, body
         print("ok: 带 Cookie 200，web_cfg.auth_enabled 回显且不含密码")
 
+        # 3b. H2：/api/state 不回显明文密钥/令牌，只给掩码与「已配置」标记
+        code, _, body = req(PORT, "/api/state", cookie=ck)
+        blob = json.dumps(body, ensure_ascii=False)
+        assert "api_key" not in body["llm"], "llm 不应再返回明文 api_key"
+        assert body["llm"]["key_configured"] is True
+        assert body["llm"]["api_key_masked"] == "sk-e…7890", body["llm"]["api_key_masked"]
+        assert state.config.llm.api_key not in blob, "明文密钥不得出现在 /api/state"
+        assert "token" not in body["update_cfg"], "update_cfg 不应再返回明文 token"
+        assert body["update_cfg"]["token_configured"] is True
+        assert body["update_cfg"]["token_masked"] == "upd-…7890", body["update_cfg"]
+        assert state.config.update.token not in blob, "明文令牌不得出现在 /api/state"
+        print("ok: /api/state 密钥/令牌仅掩码，响应全文无明文")
+
+        # 3c. api_key / update.token 三态：不带键=保持；空串=清除；新值=更新
+        llm_payload = {
+            "provider": state.config.llm.provider, "model": state.config.llm.model,
+            "base_url": state.config.llm.base_url,
+            "temperature": state.config.llm.temperature,
+            "max_tokens": state.config.llm.max_tokens,
+            "max_context_tokens": state.config.llm.max_context_tokens,
+            "enable_thinking": state.config.llm.enable_thinking,
+            "timeout_seconds": state.config.llm.timeout_seconds,
+        }
+        original_key = state.config.llm.api_key
+        code, _, body = req(PORT, "/api/config", {"llm": llm_payload}, cookie=ck)
+        assert code == 200 and body["ok"] is True, body
+        assert state.config.llm.api_key == original_key, "不带 api_key 键应保持原密钥"
+        code, _, body = req(PORT, "/api/config",
+                            {"llm": {**llm_payload, "api_key": ""}}, cookie=ck)
+        assert code == 200 and state.config.llm.api_key == "", "空串应清除密钥"
+        code, _, body = req(PORT, "/api/config",
+                            {"llm": {**llm_payload, "api_key": "sk-new-key-0000000000"}},
+                            cookie=ck)
+        assert code == 200 and state.config.llm.api_key == "sk-new-key-0000000000", \
+            state.config.llm.api_key
+        original_token = state.config.update.token
+        code, _, body = req(PORT, "/api/config",
+                            {"update": {"repo": state.config.update.repo,
+                                        "auto_check": False}}, cookie=ck)
+        assert code == 200 and state.config.update.token == original_token, \
+            "不带 token 键应保持原令牌"
+        code, _, body = req(PORT, "/api/config",
+                            {"update": {"repo": state.config.update.repo,
+                                        "token": "", "auto_check": False}}, cookie=ck)
+        assert code == 200 and state.config.update.token == "", "空串应清除令牌"
+        print("ok: api_key/update.token 三态（保持/清除/更新）")
+
         # 4. 伪造/垃圾 Cookie 不放行
         code, _, _ = req(PORT, "/api/state", cookie="orcsy_session=forged-token")
         assert code == 401
@@ -134,6 +183,15 @@ def main() -> int:
         code, _, _ = req(PORT, "/api/state", cookie=ck)
         assert code == 401, "登出后旧 Cookie 应立即失效"
         print("ok: 登出注销会话并清 Cookie")
+
+        # 5b. 登录限速（L1）：同 IP 连续失败达阈值 → 锁定，锁定期内正确密码也拒
+        for _ in range(state.LOGIN_MAX_FAILS):
+            code, _, body = req(PORT, "/api/login", {"password": "definitely-wrong"})
+            assert code == 401 and not body.get("ok"), (code, body)
+        code, _, body = req(PORT, "/api/login", {"password": cfg.web.auth_password})
+        assert code == 401 and "尝试次数过多" in (body.get("message") or ""), (code, body)
+        state._clear_login_throttle()  # 解锁，不影响后续改密步骤
+        print("ok: 连续失败 %d 次后锁定，锁定期内正确密码也被拒" % state.LOGIN_MAX_FAILS)
 
         # 6. 改密三态：改密 → 旧会话全灭、新密码可登；不带键 → 保持；空串 → 关闭鉴权
         ck = login(PORT, "secret-123")
@@ -156,6 +214,13 @@ def main() -> int:
         code, _, body = req(PORT, "/api/state")
         assert code == 200 and "projects" in body, "关闭鉴权后应免登录（回归兼容）"
         print("ok: 改密三态（更新/保持/清除），关闭鉴权后免登录")
+
+        # 7. M1：非回环绑定 + 无密码 → 保存被拒（400 可行动提示），配置不生效
+        code, _, body = req(PORT, "/api/config",
+                            {"web": {"host": "0.0.0.0", "port": PORT}})
+        assert code == 400 and "auth_password" in (body.get("message") or ""), (code, body)
+        assert state.config.web.host == "127.0.0.1", "被拒的配置不得落盘生效"
+        print("ok: 非回环绑定且无密码的保存被拒（M1）")
 
         done = True
         server.shutdown()

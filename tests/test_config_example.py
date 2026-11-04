@@ -37,7 +37,17 @@ def main() -> int:
                 "CONFIG_EXAMPLE", "config.example.yaml", lineterm=""):
             print(line)
         return 1
-    print("config.example.yaml 与 CONFIG_EXAMPLE 保持同步 ✅")
+    # 示例配置的默认组合必须能通过启动守卫：别把新用户带进「启动即失败」
+    # （非回环绑定 + 空密码会被 config.validate_web_security 拒绝，M1）
+    import yaml
+
+    from orcsy.config import validate_web_security
+
+    web_raw = (yaml.safe_load(file_text) or {}).get("web") or {}
+    validate_web_security(str(web_raw.get("host", "127.0.0.1")),
+                          str(web_raw.get("auth_password") or ""),
+                          context="config.example.yaml")
+    print("config.example.yaml 与 CONFIG_EXAMPLE 保持同步 ✅（默认 web 配置通过绑定守卫）")
     return 0
 
 
