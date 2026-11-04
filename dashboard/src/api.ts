@@ -145,6 +145,8 @@ export interface AppStateT {
   scheduler_cfg: { interval_seconds: number; max_parallel_agents: number }
   web_cfg: { host: string; port: number; open_browser: boolean; auth_enabled: boolean }
   update_cfg: { repo: string; token: string; auto_check: boolean }
+  /** 任务结束提醒开关（完成/受阻时提示音 + 系统通知；cancelled 不提醒） */
+  notify_cfg: { sound: boolean; system: boolean }
   logging: { retention_days: number; max_total_mb: number }
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>

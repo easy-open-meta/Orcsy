@@ -25,6 +25,8 @@ const commandsCatalog = ref<string[]>([])
 const commandsDraft = reactive<Record<string, boolean>>({})
 // ---- Agent 子进程环境变量草稿（多行 KEY=VALUE，代理/国内镜像） ----
 const envDraft = ref('')
+// PATH 自动修复开关：任务启动时把扫描到的缺失工具目录持久写入用户 PATH
+const pathAutofix = ref(false)
 const toolsSaving = ref(false)
 // ---- 访问权限草稿（全局默认；项目可在对话框里逐个覆盖） ----
 const permOptions = [
@@ -33,6 +35,9 @@ const permOptions = [
   { label: '完全访问（减少确认次数：一律不询问，与历史行为一致）', value: 'full_access' },
 ]
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
+// ---- 任务结束提醒草稿（完成/受阻时提示音 + 系统通知；cancelled 不提醒） ----
+const notifyDraft = reactive({ sound: true, system: true })
+const notifySaving = ref(false)
 // ---- 镜像源管理与测速选源（草稿态：自定义源可增删、内置/自定义皆可禁用；
 //      测速结果是服务端数据，随轮询即时刷新——Agent 自测后看板也能看到） ----
 const mirrorTesting = ref(false)
@@ -43,6 +48,8 @@ const mirrorCustom = ref<Record<string, string[]>>({})   // 草稿：类别 → 
 const mirrorDisabled = ref<string[]>([])                 // 草稿：禁用的源 URL
 const mirrorSpeeds = ref<Record<string, number | null>>({})
 const mirrorTestedAt = ref('')
+// 后端存 ISO 形态（2026-11-04T03:11:27），展示转成标准时间（T 换空格）
+const mirrorTestedAtText = computed(() => mirrorTestedAt.value.replace('T', ' '))
 const addCat = ref('goproxy')
 const addUrl = ref('')
 let inited = false
@@ -62,8 +69,11 @@ watch(() => store.state, (s) => {
   for (const c of commandsCatalog.value) commandsDraft[c] = s.commands_cfg?.[c] ?? true
   envDraft.value = Object.entries(s.env_cfg ?? {})
     .map(([k, v]) => `${k}=${v}`).join('\n')
+  pathAutofix.value = s.env_path_autofix ?? false
   permDraft.mode = s.permissions_cfg?.mode ?? 'full_access'
   permDraft.timeout_minutes = s.permissions_cfg?.timeout_minutes ?? 30
+  notifyDraft.sound = s.notify_cfg?.sound ?? true
+  notifyDraft.system = s.notify_cfg?.system ?? true
   syncMirrorDraft()
   mirrorSpeeds.value = s.mirror_speeds?.results ?? {}
   mirrorTestedAt.value = s.mirror_speeds?.tested_at ?? ''
@@ -95,6 +105,16 @@ async function saveLlm(): Promise<void> {
     } })
     message()?.('已保存并生效')
   } catch (e: any) { message()?.(e.message, 'error') }
+  void import('../store').then(m => m.refresh(true))
+}
+
+async function saveNotify(): Promise<void> {
+  notifySaving.value = true
+  try {
+    await api.config({ notify: { sound: notifyDraft.sound, system: notifyDraft.system } })
+    message()?.('已保存并生效（下个任务结束即按新开关提醒）')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { notifySaving.value = false }
   void import('../store').then(m => m.refresh(true))
 }
 
@@ -174,7 +194,7 @@ async function saveTools(): Promise<void> {
     await api.config({
       tools: disabled,
       commands: cmdsOff,
-      env: { vars: envVars },
+      env: { vars: envVars, path_autofix: pathAutofix.value },
       permissions: { mode: permDraft.mode, timeout_minutes: permDraft.timeout_minutes },
     })
     message()?.('工具 / 命令白名单 / 访问权限已保存并生效')
@@ -493,10 +513,10 @@ const providerOptions = [
       </div>
       <div class="frow">
         <div class="f1"><label>采样温度 temperature</label><NInputNumber v-model:value="draft.temperature" :step="0.1" :min="0" :max="2" /></div>
-        <div class="f1"><label>最大输出 max_tokens</label><NInputNumber v-model:value="draft.max_tokens" :step="256" :min="256" :max="200000" /></div>
+        <div class="f1"><label>最大输出 max_tokens（拉取过模型列表时，上限跟随模型上报值）</label><NInputNumber v-model:value="draft.max_tokens" :step="256" :min="256" :max="selectedSpec?.max_output_tokens || 200000" /></div>
       </div>
       <div class="frow">
-        <div class="f1"><label>上下文窗口 max_context_tokens</label><NInputNumber v-model:value="draft.max_context_tokens" :step="1024" :min="4096" :max="2000000" /></div>
+        <div class="f1"><label>上下文窗口 max_context_tokens（上限同样跟随模型上报值）</label><NInputNumber v-model:value="draft.max_context_tokens" :step="1024" :min="4096" :max="selectedSpec?.context_window || 2000000" /></div>
         <div class="f1"><label>请求超时（秒，-1 = 不超时，挂起时可用看板「强制停止」打断）</label><NInputNumber v-model:value="draft.timeout_seconds" :min="-1" :max="3600" /></div>
       </div>
       <label class="checkline" style="margin-bottom: 10px">
@@ -542,6 +562,23 @@ const providerOptions = [
       <div class="sfoot"><NButton type="primary" @click="saveSched">保存调度配置</NButton></div>
     </NCard>
 
+    <NCard title="🔔 提醒设置" size="small" class="scard">
+      <template #header-extra><span class="hint">任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。</span></template>
+      <div class="frow">
+        <div class="f1"><label class="checkline">
+          <NSwitch v-model:value="notifyDraft.sound" />
+          提示音
+          <span class="hint">完成/受阻时播 Windows 系统音（完成叮一声，受阻警示音），跟随系统声音方案。</span>
+        </label></div>
+        <div class="f1"><label class="checkline">
+          <NSwitch v-model:value="notifyDraft.system" />
+          系统通知
+          <span class="hint">完成/受阻时弹托盘气泡，看板没开也能收到；--no-tray 启动时无渠道。</span>
+        </label></div>
+      </div>
+      <div class="sfoot"><NButton type="primary" :loading="notifySaving" @click="saveNotify">保存提醒设置</NButton></div>
+    </NCard>
+
     <NCard title="🛠 Agent 工具与访问权限" size="small" class="scard">
       <template #header-extra><span class="hint">全局默认：项目未单独覆盖时按这里生效；保存后立即生效。</span></template>
       <div class="frow">
@@ -583,6 +620,15 @@ const providerOptions = [
         注入 run_command 子进程：国内网络拉依赖失败（unexpected EOF / 超时）时配 GOPROXY、
         npm registry（HTTP_PROXY）、PIP_INDEX_URL 即可；不允许覆盖 PATH/SYSTEMROOT 等系统变量。
       </div>
+      <label class="cmd-chip" title="写入前备份旧值到日志，只增不删，可手动改回">
+        <NSwitch size="small" v-model:value="pathAutofix" />
+        <span class="cmd-name">任务启动时自动把缺失的工具目录写入用户 PATH</span>
+      </label>
+      <div class="hint tool-foot">
+        启动任务时扫描 node/npm/go/java 等常用命令：不在 PATH 的自动注入 Agent
+        会话并写进提示词（模型无需自己找绝对路径）；开启后还会把缺失目录持久写入
+        用户 PATH（你自己的终端也能直接用）。
+      </div>
 
       <div class="sfoot">
         <NButton type="primary" :loading="toolsSaving" @click="saveTools">保存工具与权限</NButton>
@@ -595,7 +641,7 @@ const providerOptions = [
         <NButton size="small" :loading="mirrorTesting" @click="testMirrors()">测速全部源</NButton>
         <NButton size="small" type="primary" :loading="mirrorApplying" @click="applyMirrors">
           应用最快源到环境变量</NButton>
-        <span class="hint" v-if="mirrorTestedAt">上次测速：{{ mirrorTestedAt }}</span>
+        <span class="hint" v-if="mirrorTestedAt">上次测速：{{ mirrorTestedAtText }}</span>
         <span class="hint" v-else>尚未测速（Agent 会按内置默认顺序下载）</span>
       </div>
       <div class="hint tool-foot">

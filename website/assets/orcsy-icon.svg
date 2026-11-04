@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Orcsy">
+  <!-- Orcsy 程序图标（与 build/icon.png 一致：深底 + 齿轮 + 三条任务队列） -->
+  <defs>
+    <rect id="orcsy-tooth" x="490" y="88" width="44" height="64"/>
+  </defs>
+
+  <!-- 底板 -->
+  <rect x="32" y="32" width="960" height="960" rx="167" fill="#0f1420"/>
+
+  <!-- 三条任务队列（描边） -->
+  <g fill="none" stroke-width="22">
+    <rect x="171" y="311" width="168" height="458" rx="23" stroke="#5b8cff"/>
+    <rect x="441" y="311" width="168" height="458" rx="23" stroke="#3fbf7f"/>
+    <rect x="711" y="311" width="168" height="458" rx="23" stroke="#e8a13c"/>
+  </g>
+
+  <!-- 已完成 / 进行中的任务块 -->
+  <rect x="195" y="350" width="120" height="120" rx="15" fill="#5b8cff"/>
+  <rect x="465" y="350" width="120" height="120" rx="15" fill="#3fbf7f"/>
+  <rect x="735" y="350" width="120" height="120" rx="15" fill="#e8a13c"/>
+
+  <!-- 待处理任务块（半透明白） -->
+  <g fill="#ffffff" fill-opacity="0.275">
+    <rect x="190" y="510" width="130" height="90" rx="16"/>
+    <rect x="460" y="510" width="130" height="90" rx="16"/>
+    <rect x="730" y="510" width="130" height="90" rx="16"/>
+  </g>
+
+  <!-- 齿轮 -->
+  <g fill="#5b8cff">
+    <circle cx="512" cy="200" r="78"/>
+    <use href="#orcsy-tooth"/>
+    <use href="#orcsy-tooth" transform="rotate(45 512 200)"/>
+    <use href="#orcsy-tooth" transform="rotate(90 512 200)"/>
+    <use href="#orcsy-tooth" transform="rotate(135 512 200)"/>
+    <use href="#orcsy-tooth" transform="rotate(180 512 200)"/>
+    <use href="#orcsy-tooth" transform="rotate(225 512 200)"/>
+    <use href="#orcsy-tooth" transform="rotate(270 512 200)"/>
+    <use href="#orcsy-tooth" transform="rotate(315 512 200)"/>
+  </g>
+  <circle cx="512" cy="200" r="34" fill="#0f1420"/>
+</svg>

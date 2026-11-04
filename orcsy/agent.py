@@ -72,7 +72,8 @@ class ProjectAgent:
                  permission_timeout_minutes: int = 30,
                  allowed_commands: list[str] | None = None,
                  extra_env: dict[str, str] | None = None,
-                 mirror_runtime=None) -> None:
+                 mirror_runtime=None,
+                 path_autofix: bool = False) -> None:
         self.project = project
         # tools / permission_* / allowed_commands / extra_env：构造方按全局+
         # 项目覆盖解析后的生效值（resolve_tools / resolve_permission_mode /
@@ -82,7 +83,8 @@ class ProjectAgent:
                                      permission_timeout_minutes=permission_timeout_minutes,
                                      allowed_commands=allowed_commands,
                                      extra_env=extra_env,
-                                     mirror_runtime=mirror_runtime)
+                                     mirror_runtime=mirror_runtime,
+                                     path_autofix=path_autofix)
         self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
         self.log = get_logger(f"agent.{project.name}")
 

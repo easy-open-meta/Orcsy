@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Orcsy — AI Agent 任务编排系统</title>
-<meta name="description" content="Orcsy：让 AI Agent 按任务清单自动完成功能开发与 Bug 修复。每个项目一个专属 Agent，git worktree 隔离改动，Web 看板可视化管理，支持 Windows / Docker / Linux。">
+<meta name="description" content="Orcsy：让 AI Agent 按任务清单自动完成功能开发与 Bug 修复。每个项目一个专属 Agent，git worktree 隔离改动，Web 看板可视化管理，内置国内镜像测速选源与用量统计，支持 Windows / Docker / Linux。">
+<link rel="icon" href="assets/orcsy-icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/orcsy-icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/orcsy-icon-180.png">
 <script>
 /* 主题先行：在样式解析前落到 <html data-theme>，避免浅色用户首屏闪深色（与看板同款约定） */
 (function () {
@@ -54,7 +57,10 @@ a:hover{text-decoration:underline}
 .nav-in{max-width:1120px;margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;gap:26px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--text)}
 .brand:hover{text-decoration:none}
-.brand svg{width:26px;height:26px;color:var(--acc)}
+/* 站点 logo 与程序图标统一：assets/orcsy-icon.svg（外圈描边仅用于双主题下区分深色底板） */
+.brand img{width:28px;height:28px;border-radius:7px;display:block;flex:none;
+  box-shadow:0 0 0 1px var(--line2),0 1px 3px rgba(0,0,0,.25)}
+.brand img.sm{width:20px;height:20px;border-radius:5px}
 .nav-links{display:flex;gap:20px;margin-left:auto;font-size:14px}
 .nav-links a{color:var(--dim)}
 .nav-links a:hover{color:var(--text);text-decoration:none}
@@ -66,7 +72,6 @@ a:hover{text-decoration:underline}
 .btn svg{width:17px;height:17px;flex:none}
 .btn-pri{background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;color:#fff;font-weight:600}
 .btn-pri:hover{filter:brightness(1.12);border:none}
-.btn-big{padding:12px 26px;font-size:15.5px;border-radius:10px}
 
 /* ---- Hero ---- */
 .hero{position:relative;overflow:hidden;padding:96px 0 84px;text-align:center}
@@ -82,8 +87,7 @@ a:hover{text-decoration:underline}
   -webkit-background-clip:text;background-clip:text;color:transparent}
 .hero .sub{font-size:19px;color:var(--dim);max-width:640px;margin:10px auto 0}
 .hero .sub b{color:var(--text);font-weight:600}
-.hero-btns{display:flex;gap:14px;justify-content:center;margin-top:34px;flex-wrap:wrap}
-.hero-note{margin-top:18px;font-size:13px;color:var(--faint)}
+.hero-note{margin-top:26px;font-size:13px;color:var(--faint)}
 .hero-note code{font-family:var(--mono);color:var(--dim)}
 
 /* ---- 章节通用 ---- */
@@ -195,16 +199,14 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <header class="nav">
   <div class="nav-in">
     <a class="brand" href="#top">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <rect x="3" y="5" width="4.5" height="14" rx="1.2"/><rect x="9.75" y="5" width="4.5" height="9" rx="1.2" opacity=".6"/><rect x="16.5" y="5" width="4.5" height="6" rx="1.2" opacity=".35"/>
-      </svg>
+      <img src="assets/orcsy-icon.svg" alt="Orcsy 图标" width="28" height="28">
       Orcsy
     </a>
     <nav class="nav-links">
       <a href="#features">产品优势</a>
       <a href="#how">工作原理</a>
       <a href="#start">快速开始</a>
-      <a href="#docs">文档</a>
+      <a href="docs.html">文档</a>
       <a href="#download">下载</a>
     </nav>
     <div class="nav-gh">
@@ -220,22 +222,12 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <!-- ===== Hero ===== -->
 <div class="hero" id="top">
   <div class="wrap">
-    <span class="hero-badge">开源免费 · <b>v0.17.0</b> · Windows / Docker / Linux</span>
+    <span class="hero-badge">开源免费 · <b>v0.18.0</b> · Windows / Docker / Linux</span>
     <h1>让 AI Agent<br><span class="grad">按任务清单自动干活</span></h1>
     <p class="sub">Orcsy 是一个 <b>AI Agent 任务编排系统</b>：把需求与 Bug 写成 Markdown 任务清单，
       每个项目由一个专属 Agent 定时领取、真实改代码、跑测试，改动在独立 git worktree 中完成后自动提交合并——
       全程由 <b>Web 看板</b>可视化掌控。</p>
-    <div class="hero-btns">
-      <a class="btn btn-pri btn-big" href="https://github.com/easy-open-meta/Orcsy/releases" target="_blank" rel="noopener">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-        GitHub 下载
-      </a>
-      <a class="btn btn-big" href="https://gitee.com/java-and-net/agent-task-arrangement-system/releases" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="#c71d23"><path d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0Zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.593-.592h-4.15a.592.592 0 0 1-.591-.593v-1.482c0-.327.265-.592.592-.592h6.815c.328 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.92A.593.593 0 0 1 5.33 18.1V7.999c0-1.475 1.195-2.667 2.667-2.667h10.074Z"/></svg>
-        Gitee 下载
-      </a>
-    </div>
-    <p class="hero-note">Windows 一键安装包 <code>orcsy-setup-*.exe</code> · 在线更新包 <code>orcsy-update-*.zip</code> · 也支持 <code>docker compose up</code> 与 systemd / 源码运行</p>
+    <p class="hero-note">Windows 一键安装包 <code>orcsy-setup-*.exe</code> · 在线更新包 <code>orcsy-update-*.zip</code> · 也支持 <code>docker compose up</code> 与 systemd / 源码运行 · <a href="#download">⬇ 前往下载</a></p>
   </div>
 </div>
 
@@ -251,23 +243,31 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <div class="fcard"><div class="ico">🤖</div><h3>每项目一个专属 Agent</h3>
         <p>独立的 <code>AGENT.md</code> 行为准则、任务清单与对话上下文；支持绑定<b>专属模型</b>（部分覆盖全局配置），多 Agent 并行处理不同项目。</p></div>
       <div class="fcard"><div class="ico">🧾</div><h3>Markdown 任务清单驱动</h3>
-        <p>一个任务一个 <code>.md</code> 文件，优先级、状态、验收标准都写在 frontmatter 里；Git 友好、可评审、可被任何编辑器管理，Agent 按 P0~P4 排队领取。</p></div>
+        <p>一个任务一个 <code>.md</code> 文件，优先级、状态、验收标准都写在 frontmatter 里；Git 友好、可评审、可被任何编辑器管理，Agent 按 P0~P4 排队领取，看板拖拽排序落盘 <code>order</code>、同优先级内生效。</p></div>
       <div class="fcard"><div class="ico">🌿</div><h3>git worktree 隔离 + 自动合并</h3>
         <p>Agent 的全部改动发生在独立 worktree，不碰主工作区；报告完成后系统统一 commit → merge → push，冲突时保留分支等人工介入。提交权不在模型手里。</p></div>
       <div class="fcard"><div class="ico">🔒</div><h3>真实执行，安全禁锢</h3>
         <p>文件工具锁死在项目根内（路径穿越直接拒绝）、命令白名单、工具轮数上限、上下文成本自动裁剪——放开手让它跑，也出不了圈。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>三档访问权限 + 人工审批</h3>
         <p>变更前询问 / 自主模式 / 完全访问，全局默认、按项目覆盖。敏感操作挂起等看板批准，超时自动拒绝，任务不会永久卡住，全程进度留痕。</p></div>
-      <div class="fcard"><div class="ico">🛠️</div><h3>13 个内置工具，逐个可开关</h3>
-        <p>读写/编辑/批量替换/删移文件、正则与文件名搜索、白名单命令、联网取正文（SSRF 防护）、技能读取……全局 + 每项目双层开关，只读项目轻松实现。</p></div>
+      <div class="fcard"><div class="ico">🛠️</div><h3>14 个内置工具，逐个可开关</h3>
+        <p>读写/编辑/批量替换/删移文件、正则与文件名搜索、白名单命令、联网取正文（SSRF 防护）、技能读取、镜像源测速……全局 + 每项目双层开关，只读项目轻松实现。</p></div>
+      <div class="fcard"><div class="ico">⚡</div><h3>国内镜像测速选源</h3>
+        <p>内置 7 类 19 个镜像源（清华 TUNA / 阿里云 / 七牛 goproxy.cn / npmmirror 等），看板一键 HTTP 测速、「哪个快用哪个」，最快源自动写入 Agent 子进程环境变量；支持自定义源与逐个禁用。</p></div>
+      <div class="fcard"><div class="ico">🧰</div><h3>缺环境自动装（env-setup）</h3>
+        <p>遇到缺失的语言/工具链，Agent 按内置技能走「预检 → 幂等安装 → 会话修复 → 验证」闭环：包管理器优先，无代理网络自动切国内镜像直下（零管理员权限、用户级 PATH 即装即用）；安装命令同样要过人工审批。</p></div>
       <div class="fcard"><div class="ico">🖥️</div><h3>Web 可视化看板</h3>
-        <p>单文件页面零依赖：项目/任务/归档/进度/日志一屏掌握，模型接入、技能库、调度参数全部图形化配置；深浅双主题，5 秒自动刷新。</p></div>
+        <p>单文件页面零依赖：项目/任务/归档/进度/日志一屏掌握，执行中任务可强制停止、任务可拖拽排序，模型接入、技能库、调度参数全部图形化配置；深浅双主题，5 秒自动刷新。</p></div>
+      <div class="fcard"><div class="ico">📊</div><h3>用量台账与热力图</h3>
+        <p>「用量」页签统计总体与各项目的任务数/轮数/输入输出 tokens，git 提交热力图风格的近 12 周用量图（色深=当日 tokens，悬停看单日明细），任务级台账持久化在 <code>usage.jsonl</code>，重启不丢。</p></div>
       <div class="fcard"><div class="ico">🐙</div><h3>仓库 Issues 一键转任务</h3>
         <p>绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），open Issue 自动导入任务队列（标签映射优先级、归档去重），支持定时自动拉取。</p></div>
       <div class="fcard"><div class="ico">📚</div><h3>技能库（Skill）</h3>
         <p>导入本地技能目录、看板新建，或一键扫描 ZCode / Claude Code / Codex 等工具的用户级技能批量导入；提示词只注入索引，全文按需读取，不撑爆上下文。</p></div>
       <div class="fcard"><div class="ico">🔄</div><h3>程序自更新</h3>
         <p>从 Gitee Release 检查/下载/一键静默升级并自动重启；用户可写目录零 UAC，Program Files 自动走一次 UAC 提权兜底，失败自动回滚并留安装日志。</p></div>
+      <div class="fcard"><div class="ico">🔔</div><h3>任务结束提醒</h3>
+        <p>任务完成/受阻时播提示音（Windows 系统音）并弹托盘气泡系统通知，<b>看板没开也能收到</b>；手动停止不打扰，提示音/系统通知可在设置页独立开关。</p></div>
       <div class="fcard"><div class="ico">🔐</div><h3>看板登录鉴权</h3>
         <p>一个密码即可给看板加上登录门（HttpOnly 会话、防爆破延迟、改密即踢旧会话），配合 Docker / 服务器部署安全暴露到外网。</p></div>
       <div class="fcard"><div class="ico">🐳</div><h3>多平台部署</h3>
@@ -286,10 +286,10 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
     </div>
     <div class="flow">
       <div class="step"><h4>写任务</h4><p>往项目 <code>tasks/</code> 放一个 <code>.md</code>：标题、优先级、现象与验收标准；或在看板/Issues 一键生成。</p></div>
-      <div class="step"><h4>调度领取</h4><p>调度器定时扫描各项目，按 P0~P4 排序领取待办（尊重 assignee、每轮限额），任务置为进行中。</p></div>
-      <div class="step"><h4>Agent 工具循环</h4><p>专属模型在独立 worktree 里用 13 个禁锢工具探索、改码、跑测试；敏感操作按权限模式挂起等人工审批。</p></div>
+      <div class="step"><h4>调度领取</h4><p>调度器定时扫描各项目，按 P0~P4 排序领取待办（同优先级内按手动 order，尊重 assignee、每轮限额），任务置为进行中。</p></div>
+      <div class="step"><h4>Agent 工具循环</h4><p>专属模型在独立 worktree 里用 14 个禁锢工具探索、改码、跑测试，缺工具链自动按 env-setup 技能安装修复；敏感操作按权限模式挂起等人工审批。</p></div>
       <div class="step"><h4>提交合并</h4><p>Agent 报告完成后，系统在 worktree 内按 Conventional Commits 提交，<code>--no-ff</code> 合并回主分支并推送远端。</p></div>
-      <div class="step"><h4>回写归档</h4><p>结果（摘要/轮数/token/变更文件）写回任务文件并归档到 <code>done/</code>；受阻任务标 blocked 等人处理。</p></div>
+      <div class="step"><h4>回写归档</h4><p>结果（摘要/轮数/token/变更文件）写回任务文件并归档到 <code>done/</code>，token 用量记入台账热力图；受阻任务标 blocked 等人处理，完成/受阻即时弹提示音与系统通知。</p></div>
     </div>
   </div>
 </section>
@@ -312,7 +312,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
     <div class="pane on" id="p1">
       <p class="desc">下载 <code>orcsy-setup-&lt;版本&gt;.exe</code> 按向导安装；配置首次启动自动生成，看板里填模型密钥即可。</p>
       <pre class="code"><span class="c"># 1. 运行安装包（可勾选「初始化示例任务」）</span>
-orcsy-setup-0.17.0.exe
+orcsy-setup-0.18.0.exe
 
 <span class="c"># 2. 打开看板（浏览器自动打开），在「项目与设置」页：</span>
 <span class="c">#    填写 llm.api_key / base_url / model（OpenAI 兼容协议，覆盖</span>
@@ -322,7 +322,7 @@ orcsy-setup-0.17.0.exe
 <span class="c"># 配置文件位于 %APPDATA%\Orcsy\config.yaml（本地实体，不受 OneDrive 干扰）</span></pre>
       <div class="doc-actions">
         <a class="btn btn-pri" href="https://github.com/easy-open-meta/Orcsy/releases" target="_blank" rel="noopener">GitHub Releases</a>
-        <a class="btn" href="https://gitee.com/java-and-net/agent-task-arrangement-system/releases" target="_blank" rel="noopener">Gitee Releases</a>
+        <a class="btn" href="https://gitee.com/java-and-net/Orcsy/releases" target="_blank" rel="noopener">Gitee Releases</a>
       </div>
     </div>
 
@@ -382,91 +382,47 @@ journalctl -u orcsy -f            <span class="c"># 跟踪服务日志</span></p
     <div class="sec-head">
       <span class="kicker">Documentation</span>
       <h2>文档说明</h2>
-      <p>核心概念与配置速查；完整文档见仓库内 <code>README.zh-CN.md</code>（中文）与 <code>README.md</code>（English）。</p>
+      <p>安装、使用与配置的完整文档已移至<a href="docs.html"><b>独立文档页</b></a>；更完整的细节见仓库内 <code>README.zh-CN.md</code>（中文）与 <code>README.md</code>（English）。</p>
     </div>
-    <div class="doc">
-
-      <h3>任务文件</h3>
-      <p>每个任务一个 Markdown 文件，放在项目的 <code>tasks/</code> 目录，文件名即任务 ID。YAML frontmatter 写元信息，正文写需求 / 现象 / 验收标准：</p>
-      <pre class="code">---
-title: 修复登录页在 125% 缩放下的布局错位
-priority: P1            <span class="c"># P0~P4，数字越小越优先</span>
-status: open            <span class="c"># open / in_progress / done / blocked / cancelled</span>
-labels: [bug, ui]
-assignee: my-app        <span class="c"># 可选：只允许指定项目的 Agent 领取</span>
----
-
-<span class="c">## 现象</span>
-125% 缩放时登录按钮溢出卡片…
-
-<span class="c">## 验收标准</span>
-- 100% / 125% / 150% 缩放下布局正常</pre>
-      <ul>
-        <li>状态机：<code>open → in_progress → done / blocked / cancelled</code>；done 自动归档到 <code>tasks/done/</code>；</li>
-        <li>执行进度实时写回任务文件的「执行进度」节——进程被强杀也不丢；意外中断的任务下次启动自动重置回 open；</li>
-        <li>每个项目的 <code>AGENT.md</code> 是该项目的最高行为准则（技术栈、运行/测试命令、编码规范），新建项目时可按探测出的技术栈自动生成。</li>
-      </ul>
-
-      <h3>Agent 工具清单（13 个，逐个可开关）</h3>
-      <table>
-        <tr><th>工具</th><th>作用</th><th>类型</th></tr>
-        <tr><td>list_dir</td><td>列出项目文件结构（自动忽略 .git / node_modules 等）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>read_file</td><td>读文件（按行分页，超长自动截断）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>grep</td><td>正则搜索代码（glob 过滤）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>find_files</td><td>按文件名 glob 查找（如 <code>*.py</code>）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>read_skill</td><td>读取技能库中某个技能的全文</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>web_fetch</td><td>抓取公网 URL 正文（HTML 剥标签；内网/回环地址一律拒绝，SSRF 防护）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>write_file</td><td>创建 / 整体重写文件</td><td><span class="pill pill-acc">变更</span></td></tr>
-        <tr><td>edit_file</td><td>精确文本替换（old_string 须唯一匹配）</td><td><span class="pill pill-acc">变更</span></td></tr>
-        <tr><td>multi_edit</td><td>同一文件一次多处替换（全有或全无，失败不落盘）</td><td><span class="pill pill-acc">变更</span></td></tr>
-        <tr><td>delete_file</td><td>删除文件；删目录须显式 <code>recursive: true</code></td><td><span class="pill pill-warn">高风险</span></td></tr>
-        <tr><td>move_file</td><td>移动 / 重命名（目标已存在须 <code>overwrite: true</code>）</td><td><span class="pill pill-warn">高风险</span></td></tr>
-        <tr><td>run_command</td><td>执行白名单命令（python / pytest / node / cargo / go / dotnet / git / uv…）</td><td><span class="pill pill-warn">高风险</span></td></tr>
-        <tr><td>finish</td><td>给出结构化结论（completed / blocked / cannot_do + 摘要 + 提交信息）</td><td><span class="pill pill-ok">协议</span></td></tr>
-      </table>
-      <p>工具开关支持<b>全局默认 + 每项目覆盖</b>（看板设置页与项目对话框可视化编辑，或配置文件 <code>tools:</code> / <code>projects[].tools:</code>）；被禁工具不会下发给模型，执行层兜底拦截。<code>finish</code> 为任务结束的协议工具，始终可用。</p>
-
-      <h3>访问权限模式（人工审批）</h3>
-      <table>
-        <tr><th>模式</th><th>语义</th><th>挂起等待批准的操作</th></tr>
-        <tr><td>ask_on_change</td><td><b>变更前询问</b></td><td>全部变更类：write / edit / multi_edit / delete / move / run_command</td></tr>
-        <tr><td>autonomous</td><td><b>自主模式</b>（有风险时询问）</td><td>仅高风险：delete_file / move_file / run_command</td></tr>
-        <tr><td>full_access</td><td><b>完全访问</b>（减少确认次数，默认）</td><td>无——与历史行为一致</td></tr>
-      </table>
-      <ul>
-        <li>命中审批的操作<b>不执行、零副作用</b>，任务线程挂起；看板顶栏出现「🔔 待审批」，任务行标注「⏸ 待审批」；</li>
-        <li>批准 / 拒绝 / 「本任务内始终允许该工具」三种响应；超时（默认 30 分钟，可配）自动拒绝，任务不会永久挂起；</li>
-        <li>全局 <code>permissions.mode</code> + 项目级 <code>permission_mode</code> 覆盖；拒绝与超时都会反馈给模型调整方案或按 blocked 收尾，全程进度留痕。</li>
-      </ul>
-
-      <h3>配置速查</h3>
-      <table>
-        <tr><th>配置项</th><th>说明</th></tr>
-        <tr><td>llm.*</td><td>模型接入：provider（openai 兼容 / anthropic）、api_key、base_url、model、temperature、max_tokens、上下文窗口、思考开关、超时</td></tr>
-        <tr><td>scheduler.*</td><td>扫描间隔（默认 300s）、并行 Agent 数（1~16）、run_once 单轮模式</td></tr>
-        <tr><td>web.*</td><td>看板监听地址/端口（默认 127.0.0.1:5116）、自动开浏览器、<b>auth_password 登录鉴权</b>（外网部署务必设置）</td></tr>
-        <tr><td>tools / permissions</td><td>全局工具开关（未列出默认启用）；全局访问权限模式与审批超时</td></tr>
-        <tr><td>projects[]</td><td>name / path / enabled / tasks_dir / guide_file / 每轮任务数 / 轮数上限 / allowed_branch / allowed_commands，以及 llm、repo（Issues）、tools、permission_mode 四个按项目覆盖项</td></tr>
-        <tr><td>update.*</td><td>Gitee 自更新源仓库 / 私有令牌 / 启动自动检查</td></tr>
-        <tr><td>logging.*</td><td>级别、文件路径、保留天数（写满 N 天自动归档清理）</td></tr>
-      </table>
-
-      <h3>模型接入与安全边界</h3>
-      <ul>
-        <li><b>OpenAI 兼容协议</b>覆盖 DeepSeek / GLM 智谱 / Kimi / 通义 / OpenAI / Ollama / vLLM 等，另支持 <b>Anthropic 协议</b>；设置页可拉取模型列表、一键测试连通性、按所选模型自动填充上下文规格；</li>
-        <li>文件工具禁锢在项目根（worktree）内，绝对路径与 <code>../</code> 穿越一律拒绝；命令执行有白名单（可按项目自定义）；</li>
-        <li>git 提交 / 合并 / 推送由系统执行，Agent 无权操作版本控制；合并冲突时保留分支等人工介入；</li>
-        <li>看板开启 <code>web.auth_password</code> 后所有页面与 API 需先登录（HttpOnly 会话、防爆破延迟）；鉴权不替代 TLS，公网部署建议再套一层反向代理上 HTTPS。</li>
-      </ul>
-
-      <div class="doc-more">
-        <div class="t">
-          <h4>📖 完整文档</h4>
-          <p>部署细节（Docker 挂载 / Git 凭据 / systemd 管理）、Issues 集成规则、技能库使用、自更新机制、目录结构与开发指南——见仓库内双语文档。</p>
-        </div>
-        <a class="btn" href="https://github.com/easy-open-meta/Orcsy/blob/main/README.md" target="_blank" rel="noopener">README (English)</a>
-        <a class="btn" href="https://gitee.com/java-and-net/agent-task-arrangement-system/blob/master/README.zh-CN.md" target="_blank" rel="noopener">README.zh-CN（中文）</a>
+    <div class="grid">
+      <a class="fcard" href="docs.html#doc-install" style="color:inherit;text-decoration:none">
+        <div class="ico">📦</div>
+        <h3>完整安装教程</h3>
+        <p>四种方式按场景选型：Windows 安装包 / 源码 / Docker / Linux systemd——全流程、升级与卸载、Git 推送凭据、常用启动参数。</p>
+      </a>
+      <a class="fcard" href="docs.html#doc-faq" style="color:inherit;text-decoration:none">
+        <div class="ico">❓</div>
+        <h3>常见问题 Q&amp;A</h3>
+        <p>端口被占用、任务一直受阻、审批会不会卡死、数据存哪、外网部署安全、Windows 升级 UAC……12 个高频问题速查。</p>
+      </a>
+      <a class="fcard" href="docs.html#doc-task" style="color:inherit;text-decoration:none">
+        <div class="ico">🧾</div>
+        <h3>任务文件与工具清单</h3>
+        <p>Markdown 任务格式（frontmatter / 验收标准 / 拖拽排序）、14 个内置工具逐个说明与双层开关。</p>
+      </a>
+      <a class="fcard" href="docs.html#doc-perms" style="color:inherit;text-decoration:none">
+        <div class="ico">🛡️</div>
+        <h3>权限模式与人工审批</h3>
+        <p>变更前询问 / 自主模式 / 完全访问三档语义，审批挂起、超时自动拒绝与项目级覆盖。</p>
+      </a>
+      <a class="fcard" href="docs.html#doc-config" style="color:inherit;text-decoration:none">
+        <div class="ico">⚙️</div>
+        <h3>配置速查</h3>
+        <p>llm / scheduler / web / tools / env / mirrors / projects / update / notify / logging 全部配置项一览。</p>
+      </a>
+      <a class="fcard" href="docs.html#doc-model" style="color:inherit;text-decoration:none">
+        <div class="ico">🧠</div>
+        <h3>模型接入与安全边界</h3>
+        <p>OpenAI 兼容 / Anthropic 双协议接入与连通性测试；工具禁锢、命令白名单、登录鉴权与国内网络适配。</p>
+      </a>
+    </div>
+    <div class="doc-more">
+      <div class="t">
+        <h4>📖 完整文档</h4>
+        <p>部署细节（Docker 挂载 / Git 凭据 / systemd 管理）、Issues 集成规则、技能库使用、自更新机制、目录结构与开发指南——见仓库内双语文档。</p>
       </div>
+      <a class="btn" href="https://github.com/easy-open-meta/Orcsy/blob/main/README.md" target="_blank" rel="noopener">README (English)</a>
+      <a class="btn" href="https://gitee.com/java-and-net/Orcsy/blob/master/README.zh-CN.md" target="_blank" rel="noopener">README.zh-CN（中文）</a>
     </div>
   </div>
 </section>
@@ -497,11 +453,11 @@ assignee: my-app        <span class="c"># 可选：只允许指定项目的 Agen
           <svg viewBox="0 0 24 24" fill="#c71d23"><path d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0Zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.593-.592h-4.15a.592.592 0 0 1-.591-.593v-1.482c0-.327.265-.592.592-.592h6.815c.328 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.92A.593.593 0 0 1 5.33 18.1V7.999c0-1.475 1.195-2.667 2.667-2.667h10.074Z"/></svg>
           <h3>Gitee（码云）</h3>
         </div>
-        <p>仓库：<a href="https://gitee.com/java-and-net/agent-task-arrangement-system" target="_blank" rel="noopener">java-and-net/agent-task-arrangement-system</a><br>
+        <p>仓库：<a href="https://gitee.com/java-and-net/Orcsy" target="_blank" rel="noopener">java-and-net/Orcsy</a><br>
           国内访问更快；同样是 <code>orcsy-setup-*.exe</code> + <code>orcsy-update-*.zip</code> 双附件，程序内自更新默认走 Gitee 源。</p>
         <div class="go">
-          <a class="btn btn-pri" href="https://gitee.com/java-and-net/agent-task-arrangement-system/releases" target="_blank" rel="noopener">前往 Releases 下载</a>
-          <a class="btn" href="https://gitee.com/java-and-net/agent-task-arrangement-system/issues" target="_blank" rel="noopener">提交 Issue</a>
+          <a class="btn btn-pri" href="https://gitee.com/java-and-net/Orcsy/releases" target="_blank" rel="noopener">前往 Releases 下载</a>
+          <a class="btn" href="https://gitee.com/java-and-net/Orcsy/issues" target="_blank" rel="noopener">提交 Issue</a>
         </div>
       </div>
     </div>
@@ -512,15 +468,13 @@ assignee: my-app        <span class="c"># 可选：只允许指定项目的 Agen
 <footer>
   <div class="wrap foot-in">
     <span class="brand" style="font-size:15px">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:20px;height:20px;color:var(--acc)">
-        <rect x="3" y="5" width="4.5" height="14" rx="1.2"/><rect x="9.75" y="5" width="4.5" height="9" rx="1.2" opacity=".6"/><rect x="16.5" y="5" width="4.5" height="6" rx="1.2" opacity=".35"/>
-      </svg>
+      <img class="sm" src="assets/orcsy-icon.svg" alt="Orcsy 图标" width="20" height="20">
       Orcsy · AI Agent 任务编排系统
     </span>
     <span class="sp"></span>
     <a href="https://github.com/easy-open-meta/Orcsy" target="_blank" rel="noopener">GitHub</a>
-    <a href="https://gitee.com/java-and-net/agent-task-arrangement-system" target="_blank" rel="noopener">Gitee</a>
-    <a href="#docs">文档</a>
+    <a href="https://gitee.com/java-and-net/Orcsy" target="_blank" rel="noopener">Gitee</a>
+    <a href="docs.html">文档</a>
     <a href="#download">下载</a>
     <span>Copyright © 2026 易开元(EOM)</span>
   </div>

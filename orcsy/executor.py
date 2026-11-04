@@ -26,7 +26,8 @@ from .prompts import build_system_prompt
 from .skills import Skill, skill_bodies
 from .task_control import get_task_controls
 from .task_model import Task, append_progress
-from .tools import TOGGLEABLE_TOOLS, FinishSignal, TaskStopped, ToolContext
+from .tools import (TOGGLEABLE_TOOLS, FinishSignal, TaskStopped, ToolContext,
+                    _tool_path_dirs, persist_path_dirs, scan_tool_env)
 
 WORKTREE_DIR = ".worktree-arranger"
 
@@ -54,7 +55,8 @@ class TaskExecutor:
                  permission_timeout_minutes: int = 30,
                  allowed_commands: list[str] | None = None,
                  extra_env: dict[str, str] | None = None,
-                 mirror_runtime=None) -> None:
+                 mirror_runtime=None,
+                 path_autofix: bool = False) -> None:
         self.project = project
         self.llm = llm
         # 生效的工具开关 map（resolve_tools 的产物）；未列出的工具默认启用
@@ -66,6 +68,9 @@ class TaskExecutor:
         self.allowed_commands = list(allowed_commands) if allowed_commands else None
         # 注入子进程的自定义环境变量（config env.vars，代理/国内镜像等）
         self.extra_env = dict(extra_env or {})
+        # 任务启动时把扫描到的缺失工具目录持久写入用户 PATH（config
+        # env.path_autofix，看板开关；默认关——系统级修改须用户显式开启）
+        self.path_autofix = bool(path_autofix)
         # 镜像源运行时（mirrors.MirrorRuntime）：speedtest_mirrors 工具 + env-setup
         # 技能正文动态追加「测速优选」段用；None = 未接线（技能保持静态默认序）
         self.mirror_runtime = mirror_runtime
@@ -209,6 +214,12 @@ class TaskExecutor:
                 result.prompt_tokens, result.completion_tokens, self.llm.model)
         except Exception:  # noqa: BLE001 — 台账是旁路，任何异常都吞掉
             self.log.warning("用量记录失败（可忽略）", exc_info=True)
+        # 任务结束提醒：完成/受阻时提示音 + 系统通知（同款旁路，失败不影响任务）
+        try:
+            from .notify import notify_task_end
+            notify_task_end(self.project.name, task.id, task.title, result.outcome)
+        except Exception:  # noqa: BLE001 — 提醒是旁路，任何异常都吞掉
+            self.log.warning("任务提醒失败（可忽略）", exc_info=True)
         return result
 
     # ---- Agent 循环 ----
@@ -229,6 +240,20 @@ class TaskExecutor:
         if self.mirror_runtime is not None and "env-setup" in bodies:
             bodies["env-setup"] = decorate_skill_body(
                 "env-setup", bodies["env-setup"], self.mirror_runtime)
+        # 任务启动扫描：可选先把缺失工具目录持久写入用户 PATH（env.path_autofix，
+        # 只增不删、失败不阻断），再生成工具地图进系统提示词——模型不用再自己
+        # 一轮轮探测命令装在哪（npm 不在 PATH 的事故教训）
+        tool_map = None
+        try:
+            if self.path_autofix:
+                persist_path_dirs(_tool_path_dirs())
+            tool_map = scan_tool_env()
+            if tool_map["extra_dirs"]:
+                self.log.info("任务启动工具扫描：注入会话 PATH %s；发现的命令：%s",
+                              "; ".join(tool_map["extra_dirs"]),
+                              ", ".join(sorted(tool_map["tools"])) or "（无）")
+        except Exception:  # noqa: BLE001 — 扫描是旁路增强，失败不阻断任务
+            self.log.warning("任务启动工具扫描失败（忽略）", exc_info=True)
         ctx = ToolContext(root=work_root,
                           allowed_commands=self.allowed_commands,
                           skills=bodies, enabled_tools=enabled,
@@ -239,7 +264,8 @@ class TaskExecutor:
         client = LLMClient(self.llm)
         client.reset(build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,
-                                         permission_mode=self.permission_mode))
+                                         permission_mode=self.permission_mode,
+                                         tool_map=tool_map))
 
         try:
             resp = client.run_task_loop(self._build_task_prompt(task, enabled), ctx,

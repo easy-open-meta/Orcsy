@@ -61,6 +61,14 @@ DEFAULT_ALLOWED_COMMANDS = [
     # Windows 环境探测/文件查看（模型排障常用：找解释器、看目录、查环境变量）
     "where", "cmd", "dir", "type", "echo", "set", "tasklist", "systeminfo",
     "findstr", "more", "ver", "hostname", "whoami",
+    # POSIX 只读探测/统计（Git Bash / macOS / Linux 常用；模型高频使用——
+    # 统计行数、看文件片段、按文本处理等。只收只读与无害统计类：能写文件的
+    # sed/find/xargs、能执行任意命令的 env/awk/bash/sh 一律不放，模型该用
+    # write_file/edit_file 工具或让项目自身的构建命令干活）
+    "ls", "cat", "wc", "head", "tail", "grep", "sort", "uniq", "cut", "tr",
+    "diff", "stat", "du", "df", "pwd", "printf", "date", "sleep", "uname",
+    "which", "id", "basename", "dirname", "touch", "md5sum", "sha256sum",
+    "printenv",
 ]
 
 MAX_OUTPUT_CHARS = 6000
@@ -200,6 +208,86 @@ def _resolve_new_install(command: list[str]) -> list[str]:
             if cand.is_file() and cand.stat().st_size > 0:
                 return [str(cand), *command[1:]]
     return command
+
+
+# ---- 任务启动扫描：本机工具地图（进系统提示词）+ 可选写用户 PATH ----
+
+# 常见开发命令：启动项目时逐个解析，结果作为「本机工具」节注入系统提示词。
+# 教训：npm 装在 %ProgramFiles%\nodejs 但看板进程 PATH 快照里没有，Agent
+# 只能自己一轮轮探测绝对路径——扫描 + 提示词把这条路彻底省掉
+_KNOWN_TOOLS = (
+    "node", "npm", "npx", "pnpm", "yarn", "deno", "bun",
+    "python", "pip", "uv", "poetry",
+    "git", "go", "cargo", "rustc", "java", "javac", "dotnet", "cmake",
+)
+
+
+def scan_tool_env() -> dict:
+    """扫描本机常用开发命令的绝对路径与需注入会话的目录（每次调用现查）。
+
+    which 在扩充 PATH 的语义下解析（注册表最新 PATH + 常见安装目录，与
+    run_command 实际用的 env 一致）；不跑 --version 子进程（太重）。
+    返回 {tools: {命令: 绝对路径}, extra_dirs: [本次会话注入的目录]}。
+    """
+    path_value = _augmented_env().get("PATH", "")
+    tools: dict[str, str] = {}
+    for name in _KNOWN_TOOLS:
+        found = shutil.which(name, path=path_value)
+        if found:
+            tools[name] = found
+    return {"tools": tools, "extra_dirs": _tool_path_dirs()}
+
+
+def _broadcast_env_change() -> None:
+    """广播 WM_SETTINGCHANGE：让 Explorer 等后续新进程立即看到新用户 PATH。"""
+    try:
+        import ctypes
+        HWND_BROADCAST = 0xFFFF
+        SMTO_ABORTIFHUNG = 0x0002
+        ctypes.windll.user32.SendMessageTimeoutW(
+            HWND_BROADCAST, 0x001A, 0, "Environment", SMTO_ABORTIFHUNG, 2000, None)
+    except Exception:  # noqa: BLE001 — 广播失败无碍，新登录会话自然生效
+        pass
+
+
+def persist_path_dirs(dirs: list[str]) -> list[str]:
+    """把缺失目录追加写入 HKCU 用户 PATH（等价 setx，无需管理员；只增不删）。
+
+    看板 env.path_autofix 开启时任务启动调用：Agent 会话内可用 ≠ 用户自己的
+    终端可用，这里做持久修复。保留原值类型（REG_EXPAND_SZ 的 %VAR% 条目
+    原样保留），写回前旧值先打日志（可回滚），写回后广播。幂等：无缺失时
+    不写不广播。任何失败记日志返回空，绝不阻断任务启动。
+    """
+    if os.name != "nt" or not dirs:
+        return []
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                            winreg.KEY_READ | winreg.KEY_WRITE) as key:
+            try:
+                raw, vtype = winreg.QueryValueEx(key, "Path")
+            except OSError:
+                raw, vtype = "", winreg.REG_EXPAND_SZ
+            raw_entries = [e for e in str(raw).split(os.pathsep) if e.strip()]
+            existing = {_path_key(os.path.expandvars(e)) for e in raw_entries}
+            add: list[str] = []
+            for d in dirs:
+                if _path_key(d) in existing or "windowsapps" in d.lower():
+                    continue
+                existing.add(_path_key(d))
+                add.append(d)
+            if not add:
+                return []
+            log.info("写用户 PATH 前的旧值（可回滚）：%s", raw)
+            winreg.SetValueEx(key, "Path", 0,
+                              vtype or winreg.REG_EXPAND_SZ,
+                              os.pathsep.join(raw_entries + add))
+    except OSError as e:
+        log.warning("写用户 PATH 失败（不阻断任务）：%s", e)
+        return []
+    _broadcast_env_change()
+    log.info("用户 PATH 已追加 %d 个目录：%s", len(add), ", ".join(add))
+    return add
 
 
 @dataclass

@@ -54,6 +54,17 @@ def stop_tray() -> None:
         pass
 
 
+def notify_user(message: str, title: str = "Orcsy") -> None:
+    """从任意线程弹托盘气泡通知（任务结束提醒用）。未启动时静默跳过。"""
+    icon = _ICON_HOLDER.get("icon")
+    if icon is None:
+        return
+    try:
+        icon.notify(message, title)
+    except Exception:  # noqa: BLE001 气泡弹不出不影响调用方
+        log.warning("托盘通知发送失败", exc_info=True)
+
+
 def run_tray(state, scheduler, url: str, server=None) -> None:
     """阻塞运行托盘图标循环（由 cmd_web 放在后台线程调用）。
 

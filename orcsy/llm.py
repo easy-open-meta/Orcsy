@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import Counter
 
 import httpx
 
@@ -225,6 +226,20 @@ class LLMError(RuntimeError):
     pass
 
 
+# ---- 瞬时故障有界重试：单次超时/网关抖动不应判死整个任务 ----
+# 实测（2026-11-03）：后端任务单请求 timed out 一次即整任务 blocked，
+# 只能等下一调度周期重跑。对可重试错误自动退避重试，最终失败才抛 LLMError。
+_RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+_LLM_MAX_ATTEMPTS = 4            # 首次 + 3 次重试
+_LLM_RETRY_BACKOFF = (2, 4, 8)   # 每次重试前的退避秒数
+# 连续 N 轮未调用任何工具（只输出纯文本）视为卡住，升级强制收尾；
+# 否则「提醒」会无限循环（轮数不限的任务永不结束）
+_NO_TOOL_FORCE_TURNS = 3
+# 完全相同参数的同一工具调用第 N 次起在结果里附警告（模型打转止损，
+# 实测会 100+ 轮重读同一批文件）；计数仅存内存，任务结束即弃
+_REPEAT_CALL_WARN = 3
+
+
 class AgentResponse:
     """Agent 对单个任务的结构化结论（来自 finish 工具）。"""
 
@@ -281,6 +296,9 @@ class LLMClient:
         # 执行、主线程 0.2s 轮询它——不超时（timeout_seconds=-1）时挂起的
         # 请求也能被看板「强制停止」秒级打断
         self._stop_event: object | None = None
+        # 瞬时故障重试参数（测试可覆盖以退避归零加速）
+        self.retry_attempts = _LLM_MAX_ATTEMPTS
+        self.retry_backoff: tuple[float, ...] = _LLM_RETRY_BACKOFF
 
     def _acc_usage(self, data: dict, provider: str) -> None:
         u = data.get("usage") or {}
@@ -339,6 +357,9 @@ class LLMClient:
         turn = 0
         # max_turns <= 0（如 -1）= 不设轮数上限：只有 finish / 停止信号 / 异常能结束循环
         unlimited = max_turns is None or max_turns <= 0
+        no_tool_turns = 0        # 连续未调用工具的轮数（连续过多升级强制收尾）
+        repeat_calls: Counter[tuple[str, str]] = Counter()  # (工具, 参数) → 次数
+        forced_reason = ""       # 非空 = 因卡住/轮数耗尽强制收尾（而非 finish）
         while unlimited or turn < max_turns:
             turn += 1
             # 强制停止（看板置位）：在模型请求之前先看一眼，避免多跑一轮
@@ -357,14 +378,22 @@ class LLMClient:
                 log.info("💭 模型思考（第 %d 轮）：\n%s", turn, _clip_thinking(reasoning))
 
             if not tool_calls:
-                # 模型直接输出文字而非调用工具：提醒其走 finish 协议
+                # 模型直接输出文字而非调用工具：提醒其走 finish 协议；
+                # 连续多轮提醒仍不调工具视为卡住，升级强制收尾（防无限循环）
+                no_tool_turns += 1
                 said = (assistant_msg.get("content") or "").strip()[:200]
                 log.debug("第 %d 轮模型未调用工具，输出：%s", turn, said)
+                if no_tool_turns >= _NO_TOOL_FORCE_TURNS:
+                    forced_reason = (f"连续 {no_tool_turns} 轮未调用任何工具"
+                                     "（疑似卡住）")
+                    break
                 self.messages.append(self._user(
                     "请调用 finish 工具给出任务结论（action/summary 等字段）。"
                     "不要用纯文本回复。"
                 ))
                 continue
+
+            no_tool_turns = 0
 
             for call in tool_calls:
                 # 同一轮多个工具调用之间也检查：停止请求一个工具周期内即生效
@@ -382,23 +411,38 @@ class LLMClient:
                     except Exception:  # noqa: BLE001 进度回调失败不影响执行
                         pass
                 result = dispatch_tool(ctx, name, args_json)
+                # 完全相同参数的重复调用检测：给打转的模型一个止损信号
+                # （实测会 100+ 轮重读同一批文件）。计数仅存内存，任务结束即弃
+                repeat_calls[(name, args_json or "")] += 1
+                repeats = repeat_calls[(name, args_json or "")]
+                if repeats >= _REPEAT_CALL_WARN:
+                    if repeats == _REPEAT_CALL_WARN:
+                        log.warning("工具调用 [%d] %s 已 %d 次以完全相同的"
+                                    "参数重复执行", turn, name, repeats)
+                    result += (
+                        f"\n\n⚠️ 提醒：这是第 {repeats} 次以完全相同的参数调用 "
+                        f"{name}，重复执行不会产生新信息。请基于已有结果推进"
+                        "（写入/修改/下一步操作）；若在等待外部变化，请换一种"
+                        "验证方式；若已无法推进，请调用 finish（action=blocked）"
+                        "说明原因。")
                 log.debug("工具结果 [%d] %s：%s", turn, name, result[:200].replace("\n", " "))
                 self.messages.append(self._tool_result(call_id, result))
 
             self._trim_context()
 
-        # 轮数耗尽（不设上限时循环只能被 finish/停止/异常离开，到不了这里）：
-        # 要求强制收尾
-        log.warning("工具循环达到最大轮数 %d，要求强制收尾", max_turns)
+        # 强制收尾：轮数耗尽，或连续多轮无工具调用（不设上限时循环本只能被
+        # finish/停止/异常离开；轮数有限时到不了 while 出口的只有这两种）
+        forced_reason = forced_reason or f"已达到最大工作轮数 {max_turns}"
+        log.warning("%s，要求强制收尾", forced_reason)
         if ctx.stop_event is not None and ctx.stop_event.is_set():
             raise TaskStopped()
         if on_progress is not None:
             try:
-                on_progress(f"达到最大轮数 {max_turns}，要求强制收尾")
+                on_progress(f"{forced_reason}，要求强制收尾")
             except Exception:  # noqa: BLE001
                 pass
         self.messages.append(self._user(
-            "已达到最大工作轮数。请立即调用 finish 工具：能完成的部分说明完成度，"
+            f"{forced_reason}。请立即调用 finish 工具：能完成的部分说明完成度，"
             "未完成的部分用 action=blocked 并在 notes 里说明剩余工作。"
         ))
         try:
@@ -585,11 +629,12 @@ class LLMClient:
         """httpx 超时值：timeout_seconds <= 0（约定 -1）= 不超时，无限等待响应。"""
         return None if self.cfg.timeout_seconds <= 0 else self.cfg.timeout_seconds
 
-    def _timeout_error(self, e: Exception) -> LLMError:
+    def _timeout_error(self, e: Exception, attempts: int = 1) -> LLMError:
         # 可行动指引：思考型模型 + 长上下文时单轮 300s 常不够，用户需要
         # 知道去哪儿调、任务怎么恢复，而不是只看到一个裸的 timed out
+        retried = f"（含自动重试共 {attempts} 次尝试）" if attempts > 1 else ""
         return LLMError(
-            f"请求大模型超时：{self.cfg.timeout_seconds} 秒内未返回。"
+            f"请求大模型超时：{self.cfg.timeout_seconds} 秒内未返回。{retried}"
             "思考型模型/长上下文单轮生成常需更久，可在看板设置页「大模型接入」"
             "把「超时秒数」调大（如 600~900；-1 = 不超时，挂起时靠「强制停止」"
             "打断）后重试；本任务会被标为 blocked，重置为待办即可按原优先级重跑"
@@ -602,23 +647,61 @@ class LLMClient:
         timeout = self._request_timeout()
         log.debug("LLM 请求 %s model=%s msgs=%d timeout=%s",
                   url, self.cfg.model, len(self.messages), timeout)
-        if self._stop_event is not None:
-            resp = self._post_stop_aware(url, body, req_headers, timeout,
-                                         self._stop_event)
-        else:
+        stop = self._stop_event
+        max_attempts = self.retry_attempts
+        backoff = self.retry_backoff
+        for attempt in range(1, max_attempts + 1):
+            is_last = attempt == max_attempts
             try:
-                resp = httpx.post(url, content=body, headers=req_headers,
-                                  timeout=timeout)
+                if stop is not None:
+                    resp = self._post_stop_aware(url, body, req_headers,
+                                                 timeout, stop)
+                else:
+                    resp = httpx.post(url, content=body, headers=req_headers,
+                                      timeout=timeout)
             except httpx.TimeoutException as e:
-                raise self._timeout_error(e) from e
+                if is_last:
+                    raise self._timeout_error(e, attempt) from e
+                reason = f"请求超时（timeout={timeout}）"
+            except httpx.TransportError as e:
+                if is_last:
+                    raise LLMError(
+                        f"请求大模型失败：{e}（已自动重试 {attempt - 1} 次）") from e
+                reason = f"网络传输错误：{e}"
             except httpx.HTTPError as e:
+                # 非传输类 HTTP 层异常（重定向过多等）：重试无意义，保持旧行为
                 raise LLMError(f"请求大模型失败：{e}") from e
-        if resp.status_code != 200:
-            raise LLMError(f"大模型返回 HTTP {resp.status_code}：{resp.text[:500]}")
-        try:
-            return resp.json()
-        except ValueError as e:
-            raise LLMError(f"大模型返回非 JSON：{resp.text[:500]}") from e
+            else:
+                if resp.status_code == 200:
+                    try:
+                        return resp.json()
+                    except ValueError as e:
+                        raise LLMError(
+                            f"大模型返回非 JSON：{resp.text[:500]}") from e
+                if resp.status_code in _RETRYABLE_STATUS and not is_last:
+                    reason = f"HTTP {resp.status_code}"
+                else:
+                    suffix = (f"（已自动重试 {attempt - 1} 次）"
+                              if attempt > 1 else "")
+                    raise LLMError(f"大模型返回 HTTP {resp.status_code}："
+                                   f"{resp.text[:500]}{suffix}")
+            delay = backoff[min(attempt - 1, len(backoff) - 1)]
+            log.warning("LLM 请求第 %d/%d 次失败（%s），%.0f 秒后重试",
+                        attempt, max_attempts, reason, delay)
+            self._sleep_stop_aware(delay, stop)
+        raise LLMError("unreachable")  # pragma: no cover — 循环必经 return/raise
+
+    @staticmethod
+    def _sleep_stop_aware(seconds: float, stop) -> None:
+        """重试退避等待：每 0.2s 看一眼停止信号，「强制停止」秒级生效。"""
+        if stop is None:
+            time.sleep(seconds)
+            return
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if stop.is_set():
+                raise TaskStopped()
+            time.sleep(0.2)
 
     def _post_stop_aware(self, url: str, body: bytes, headers: dict,
                          timeout, stop) -> "httpx.Response":
@@ -647,10 +730,6 @@ class LLMClient:
             if not t.is_alive():
                 break
         if "err" in out:
-            e = out["err"]
-            if isinstance(e, httpx.TimeoutException):
-                raise self._timeout_error(e) from e
-            if isinstance(e, httpx.HTTPError):
-                raise LLMError(f"请求大模型失败：{e}") from e
-            raise e
+            # 原样抛回主线程：超时/传输错误的「重试 + 文案」统一收敛在 _post
+            raise out["err"]
         return out["resp"]

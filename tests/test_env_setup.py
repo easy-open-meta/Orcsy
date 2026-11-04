@@ -122,6 +122,14 @@ def check_whitelist_and_approval() -> None:
     # 镜像直下流程（技能阶段二B）所需的 shell/下载/解压/PATH 注册工具
     for c in ("powershell", "pwsh", "curl", "tar", "setx"):
         assert c in DEFAULT_ALLOWED_COMMANDS, c
+    # POSIX 只读探测/统计（模型高频误用被拦的 wc/head/tail/grep 等已放行）；
+    # 能写文件或执行任意命令的坚决不放
+    for c in ("ls", "cat", "wc", "head", "tail", "grep", "sort", "uniq",
+              "cut", "tr", "diff", "stat", "touch", "sha256sum"):
+        assert c in DEFAULT_ALLOWED_COMMANDS, c
+    for c in ("sed", "awk", "rm", "mv", "cp", "xargs", "bash", "sh", "env",
+              "find", "chmod"):
+        assert c not in DEFAULT_ALLOWED_COMMANDS, c
     tmp = Path(tempfile.mkdtemp(prefix="envwl-"))
     try:
         ctx = ToolContext(root=tmp)  # None = 默认全表

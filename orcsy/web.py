@@ -94,12 +94,13 @@ from . import skills as skills_lib
 from .agent import ProjectAgent
 from .approvals import get_manager
 from .config import (AppConfig, CommandsConfig, EnvConfig, LLMConfig,
-                     MirrorsConfig, PermissionsConfig, ProjectConfig,
-                     SchedulerConfig, TaskStatus,
+                     MirrorsConfig, NotifyConfig, PermissionsConfig,
+                     ProjectConfig, SchedulerConfig, TaskStatus,
                      ToolsConfig, UpdateConfig, WebConfig, normalize_llm_override,
                      resolve_commands, resolve_llm, resolve_permission_mode,
                      resolve_tools, validate_env_vars, validate_permission_mode)
 from .issues import IssueError, normalize_repo, sync_issues
+from . import notify
 from . import updater
 from .llm import LLMError, list_models, test_connection
 from .logging_setup import get_logger
@@ -160,6 +161,12 @@ class AppState:
         # 镜像源运行时（测速边车与 config.yaml 同目录；与 Scheduler 各持一份，
         # 数据经边车文件天然共享）
         self.mirror_runtime = mirror_runtime_for(config)
+        # 任务结束提醒开关（模块级旁路，同镜像源运行时随配置注入）
+        notify.configure(config.notify)
+        # 模型规格缓存（model id → context_window/max_output_tokens）：看板拉取
+        # 模型列表时更新；保存配置时用模型上报值钳制/校验输出与上下文上限——
+        # 模型服务端的限制才是真上限。内存态，重启后由下次拉取重建
+        self._model_meta: dict[str, dict] = {}
         self.agents: dict[str, ProjectAgent] = {
             p.name: ProjectAgent(p, resolve_llm(config.llm, p.llm,
                                                 context=f"项目 {p.name} 的 llm"),
@@ -169,7 +176,8 @@ class AppState:
                                  permission_timeout_minutes=config.permissions.timeout_minutes,
                                  allowed_commands=resolve_commands(config.commands, p),
                                  extra_env=config.env.vars or None,
-                                 mirror_runtime=self.mirror_runtime)
+                                 mirror_runtime=self.mirror_runtime,
+                                 path_autofix=config.env.path_autofix)
             for p in config.projects
         }
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
@@ -392,6 +400,10 @@ class AppState:
                 "token": self.config.update.token,
                 "auto_check": self.config.update.auto_check,
             },
+            "notify_cfg": {
+                "sound": self.config.notify.sound,
+                "system": self.config.notify.system,
+            },
             "logging": {"retention_days": self.config.logging.retention_days,
                         "max_total_mb": self.config.logging.max_total_mb},
             # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
@@ -414,6 +426,9 @@ class AppState:
             "commands_catalog": list(DEFAULT_ALLOWED_COMMANDS),
             # Agent 子进程自定义环境变量（代理/国内镜像），设置页可视化编辑
             "env_cfg": dict(self.config.env.vars),
+            # PATH 自动修复开关（env 节的 path_autofix）：env_cfg 本体保持
+            # vars dict 结构（前端 Object.entries 直接消费），开关另用顶级键
+            "env_path_autofix": self.config.env.path_autofix,
             # 镜像源管理：类别表 + 各类别源清单（内置在前、含启用态）+ 用户配置
             # + 测速结果边车（设置页「镜像源管理与测速选源」卡片全量数据）
             "mirror_categories": [
@@ -731,6 +746,10 @@ class AppState:
                 if spec:
                     m["context_window"] = m["context_window"] or spec[0]
                     m["max_output_tokens"] = m["max_output_tokens"] or spec[1]
+        # 缓存模型规格：保存配置时按模型上报值钳制/校验 max_tokens 与上下文窗口
+        for m in models:
+            if m["context_window"] is not None or m["max_output_tokens"] is not None:
+                self._model_meta[str(m["id"])] = m
         return {"ok": True, "models": models}
 
     def test_model(self, data: dict) -> dict:
@@ -910,8 +929,11 @@ class AppState:
             "tools": dict(cfg.tools.enabled),
             # 命令白名单开关：只落盘显式禁用/启用的项（空 dict = 默认全放行）
             "commands": dict(cfg.commands.enabled),
-            # Agent 子进程环境变量（代理/镜像）：整体落盘（空 dict = 不注入）
-            "env": {"vars": dict(cfg.env.vars)},
+            # Agent 子进程环境变量（代理/镜像）：整体落盘（空 dict = 不注入）；
+            # path_autofix 必须一起写回——漏写会在看板任意保存时静默重置为关
+            #（同 update 节漏写的教训）
+            "env": {"vars": dict(cfg.env.vars),
+                    "path_autofix": cfg.env.path_autofix},
             # 镜像源管理：用户添加源 + 禁用清单（测速结果在边车 JSON，不落这里）
             "mirrors": {"custom": {k: list(v) for k, v in cfg.mirrors.custom.items()},
                         "disabled": list(cfg.mirrors.disabled)},
@@ -921,6 +943,9 @@ class AppState:
             # 用户填的 update.repo/token 从 config.yaml 里静默抹掉
             "update": {"repo": cfg.update.repo, "token": cfg.update.token,
                        "auto_check": cfg.update.auto_check},
+            # 任务结束提醒开关必须一起写回：漏写会在看板任意保存时静默
+            # 重置为默认全开（同 update 节漏写的教训）
+            "notify": {"sound": cfg.notify.sound, "system": cfg.notify.system},
             "projects": [
                 {
                     "name": p.name, "path": str(p.path), "enabled": p.enabled,
@@ -947,6 +972,8 @@ class AppState:
         self.config = new_cfg
         # 镜像源运行时随配置重建（custom/disabled 可能变了；测速边车路径不变）
         self.mirror_runtime = mirror_runtime_for(new_cfg)
+        # 任务结束提醒开关随配置刷新（看板保存后立即生效，无需重启）
+        notify.configure(new_cfg.notify)
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
         self.agents = {p.name: ProjectAgent(p, resolve_llm(new_cfg.llm, p.llm,
@@ -958,7 +985,8 @@ class AppState:
                                             permission_timeout_minutes=new_cfg.permissions.timeout_minutes,
                                             allowed_commands=resolve_commands(new_cfg.commands, p),
                                             extra_env=new_cfg.env.vars or None,
-                                            mirror_runtime=self.mirror_runtime)
+                                            mirror_runtime=self.mirror_runtime,
+                                            path_autofix=new_cfg.env.path_autofix)
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
@@ -1435,6 +1463,8 @@ class AppState:
         # 分块保存：只带 scheduler/web/logging 的请求不校验/覆盖 llm
         llm = data.get("llm") or {}
         save_llm = "llm" in data
+        # 模型上限钳制提示（save_llm 分支填充；分块保存时保持为空）
+        clamped: list[str] = []
         provider = str(llm.get("provider", self.config.llm.provider)).strip().lower()
         if save_llm and provider not in ("openai", "anthropic"):
             raise ValueError(f"provider 不合法：{provider}（openai / anthropic）")
@@ -1458,10 +1488,24 @@ class AppState:
         max_context = int(llm.get("max_context_tokens")
                           or self.config.llm.max_context_tokens or 131072)
         if save_llm:
-            if not (256 <= max_tokens <= 200000):
-                raise ValueError("最大输出 max_tokens 应为 256~200000")
-            if not (4096 <= max_context <= 2_000_000):
-                raise ValueError("上下文窗口 max_context_tokens 应为 4096~2000000")
+            # 输出/上下文上限优先跟随模型上报规格（看板拉取模型列表时缓存在
+            # _model_meta）：超出自动钳到模型值——模型服务端的限制才是真上限，
+            # 写死的 20 万/200 万只是没拉过模型列表时的兜底
+            spec = self._model_meta.get(model) or {}
+            out_cap = spec.get("max_output_tokens")
+            ctx_cap = spec.get("context_window")
+            if isinstance(out_cap, int) and out_cap > 0 and max_tokens > out_cap:
+                max_tokens = out_cap
+                clamped.append(f"max_tokens 已按模型上限调整为 {out_cap}")
+            if isinstance(ctx_cap, int) and ctx_cap > 0 and max_context > ctx_cap:
+                max_context = ctx_cap
+                clamped.append(f"上下文窗口已按模型上限调整为 {ctx_cap}")
+            tokens_cap = out_cap if isinstance(out_cap, int) and out_cap > 0 else 200000
+            if not (256 <= max_tokens <= tokens_cap):
+                raise ValueError(f"最大输出 max_tokens 应为 256~{tokens_cap}")
+            ctx_cap_eff = ctx_cap if isinstance(ctx_cap, int) and ctx_cap > 0 else 2_000_000
+            if not (4096 <= max_context <= ctx_cap_eff):
+                raise ValueError(f"上下文窗口 max_context_tokens 应为 4096~{ctx_cap_eff}")
             # 超时 ≤0（如 -1）归一为 -1 = 不超时（挂起靠「强制停止」打断）；
             # 不能用 `or` 兜底——0 是显式意图该归一，而不是被当成「未填」回退 300
             raw_ts = llm.get("timeout_seconds")
@@ -1530,21 +1574,37 @@ class AppState:
             self.config.tools = ToolsConfig(
                 enabled=validate_tools_map(data.get("tools"), context="tools"))
 
+        # 任务结束提醒开关：分块保存，只带 notify 的请求不触碰其它配置
+        if "notify" in data:
+            not_cfg = data.get("notify") or {}
+            self.config.notify = NotifyConfig(
+                sound=bool(not_cfg.get("sound", self.config.notify.sound)),
+                system=bool(not_cfg.get("system", self.config.notify.system)),
+            )
+            notify.configure(self.config.notify)
+
         # 命令白名单开关：分块保存；键必须是默认白名单成员（400 透传看板）
         if "commands" in data:
             self.config.commands = CommandsConfig(
                 enabled=validate_commands_map(data.get("commands"), context="commands"))
 
         # Agent 子进程环境变量（代理/国内镜像）：分块保存，键名与保留变量校验。
-        # 兼容 {vars:{...}} 与平铺 {...} 两种前端/手写形态
+        # 兼容 {vars:{...}} 与平铺 {...} 两种前端/手写形态；path_autofix 键缺失
+        # =保持原值（mirror_apply 等只带 vars 的保存不得静默重置开关），显式
+        # 提供才更新——平铺形态键全部按环境变量处理，与 config.py 加载侧同规则
         if "env" in data:
             raw_env = data.get("env")
             if isinstance(raw_env, dict):
                 env_map = raw_env.get("vars") if "vars" in raw_env else raw_env
             else:
                 env_map = raw_env
+            path_autofix = self.config.env.path_autofix
+            if (isinstance(raw_env, dict) and "vars" in raw_env
+                    and "path_autofix" in raw_env):
+                path_autofix = bool(raw_env.get("path_autofix"))
             self.config.env = EnvConfig(
-                vars=validate_env_vars(env_map, context="env.vars"))
+                vars=validate_env_vars(env_map, context="env.vars"),
+                path_autofix=path_autofix)
 
         # 镜像源管理：分块保存（整块替换语义）；类别/URL 校验 400 透传看板
         if "mirrors" in data:
@@ -1589,7 +1649,9 @@ class AppState:
                 log.warning("日志归档/清理失败：%s", e)
 
         log.info("Web 保存配置：model=%s interval=%ss", self.config.llm.model, interval)
-        return {"ok": True, "message": "配置已保存并生效（看板 host/port 变更下次启动生效）"}
+        note = f"（{'；'.join(clamped)}）" if clamped else ""
+        return {"ok": True,
+                "message": f"配置已保存并生效（看板 host/port 变更下次启动生效）{note}"}
 
 
 class WebHandler(BaseHTTPRequestHandler):

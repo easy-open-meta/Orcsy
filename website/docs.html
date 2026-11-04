@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orcsy — 文档中心（安装教程 · 常见问题 · 配置速查）</title>
+<meta name="description" content="Orcsy 文档中心：完整安装教程（Windows 安装包 / 源码 / Docker / Linux systemd）、常见问题 Q&A、任务文件格式、Agent 工具清单、访问权限模式与配置速查。">
+<link rel="icon" href="assets/orcsy-icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/orcsy-icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/orcsy-icon-180.png">
+<script>
+/* 主题先行：在样式解析前落到 <html data-theme>，避免浅色用户首屏闪深色（与看板同款约定） */
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('ta-theme'); } catch (e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.dataset.theme = t;
+})();
+</script>
+<style>
+/* 本样式块与 index.html 的 <style> 保持同步（站点为自包含单文件页，改样式请两处同步） */
+:root{
+  --bg:#0b0f17; --panel:#131a2a; --card:#1a2235; --line:#253048; --line2:#31405f;
+  --text:#e5eaf6; --dim:#94a2be; --faint:#64748f;
+  --acc:#5b8cff; --acc2:#8f5bff; --ok:#3ddc97; --warn:#ffb454; --err:#ff6b81;
+  --nav-bg:rgba(11,15,23,.82); --badge-bg:rgba(26,34,53,.6);
+  --alt-bg:linear-gradient(180deg,rgba(19,26,42,.55),rgba(11,15,23,0));
+  --hero-glow:rgba(91,140,255,.22); --hero-glow2:rgba(143,91,255,.12);
+  --code-bg:#0d1322; --code-fg:#9db8ff;
+  --mono:Consolas,"Cascadia Mono","JetBrains Mono",monospace;
+}
+/* 浅色主题：与产品看板 light 令牌同源（theme.ts 的 LIGHT 常量） */
+:root[data-theme="light"]{
+  --bg:#f2f4f9; --panel:#ffffff; --card:#f7f8fc; --line:#e4e9f3; --line2:#cbd5ea;
+  --text:#1d2637; --dim:#5c6b85; --faint:#8e9bb3;
+  --acc:#2f6bff; --acc2:#7a3dff; --ok:#0e9f6e; --warn:#b45309; --err:#dc2643;
+  --nav-bg:rgba(255,255,255,.85); --badge-bg:rgba(255,255,255,.75);
+  --alt-bg:linear-gradient(180deg,rgba(255,255,255,.8),rgba(242,244,249,0));
+  --hero-glow:rgba(91,140,255,.16); --hero-glow2:rgba(143,91,255,.10);
+  --code-bg:#0d1322; --code-fg:#8fb3ff;  /* 代码块保持深色底，双主题下都易读 */
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+body{
+  background:var(--bg);color:var(--text);
+  font:15px/1.7 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+
+/* ---- 顶栏 ---- */
+.nav{position:sticky;top:0;z-index:50;background:var(--nav-bg);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line)}
+.nav-in{max-width:1120px;margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;gap:26px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--text)}
+.brand:hover{text-decoration:none}
+/* 站点 logo 与程序图标统一：assets/orcsy-icon.svg（外圈描边仅用于双主题下区分深色底板） */
+.brand img{width:28px;height:28px;border-radius:7px;display:block;flex:none;
+  box-shadow:0 0 0 1px var(--line2),0 1px 3px rgba(0,0,0,.25)}
+.brand img.sm{width:20px;height:20px;border-radius:5px}
+.nav-links{display:flex;gap:20px;margin-left:auto;font-size:14px}
+.nav-links a{color:var(--dim)}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+.nav-gh{display:flex;gap:10px}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:8px;font-size:14px;
+  padding:8px 16px;border:1px solid var(--line2);color:var(--text);background:var(--card);
+  transition:border-color .15s,transform .15s;cursor:pointer}
+.btn:hover{text-decoration:none;border-color:var(--acc);transform:translateY(-1px)}
+.btn svg{width:17px;height:17px;flex:none}
+.btn-pri{background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;color:#fff;font-weight:600}
+.btn-pri:hover{filter:brightness(1.12);border:none}
+
+/* ---- 章节通用 ---- */
+section{padding:56px 0}
+.sec-head{text-align:center;margin-bottom:34px}
+.sec-head h2{font-size:30px;letter-spacing:.4px}
+.sec-head p{color:var(--dim);margin-top:8px;max-width:680px;margin-left:auto;margin-right:auto}
+.kicker{display:inline-block;font-size:12.5px;font-weight:700;letter-spacing:2px;
+  color:var(--acc);text-transform:uppercase;margin-bottom:10px}
+.alt{background:var(--alt-bg)}
+
+/* ---- 文档内导航胶囊（复用主页快速开始页签样式，纯锚点无 JS） ---- */
+.tabs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:26px}
+.tab{border:1px solid var(--line2);background:var(--panel);color:var(--dim);border-radius:999px;
+  padding:8px 20px;font-size:14px;cursor:pointer;transition:all .15s}
+.tab:hover{color:var(--text);text-decoration:none;border-color:var(--acc)}
+
+/* ---- 快速开始/文档共用代码块 ---- */
+pre.code{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:18px 20px;
+  overflow:auto;font:13px/1.75 var(--mono);color:#c9d6f2}
+pre.code .c{color:#5c6f95}
+pre.code .k{color:#8fbcff}
+.doc-actions{display:flex;gap:12px;justify-content:center;margin-top:22px;flex-wrap:wrap}
+
+/* ---- 文档 ---- */
+.doc{max-width:960px;margin:0 auto}
+.doc h3{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.doc h3:first-child{margin-top:0}
+.doc p{color:var(--dim);margin-bottom:10px}
+.doc ul{margin:0 0 12px 22px;color:var(--dim)}
+.doc li{margin-bottom:5px}
+.doc li b,.doc p b{color:var(--text)}
+.doc code,td code,li code,.fcard p code{font-family:var(--mono);font-size:.92em;color:var(--code-fg);
+  background:rgba(91,140,255,.1);border-radius:4px;padding:1px 5px}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0 16px}
+th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+th{background:var(--panel);color:var(--text);font-weight:600;white-space:nowrap}
+td{color:var(--dim)}
+td:first-child{color:var(--text);font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+/* Q&A 表第一列是自然语言问题，不用等宽 */
+.qa td:first-child{font-family:inherit;font-size:13.5px;white-space:normal;font-weight:600}
+.pill{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:600}
+.pill-ok{background:rgba(61,220,151,.14);color:var(--ok)}
+.pill-warn{background:rgba(255,180,84,.14);color:var(--warn)}
+.pill-acc{background:rgba(91,140,255,.15);color:var(--acc)}
+.doc-more{margin-top:30px;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:22px 24px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.doc-more .t{flex:1;min-width:240px}
+.doc-more h4{font-size:15.5px;margin-bottom:4px}
+.doc-more p{font-size:13px;color:var(--dim);margin:0}
+
+/* ---- 页脚 ---- */
+footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);font-size:13px}
+.foot-in{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.foot-in .sp{margin-left:auto}
+.foot-in a{color:var(--dim)}
+
+@media (max-width:920px){
+  .nav-links{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 顶栏 ===== -->
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="index.html">
+      <img src="assets/orcsy-icon.svg" alt="Orcsy 图标" width="28" height="28">
+      Orcsy
+    </a>
+    <nav class="nav-links">
+      <a href="index.html">首页</a>
+      <a href="index.html#features">产品优势</a>
+      <a href="index.html#how">工作原理</a>
+      <a href="index.html#start">快速开始</a>
+      <a href="index.html#download">下载</a>
+    </nav>
+    <div class="nav-gh">
+      <button class="btn" id="themeBtn" title="切换浅色 / 深色" aria-label="切换浅色或深色主题">☀</button>
+      <a class="btn" href="https://github.com/easy-open-meta/Orcsy" target="_blank" rel="noopener" title="GitHub 仓库">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- ===== 文档中心 ===== -->
+<section id="docs">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">Documentation</span>
+      <h2>文档中心</h2>
+      <p>完整安装教程、常见问题、核心概念与配置速查；更完整的细节见仓库内 <code>README.zh-CN.md</code>（中文）与 <code>README.md</code>（English）。</p>
+    </div>
+
+    <div class="tabs">
+      <a class="tab" href="#doc-install">📦 安装教程</a>
+      <a class="tab" href="#doc-faq">❓ 常见问题</a>
+      <a class="tab" href="#doc-task">🧾 任务文件</a>
+      <a class="tab" href="#doc-tools">🛠 工具清单</a>
+      <a class="tab" href="#doc-perms">🛡 权限模式</a>
+      <a class="tab" href="#doc-config">⚙️ 配置速查</a>
+      <a class="tab" href="#doc-model">🧠 模型与安全</a>
+    </div>
+
+    <div class="doc">
+
+      <h3 id="doc-install">完整安装教程</h3>
+      <p>先按场景选方式（各方式命令速查见<a href="index.html#start">主页「快速开始」</a>标签页）：</p>
+      <table>
+        <tr><th>场景</th><th>推荐方式</th></tr>
+        <tr><td>Windows 个人电脑（最省事）</td><td><b>Windows 安装包</b>：托盘常驻、开机自启、程序内一键自更新，自带运行环境无需装 Python</td></tr>
+        <tr><td>想看 / 改源码、参与开发</td><td><b>源码运行</b>（uv，首次运行自动准备 Python 3.11+）</td></tr>
+        <tr><td>服务器 / NAS / 不想装运行环境</td><td><b>Docker Compose</b></td></tr>
+        <tr><td>Linux 服务器系统级常驻</td><td><b>systemd 服务</b>（install.sh 一键装）</td></tr>
+      </table>
+      <ul>
+        <li><b>通用前置</b>：一个可用的大模型 API Key（OpenAI 兼容协议或 Anthropic）；受管项目<b>建议是 git 仓库</b>——Agent 的改动全部发生在独立 worktree，系统统一提交合并（非 git 项目也能跑，只是没有版本控制整合）；</li>
+        <li><b>配置不用手写</b>：首次启动自动生成（Windows 在 <code>%APPDATA%\Orcsy</code>、Docker 在 <code>./orcsy-data</code>、Linux 在 <code>/var/lib/orcsy</code>），模型密钥等都能在看板「项目与设置」页可视化填写；</li>
+        <li><b>数据不进项目目录</b>：配置、技能库、日志、用量台账都集中在数据目录，受管项目里只新增 <code>tasks/</code> 与 <code>AGENT.md</code>。</li>
+      </ul>
+
+      <p><b>① Windows 安装包（推荐）</b></p>
+      <pre class="code"><span class="c"># 1. 下载 orcsy-setup-&lt;版本&gt;.exe（GitHub / Gitee Releases）→ 按向导安装</span>
+<span class="c">#    可勾选「初始化示例任务」在数据目录放示例模板；config.yaml 首次启动自动生成</span>
+<span class="c"># 2. 开始菜单/桌面打开「任务编排系统」→ 浏览器自动打开看板（127.0.0.1:5116）</span>
+<span class="c"># 3. 「项目与设置」页：填 llm.api_key / base_url / model → 新建项目（绝对路径）</span>
+<span class="c"># 4. 看板新建任务，或往项目 tasks/ 放 .md 任务文件 → 点「立即扫描一轮」</span></pre>
+      <ul>
+        <li>升级：托盘菜单 / 看板顶栏「检查更新」一键静默升级并自动重启。装在用户可写目录全程零 UAC；装在 Program Files 等系统目录会弹一次 UAC 授权（取消则不更新、程序照常运行），失败自动回滚并留安装日志；</li>
+        <li>卸载：安装包自带卸载器，可选是否一并删除用户数据（<code>%APPDATA%\Orcsy</code>）。</li>
+      </ul>
+
+      <p><b>② 源码运行</b></p>
+      <pre class="code">git clone https://github.com/easy-open-meta/Orcsy.git orcsy <span class="k">&amp;&amp;</span> cd orcsy
+uv sync                             <span class="c"># 本机需有 uv；首次运行自动准备 Python 3.11+</span>
+uv run orcsy init --dir run         <span class="c"># 生成 run/config.yaml 与任务/指引模板</span>
+uv run orcsy validate --config run/config.yaml
+uv run orcsy web --config run/config.yaml</pre>
+      <ul>
+        <li>不想常驻时用外部调度：<code>uv run orcsy run --config run/config.yaml --once</code>（或配置 <code>scheduler.run_once: true</code>），配 Windows 计划任务 / cron 触发单轮；</li>
+        <li>常用启动参数：<code>--port</code> 换端口、<code>--host 0.0.0.0</code> 对外暴露（务必配登录密码）、<code>--no-tray</code> 关托盘、<code>--no-browser</code> 不自动开浏览器、<code>--no-sched</code> 关定时调度（仅手动「立即扫描」）。</li>
+      </ul>
+
+      <p><b>③ Docker Compose（服务器 / NAS）</b></p>
+      <pre class="code">docker compose up -d --build        <span class="c"># 数据落在 ./orcsy-data，受管仓库放 ./projects</span></pre>
+      <ul>
+        <li>镜像基于 Python 3.12 slim + git，多阶段 uv 构建按 <code>uv.lock</code> 可复现，非 root 运行、tini 转发信号；容器内自动关闭托盘与自动开浏览器；</li>
+        <li>项目路径<b>必须写容器内路径</b> <code>/projects/&lt;项目名&gt;</code>（对应宿主 <code>./projects/&lt;项目名&gt;</code>，需是 git 仓库）；</li>
+        <li>推送凭据：HTTPS 把 token 写进远端 URL，或按 <code>docker-compose.yml</code> 注释只读挂载 <code>~/.ssh</code> 并设 <code>GIT_SSH_COMMAND</code>；提交身份默认 <code>Orcsy Agent &lt;orcsy@localhost&gt;</code>，可用 <code>ORCSY_GIT_NAME / ORCSY_GIT_EMAIL</code> 覆盖；</li>
+        <li>受管项目需要 node 等额外工具链时，按 <code>Dockerfile.custom</code> 叠加镜像（<code>apt-get install</code> 后改 compose 的 <code>image</code>）；</li>
+        <li>端口映射到公网 / NAS <b>务必先设置 <code>web.auth_password</code></b>。</li>
+      </ul>
+
+      <p><b>④ Linux systemd（系统级常驻）</b></p>
+      <pre class="code">sudo bash deploy/linux/install.sh   <span class="c"># 需 root：自动装 uv、建专用用户、装服务并启动</span>
+systemctl status orcsy              <span class="c"># 运行状态</span>
+sudo systemctl restart orcsy        <span class="c"># 改完 /var/lib/orcsy/config.yaml 后重启生效</span>
+journalctl -u orcsy -f              <span class="c"># 跟踪日志（文件日志在 /var/lib/orcsy/logs/）</span></pre>
+      <ul>
+        <li>布局：<code>/opt/orcsy</code> 程序与虚拟环境、<code>/var/lib/orcsy</code> 数据目录（config.yaml / skills / logs）、<code>/srv/orcsy-projects</code> 受管仓库（项目路径写 <code>/srv/orcsy-projects/&lt;项目名&gt;</code>）；</li>
+        <li>不想用 systemd 时可手动前台运行（数据目录默认 <code>~/.orcsy</code>）：<code>uv sync --no-dev &amp;&amp; uv run orcsy web --host 0.0.0.0 --no-tray --no-browser</code>；</li>
+        <li>卸载：<code>sudo bash deploy/linux/uninstall.sh</code>（数据目录与受管仓库默认保留，按脚本提示手动清理）。</li>
+      </ul>
+
+      <h3 id="doc-faq">常见问题 Q&amp;A</h3>
+      <table class="qa">
+        <tr><th style="width:30%">问题</th><th>解答</th></tr>
+        <tr><td>看板打不开 / 端口被占用？</td><td>看板默认 <code>127.0.0.1:5116</code>；显式指定的端口被占用会直接报错退出（不会静默换口）。改 <code>web.port</code>（或 <code>--port</code>），或释放占用进程后重启。</td></tr>
+        <tr><td>任务一直「受阻」？</td><td>常见三类原因：模型请求最终失败（超时 / 429 / 5xx 已自动退避重试，仍失败才判 blocked）、Agent 判断无法继续主动受阻、审批被拒或超时。看「运行日志」定位；一键「重新入队」后下轮<b>插队重跑</b>。</td></tr>
+        <tr><td>审批没人处理会卡死吗？</td><td>不会。挂起超时（默认 30 分钟，可配 1~1440）自动拒绝，拒绝意见会反馈给模型调整方案，任务不会永久挂起。</td></tr>
+        <tr><td>中途关机 / 强杀进程，任务会丢吗？</td><td>执行进度逐轮实时写回任务文件的「执行进度」节，已完成轮次不丢；下次启动自动把中断任务重置回 open 继续排队。</td></tr>
+        <tr><td>国内网络拉依赖失败？</td><td>三件套兜底：设置页「镜像源测速」选最快源、<code>env.vars</code> 注入 <code>GOPROXY</code> / <code>HTTP_PROXY</code> / <code>PIP_INDEX_URL</code>、env-setup 技能无代理时自动切国内镜像直下（零管理员权限、用户级 PATH 即装即用）。</td></tr>
+        <tr><td>支持哪些模型？怎么验证配对了？</td><td>OpenAI 兼容协议（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）与 Anthropic 协议；设置页「拉取模型列表」「测试连通性」一键验证，按所选模型自动填充上下文规格。</td></tr>
+        <tr><td>外网 / 服务器部署要注意什么？</td><td>看板默认只监听 127.0.0.1 且无鉴权；对外暴露<b>必须设置 <code>web.auth_password</code></b>（否则任何能访问端口的人可全权操作，还能看到 api_key）。会话 7 天有效、程序重启后需重登；鉴权不替代 TLS，公网建议再套一层反向代理上 HTTPS。</td></tr>
+        <tr><td>配置 / 日志 / 技能都存在哪？</td><td>Windows 在 <code>%APPDATA%\Orcsy</code>，Docker 在 <code>./orcsy-data</code>（容器内 <code>/data</code>），Linux 在 <code>/var/lib/orcsy</code>；含 <code>config.yaml</code>、<code>skills/</code>、<code>logs/</code> 与用量台账，<b>不写入受管项目目录</b>。</td></tr>
+        <tr><td>合并冲突 / 推送失败怎么处理？</td><td>提交与合并由系统执行；冲突时保留 Agent 分支等人工介入，不会自动强改。推送凭据用 HTTPS token（写进远端 URL）或 SSH key。</td></tr>
+        <tr><td>Windows 升级需要管理员权限吗？</td><td>装在用户可写目录时全程零 UAC 静默升级；装在 Program Files 等系统目录会弹一次 UAC（取消则不更新、程序照常运行）；升级失败自动回滚并留安装日志。</td></tr>
+        <tr><td>能不开看板、只当命令行调度器用吗？</td><td>可以：<code>orcsy run</code> 持续调度，<code>orcsy run --once</code> 单轮（配 cron / 计划任务，或 <code>scheduler.run_once: true</code>）；看板模式也可加 <code>--no-sched</code> 关定时调度、只手动触发。</td></tr>
+        <tr><td>托盘图标没出现 / 不想要托盘？</td><td>用 <code>--no-tray</code> 启动（Docker 内自动关闭）；看板功能不受影响，直接访问 <code>127.0.0.1:5116</code>。</td></tr>
+      </table>
+
+      <h3 id="doc-task">任务文件</h3>
+      <p>每个任务一个 Markdown 文件，放在项目的 <code>tasks/</code> 目录，文件名即任务 ID。YAML frontmatter 写元信息，正文写需求 / 现象 / 验收标准：</p>
+      <pre class="code">---
+title: 修复登录页在 125% 缩放下的布局错位
+priority: P1            <span class="c"># P0~P4，数字越小越优先</span>
+status: open            <span class="c"># open / in_progress / done / blocked / cancelled</span>
+labels: [bug, ui]
+assignee: my-app        <span class="c"># 可选：只允许指定项目的 Agent 领取</span>
+---
+
+<span class="c">## 现象</span>
+125% 缩放时登录按钮溢出卡片…
+
+<span class="c">## 验收标准</span>
+- 100% / 125% / 150% 缩放下布局正常</pre>
+      <ul>
+        <li>状态机：<code>open → in_progress → done / blocked / cancelled</code>；done 自动归档到 <code>tasks/done/</code>；</li>
+        <li>执行进度实时写回任务文件的「执行进度」节——进程被强杀也不丢；意外中断的任务下次启动自动重置回 open；</li>
+        <li>看板拖拽排序落盘 frontmatter 的 <code>order</code> 字段：Agent 领取顺序<b>优先级 P0~P4 始终优先，同一优先级内按 order</b>（未排序的排在同 P 已排序任务之后，删除该行回到自动排序）；</li>
+        <li>每个项目的 <code>AGENT.md</code> 是该项目的最高行为准则（技术栈、运行/测试命令、编码规范），新建项目时可按探测出的技术栈自动生成。</li>
+      </ul>
+
+      <h3 id="doc-tools">Agent 工具清单（14 个，除 finish 外逐个可开关）</h3>
+      <table>
+        <tr><th>工具</th><th>作用</th><th>类型</th></tr>
+        <tr><td>list_dir</td><td>列出项目文件结构（自动忽略 .git / node_modules 等）</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>read_file</td><td>读文件（按行分页，超长自动截断）</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>grep</td><td>正则搜索代码（glob 过滤）</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>find_files</td><td>按文件名 glob 查找（如 <code>*.py</code>）</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>read_skill</td><td>读取技能库中某个技能的全文</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>web_fetch</td><td>抓取公网 URL 正文（HTML 剥标签；内网/回环地址一律拒绝，SSRF 防护）</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>speedtest_mirrors</td><td>HTTP 测速内置/自定义镜像源，按各类别给出「最快优先」排序（结果与看板共享）</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>write_file</td><td>创建 / 整体重写文件</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>edit_file</td><td>精确文本替换（old_string 须唯一匹配）</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>multi_edit</td><td>同一文件一次多处替换（全有或全无，失败不落盘）</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>delete_file</td><td>删除文件；删目录须显式 <code>recursive: true</code></td><td><span class="pill pill-warn">高风险</span></td></tr>
+        <tr><td>move_file</td><td>移动 / 重命名（目标已存在须 <code>overwrite: true</code>）</td><td><span class="pill pill-warn">高风险</span></td></tr>
+        <tr><td>run_command</td><td>执行白名单命令（python / pytest / node / cargo / go / dotnet / git / uv、winget / scoop 等包管理器、powershell / curl / tar / setx 镜像直下与 PATH 注册、ls / cat / grep / where 等只读探测统计…）；缺工具链时按 <code>env-setup</code> 技能自动安装（需过审批），新装工具立即可用</td><td><span class="pill pill-warn">高风险</span></td></tr>
+        <tr><td>finish</td><td>给出结构化结论（completed / blocked / cannot_do + 摘要 + 提交信息）</td><td><span class="pill pill-ok">协议</span></td></tr>
+      </table>
+      <p>工具开关支持<b>全局默认 + 每项目覆盖</b>（看板设置页与项目对话框可视化编辑，或配置文件 <code>tools:</code> / <code>projects[].tools:</code>）；被禁工具不会下发给模型，执行层兜底拦截。<code>finish</code> 为任务结束的协议工具，始终可用。</p>
+
+      <h3 id="doc-perms">访问权限模式（人工审批）</h3>
+      <table>
+        <tr><th>模式</th><th>语义</th><th>挂起等待批准的操作</th></tr>
+        <tr><td>ask_on_change</td><td><b>变更前询问</b></td><td>全部变更类：write / edit / multi_edit / delete / move / run_command</td></tr>
+        <tr><td>autonomous</td><td><b>自主模式</b>（有风险时询问）</td><td>仅高风险：delete_file / move_file / run_command</td></tr>
+        <tr><td>full_access</td><td><b>完全访问</b>（减少确认次数，默认）</td><td>无——与历史行为一致</td></tr>
+      </table>
+      <ul>
+        <li>命中审批的操作<b>不执行、零副作用</b>，任务线程挂起；看板顶栏出现「🔔 待审批」，任务行标注「⏸ 待审批」；</li>
+        <li>批准 / 拒绝 / 「本任务内始终允许该工具」三种响应；超时（默认 30 分钟，可配）自动拒绝，任务不会永久挂起；</li>
+        <li>全局 <code>permissions.mode</code> + 项目级 <code>permission_mode</code> 覆盖；拒绝与超时都会反馈给模型调整方案或按 blocked 收尾，全程进度留痕。</li>
+      </ul>
+
+      <h3 id="doc-config">配置速查</h3>
+      <table>
+        <tr><th>配置项</th><th>说明</th></tr>
+        <tr><td>llm.*</td><td>模型接入：provider（openai 兼容 / anthropic）、api_key、base_url、model、temperature、max_tokens、上下文窗口、思考开关、超时</td></tr>
+        <tr><td>scheduler.*</td><td>扫描间隔（默认 300s）、并行 Agent 数（1~16）、run_once 单轮模式</td></tr>
+        <tr><td>web.*</td><td>看板监听地址/端口（默认 127.0.0.1:5116）、自动开浏览器、<b>auth_password 登录鉴权</b>（外网部署务必设置）</td></tr>
+        <tr><td>tools / permissions</td><td>全局工具开关（未列出默认启用）；全局访问权限模式与审批超时</td></tr>
+        <tr><td>env / mirrors</td><td>Agent 子进程环境变量注入（GOPROXY / HTTP_PROXY / PIP_INDEX_URL 等，国内拉依赖兜底，不允许覆盖 PATH）；镜像源管理：7 类内置 + 自定义源、逐个禁用，测速选源</td></tr>
+        <tr><td>projects[]</td><td>name / path / enabled / tasks_dir / guide_file / 每轮任务数 / 轮数上限（<b>-1 不设上限</b>）/ allowed_branch / allowed_commands，以及 llm、repo（Issues）、tools、permission_mode 四个按项目覆盖项</td></tr>
+        <tr><td>update.*</td><td>Gitee 自更新源仓库 / 私有令牌 / 启动自动检查</td></tr>
+        <tr><td>notify.*</td><td>任务结束提醒：完成/受阻时提示音 + 托盘气泡系统通知（默认全开，手动停止不提醒），看板设置页「🔔 提醒设置」可视化编辑</td></tr>
+        <tr><td>logging.*</td><td>级别、文件路径、保留天数（写满 N 天自动归档清理）</td></tr>
+      </table>
+
+      <h3 id="doc-model">模型接入与安全边界</h3>
+      <ul>
+        <li><b>OpenAI 兼容协议</b>覆盖 DeepSeek / GLM 智谱 / Kimi / 通义 / OpenAI / Ollama / vLLM 等，另支持 <b>Anthropic 协议</b>；设置页可拉取模型列表、一键测试连通性、按所选模型自动填充上下文规格；</li>
+        <li>文件工具禁锢在项目根（worktree）内，绝对路径与 <code>../</code> 穿越一律拒绝；命令执行有白名单（可按项目自定义）；</li>
+        <li>git 提交 / 合并 / 推送由系统执行，Agent 无权操作版本控制；合并冲突时保留分支等人工介入；</li>
+        <li>看板开启 <code>web.auth_password</code> 后所有页面与 API 需先登录（HttpOnly 会话、防爆破延迟）；鉴权不替代 TLS，公网部署建议再套一层反向代理上 HTTPS；</li>
+        <li><b>国内网络适配</b>：镜像源 HTTP 测速选源（最快源写入 Agent 子进程环境变量）、<code>env.vars</code> 代理/镜像变量注入、env-setup 缺环境自安装（无代理时自动切国内镜像直下）三件套，拉依赖失败不再卡死任务。</li>
+      </ul>
+
+      <div class="doc-more">
+        <div class="t">
+          <h4>📖 完整文档</h4>
+          <p>部署细节（Docker 挂载 / Git 凭据 / systemd 管理）、Issues 集成规则、技能库使用、自更新机制、目录结构与开发指南——见仓库内双语文档。</p>
+        </div>
+        <a class="btn" href="https://github.com/easy-open-meta/Orcsy/blob/main/README.md" target="_blank" rel="noopener">README (English)</a>
+        <a class="btn" href="https://gitee.com/java-and-net/Orcsy/blob/master/README.zh-CN.md" target="_blank" rel="noopener">README.zh-CN（中文）</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 页脚 ===== -->
+<footer>
+  <div class="wrap foot-in">
+    <span class="brand" style="font-size:15px">
+      <img class="sm" src="assets/orcsy-icon.svg" alt="Orcsy 图标" width="20" height="20">
+      Orcsy · AI Agent 任务编排系统
+    </span>
+    <span class="sp"></span>
+    <a href="index.html">返回主页</a>
+    <a href="https://github.com/easy-open-meta/Orcsy" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://gitee.com/java-and-net/Orcsy" target="_blank" rel="noopener">Gitee</a>
+    <a href="index.html#download">下载</a>
+    <span>Copyright © 2026 易开元(EOM)</span>
+  </div>
+</footer>
+
+<script>
+// 浅/深主题切换：与看板同款 localStorage 键（ta-theme），图标随当前主题翻转
+(function () {
+  var btn = document.getElementById('themeBtn');
+  function sync() {
+    btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀' : '☾';
+    btn.title = document.documentElement.dataset.theme === 'dark' ? '切换浅色' : '切换深色';
+  }
+  btn.addEventListener('click', function () {
+    var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('ta-theme', next); } catch (e) {}
+    sync();
+  });
+  sync();
+})();
+</script>
+</body>
+</html>

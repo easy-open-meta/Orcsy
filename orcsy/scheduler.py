@@ -53,7 +53,8 @@ class Scheduler:
                          permission_timeout_minutes=config.permissions.timeout_minutes,
                          allowed_commands=resolve_commands(config.commands, p),
                          extra_env=config.env.vars or None,
-                         mirror_runtime=self.mirror_runtime)
+                         mirror_runtime=self.mirror_runtime,
+                         path_autofix=config.env.path_autofix)
             for p in config.projects
             if p.enabled
         ]
@@ -125,7 +126,8 @@ class Scheduler:
                              permission_timeout_minutes=new_config.permissions.timeout_minutes,
                              allowed_commands=resolve_commands(new_config.commands, p),
                              extra_env=new_config.env.vars or None,
-                             mirror_runtime=self.mirror_runtime)
+                             mirror_runtime=self.mirror_runtime,
+                             path_autofix=new_config.env.path_autofix)
                 for p in new_config.projects
                 if p.enabled
             ]

@@ -113,7 +113,7 @@ class WebConfig:
 
 
 # 官方更新源：配置未写 update.repo 时作为默认值（零配置即可检查更新）
-DEFAULT_UPDATE_REPO = "https://gitee.com/java-and-net/agent-task-arrangement-system"
+DEFAULT_UPDATE_REPO = "https://gitee.com/java-and-net/Orcsy"
 
 
 @dataclass
@@ -124,6 +124,14 @@ class UpdateConfig:
     repo: str = DEFAULT_UPDATE_REPO
     token: str = ""               # 私有仓库的私人令牌；公开仓库可留空
     auto_check: bool = True       # 启动后自动检查一次更新
+
+
+@dataclass
+class NotifyConfig:
+    """任务结束提醒配置：完成/受阻时提示音 + 系统通知（cancelled 不提醒）。"""
+
+    sound: bool = True            # 提示音（Windows 系统音：完成 Asterisk / 受阻 Exclamation）
+    system: bool = True           # 系统通知（托盘气泡；--no-tray 启动时无渠道自动跳过）
 
 
 @dataclass
@@ -160,6 +168,9 @@ class EnvConfig:
     """
 
     vars: dict[str, str] = field(default_factory=dict)
+    # 任务启动时把扫描到的缺失工具目录追加写入用户 PATH（HKCU，只增不删、
+    # 写前备份）。默认关：这是系统级持久修改，由用户在看板显式开启
+    path_autofix: bool = False
 
 
 def validate_env_vars(data: object, context: str = "env") -> dict[str, str]:
@@ -224,6 +235,7 @@ class AppConfig:
     commands: CommandsConfig = field(default_factory=CommandsConfig)
     env: EnvConfig = field(default_factory=EnvConfig)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
+    notify: NotifyConfig = field(default_factory=NotifyConfig)
     mirrors: MirrorsConfig = field(default_factory=MirrorsConfig)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
@@ -414,7 +426,12 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     if not isinstance(env_raw, dict):
         raise ValueError("env 配置必须是字典（含 vars 键值对）。")
     env_map = env_raw.get("vars") if "vars" in env_raw else env_raw
-    env = EnvConfig(vars=validate_env_vars(env_map, context="env.vars"))
+    # path_autofix 只认规范形态（env.vars 嵌套）：平铺形态的键全部是环境变量，
+    # 多出的 path_autofix 键按变量处理（宁可不生效也不误读）
+    env = EnvConfig(
+        vars=validate_env_vars(env_map, context="env.vars"),
+        path_autofix=bool(env_raw.get("path_autofix", False)) if "vars" in env_raw else False,
+    )
 
     # 镜像源管理（内置 + 用户添加源，HTTP 测速选最快），加载期即校验
     mirrors_clean = validate_mirrors(raw.get("mirrors"), context="mirrors")
@@ -434,6 +451,15 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     permissions = PermissionsConfig(
         mode=validate_permission_mode(perm_raw.get("mode", "full_access")),
         timeout_minutes=perm_timeout,
+    )
+
+    # 任务结束提醒开关：布尔直取，缺失/非法一律回退默认（旁路功能不做强校验）
+    not_raw = raw.get("notify") or {}
+    if not isinstance(not_raw, dict):
+        raise ValueError("notify 配置必须是字典（键值对）。")
+    notify = NotifyConfig(
+        sound=bool(not_raw.get("sound", True)),
+        system=bool(not_raw.get("system", True)),
     )
 
     projects: list[ProjectConfig] = []
@@ -491,6 +517,6 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
                     update=update, tools=tools, commands=commands, env=env,
-                    permissions=permissions, mirrors=mirrors, projects=projects,
-                    source_path=path.resolve())
+                    permissions=permissions, notify=notify, mirrors=mirrors,
+                    projects=projects, source_path=path.resolve())
     return cfg

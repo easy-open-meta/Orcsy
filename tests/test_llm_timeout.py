@@ -25,8 +25,10 @@ from orcsy.tools import TaskStopped
 
 
 def _client(timeout: int) -> LLMClient:
-    return LLMClient(LLMConfig(api_key="k", base_url="http://localhost:9",
-                               model="m", timeout_seconds=timeout))
+    c = LLMClient(LLMConfig(api_key="k", base_url="http://localhost:9",
+                            model="m", timeout_seconds=timeout))
+    c.retry_backoff = (0, 0, 0)  # 自检不求真实退避
+    return c
 
 
 def check_timeout_value() -> None:

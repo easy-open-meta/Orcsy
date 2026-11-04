@@ -13,6 +13,7 @@ from pathlib import Path
 from .config import ProjectConfig
 from .logging_setup import get_logger
 from .skills import Skill
+from .tools import _path_key
 
 log = get_logger("prompts")
 
@@ -124,6 +125,30 @@ def _skills_section(skills: list[Skill] | None,
     )
 
 
+def _tools_section(tool_map: dict | None) -> str:
+    """本机工具节：只列不在系统默认 PATH、靠启动扫描注入会话的命令。
+
+    本来就在 PATH 里的命令不列（模型直接用即可，列了纯占上下文）；
+    空地图整节约省略。
+    """
+    if not tool_map:
+        return ""
+    extra_keys = {_path_key(d) for d in (tool_map.get("extra_dirs") or [])}
+    injected = []
+    for name, abs_path in sorted((tool_map.get("tools") or {}).items()):
+        if _path_key(str(Path(abs_path).parent)) in extra_keys:
+            injected.append(f"- {name} → {abs_path}")
+    if not injected:
+        return ""
+    lines = "\n".join(injected)
+    return (
+        f"## 本机工具\n\n"
+        f"以下命令已安装但不在系统默认 PATH，其目录已自动注入你的会话 PATH，"
+        f"用裸名直接调用即可（不要自己拼绝对路径）：\n\n"
+        f"{lines}\n\n"
+    )
+
+
 def _permissions_section(mode: str | None) -> str:
     """人工审批提示节：模式非 full_access 时告知模型操作可能被拒/超时。"""
     if not mode or mode == "full_access":
@@ -150,11 +175,14 @@ def build_system_prompt(
     skills: list[Skill] | None = None,
     tools: frozenset[str] | None = None,
     permission_mode: str | None = None,
+    tool_map: dict | None = None,
 ) -> str:
     """组装系统提示词：角色 → 项目指引 → 技能索引 → 工作环境 → 输出协议。
 
     tools：启用的工具名集合（含 finish）；None = 全启用，文案与旧版一致。
     permission_mode：访问权限模式；非 full_access 时追加人工审批提示节。
+    tool_map：任务启动扫描的本机工具地图（tools + extra_dirs），非空时追加
+    「本机工具」节——模型无需浪费轮数自己探测命令在哪。
     """
     guide = guide_content.strip()
     if len(guide) > guide_max_chars:
@@ -184,6 +212,7 @@ def build_system_prompt(
         f"<agent_guide>\n{guide}\n</agent_guide>\n\n"
         f"{_skills_section(skills, tools)}"
         f"{workspace}\n"
+        f"{_tools_section(tool_map)}"
         f"{_permissions_section(permission_mode)}\n"
         f"{_output_contract(tools)}"
     )

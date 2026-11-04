@@ -7,6 +7,7 @@ web_fetch 的集成测试在本机起一次性 HTTP 服务，并 monkeypatch 掉
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import tempfile
@@ -203,20 +204,29 @@ def check_web_fetch() -> None:
     T._assert_public_url = lambda url: None
     try:
         ctx = ToolContext(root=root)
-        out = T.tool_web_fetch(ctx, {"url": f"http://127.0.0.1:{port}/page"})
+
+        def _fetch(url, **kw):
+            # 回环偶发 RST（本项目已知环境怪癖，WinError 10054）：重试至多 3 次
+            last = ""
+            for _ in range(3):
+                last = T.tool_web_fetch(ctx, {"url": url, **kw})
+                if not last.startswith("错误：请求失败"):
+                    return last
+            return last
+
+        out = _fetch(f"http://127.0.0.1:{port}/page")
         assert "正文段落 内容" in out and "标题" in out, out
         assert "evil()" not in out and "b{}" not in out, "script/style 应被剥离"
         assert out.startswith("[HTTP 200"), out
-        out = T.tool_web_fetch(ctx, {"url": f"http://127.0.0.1:{port}/raw.txt"})
+        out = _fetch(f"http://127.0.0.1:{port}/raw.txt")
         assert "plain text body" in out, out
         # 二进制类型拒绝；404 报错文本；空 url
-        assert T.tool_web_fetch(ctx, {"url": f"http://127.0.0.1:{port}/img"}
-                                ).startswith("错误：不支持的内容类型"), "image/* 应拒绝"
-        assert "HTTP 404" in T.tool_web_fetch(ctx, {"url": f"http://127.0.0.1:{port}/nope"})
+        assert _fetch(f"http://127.0.0.1:{port}/img"
+                      ).startswith("错误：不支持的内容类型"), "image/* 应拒绝"
+        assert "HTTP 404" in _fetch(f"http://127.0.0.1:{port}/nope")
         assert T.tool_web_fetch(ctx, {"url": ""}).startswith("错误")
         # 截断参数生效
-        out = T.tool_web_fetch(ctx, {"url": f"http://127.0.0.1:{port}/raw.txt",
-                                     "max_chars": 1000})
+        out = _fetch(f"http://127.0.0.1:{port}/raw.txt", max_chars=1000)
         assert "plain text body" in out
         print("ok: web_fetch（HTML 剥标签/文本原样/二进制拒绝/404/空 url）")
     finally:
@@ -225,13 +235,120 @@ def check_web_fetch() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
+def check_scan_tool_env() -> None:
+    """启动扫描：扩充 PATH 语义下解析命令；目录注入的命令能被发现。"""
+    res = T.scan_tool_env()
+    assert set(res) == {"tools", "extra_dirs"}
+    assert "python" in res["tools"], res  # 测试本身就跑在 python 上，必然可解析
+    for name, p in res["tools"].items():
+        assert Path(p).is_absolute() and Path(p).exists(), (name, p)
+    # 临时常见目录里的假工具：证明 which 用的是扩充后的 PATH（注册表/常见目录），
+    # 而不是进程 PATH 快照——部署机上 npm 不在快照里也能被扫出来。
+    # 用白名单里本机没装的命令（deno），扫描只认 _KNOWN_TOOLS
+    fake_dir = Path(tempfile.mkdtemp(prefix="scan-env-"))
+    try:
+        exe = fake_dir / ("deno.cmd" if sys.platform == "win32" else "deno")
+        exe.write_text("echo ok\r\n" if sys.platform == "win32" else "#!/bin/sh\necho ok\n",
+                       encoding="utf-8")
+        if sys.platform != "win32":
+            exe.chmod(0o755)
+        original = T._TOOL_PATH_DIRS
+        try:
+            T._TOOL_PATH_DIRS = original + (str(fake_dir),)
+            res2 = T.scan_tool_env()
+            assert "deno" in res2["tools"], res2
+            assert Path(res2["tools"]["deno"]).parent == fake_dir
+            assert str(fake_dir) in [str(Path(d)) for d in res2["extra_dirs"]]
+        finally:
+            T._TOOL_PATH_DIRS = original
+    finally:
+        shutil.rmtree(fake_dir, ignore_errors=True)
+    print("ok: scan_tool_env（扩充 PATH 解析/绝对路径/目录注入命令可发现）")
+
+
+class _FakeKey:
+    """记录 SetValueEx 的假注册表键。"""
+
+    def __init__(self, value, vtype):
+        self.value, self.vtype = value, vtype
+        self.written = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def check_persist_path_dirs() -> None:
+    """写用户 PATH：去重/只增不删/类型保留/windowsapps 跳过/幂等/失败不抛。"""
+    if sys.platform != "win32":
+        print("skip: persist_path_dirs（非 Windows）")
+        return
+    import sys as _sys
+    import types
+    fake_mod = types.ModuleType("winreg")
+    fake_mod.HKEY_CURRENT_USER = 0x80000001
+    fake_mod.KEY_READ = 0x20019
+    fake_mod.KEY_WRITE = 0x20006
+    fake_mod.REG_EXPAND_SZ = 2
+    key = _FakeKey(r"%JAVA_HOME%\bin" + os.pathsep + r"C:\Program Files\nodejs", 2)
+    opened = []
+
+    def fake_openkey(hive, subkey, _reserved=0, _access=0):
+        assert hive == fake_mod.HKEY_CURRENT_USER and subkey == "Environment"
+        opened.append(1)
+        return key
+
+    fake_mod.OpenKey = fake_openkey
+    fake_mod.QueryValueEx = lambda k, name: (k.value, k.vtype)
+
+    def fake_setvalue(k, name, _r, vtype, data):
+        k.written = (vtype, data)
+        k.value = data  # 模拟真注册表：写回后重读可见（幂等断言依赖这点）
+
+    fake_mod.SetValueEx = fake_setvalue
+
+    real_mod = _sys.modules.get("winreg")
+    _sys.modules["winreg"] = fake_mod
+    real_os_name = os.name
+    try:
+        # 新目录追加：旧条目原样保留（含未展开的 %VAR%），类型保留
+        added = T.persist_path_dirs([r"C:\Program Files\nodejs",
+                                     r"C:\Tools\NewKit",
+                                     r"C:\Users\x\AppData\Local\Microsoft\WindowsApps"])
+        assert added == [r"C:\Tools\NewKit"], added
+        vtype, data = key.written
+        assert vtype == 2 and data.startswith(r"%JAVA_HOME%\bin")
+        assert r"C:\Program Files\nodejs" in data and r"C:\Tools\NewKit" in data
+        assert "windowsapps" not in data.lower()
+        # 幂等：再跑一次不再追加
+        assert T.persist_path_dirs([r"C:\Tools\NewKit"]) == []
+        assert key.written[1] == data  # 没有第二次写入
+        # 注册表不可用（OSError）：返回空且不抛
+        def broken_open(*a, **k):
+            raise OSError("access denied")
+        fake_mod.OpenKey = broken_open
+        assert T.persist_path_dirs([r"C:\Tools\Other"]) == []
+    finally:
+        if real_mod is not None:
+            _sys.modules["winreg"] = real_mod
+        else:
+            _sys.modules.pop("winreg", None)
+    print("ok: persist_path_dirs（去重/只增不删/类型保留/幂等/失败不抛）")
+
+
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):  # GBK 控制台打不出 ✅ 等字符
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     check_delete()
     check_move()
     check_multi_edit()
     check_find_files()
     check_ssrf_guard()
     check_web_fetch()
+    check_scan_tool_env()
+    check_persist_path_dirs()
     print("\n新工具实现级测试全部通过 ✅")
     return 0
 

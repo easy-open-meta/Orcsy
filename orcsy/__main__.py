@@ -67,7 +67,8 @@ web:
 #                            # 默认白名单含 python/node/cargo/go/dotnet/mvn/
 #                            # gradle/cmake/git、winget/scoop/choco 等包管理器、
 #                            # powershell/curl/tar/setx（env-setup 镜像直下需要）
-#                            # 及 where/cmd/dir 等探测命令
+#                            # 及 where/cmd/dir、ls/cat/wc/head/tail/grep 等
+#                            # 只读探测/统计命令（sed/awk/rm 等可写盘的不放）
 
 # env:                       # 注入 Agent 子进程（run_command）的环境变量：
 #   vars:                    #   国内网络拉依赖失败（EOF/超时）时配镜像/代理即可，
@@ -75,6 +76,9 @@ web:
 #     # HTTP_PROXY: http://127.0.0.1:7890    # 有代理时（Node/Python 一并生效）
 #     # PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
 #                            # 不允许覆盖 PATH/SYSTEMROOT/COMSPEC/WINDIR
+#   path_autofix: false      # 任务启动时自动扫描本机工具（node/npm/go/java 等），
+#                            # 缺失目录追加写入用户 PATH（HKCU，只增不删、写前
+#                            # 备份）；默认 false——系统级修改，看板设置页可开
 
 # mirrors:                   # 镜像源管理（看板设置页「镜像源管理与测速选源」可视化编辑）：
 #   custom:                  #   用户添加的镜像源（按类别分组）；Agent 下载安装包/配依赖
@@ -94,9 +98,13 @@ permissions:
   timeout_minutes: 30        # 审批挂起超时（分钟，1~1440）：无人响应自动拒绝，任务不会永久挂起
 
 update:
-  repo: https://gitee.com/java-and-net/agent-task-arrangement-system   # Gitee 更新源仓库（默认官方源，可改成自己的镜像；Release 附件放安装包）
+  repo: https://gitee.com/java-and-net/Orcsy   # Gitee 更新源仓库（默认官方源，可改成自己的镜像；Release 附件放安装包）
   token: ""                    # 私有仓库的私人令牌；公开仓库可留空
   auto_check: true             # 启动后自动检查一次更新
+
+notify:
+  sound: true                  # 任务结束提示音：完成/受阻时播 Windows 系统音（cancelled 不提醒）
+  system: true                 # 系统通知：完成/受阻时弹托盘气泡（看板没开也能收到；--no-tray 启动则无渠道）
 
 # 受管项目列表：每个项目由一个独立 Agent 负责。
 # 推荐直接在看板「项目与设置」页可视化新建（会自动创建任务目录与 AGENT.md）；
