@@ -80,6 +80,20 @@ class TaskExecutor:
         self.worktree_git = Git(self.worktree)
         self.log = get_logger(f"executor.{project.name}")
 
+    def probe_git_repo(self) -> bool:
+        """实时探测项目目录是否已是 git 仓库，并回写 is_git_repo 缓存。
+
+        会话创建时缓存的 is_git_repo 会过期（用户事后手动 init git），这里
+        先做廉价的 .git 存在性预判：没有 .git 直接判否；有 .git 才跑一次
+        git rev-parse 复核（目录可能还没真正 init 完）。回写缓存让本会话
+        内的 worktree / 提交逻辑立即跟上实际状态。
+        """
+        if not self.project.path.is_dir() or not (self.project.path / ".git").exists():
+            self.is_git_repo = False
+        else:
+            self.is_git_repo = self.git.is_repo()
+        return self.is_git_repo
+
     def _make_approval_gate(self, task: Task):
         """按访问权限模式构建本任务的审批门；full_access 返回 None（零开销）。
 

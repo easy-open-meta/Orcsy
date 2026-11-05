@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NCard, NCheckbox, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref } from 'vue'
-import { openGuide, openProjectEdit, openTaskNew, openTaskView, store, ui } from '../store'
+import { openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { parseLogEntries, relTime } from '../utils'
 import type { ProjectT, TaskT } from '../api'
@@ -203,6 +203,19 @@ async function syncIssues(p: { name: string }): Promise<void> {
   void import('../store').then(m => m.refresh(true))
 }
 
+// ---- 刷新仓库信息：手动 init git 后点这里立即重取 git 状态 ----
+const gitRefreshing = ref('')
+async function refreshGit(p: { name: string }): Promise<void> {
+  gitRefreshing.value = p.name
+  try {
+    await refresh(true)
+    const cur = store.state?.projects.find(x => x.name === p.name)
+    window.$message?.(cur?.is_git_repo ? '已识别为 git 仓库' : '仍不是 git 仓库', 'success')
+  } catch (e: any) {
+    window.$message?.(e.message, 'error')
+  } finally { gitRefreshing.value = '' }
+}
+
 // ---- 批量删除任务：勾选行 → 批量操作条 → 确认删除；选择跨页保留 ----
 const checked = reactive<Record<string, string[]>>({})
 const batchDeleting = ref('')
@@ -338,6 +351,9 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <NTag size="small" :type="p.is_git_repo ? 'default' : 'warning'" :bordered="false">
               {{ p.is_git_repo ? 'git' : '非 git' }}
             </NTag>
+            <NButton size="tiny" quaternary class="git-refresh" :loading="gitRefreshing === p.name"
+                     title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
+                     @click="refreshGit(p)">↻</NButton>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
             <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
                   :type="p.issue_auto_pull.last_error ? 'error' : 'success'"
@@ -477,6 +493,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
 .phead { display: flex; gap: 6px; align-items: center; }
+.git-refresh { padding: 0 6px; font-size: 13px; }
 .path { font-size: 12px; color: var(--dim); margin-bottom: 8px; word-break: break-all; }
 .counts { float: right; }
 .quickadd { display: flex; gap: 6px; margin-bottom: 10px; }

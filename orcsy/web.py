@@ -430,7 +430,9 @@ class AppState:
                      "interval": p.repo["auto_pull_interval"]}
                     if (p.repo or {}).get("auto_pull_interval") else None
                 ),
-                "is_git_repo": agent.executor.is_git_repo,
+                # 实时探测而非会话缓存：用户可能事后手动 init git，5s 轮询
+                # 也能看到最新状态（探测带 .git 存在性预判，开销可忽略）
+                "is_git_repo": agent.executor.probe_git_repo(),
                 "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),
                 "tasks": all_tasks,
