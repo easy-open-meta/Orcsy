@@ -104,6 +104,8 @@ from .config import (AppConfig, CommandsConfig, EnvConfig, LLMConfig,
                      resolve_commands, resolve_llm, resolve_permission_mode,
                      resolve_tools, validate_env_vars, validate_permission_mode,
                      validate_web_security)
+from .executor import WORKTREE_DIR
+from .git_ops import Git, GitError
 from .issues import IssueError, normalize_repo, sync_issues
 from . import notify
 from . import updater
@@ -1154,12 +1156,33 @@ class AppState:
                 encoding="utf-8")
             created.append(proj.guide_file)
 
+        # 新项目/导入项目：git 就绪——非仓库则 git init，是仓库则补齐 .gitignore
+        # （任务目录 / AGENT.md / worktree 不入版本库）。已有条目与用户内容一律
+        # 不动；git 不可用等失败只记日志，不阻断建项。
+        git_notes: list[str] = []
+        if original is None and proj.path.is_dir():
+            git = Git(proj.path)
+            try:
+                if not git.is_repo():
+                    git.init()
+                    git_notes.append("已初始化 git 仓库")
+                added = git.ensure_gitignore([
+                    f"{proj.tasks_dir.strip('/')}/", proj.guide_file,
+                    f"{WORKTREE_DIR}/",
+                ])
+                if added:
+                    git_notes.append(f".gitignore 已忽略 {'、'.join(added)}")
+            except (GitError, OSError) as e:
+                log.warning("项目 %s git 初始化/忽略规则失败：%s", proj.name, e)
+
         self.scheduler.reload_config(self.config)
         self._apply_config(self.config)
         self._save_config(self.config)
         log.info("Web %s项目 %s（%s）", action, proj.name, proj.path)
-        return {"ok": True, "created": created, "message":
-                f"已{action}项目 {proj.name}" + (f"，初始化了 {'、'.join(created)}" if created else "")}
+        return {"ok": True, "created": created, "git": git_notes, "message":
+                f"已{action}项目 {proj.name}"
+                + (f"，初始化了 {'、'.join(created)}" if created else "")
+                + (f"；{'；'.join(git_notes)}" if git_notes else "")}
 
     def sync_project_issues(self, body: dict) -> dict:
         """拉取绑定仓库的 open Issues 导入任务队列（单向；去重含 done/ 归档）。"""

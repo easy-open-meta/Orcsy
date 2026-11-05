@@ -71,6 +71,38 @@ class Git:
 
     # ---- 变更 ----
 
+    def init(self) -> None:
+        """git init 当前目录（幂等：已是仓库时 no-op，不报错）。"""
+        if self.is_repo():
+            return
+        self._run("init")
+
+    def ensure_gitignore(self, entries: list[str]) -> list[str]:
+        """把 entries 追加进 .gitignore（幂等：已有的条目不重复写）。
+
+        逐行精确匹配（含注释行在内整行比对）判定是否已忽略，不做模糊
+        contains——避免 `tasks` 误判已覆盖 `tasks/` 之类的半覆盖状态。
+        返回实际新追加的条目；文件不存在则创建。失败抛 GitError 由上层兜底。
+        """
+        gitignore = self.repo / ".gitignore"
+        existing: set[str] = set()
+        if gitignore.exists():
+            existing = {
+                line.strip() for line in
+                gitignore.read_text(encoding="utf-8", errors="replace").splitlines()
+            }
+        missing = [e for e in entries if e not in existing]
+        if not missing:
+            return []
+        with gitignore.open("a", encoding="utf-8") as f:
+            # 追加前补一个空行，把新增段落与用户已有内容隔开
+            if existing:
+                f.write("\n")
+            f.write("# Orcsy：任务队列 / 指引 / worktree 不入版本库\n")
+            for e in missing:
+                f.write(f"{e}\n")
+        return missing
+
     def add_all(self) -> None:
         self._run("add", "-A")
 
