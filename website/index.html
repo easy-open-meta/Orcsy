@@ -179,6 +179,21 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 .foot-in .sp{margin-left:auto}
 .foot-in a{color:var(--dim)}
 
+/* ---- 用户指南横幅 ---- */
+.guide-banner{display:flex;gap:20px;align-items:center;flex-wrap:wrap;
+  max-width:1120px;margin:0 auto 22px;padding:22px 26px;
+  background:linear-gradient(120deg,rgba(91,140,255,.12),rgba(143,91,255,.08));
+  border:1px solid var(--line2);border-radius:14px;color:inherit;
+  transition:border-color .15s,transform .15s}
+.guide-banner:hover{border-color:var(--acc);transform:translateY(-2px)}
+.guide-banner .gb-text{flex:1;min-width:260px;color:inherit;text-decoration:none}
+.guide-banner .gb-text:hover{text-decoration:none}
+.guide-banner .gb-text:hover h3{color:var(--acc)}
+.guide-banner h3{font-size:19px;margin:4px 0 6px}
+.guide-banner p{font-size:13px;color:var(--dim);margin:0}
+.guide-banner .gb-actions{display:flex;gap:10px;flex-wrap:wrap}
+.guide-banner .btn:hover{transform:none}
+
 @media (max-width:920px){
   .grid{grid-template-columns:repeat(2,1fr)}
   .flow{grid-template-columns:1fr 1fr}
@@ -207,6 +222,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <a href="#how">工作原理</a>
       <a href="#start">快速开始</a>
       <a href="docs.html">文档</a>
+      <a href="guide.html">用户指南</a>
       <a href="#download">下载</a>
     </nav>
     <div class="nav-gh">
@@ -384,6 +400,17 @@ journalctl -u orcsy -f            <span class="c"># 跟踪服务日志</span></p
       <h2>文档说明</h2>
       <p>安装、使用与配置的完整文档已移至<a href="docs.html"><b>独立文档页</b></a>；更完整的细节见仓库内 <code>README.zh-CN.md</code>（中文）与 <code>README.md</code>（English）。</p>
     </div>
+    <div class="guide-banner">
+      <a class="gb-text" href="guide.html">
+        <span class="kicker">User Guide</span>
+        <h3>📖 用户指南 · 第一次使用 Orcsy 从这里开始</h3>
+        <p>面向普通使用者的完整上手教程：安装部署（Windows 安装包 / 源码 / Docker / Linux）、模型接入、项目接入、任务管理、看板操作、审批与常见问题——不懂编程也能照着做。</p>
+      </a>
+      <div class="gb-actions">
+        <a class="btn btn-pri" href="guide.html">阅读用户指南</a>
+        <a class="btn" href="guide-en.html">English</a>
+      </div>
+    </div>
     <div class="grid">
       <a class="fcard" href="docs.html#doc-install" style="color:inherit;text-decoration:none">
         <div class="ico">📦</div>
@@ -475,6 +502,7 @@ journalctl -u orcsy -f            <span class="c"># 跟踪服务日志</span></p
     <a href="https://github.com/easy-open-meta/Orcsy" target="_blank" rel="noopener">GitHub</a>
     <a href="https://gitee.com/java-and-net/Orcsy" target="_blank" rel="noopener">Gitee</a>
     <a href="docs.html">文档</a>
+    <a href="guide.html">用户指南</a>
     <a href="#download">下载</a>
     <span>Copyright © 2026 易开元(EOM)</span>
   </div>

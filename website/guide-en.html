@@ -1,0 +1,2173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orcsy User Guide — Setup, Features, Usage</title>
+<meta name="description" content="A step-by-step Orcsy guide for non-technical users: Windows installer, source, Docker, Linux systemd, model setup, projects, tasks, dashboard, approvals, skills, and FAQ.">
+<!-- 由仓库根目录的 user-guide.md 经 pandoc 生成；改动 Markdown 后请重新生成本页 -->
+<link rel="icon" href="assets/orcsy-icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/orcsy-icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/orcsy-icon-180.png">
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('ta-theme'); } catch (e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.dataset.theme = t;
+})();
+</script>
+<style>
+:root{
+  --bg:#0b0f17; --panel:#131a2a; --card:#1a2235; --line:#253048; --line2:#31405f;
+  --text:#e5eaf6; --dim:#94a2be; --faint:#64748f;
+  --acc:#5b8cff; --acc2:#8f5bff; --ok:#3ddc97; --warn:#ffb454; --err:#ff6b81;
+  --nav-bg:rgba(11,15,23,.82); --code-bg:#0d1322; --code-fg:#9db8ff;
+  --mono:Consolas,"Cascadia Mono","JetBrains Mono",monospace;
+}
+:root[data-theme="light"]{
+  --bg:#f2f4f9; --panel:#ffffff; --card:#f7f8fc; --line:#e4e9f3; --line2:#cbd5ea;
+  --text:#1d2637; --dim:#5c6b85; --faint:#8e9bb3;
+  --acc:#2f6bff; --acc2:#7a3dff; --ok:#0e9f6e; --warn:#b45309; --err:#dc2643;
+  --nav-bg:rgba(255,255,255,.85); --code-bg:#0d1322; --code-fg:#8fb3ff;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:84px}
+body{background:var(--bg);color:var(--text);
+  font:15px/1.75 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+
+.nav{position:sticky;top:0;z-index:50;background:var(--nav-bg);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line)}
+.nav-in{max-width:1120px;margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;gap:26px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--text)}
+.brand:hover{text-decoration:none}
+.brand img{width:28px;height:28px;border-radius:7px;display:block;flex:none;
+  box-shadow:0 0 0 1px var(--line2),0 1px 3px rgba(0,0,0,.25)}
+.brand img.sm{width:20px;height:20px;border-radius:5px}
+.nav-links{display:flex;gap:20px;margin-left:auto;font-size:14px}
+.nav-links a{color:var(--dim)}
+.nav-links a:hover,.nav-links a.on{color:var(--text);text-decoration:none}
+.nav-gh{display:flex;gap:10px}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:8px;font-size:14px;
+  padding:8px 16px;border:1px solid var(--line2);color:var(--text);background:var(--card);
+  transition:border-color .15s,transform .15s;cursor:pointer}
+.btn:hover{text-decoration:none;border-color:var(--acc);transform:translateY(-1px)}
+.btn svg{width:17px;height:17px;flex:none}
+.btn-pri{background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;color:#fff;font-weight:600}
+.btn-pri:hover{filter:brightness(1.12);border:none}
+
+.guide-wrap{max-width:1200px;margin:0 auto;padding:34px 24px 72px;
+  display:grid;grid-template-columns:250px minmax(0,1fr);gap:38px;align-items:start}
+.guide-toc{position:sticky;top:84px;max-height:calc(100vh - 110px);overflow:auto;
+  border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 12px}
+.toc-title{font-size:11.5px;font-weight:700;letter-spacing:1.6px;color:var(--faint);
+  text-transform:uppercase;padding:0 8px 10px;border-bottom:1px solid var(--line);margin-bottom:8px}
+#TOC ul{list-style:none;padding:0;margin:0}
+#TOC li{margin:1px 0}
+#TOC a{display:block;padding:5px 8px;border-radius:6px;color:var(--dim);font-size:13px;line-height:1.45}
+#TOC a:hover{background:rgba(128,140,180,.14);color:var(--text);text-decoration:none}
+#TOC a.on{background:rgba(91,140,255,.14);color:var(--acc);font-weight:600}
+
+.guide-body{max-width:900px;min-width:0}
+.lang-switch{display:flex;justify-content:flex-end;gap:8px;align-items:center;
+  font-size:13px;color:var(--faint);margin-bottom:6px}
+.lang-switch a{font-weight:600}
+.guide-body h1{font-size:34px;line-height:1.25;margin:0 0 16px;letter-spacing:.3px}
+.guide-body h2{font-size:25px;line-height:1.35;margin:52px 0 14px;padding-top:18px;
+  border-top:1px solid var(--line);scroll-margin-top:84px}
+.guide-body h3{font-size:19px;line-height:1.4;margin:30px 0 10px;scroll-margin-top:84px}
+.guide-body h4{font-size:16px;margin:22px 0 8px;scroll-margin-top:84px}
+.guide-body p,.guide-body li{color:var(--dim)}
+.guide-body p{margin:0 0 12px}
+.guide-body strong{color:var(--text)}
+.guide-body ul,.guide-body ol{margin:0 0 14px 24px}
+.guide-body li{margin:5px 0}
+.guide-body li>ul,.guide-body li>ol{margin-top:4px;margin-bottom:4px}
+.guide-body hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+.guide-body blockquote{border-left:3px solid var(--acc);background:rgba(91,140,255,.07);
+  border-radius:0 8px 8px 0;padding:12px 16px;margin:16px 0}
+.guide-body blockquote p:last-child{margin-bottom:0}
+.guide-body code{font-family:var(--mono);font-size:.92em;color:var(--code-fg);
+  background:rgba(91,140,255,.1);border-radius:4px;padding:1px 5px;word-break:break-word}
+.guide-body pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;
+  padding:16px 18px;overflow:auto;margin:16px 0;font:13px/1.75 var(--mono);color:#c9d6f2}
+.guide-body pre code{background:none;padding:0;border-radius:0;color:inherit;font-size:inherit;word-break:normal}
+.guide-body table{width:100%;border-collapse:collapse;font-size:13.5px;margin:16px 0}
+.guide-body th,.guide-body td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+.guide-body th{background:var(--panel);color:var(--text);font-weight:600}
+.guide-body td{color:var(--dim)}
+.guide-body td:first-child{color:var(--text)}
+.guide-body input[type="checkbox"]{margin-right:6px}
+.guide-body img{max-width:100%;height:auto}
+.to-top{position:fixed;right:22px;bottom:22px;width:40px;height:40px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;background:var(--card);
+  border:1px solid var(--line2);color:var(--dim);font-size:17px;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:40}
+.to-top:hover{color:var(--text);border-color:var(--acc);text-decoration:none}
+
+footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);font-size:13px}
+.foot-in{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.foot-in .sp{margin-left:auto}
+.foot-in a{color:var(--dim)}
+
+@media (max-width:920px){
+  .nav-links{display:none}
+  .guide-wrap{grid-template-columns:1fr;gap:20px;padding-top:24px}
+  .guide-toc{position:static;max-height:none;order:-1}
+  .guide-body{max-width:none}
+}
+@media (max-width:600px){
+  .guide-wrap{padding:18px 16px 52px}
+  .guide-body h1{font-size:28px}
+  .guide-body h2{font-size:22px;margin-top:40px}
+  .guide-body h3{font-size:17px}
+  .guide-body table{font-size:12.5px}
+  .guide-body th,.guide-body td{padding:6px 8px}
+}
+</style>
+</head>
+<body>
+
+
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="index.html">
+      <img src="assets/orcsy-icon.svg" alt="Orcsy 图标" width="28" height="28">
+      Orcsy
+    </a>
+    <nav class="nav-links">
+      <a href="index.html">首页</a>
+      <a href="index.html#features">产品优势</a>
+      <a href="index.html#how">工作原理</a>
+      <a href="index.html#start">快速开始</a>
+      <a href="docs.html">文档</a>
+      <a href="guide.html" class="on">用户指南</a>
+      <a href="index.html#download">下载</a>
+    </nav>
+    <div class="nav-gh">
+      <button class="btn" id="themeBtn" title="切换浅色 / 深色" aria-label="切换浅色或深色主题">☀</button>
+      <a class="btn" href="https://github.com/easy-open-meta/Orcsy" target="_blank" rel="noopener" title="GitHub 仓库">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</header>
+
+
+<main class="guide-wrap">
+  <aside class="guide-toc">
+    <div class="toc-title">On this page</div>
+    <nav id="TOC" aria-label="目录"><ul><li><a href="#1-quick-start-your-first-task-in-5-minutes">1. Quick start: your first task in 5 minutes</a></li><li><a href="#2-what-orcsy-is-and-what-it-can-do-for-you">2. What Orcsy is and what it can do for you</a></li><li><a href="#3-three-core-ideas-in-plain-english">3. Three core ideas in plain English</a></li><li><a href="#4-installation-choose-the-path-that-fits-you">4. Installation: choose the path that fits you</a></li><li><a href="#5-first-launch-connect-your-llm">5. First launch: connect your LLM</a></li><li><a href="#6-add-your-first-project">6. Add your first project</a></li><li><a href="#7-create-and-manage-tasks">7. Create and manage tasks</a></li><li><a href="#8-let-orcsy-start-working">8. Let Orcsy start working</a></li><li><a href="#9-dashboard-map-what-every-button-does">9. Dashboard map: what every button does</a></li><li><a href="#10-advanced-features-approvals-skills-issues-mirrors">10. Advanced features: approvals, skills, Issues, mirrors</a></li><li><a href="#11-data-backup-and-migration">11. Data, backup, and migration</a></li><li><a href="#12-faq-and-troubleshooting">12. FAQ and troubleshooting</a></li><li><a href="#13-glossary">13. Glossary</a></li><li><a href="#14-appendix-task-template-and-command-reference">14. Appendix: task template and command reference</a></li></ul></nav>
+  </aside>
+  <article class="guide-body">
+    <div class="lang-switch"><span>English</span><span>|</span><a href="guide.html">简体中文</a></div>
+    <h1 id="orcsy-user-guide">Orcsy User Guide</h1>
+<blockquote>
+<p>For first-time, non-technical users: install Orcsy, connect a
+project, create tasks, and understand every part of the dashboard —
+without needing to write code.</p>
+<p>Version: <strong>0.18.0</strong>　|　Default dashboard: <strong><a
+href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
+<p>ℹ️ The dashboard is currently Chinese-only. This guide uses English
+names for buttons and cards; a Chinese-label reference is in <a
+href="#91-top-toolbar">section 9.1</a>.</p>
+</blockquote>
+<hr />
+<h2 id="1-quick-start-your-first-task-in-5-minutes">1. Quick start: your
+first task in 5 minutes</h2>
+<p>If Orcsy is already installed and you just want to try it, do these
+five things:</p>
+<ol type="1">
+<li><strong>Open the dashboard</strong>: double-click the Orcsy desktop
+shortcut, or visit <a
+href="http://127.0.0.1:5116">http://127.0.0.1:5116</a>.</li>
+<li><strong>Connect a model</strong>: click <strong>Projects &amp;
+Settings</strong> in the top bar → fill in API Key, API base URL, and
+model under <strong>🤖 LLM Access</strong> → click <strong>Test
+connection</strong> → on success click <strong>Save model
+settings</strong>.</li>
+<li><strong>Add a project</strong>: click <strong>＋ New
+project</strong> at the top right → choose a project folder on your
+computer → click <strong>Save</strong>. Orcsy creates
+<code>tasks/</code> and <code>AGENT.md</code> inside it and leaves the
+rest of your code alone.</li>
+<li><strong>Add a task</strong>: go back to <strong>Dashboard</strong>,
+type a one-line task title in the project card (for example "Fix the
+login page at 125% zoom"), choose a priority, and click
+<strong>Add</strong>.</li>
+<li><strong>Let it run</strong>: click <strong>▶ Scan now</strong> in
+the top bar. The task moves from <strong>Open</strong> to <strong>In
+progress</strong>, then to <strong>Done</strong> or
+<strong>Blocked</strong>. If the project is a Git repository, you will
+also get a Git commit when it succeeds.</li>
+</ol>
+<blockquote>
+<p>💡 For your first run, use a <strong>test project</strong> or a
+<strong>copy</strong>. Orcsy really edits files and runs commands. In a
+Git repository, edits happen in a temporary work copy first and are
+merged back only on success; in a non-Git project, edits happen directly
+in the project folder.</p>
+</blockquote>
+<hr />
+<h2 id="2-what-orcsy-is-and-what-it-can-do-for-you">2. What Orcsy is and
+what it can do for you</h2>
+<h3 id="21-one-sentence">2.1 One sentence</h3>
+<p><strong>Orcsy is a tool that turns a written task into work done for
+you.</strong> You describe what you want in a Markdown file. Orcsy
+periodically checks the task list, hands the task to an AI agent, and
+lets it read code, edit files, and run tests inside your project. When
+it finishes, Orcsy commits the changes to Git and updates the task
+status.</p>
+<p>A simple way to picture the roles:</p>
+<ul>
+<li><strong>You</strong> are the product owner: you write down what to
+do and what "done" means.</li>
+<li><strong>Orcsy</strong> is the project manager: it prioritizes,
+schedules, and tracks progress.</li>
+<li><strong>The LLM</strong> is the engineer: it actually reads and
+changes the code.</li>
+<li><strong>The dashboard</strong> is the office display: you can always
+see what is running and where it stands.</li>
+</ul>
+<h3 id="22-what-it-is-good-at">2.2 What it is good at</h3>
+<ul>
+<li>Development tasks with clear acceptance criteria: bug fixes, small
+features, tests, copy changes, small refactors;</li>
+<li>Repetitive maintenance: run tests after a dependency bump, apply a
+config change in several places, generate documentation;</li>
+<li>Turning GitHub / Gitee / GitLab / Gitea Issues into development
+tasks automatically;</li>
+<li>Queuing work across several projects, or running several projects in
+parallel;</li>
+<li>Making progress overnight or over the weekend without someone
+watching.</li>
+</ul>
+<h3 id="23-what-it-is-not-good-at">2.3 What it is not good at</h3>
+<ul>
+<li>Vague requests where even you cannot say what "done" looks
+like;</li>
+<li>Tasks that need many product decisions, visual taste, or major
+database schema changes;</li>
+<li>Work that needs production databases, third-party admin consoles, or
+secret managers you have not given it access to;</li>
+<li>"One-click deploy to production" or app-store releases. Orcsy
+changes code and commits it; it does not deploy your product.</li>
+</ul>
+<h3 id="24-do-i-need-to-know-how-to-code">2.4 Do I need to know how to
+code?</h3>
+<p><strong>You do not need to write code, but you should be able
+to:</strong></p>
+<ul>
+<li>install Windows software and unzip files;</li>
+<li>sign up for an LLM API key on a provider's website;</li>
+<li>describe a task in a sentence or two, ideally with acceptance
+criteria;</li>
+<li>find your project folder on disk;</li>
+<li>read a Chinese/English message in the run log when something goes
+wrong.</li>
+</ul>
+<p>If you do not want to touch a command line at all, <strong>use the
+Windows installer</strong>. Everything else can be done by clicking in
+the browser.</p>
+<hr />
+<h2 id="3-three-core-ideas-in-plain-english">3. Three core ideas in
+plain English</h2>
+<h3 id="31-project">3.1 Project</h3>
+<p>A <strong>project</strong> is one code folder, for example
+<code>D:\Repos\my-app</code>.</p>
+<p>Orcsy only does two things inside it:</p>
+<ol type="1">
+<li>Creates a <code>tasks/</code> folder if it does not exist, to hold
+tasks;</li>
+<li>Creates an <code>AGENT.md</code> file if it does not exist, to tell
+the AI the rules of this project.</li>
+</ol>
+<p>It does <strong>not</strong> rearrange the rest of your repository,
+and it never writes configuration, logs, or skills into the project
+folder.</p>
+<h3 id="32-task">3.2 Task</h3>
+<p>A <strong>task</strong> is one Markdown file (<code>.md</code>)
+inside the project's <code>tasks/</code> folder.</p>
+<p>The file name is the task ID, for example
+<code>P1-fix-login-crash.md</code>. The top of the file holds metadata
+(title, priority, status); the body holds the request, symptoms, and
+acceptance criteria.</p>
+<p>You can:</p>
+<ul>
+<li>create a task by clicking in the dashboard;</li>
+<li>drop a <code>.md</code> file into <code>tasks/</code>;</li>
+<li>edit the file in any text editor.</li>
+</ul>
+<p>All three are equivalent, because the dashboard edits those same
+files.</p>
+<h3 id="33-agent">3.3 Agent</h3>
+<p>Each project has its own dedicated Agent. It is not a robot that sits
+around all day; it is an executor that wakes up when there is a
+task.</p>
+<p>When it works, it:</p>
+<ol type="1">
+<li>reads the project's <code>AGENT.md</code> to learn the stack, run
+commands, and coding rules;</li>
+<li>reads the task file to understand the request;</li>
+<li>in a Git repository, creates a <strong>temporary work copy</strong>
+(a Git worktree); every edit happens there first (non-Git projects are
+edited in place);</li>
+<li>reads files, edits files, runs tests and builds;</li>
+<li>reports the result; Orcsy then commits and merges back to the main
+branch;</li>
+<li>writes the result back into the task file and archives completed
+tasks under <code>tasks/done/</code>.</li>
+</ol>
+<blockquote>
+<p>💡 Why a temporary copy? Because AI makes mistakes too. In a Git
+project, edits stay in the copy until the task succeeds. If the task is
+blocked, the copy is discarded and your main working tree stays clean.
+Non-Git projects do not have this safety layer, so back up or practice
+on a copy first.</p>
+</blockquote>
+<hr />
+<h2 id="4-installation-choose-the-path-that-fits-you">4. Installation:
+choose the path that fits you</h2>
+<h3 id="41-pick-a-method">4.1 Pick a method</h3>
+<table>
+<thead>
+<tr>
+<th>Your situation</th>
+<th>Recommended method</th>
+<th>Difficulty</th>
+<th>What you need</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows PC, want the easiest path</td>
+<td><strong>Windows installer</strong></td>
+<td>★☆☆</td>
+<td>An API key</td>
+</tr>
+<tr>
+<td>Want to read or modify the source</td>
+<td><strong>Run from source</strong></td>
+<td>★★★</td>
+<td>Some command-line comfort, <code>uv</code></td>
+</tr>
+<tr>
+<td>Server or NAS, do not want a local runtime</td>
+<td><strong>Docker Compose</strong></td>
+<td>★★☆</td>
+<td>Basic Docker knowledge</td>
+</tr>
+<tr>
+<td>Linux server, want a boot-time service</td>
+<td><strong>Linux systemd</strong></td>
+<td>★★★</td>
+<td>root access, some Linux comfort</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>For most non-technical users, the <strong>Windows installer</strong>
+is enough.</p>
+</blockquote>
+<h3 id="42-option-1-windows-installer-recommended">4.2 Option 1: Windows
+installer (recommended)</h3>
+<h4 id="before-you-start">Before you start</h4>
+<ul>
+<li>Windows 10 / 11;</li>
+<li>an LLM API key (DeepSeek, Zhipu GLM, Kimi, OpenAI, Qwen, etc.);</li>
+<li>a project folder you want Orcsy to work on;</li>
+<li>ideally the project is a <strong>Git repository</strong> (not
+required, but then you lose automatic commit/merge).</li>
+</ul>
+<h4 id="steps">Steps</h4>
+<ol type="1">
+<li>Download <code>orcsy-setup-0.18.0.exe</code> from the release page:
+<ul>
+<li>Gitee: <a
+href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
+<li>GitHub: <a
+href="https://github.com/easy-open-meta/Orcsy/releases">https://github.com/easy-open-meta/Orcsy/releases</a></li>
+</ul></li>
+<li>Double-click it. If Windows SmartScreen appears, click <strong>More
+info</strong> → <strong>Run anyway</strong>.</li>
+<li>Follow the wizard. You can keep the default location
+<code>C:\Program Files\Orcsy</code>, or choose a <strong>user-writable
+folder</strong> such as <code>D:\Tools\Orcsy</code>.
+<ul>
+<li>Under <code>C:\Program Files</code>: future auto-updates will ask
+for administrator permission (UAC) once; click
+<strong>Yes</strong>.</li>
+<li>In a user-writable folder: future updates run silently with no
+prompt.</li>
+</ul></li>
+<li>Under optional tasks you may check <strong>Initialize sample
+tasks</strong>. This only places a sample template in the data
+directory; it is optional.</li>
+<li>Click <strong>Install</strong>. When it finishes, Orcsy starts
+automatically:
+<ul>
+<li>an Orcsy tray icon appears near the clock;</li>
+<li>your browser opens the dashboard at <a
+href="http://127.0.0.1:5116">http://127.0.0.1:5116</a>.</li>
+</ul></li>
+<li>If the browser does not open: right-click the tray icon →
+<strong>Show dashboard</strong>, or open the address manually.</li>
+</ol>
+<h4 id="three-things-to-know-after-installation">Three things to know
+after installation</h4>
+<ul>
+<li><strong>Data directory</strong>:
+<code>C:\Users\&lt;you&gt;\AppData\Roaming\Orcsy</code>
+<ul>
+<li><code>config.yaml</code>: configuration (contains your API key —
+<strong>do not share it</strong>);</li>
+<li><code>skills\</code>: skill library;</li>
+<li><code>logs\</code>: run logs;</li>
+<li><code>logs\usage.jsonl</code>: usage ledger.</li>
+</ul></li>
+<li><strong>Program directory</strong>: program files only; your data is
+not stored there.</li>
+<li><strong>Uninstall</strong>: Windows <strong>Settings → Apps →
+Installed apps</strong> → Orcsy. You can choose whether to delete the
+data directory.</li>
+</ul>
+<blockquote>
+<p>⚠️ <code>config.yaml</code> is generated automatically on first
+launch. You do <strong>not</strong> need to create it by hand. Filling
+in the model settings in the dashboard is the easiest path.</p>
+</blockquote>
+<h3 id="43-option-2-run-from-source-for-people-who-want-the-source">4.3
+Option 2: run from source (for people who want the source)</h3>
+<p>Prerequisite: <a href="https://docs.astral.sh/uv/">uv</a> is
+installed. You do not need Python preinstalled; <code>uv</code> prepares
+Python 3.11+ for you.</p>
+<pre class="bash"><code># 1. Get the source
+git clone https://gitee.com/java-and-net/Orcsy.git orcsy
+cd orcsy
+
+# 2. Install dependencies
+uv sync
+
+# 3. Generate config and templates under run/
+uv run orcsy init --dir run
+
+# 4. Edit run/config.yaml: at least api_key, base_url, model
+#    Then point projects at your own project (absolute path)
+
+# 5. Validate config and task files
+uv run orcsy validate --config run/config.yaml
+
+# 6. Start the dashboard (also starts the scheduler and opens the browser)
+uv run orcsy web --config run/config.yaml</code></pre>
+<p>Useful flags:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--port 8080</code></td>
+<td>Use another dashboard port</td>
+</tr>
+<tr>
+<td><code>--host 0.0.0.0</code></td>
+<td>Allow LAN access (<strong>you must set a login
+password</strong>)</td>
+</tr>
+<tr>
+<td><code>--no-browser</code></td>
+<td>Do not open the browser automatically</td>
+</tr>
+<tr>
+<td><code>--no-tray</code></td>
+<td>Do not show the tray icon</td>
+</tr>
+<tr>
+<td><code>--no-sched</code></td>
+<td>Do not run the scheduler; only manual <strong>Scan now</strong></td>
+</tr>
+</tbody>
+</table>
+<p>If you only want a command-line scheduler without the dashboard:</p>
+<pre class="bash"><code>uv run orcsy run --config run/config.yaml          # keep scheduling
+uv run orcsy run --config run/config.yaml --once   # run one cycle and exit (Task Scheduler / cron)</code></pre>
+<h3 id="44-option-3-docker-server--nas">4.4 Option 3: Docker (server /
+NAS)</h3>
+<p>Prerequisites: Docker and Docker Compose are installed.</p>
+<pre class="bash"><code># 1. Build and start from the repository root
+docker compose up -d --build
+
+# 2. First start generates ./orcsy-data/config.yaml
+#    The container listens on 0.0.0.0, so a login password is mandatory;
+#    otherwise startup is refused. Edit web.auth_password, then:
+docker compose restart
+
+# 3. Open the dashboard
+#    http://&lt;server-ip&gt;:5116</code></pre>
+<p>Volume mapping:</p>
+<table>
+<thead>
+<tr>
+<th>Host</th>
+<th>Container</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>./orcsy-data</code></td>
+<td><code>/data</code></td>
+<td>config, skills, logs, usage ledger</td>
+</tr>
+<tr>
+<td><code>./projects</code></td>
+<td><code>/projects</code></td>
+<td>managed projects (one subfolder per project)</td>
+</tr>
+</tbody>
+</table>
+<p>Important rules:</p>
+<ul>
+<li>When creating a project in the dashboard, use the <strong>container
+path</strong>, for example <code>/projects/my-app</code>, which maps to
+<code>./projects/my-app</code> on the host;</li>
+<li><code>./projects/my-app</code> on the host must be a Git
+repository;</li>
+<li>To let Orcsy push to a remote, configure Git credentials:
+<ul>
+<li>HTTPS: put a token in the remote URL;</li>
+<li>SSH: mount <code>~/.ssh</code> as described in
+<code>docker-compose.yml</code>.</li>
+</ul></li>
+<li>Logs: <code>docker compose logs -f</code>;</li>
+<li>Stop: <code>docker compose down</code>;</li>
+<li>Upgrade: back up <code>./orcsy-data</code>, pull the new source,
+then <code>docker compose up -d --build</code>.</li>
+</ul>
+<h3 id="45-option-4-linux-systemd-service">4.5 Option 4: Linux systemd
+service</h3>
+<p>Prerequisites: Linux server, root access, <code>git</code>
+installed.</p>
+<pre class="bash"><code># Run from the repository root (as root)
+sudo bash deploy/linux/install.sh
+
+# The installer will:
+# - install uv if needed
+# - create a dedicated orcsy user
+# - install the program under /opt/orcsy
+# - put data under /var/lib/orcsy
+# - use /srv/orcsy-projects for managed projects
+# - generate a random login password and print it</code></pre>
+<p>After installation:</p>
+<ol type="1">
+<li>Open <code>http://&lt;server-ip&gt;:5116</code> in a browser;</li>
+<li>Log in with the password printed by the installer;</li>
+<li>Fill in the model settings under <strong>Projects &amp;
+Settings</strong>; when creating a project, use
+<code>/srv/orcsy-projects/&lt;name&gt;</code> as the path.</li>
+</ol>
+<p>Service commands:</p>
+<pre class="bash"><code>systemctl status orcsy          # status
+sudo systemctl restart orcsy    # restart after editing /var/lib/orcsy/config.yaml
+journalctl -u orcsy -f          # follow logs
+sudo bash deploy/linux/uninstall.sh   # uninstall (data directory is kept by default)</code></pre>
+<p>If the server has a firewall, allow port 5116 (or your custom
+port).</p>
+<h3 id="46-post-install-checklist">4.6 Post-install checklist</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />The dashboard opens at
+<code>http://127.0.0.1:5116</code>;</label></li>
+<li><label><input type="checkbox" />The version and model name appear in
+the top bar;</label></li>
+<li><label><input type="checkbox" />Model settings are saved and
+<strong>Test connection</strong> succeeds;</label></li>
+<li><label><input type="checkbox" />At least one project is listed, with
+a <code>git</code> or <code>non-git</code> badge;</label></li>
+<li><label><input type="checkbox" />No red <strong>Missing
+guide</strong> badge on the project card;</label></li>
+<li><label><input type="checkbox" />The <strong>Run log</strong> section
+is visible;</label></li>
+<li><label><input type="checkbox" />You receive a sound/system
+notification when a task finishes (if enabled).</label></li>
+</ul>
+<hr />
+<h2 id="5-first-launch-connect-your-llm">5. First launch: connect your
+LLM</h2>
+<p>Orcsy does not include an AI model. It needs an external LLM service.
+You provide the endpoint, model name, and key.</p>
+<h3 id="51-open-settings">5.1 Open Settings</h3>
+<p>Click <strong>Projects &amp; Settings</strong> in the top bar, then
+find the first card: <strong>🤖 LLM Access</strong>.</p>
+<h3 id="52-fill-in-the-fields">5.2 Fill in the fields</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What to enter</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>provider</td>
+<td>Most services: <code>openai (compatible)</code>; Claude or
+Anthropic-compatible services: <code>anthropic</code></td>
+<td>Wrong choice = connection failure</td>
+</tr>
+<tr>
+<td>model</td>
+<td>The model name from your provider, e.g. <code>deepseek-chat</code>,
+<code>glm-4-plus</code>, <code>moonshot-v1-32k</code></td>
+<td>You can click <strong>Fetch list</strong> and pick from the
+dropdown</td>
+</tr>
+<tr>
+<td>base_url</td>
+<td>The API endpoint from your provider, usually ending in
+<code>/v1</code></td>
+<td>See the table below</td>
+</tr>
+<tr>
+<td>API Key</td>
+<td>The key generated in the provider's console, usually starting with
+<code>sk-</code></td>
+<td>Only a masked value is shown; plaintext is never echoed back</td>
+</tr>
+<tr>
+<td>temperature</td>
+<td>Default <code>0.2</code> is fine</td>
+<td>Higher = more creative; lower is better for code</td>
+</tr>
+<tr>
+<td>max_tokens</td>
+<td>Default <code>8192</code> is fine</td>
+<td>Auto-adjusted to the model limit after fetching the list</td>
+</tr>
+<tr>
+<td>max_context_tokens</td>
+<td>Default <code>131072</code> is fine</td>
+<td>Same as above</td>
+</tr>
+<tr>
+<td>timeout_seconds</td>
+<td>Default <code>300</code> seconds</td>
+<td>Use <code>600</code>–<code>900</code> for long/thinking models;
+<code>-1</code> means no timeout</td>
+</tr>
+<tr>
+<td>Enable model thinking</td>
+<td>Off by default</td>
+<td>Only turn on if you want to see the thinking process; unsupported
+models may fail</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53-common-providers">5.3 Common providers</h3>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Protocol</th>
+<th>base_url</th>
+<th>Example model</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DeepSeek</td>
+<td>openai</td>
+<td><code>https://api.deepseek.com/v1</code></td>
+<td><code>deepseek-chat</code></td>
+</tr>
+<tr>
+<td>Zhipu GLM</td>
+<td>openai</td>
+<td><code>https://open.bigmodel.cn/api/paas/v4</code></td>
+<td><code>glm-4-plus</code></td>
+</tr>
+<tr>
+<td>Kimi (Moonshot)</td>
+<td>openai</td>
+<td><code>https://api.moonshot.cn/v1</code></td>
+<td><code>moonshot-v1-32k</code></td>
+</tr>
+<tr>
+<td>Qwen (DashScope)</td>
+<td>openai</td>
+<td>See your Alibaba Cloud console (usually includes
+<code>/compatible-mode/v1</code>)</td>
+<td><code>qwen-plus</code></td>
+</tr>
+<tr>
+<td>OpenAI</td>
+<td>openai</td>
+<td><code>https://api.openai.com/v1</code></td>
+<td><code>gpt-4o</code></td>
+</tr>
+<tr>
+<td>Ollama (local)</td>
+<td>openai</td>
+<td><code>http://127.0.0.1:11434/v1</code></td>
+<td><code>qwen2.5-coder:14b</code></td>
+</tr>
+<tr>
+<td>Anthropic Claude</td>
+<td>anthropic</td>
+<td><code>https://api.anthropic.com</code></td>
+<td><code>claude-sonnet-4-...</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>💡 If you are not sure about the model name, click <strong>Fetch
+list</strong> first. If the provider does not expose a model list (404),
+type the model name manually.</p>
+</blockquote>
+<h3 id="54-what-the-two-buttons-do">5.4 What the two buttons do</h3>
+<ul>
+<li><strong>Fetch list</strong>: asks the provider for available models.
+On success, the model field becomes a dropdown and the context window /
+max output are filled in automatically.</li>
+<li><strong>Test connection</strong>: sends a tiny chat request to
+verify network + key + model name. <strong>Click it after every
+change.</strong></li>
+</ul>
+<h3 id="55-save">5.5 Save</h3>
+<p>Click <strong>Save model settings</strong>. The top bar will show the
+current model, for example:</p>
+<pre><code>v0.18.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<p>If it says <strong>api_key not configured</strong>, the key was not
+saved. Go back and check.</p>
+<hr />
+<h2 id="6-add-your-first-project">6. Add your first project</h2>
+<h3 id="61-create-a-project">6.1 Create a project</h3>
+<p>Click <strong>＋ New project</strong> at the top right (or the button
+of the same name under <strong>📁 Managed projects</strong> in
+Settings).</p>
+<p>Fill in, in order:</p>
+<ol type="1">
+<li><strong>Project name</strong>: use letters, digits, and hyphens
+(underscores are also allowed), e.g. <code>my-app</code>; no spaces or
+special symbols, and it cannot start with a symbol. It appears in logs
+and branch names.</li>
+<li><strong>Max tasks per cycle</strong>: default <code>1</code>. This
+is how many tasks this project may run per scan. Keep 1 at first; raise
+it after things are stable.</li>
+<li><strong>Project path</strong>: click <strong>Choose…</strong> and
+pick your project folder, or paste an absolute path such as
+<code>D:\Repos\my-app</code>.</li>
+<li><strong>Tasks directory</strong>: default <code>tasks</code>; keep
+it.</li>
+<li><strong>Guide file</strong>: default <code>AGENT.md</code>; keep
+it.</li>
+<li><strong>Max agent turns</strong>: default <code>40</code>. The
+maximum number of "think → act" rounds per task. <code>-1</code> means
+unlimited (not recommended for beginners).</li>
+<li><strong>Working branch</strong>: optional. Leave blank to use the
+project's current branch.</li>
+<li><strong>Command whitelist</strong>: optional. Leave blank to use the
+default whitelist (python, node, npm, git, dotnet, etc.).</li>
+<li><strong>Bind a dedicated model</strong>: optional. When enabled,
+this project can use its own model; blank fields inherit the global
+config.</li>
+<li><strong>Permission mode</strong>: default <strong>Follow
+global</strong>. Choose <strong>Ask before changes</strong> if you want
+more safety.</li>
+<li><strong>Override Agent tool switches</strong>: optional. Follow
+global by default; leave it alone unless needed.</li>
+<li><strong>Bind remote repository Issues</strong>: optional. Turn on if
+you want GitHub/Gitee/GitLab/Gitea Issues to become tasks
+automatically.</li>
+<li><strong>Stack / Run / Test</strong>: Orcsy auto-detects these after
+you enter the path. You can edit them. They are written into
+<code>AGENT.md</code> to save the AI time.</li>
+<li><strong>Enable this project</strong>: keep it on.</li>
+</ol>
+<p>Click <strong>Save</strong>. You will see:</p>
+<ul>
+<li>the project card on the <strong>Dashboard</strong>;</li>
+<li>a <code>tasks/</code> folder and <code>AGENT.md</code> in the
+project (if they did not exist);</li>
+<li>the project path, task counts, and a <code>git</code> or
+<code>non-git</code> badge on the card.</li>
+</ul>
+<h3 id="62-what-the-badges-mean">6.2 What the badges mean</h3>
+<table>
+<thead>
+<tr>
+<th>Badge</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>git</code></td>
+<td>The project is a Git repository. Successful tasks are committed and
+merged; if a remote is configured, pushed</td>
+</tr>
+<tr>
+<td><code>non-git</code></td>
+<td>Not a Git repository. The Agent edits files directly, with no
+automatic commit</td>
+</tr>
+<tr>
+<td><code>Missing guide</code></td>
+<td>No <code>AGENT.md</code>; click <strong>AGENT.md</strong> to create
+one</td>
+</tr>
+<tr>
+<td><code>Auto pull Nmin</code></td>
+<td>Scheduled Issue pulling is on, every N minutes</td>
+</tr>
+<tr>
+<td>Switch</td>
+<td>Enable/disable the project. Disabled projects are skipped; config
+and files are kept</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63-what-agentmd-is-and-why-it-matters">6.3 What AGENT.md is and
+why it matters</h3>
+<p><code>AGENT.md</code> is the project's <strong>employee
+handbook</strong>. The AI reads it before every task.</p>
+<p>It usually contains:</p>
+<ul>
+<li>the tech stack (language, framework);</li>
+<li>how to run the project locally;</li>
+<li>how to run tests;</li>
+<li>coding style and conventions;</li>
+<li>things that must never be done;</li>
+<li>when to stop and ask for help (<code>blocked</code>).</li>
+</ul>
+<p>When you create a project, Orcsy generates an English template and
+fills in Stack / Run / Test from detection. Click
+<strong>AGENT.md</strong> on the project card to edit it; you can
+translate it or add project rules.</p>
+<blockquote>
+<p>💡 The highest-leverage thing you can do for output quality is to
+make <code>AGENT.md</code> specific: test commands, coding rules,
+folders not to touch, and the definition of done.</p>
+</blockquote>
+<h3 id="64-optional-project-settings">6.4 Optional project settings</h3>
+<p>Click <strong>Settings</strong> on a project card to change:</p>
+<ul>
+<li>name, path, tasks directory, guide file;</li>
+<li>max tasks per cycle, max turns, working branch, command
+whitelist;</li>
+<li>dedicated model;</li>
+<li>permission mode;</li>
+<li>tool overrides;</li>
+<li>remote repository binding and auto-pull interval;</li>
+<li>enabled/disabled.</li>
+</ul>
+<p>Renaming a project also updates skills bound to that project, so they
+do not become orphaned.</p>
+<hr />
+<h2 id="7-create-and-manage-tasks">7. Create and manage tasks</h2>
+<h3 id="71-fastest-way-quick-add-on-the-card">7.1 Fastest way: quick add
+on the card</h3>
+<p>On the <strong>Dashboard</strong>, inside a project card:</p>
+<ol type="1">
+<li>type a one-line title in <strong>New task title, press Enter to
+add</strong>;</li>
+<li>choose a priority (default <code>P2</code>);</li>
+<li>click <strong>Add</strong> or press Enter.</li>
+</ol>
+<p>The task ID is generated automatically as
+<code>priority-title</code>, for example
+<code>P2-fix-login-layout</code>. Duplicates get <code>-2</code>,
+<code>-3</code>.</p>
+<h3 id="72-full-way-the-new-task-dialog">7.2 Full way: the New task
+dialog</h3>
+<p>Click <strong>New task</strong> under the project card. You can fill
+in:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Task ID</td>
+<td>Leave blank to auto-generate; or use a short English name such as
+<code>fix-login-timeout</code></td>
+</tr>
+<tr>
+<td>Priority</td>
+<td><code>P0</code> highest, <code>P4</code> lowest</td>
+</tr>
+<tr>
+<td>Title</td>
+<td>One sentence describing the work</td>
+</tr>
+<tr>
+<td>Labels</td>
+<td>Comma-separated, e.g. <code>bug, ui</code>; used for grouping and
+display only</td>
+</tr>
+<tr>
+<td>Assignee</td>
+<td>Leave blank to let any Agent take it; enter a project name to
+restrict it</td>
+</tr>
+<tr>
+<td>Description</td>
+<td>Markdown body: symptoms, reproduction steps, acceptance
+criteria</td>
+</tr>
+</tbody>
+</table>
+<p>Click <strong>Save</strong>. The task enters <code>open</code>
+(to-do) status.</p>
+<blockquote>
+<p>⚠️ Only <strong>open</strong> tasks are directly editable.
+In-progress, blocked, and completed tasks open read-only. To change one,
+click <strong>Requeue</strong> first.</p>
+</blockquote>
+<h3 id="73-how-to-choose-a-priority">7.3 How to choose a priority</h3>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>When to use</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>P0</code></td>
+<td>Production incident, blocks everyone</td>
+<td>Payment API returns 500, app crashes on start</td>
+</tr>
+<tr>
+<td><code>P1</code></td>
+<td>Important feature broken, or must ship this week</td>
+<td>Login fails, core flow errors</td>
+</tr>
+<tr>
+<td><code>P2</code></td>
+<td>Normal request or ordinary bug (default)</td>
+<td>Add a filter, fix a layout issue</td>
+</tr>
+<tr>
+<td><code>P3</code></td>
+<td>Can be scheduled, not urgent</td>
+<td>Add docs, improve log messages</td>
+</tr>
+<tr>
+<td><code>P4</code></td>
+<td>Whenever there is time</td>
+<td>Code cleanup, polish</td>
+</tr>
+</tbody>
+</table>
+<p>Ordering: <strong>P0 → P4 first; within the same priority, the order
+you drag them into</strong>. A blocked task that is requeued is picked
+up first on the next scan.</p>
+<h3 id="74-what-a-task-file-looks-like">7.4 What a task file looks
+like</h3>
+<p>Open <code>tasks/P2-fix-login-layout.md</code> in a text editor:</p>
+<pre class="markdown"><code>---
+title: Fix login layout
+priority: P2
+status: open
+labels: [bug, ui]
+assignee:
+---
+
+## Symptoms
+
+At 125% scaling, the login button overflows the card on the right.
+
+## Steps to reproduce
+
+1. Set Windows display scaling to 125%;
+2. Open the login page;
+3. Observe the button position.
+
+## Acceptance criteria
+
+- [ ] Layout is correct at 100% / 125% / 150%
+- [ ] The existing login flow is unchanged</code></pre>
+<p>You can edit this file directly; the dashboard picks up the change on
+its next refresh.</p>
+<blockquote>
+<p>💡 Do not put secrets, passwords, or internal addresses in task
+bodies. Task files live in the Git repository and may be committed.</p>
+</blockquote>
+<h3 id="75-task-lifecycle">7.5 Task lifecycle</h3>
+<pre><code>open (to-do)
+  │  claimed by the Agent
+  ▼
+in_progress (running)
+  │
+  ├── success ──▶ done ──▶ moved to tasks/done/
+  ├── blocked ──▶ blocked ──▶ waiting for you; can be requeued
+  └── manual stop ──▶ cancelled ──▶ set `status` back to `open` in the task file to rerun</code></pre>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Dashboard label</th>
+<th>What you can do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>open</code></td>
+<td>Open</td>
+<td>Edit, delete, drag to reorder</td>
+</tr>
+<tr>
+<td><code>in_progress</code></td>
+<td>In progress</td>
+<td>View, force stop, mark done (not recommended)</td>
+</tr>
+<tr>
+<td><code>done</code></td>
+<td>Done</td>
+<td>View; archived automatically</td>
+</tr>
+<tr>
+<td><code>blocked</code></td>
+<td>Blocked</td>
+<td>View reason, requeue, delete</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Cancelled</td>
+<td>View, delete; to rerun, set <code>status</code> back to
+<code>open</code> in the task file (or copy it into a new task)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="76-actions-on-the-task-list">7.6 Actions on the task list</h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Where</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Click a task row</td>
+<td>Task list</td>
+<td>Open the editor for open tasks; read-only view otherwise</td>
+</tr>
+<tr>
+<td>Drag a task row</td>
+<td>Task list</td>
+<td>Reorder within the same priority; also determines the Agent's pickup
+order</td>
+</tr>
+<tr>
+<td>Checkbox</td>
+<td>Left of the task</td>
+<td>Select for batch actions</td>
+</tr>
+<tr>
+<td>Select page</td>
+<td>Above the list</td>
+<td>Select the 10 tasks on the current page</td>
+</tr>
+<tr>
+<td>Batch delete</td>
+<td>Appears after selection</td>
+<td>Delete the selected task files; irreversible</td>
+</tr>
+<tr>
+<td>Clear tasks (N)</td>
+<td>Above the list</td>
+<td>Delete all active tasks in the project; archived tasks are kept</td>
+</tr>
+<tr>
+<td>Requeue</td>
+<td>Blocked/in-progress task</td>
+<td>Back to open; picked up first next scan</td>
+</tr>
+<tr>
+<td>Mark done</td>
+<td>Open/in-progress task</td>
+<td>Mark complete manually (no auto-archive)</td>
+</tr>
+<tr>
+<td>Force stop</td>
+<td>In-progress task</td>
+<td>Abort the AI loop and running commands, discard temporary changes,
+mark cancelled</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>Each task row</td>
+<td>Delete one task file</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ <strong>Delete</strong>, <strong>Clear</strong>, and <strong>Force
+stop</strong> cannot be undone. Confirm the content before deleting a
+task; for Git projects, force stop discards this task's temporary
+changes, while non-Git projects keep whatever was already changed.</p>
+</blockquote>
+<h3 id="77-archived-tasks">7.7 Archived tasks</h3>
+<p>Completed tasks are moved to <code>tasks/done/</code>. Expand
+<strong>Archived (N) · click for details</strong> at the bottom of the
+project card to view them; clicking a row opens a read-only view.</p>
+<h3 id="78-five-tips-for-writing-good-tasks">7.8 Five tips for writing
+good tasks</h3>
+<ol type="1">
+<li><strong>Describe the current state</strong>: error messages,
+screenshot description, reproduction steps.</li>
+<li><strong>Describe what "done" means</strong>: an acceptance
+checklist, as concrete as possible.</li>
+<li><strong>Limit the scope</strong>: tell it which page/module to
+change, and not to refactor the whole project.</li>
+<li><strong>One task, one thing</strong>: split large work into smaller
+tasks; success rate and reviewability both improve.</li>
+<li><strong>Give a way to verify</strong>: e.g. "run
+<code>npm test</code>" or "open <code>/login</code> and check".</li>
+</ol>
+<p>A vague example:</p>
+<blockquote>
+<p>Improve the login.</p>
+</blockquote>
+<p>A good example:</p>
+<blockquote>
+<p>The login button overflows the card at 125% scaling. Only adjust the
+login page styles; do not change login logic. Acceptance: the button is
+fully visible at 100%/125%/150%, and <code>npm run build</code>
+passes.</p>
+</blockquote>
+<hr />
+<h2 id="8-let-orcsy-start-working">8. Let Orcsy start working</h2>
+<h3 id="81-two-ways-to-trigger-work">8.1 Two ways to trigger work</h3>
+<ul>
+<li><strong>Scheduled scan</strong>: the program scans automatically
+every interval. The default is 300 seconds; change it in Settings
+(30–86400 seconds).</li>
+<li><strong>Scan now</strong>: click <strong>▶ Scan now</strong> to run
+one cycle immediately. Useful right after adding tasks.</li>
+</ul>
+<p>They do not double-claim tasks: one project runs at most one Agent at
+a time.</p>
+<h3 id="82-top-status-chips">8.2 Top status chips</h3>
+<table>
+<thead>
+<tr>
+<th>Chip</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Idle / Scanning…</td>
+<td>Whether a scan is running</td>
+</tr>
+<tr>
+<td>Cycles done N</td>
+<td>Number of scan cycles since launch</td>
+</tr>
+<tr>
+<td>Last scan just now / N min ago</td>
+<td>Most recent scan time</td>
+</tr>
+<tr>
+<td>Interval Ns</td>
+<td>Current scan interval</td>
+</tr>
+<tr>
+<td>Project: N tasks</td>
+<td>Tasks processed by each project in the last cycle</td>
+</tr>
+</tbody>
+</table>
+<h3 id="83-what-happens-while-a-task-runs">8.3 What happens while a task
+runs</h3>
+<ol type="1">
+<li>Orcsy scans the project's <code>tasks/</code> folder and selects
+<code>status: open</code> tasks.</li>
+<li>It picks one by priority and order.</li>
+<li>The status becomes <code>in_progress</code>.</li>
+<li>If the project is a Git repository, it creates a temporary work copy
+(<code>.worktree-arranger/</code>) under the project.</li>
+<li>The AI reads <code>AGENT.md</code> and the task, then reads files,
+edits files, and runs commands.</li>
+<li>After every round, a line is appended to the task's <strong>##
+Execution progress</strong> section, so a hard kill does not lose
+progress.</li>
+<li>When the AI reports a result:
+<ul>
+<li>success: the system commits and merges back to the main branch;
+pushes if a remote exists; the task becomes <code>done</code> and is
+archived;</li>
+<li>blocked: the temporary copy is discarded, the task becomes
+<code>blocked</code> with a reason;</li>
+<li>cancelled: the temporary copy is discarded, the task becomes
+<code>cancelled</code>.</li>
+</ul></li>
+</ol>
+<blockquote>
+<p>Only Git projects have a temporary copy. Non-Git projects have no
+isolation layer; changes the Agent already made stay in the project
+folder, so review or revert them after a blocked/cancelled run.</p>
+</blockquote>
+<h3 id="84-read-the-run-log">8.4 Read the run log</h3>
+<p>The <strong>Run log (newest first, click to collapse)</strong>
+section at the bottom of the dashboard shows:</p>
+<ul>
+<li>the start and end of every scan cycle;</li>
+<li>the start and end of every task, commit hashes, blocked
+reasons;</li>
+<li>model thinking content (if enabled), folded into purple entries you
+can expand.</li>
+</ul>
+<p>The page refreshes every 5 seconds. Logs are also written to
+<code>logs/orcsy.log</code>.</p>
+<h3 id="85-after-a-task-ends">8.5 After a task ends</h3>
+<ul>
+<li>Success: the task becomes <strong>Done</strong> and moves to the
+archive; the project gets a Git commit;</li>
+<li>Blocked: the task becomes <strong>Blocked</strong>; open it to see
+the reason under <strong>Agent result</strong>;</li>
+<li>Cancelled: the task becomes <strong>Cancelled</strong>; set
+<code>status</code> back to <code>open</code> in the task file to rerun
+it.</li>
+</ul>
+<p>If notifications are enabled, a sound and tray balloon appear for
+done/blocked; manual stops stay silent.</p>
+<hr />
+<h2 id="9-dashboard-map-what-every-button-does">9. Dashboard map: what
+every button does</h2>
+<h3 id="91-top-toolbar">9.1 Top toolbar</h3>
+<p>Chinese-label reference for the main UI (English name → label shown
+in the dashboard):</p>
+<table>
+<thead>
+<tr>
+<th>English</th>
+<th>Chinese label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dashboard</td>
+<td>看板</td>
+</tr>
+<tr>
+<td>Projects &amp; Settings</td>
+<td>项目与设置</td>
+</tr>
+<tr>
+<td>Skills</td>
+<td>技能</td>
+</tr>
+<tr>
+<td>Usage</td>
+<td>用量</td>
+</tr>
+<tr>
+<td>Check for updates</td>
+<td>检查更新</td>
+</tr>
+<tr>
+<td>Scan now</td>
+<td>立即扫描</td>
+</tr>
+<tr>
+<td>Restart</td>
+<td>重启</td>
+</tr>
+<tr>
+<td>New project</td>
+<td>新建项目</td>
+</tr>
+<tr>
+<td>Refresh</td>
+<td>↻</td>
+</tr>
+<tr>
+<td>Theme</td>
+<td>☀ / ☾</td>
+</tr>
+<tr>
+<td>Pending approvals</td>
+<td>🔔 待审批</td>
+</tr>
+<tr>
+<td>Log out</td>
+<td>退出</td>
+</tr>
+<tr>
+<td>Open / In progress / Done / Blocked / Cancelled</td>
+<td>待办 / 执行中 / 已完成 / 受阻 / 已取消</td>
+</tr>
+<tr>
+<td>New task</td>
+<td>新建任务</td>
+</tr>
+<tr>
+<td>Open folder</td>
+<td>打开文件夹</td>
+</tr>
+<tr>
+<td>Pull Issues</td>
+<td>拉取 Issues</td>
+</tr>
+<tr>
+<td>Settings</td>
+<td>设置</td>
+</tr>
+<tr>
+<td>Remove</td>
+<td>移除</td>
+</tr>
+<tr>
+<td>Run log</td>
+<td>运行日志</td>
+</tr>
+<tr>
+<td>Save</td>
+<td>保存</td>
+</tr>
+<tr>
+<td>Add</td>
+<td>添加</td>
+</tr>
+<tr>
+<td>Cancel</td>
+<td>取消</td>
+</tr>
+</tbody>
+</table>
+<p>Toolbar buttons:</p>
+<table>
+<thead>
+<tr>
+<th>Button</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dashboard / Projects &amp; Settings / Skills / Usage</td>
+<td>Switch between the four main tabs</td>
+</tr>
+<tr>
+<td>Check for updates</td>
+<td>Check for a new version; when available, the button becomes
+<strong>Update to x.y.z</strong></td>
+</tr>
+<tr>
+<td>▶ Scan now</td>
+<td>Run one scheduling cycle immediately</td>
+</tr>
+<tr>
+<td>⟳ Restart</td>
+<td>Restart the program so config/code changes take effect; running
+tasks are interrupted and can be requeued after restart</td>
+</tr>
+<tr>
+<td>＋ New project</td>
+<td>Open the New project dialog</td>
+</tr>
+<tr>
+<td>↻</td>
+<td>Refresh dashboard data</td>
+</tr>
+<tr>
+<td>☀ / ☾</td>
+<td>Toggle light/dark theme</td>
+</tr>
+<tr>
+<td>🔔 Pending approvals N</td>
+<td>N operations are waiting for your decision (approval modes
+only)</td>
+</tr>
+<tr>
+<td>Log out</td>
+<td>Appears when a login password is set</td>
+</tr>
+</tbody>
+</table>
+<h3 id="92-dashboard-tab">9.2 Dashboard tab</h3>
+<ul>
+<li>Status chips: scheduling state, cycles, last scan, interval,
+per-project counts;</li>
+<li>Project cards: name, enable switch, git badge, missing-guide badge,
+auto-pull badge, path, task counts;</li>
+<li>Quick add task;</li>
+<li>Task list: priority color, status tag, pending-approval tag,
+collapsible description, actions;</li>
+<li>Pagination (10 per page);</li>
+<li>Archived tasks;</li>
+<li>Run log.</li>
+</ul>
+<h3 id="93-projects--settings-tab">9.3 Projects &amp; Settings tab</h3>
+<p>From top to bottom:</p>
+<ol type="1">
+<li><strong>🤖 LLM Access</strong>: model, key, endpoint,
+parameters;</li>
+<li><strong>⏱ Scheduler &amp; dashboard</strong>: interval, parallelism,
+port, log retention, login password;</li>
+<li><strong>🔔 Notifications</strong>: sound, system notification;</li>
+<li><strong>🛠 Agent tools &amp; permissions</strong>: approval mode,
+timeout, tool switches, command whitelist, environment variables, PATH
+auto-fix;</li>
+<li><strong>🪞 Mirror management &amp; speed test</strong>: test, apply
+fastest, add/disable mirrors;</li>
+<li><strong>⚙️ App</strong>: autostart, auto-update check, update
+source, manual package import;</li>
+<li><strong>📁 Managed projects</strong>: project list and
+shortcuts.</li>
+</ol>
+<h3 id="94-skills-tab">9.4 Skills tab</h3>
+<ul>
+<li>Browse the skill library;</li>
+<li>Scan user-level skills from AI tools (ZCode / Claude Code / Codex /
+OpenCode, etc.);</li>
+<li>Import a local skill directory;</li>
+<li>Create a skill;</li>
+<li>Edit, enable/disable, open folder, delete/remove;</li>
+<li>Select all, invert, batch delete.</li>
+</ul>
+<h3 id="95-usage-tab">9.5 Usage tab</h3>
+<ul>
+<li>Total tasks, total turns, input tokens, output tokens;</li>
+<li>Per-project table (tasks, turns, input/output/total, last
+used);</li>
+<li>12-week heatmap (darker = more tokens that day; hover for
+details);</li>
+<li>Latest 20 task records (time, project, task, result, turns,
+input/output, model).</li>
+</ul>
+<hr />
+<h2 id="10-advanced-features-approvals-skills-issues-mirrors">10.
+Advanced features: approvals, skills, Issues, mirrors</h2>
+<h3 id="101-human-approval-permission-modes">10.1 Human approval
+(permission modes)</h3>
+<p>The default is <strong>Full access</strong>: the AI does not ask
+before acting. For more safety, change it in Settings:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Who it is for</th>
+<th>What it asks about</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ask_on_change</code></td>
+<td>First-time users, cautious users</td>
+<td>write, edit, multi-edit, delete, move, run command</td>
+</tr>
+<tr>
+<td><code>autonomous</code></td>
+<td>Experienced users who only want high-risk gates</td>
+<td>delete, move, run command</td>
+</tr>
+<tr>
+<td><code>full_access</code> (default)</td>
+<td>Users who trust the AI and want speed</td>
+<td>Nothing</td>
+</tr>
+</tbody>
+</table>
+<p>How it works:</p>
+<ol type="1">
+<li>When the AI wants a sensitive operation, the task
+<strong>pauses</strong>; the operation is not executed (zero side
+effects);</li>
+<li>The top bar shows <strong>🔔 Pending approvals N</strong>;</li>
+<li>Open it to see project, task, tool, argument preview, and waiting
+time;</li>
+<li>Click <strong>Approve</strong> or <strong>Reject</strong>;</li>
+<li>Check <strong>Always allow this tool for this task</strong> to
+reduce repeated prompts (current task only);</li>
+<li>If nobody responds before the timeout (default 30 minutes), the
+request is automatically rejected; the task never hangs forever.</li>
+</ol>
+<p>Rejections and timeouts are reported back to the AI with a reason, so
+it can adjust or finish as blocked.</p>
+<h3 id="102-tool-switches-and-command-whitelist">10.2 Tool switches and
+command whitelist</h3>
+<p><strong>Tool switches</strong> decide which capabilities the AI has.
+All are on by default (<code>finish</code> is the protocol tool that
+ends a task and is always available).</p>
+<p>Common uses:</p>
+<ul>
+<li>No internet: turn off <code>web_fetch</code>;</li>
+<li>Code changes only, no commands: turn off
+<code>run_command</code>;</li>
+<li>Review only, no file changes: turn off write/edit/delete/move
+tools.</li>
+</ul>
+<p><strong>Command whitelist</strong> decides what
+<code>run_command</code> may execute. The default includes python,
+pytest, node, npm, cargo, go, dotnet, git, package managers, and common
+read-only commands. Turning a command off makes the AI's call fail
+immediately.</p>
+<p>Projects can override global settings: open <strong>Override Agent
+tool switches</strong> in the project dialog and set each tool. Remove
+the override to follow global again.</p>
+<h3 id="103-skill-library">10.3 Skill library</h3>
+<p>A skill is a <strong>specialized handbook</strong> for the AI, for
+example:</p>
+<ul>
+<li>project coding conventions;</li>
+<li>best practices for a framework;</li>
+<li>release process;</li>
+<li>environment setup guide.</li>
+</ul>
+<p>Four sources:</p>
+<ol type="1">
+<li><strong>Built-in <code>env-setup</code></strong>: seeded on first
+launch; teaches the AI to install missing toolchains;</li>
+<li><strong>Scan AI tools</strong>: batch-import skills already
+installed in ZCode / Claude Code / Codex / OpenCode;</li>
+<li><strong>Import local skill</strong>: choose a directory containing
+<code>SKILL.md</code>;</li>
+<li><strong>Create skill</strong>: write name, description, and body
+directly in the dashboard.</li>
+</ol>
+<p>Scope:</p>
+<ul>
+<li><strong>Global</strong>: available to all projects;</li>
+<li><strong>Dedicated · project</strong>: only that project.</li>
+</ul>
+<p>Notes:</p>
+<ul>
+<li>Skills live in <code>skills\</code> under the data directory and are
+<strong>never written into project folders</strong>;</li>
+<li>The system prompt only receives a name + description index; the AI
+reads the full text via <code>read_skill</code> on demand, so many
+skills do not bloat the context;</li>
+<li>Removing an imported skill only removes the Orcsy copy; the original
+remains in the external tool's folder and can be re-scanned;</li>
+<li>A skill created in Orcsy is gone forever once deleted.</li>
+</ul>
+<h3 id="104-issue-import">10.4 Issue import</h3>
+<p>If your project is hosted on GitHub / Gitee / GitLab / Gitea, Issues
+can become tasks.</p>
+<p>Setup:</p>
+<ol type="1">
+<li>Project <strong>Settings</strong> → enable <strong>Bind remote
+repository Issues</strong>;</li>
+<li>Enter the repository URL, e.g.
+<code>https://github.com/owner/repo</code>;</li>
+<li>Choose the platform (self-hosted GitLab/Gitea must be selected
+explicitly);</li>
+<li>Enter credentials:
+<ul>
+<li>token (recommended; GitHub supports tokens only);</li>
+<li>or username + password (GitLab / Gitee / Gitea);</li>
+</ul></li>
+<li>Optional: auto-pull interval in minutes (0 = manual only);</li>
+<li>Save.</li>
+</ol>
+<p>Use:</p>
+<ul>
+<li>Click <strong>Pull Issues</strong> on the project card to import
+open Issues into the queue;</li>
+<li>Priority defaults to <code>P2</code>; Issues labeled
+<code>P0</code>–<code>P4</code> use that label;</li>
+<li>Task files carry a source annotation; already-imported Issues
+(including archived ones) are skipped;</li>
+<li><strong>One-way import</strong>: Orcsy does not write task status
+back to the Issue.</li>
+</ul>
+<h3 id="105-mirrors-and-slow-networks">10.5 Mirrors and slow
+networks</h3>
+<p>If you are in a region with slow or blocked access to package
+registries, Orcsy has three fallbacks:</p>
+<ol type="1">
+<li><strong>Mirror speed test</strong>: Settings → <strong>🪞 Mirror
+management &amp; speed test</strong> → <strong>Test all sources</strong>
+→ <strong>Apply fastest to environment variables</strong>;</li>
+<li><strong>Environment variables</strong>: fill <code>GOPROXY</code>,
+<code>PIP_INDEX_URL</code>, <code>npm_config_registry</code>,
+<code>HTTP_PROXY</code>, etc. under <strong>Agent subprocess environment
+variables</strong>;</li>
+<li><strong>env-setup skill</strong>: when a toolchain is missing, the
+AI follows the skill to install it; if package managers fail, it
+switches to direct domestic mirror downloads.</li>
+</ol>
+<p>Mirror categories include: Go installer, Go module proxy, npm
+registry, pip index, Node.js installer, JDK, Python installer. You can
+disable sources or add your own internal mirror.</p>
+<blockquote>
+<p>⚠️ <strong>Apply fastest to environment variables</strong> overwrites
+the same kind of variables you typed manually. Check the text box
+afterwards.</p>
+</blockquote>
+<h3 id="106-multiple-projects-parallelism-dedicated-models">10.6
+Multiple projects, parallelism, dedicated models</h3>
+<ul>
+<li>One Agent per project; projects do not interfere;</li>
+<li>If <strong>Parallel Agents</strong> in Settings is greater than 1,
+multiple projects can run at the same time (1–16);</li>
+<li>One project still runs only one task at a time;</li>
+<li>A project can bind a dedicated model: use a cheaper model for simple
+projects and a stronger one for complex projects;</li>
+<li>A dedicated model overrides only the fields you fill; the rest
+inherit the global config.</li>
+</ul>
+<h3 id="107-notifications">10.7 Notifications</h3>
+<p>Settings → <strong>🔔 Notifications</strong>:</p>
+<ul>
+<li><strong>Sound</strong>: a "ding" for done, a warning tone for
+blocked;</li>
+<li><strong>System notification</strong>: tray balloon, works even when
+the dashboard is closed;</li>
+<li>Manual stops (cancelled) stay silent;</li>
+<li>With <code>--no-tray</code>, there is no tray and therefore no
+system-notification channel.</li>
+</ul>
+<h3 id="108-auto-update-and-restart">10.8 Auto-update and restart</h3>
+<ul>
+<li>Auto-check for updates on startup (can be turned off);</li>
+<li>Top bar <strong>Check for updates</strong> → when a new version
+exists, click <strong>Update to x.y.z</strong>;</li>
+<li>The update installs silently in the background, the app restarts,
+and the page reloads;</li>
+<li>If installed under <code>Program Files</code> or another system
+directory, one UAC prompt appears;</li>
+<li>A failed update rolls back automatically and opens the install
+log;</li>
+<li>You can also <strong>import a local package</strong>: choose
+<code>orcsy-update-*.zip</code>; same-version reinstall, upgrade, and
+downgrade are supported.</li>
+</ul>
+<h3 id="109-dashboard-login-password">10.9 Dashboard login password</h3>
+<p>By default the dashboard only listens on <code>127.0.0.1</code>, so
+only this machine can reach it and no password is needed.</p>
+<p>You <strong>must set a password</strong> if you:</p>
+<ul>
+<li>use <code>--host 0.0.0.0</code> to allow LAN access;</li>
+<li>deploy with Docker / systemd on a server;</li>
+<li>expose it through a reverse proxy to the internet.</li>
+</ul>
+<p>With a non-loopback address and an empty password, the program
+refuses to start. If that protection were bypassed and the port exposed,
+anyone who can reach it could operate the dashboard, change
+configuration, and start/stop tasks (keys are shown only as masks, but
+they can still be replaced).</p>
+<p>Where to set it:</p>
+<ul>
+<li>Settings → <strong>⏱ Scheduler &amp; dashboard</strong> →
+<strong>Dashboard login password</strong>;</li>
+<li>or edit <code>web.auth_password</code> in
+<code>config.yaml</code>.</li>
+</ul>
+<p>After it is set, opening the dashboard shows a login page: enter the
+password and click <strong>Log in</strong>. A <strong>Log out</strong>
+button appears at the top right.</p>
+<p>Behavior:</p>
+<ul>
+<li>A login session lasts 7 days;</li>
+<li>After a program restart you need to log in again;</li>
+<li>Changing the password invalidates all old sessions immediately;</li>
+<li>Authentication is not a substitute for TLS. For internet exposure,
+put a reverse proxy (nginx / caddy) with HTTPS in front.</li>
+</ul>
+<h3 id="1010-logs-autostart-and-port">10.10 Logs, autostart, and
+port</h3>
+<p><strong>Logs</strong></p>
+<ul>
+<li>The <strong>Run log</strong> on the dashboard shows only the recent
+tail; the full log is <code>logs/orcsy.log</code> in the data
+directory;</li>
+<li>Under <strong>⏱ Scheduler &amp; dashboard</strong> you can set:
+<ul>
+<li><strong>Log retention (days)</strong>: default 7. When full, logs
+are archived to <code>logs/archive/</code>, and logs older than the
+limit are cleaned automatically; <code>0</code> disables automatic
+cleanup;</li>
+<li><strong>Total log size limit (MB)</strong>: default 200. When active
+logs + backups + archives exceed it, the oldest are deleted first;
+<code>0</code> means unlimited;</li>
+</ul></li>
+<li>Saving applies the new rules immediately.</li>
+</ul>
+<p><strong>Autostart</strong></p>
+<ul>
+<li>Settings → <strong>⚙️ App</strong> → turn on <strong>Start
+automatically on boot</strong>;</li>
+<li>It writes to the current user's registry and needs no administrator
+rights;</li>
+<li>The tray menu also has an autostart checkbox;</li>
+<li>Turn the switch off to stop it.</li>
+</ul>
+<p><strong>Dashboard port</strong></p>
+<ul>
+<li>Settings → <strong>⏱ Scheduler &amp; dashboard</strong> →
+<strong>Dashboard port</strong>;</li>
+<li>Takes effect on the <strong>next start</strong>;</li>
+<li>You can also override it with <code>--port 8080</code>;</li>
+<li>Port-conflict behavior is described in <a
+href="#121-the-dashboard-does-not-open--port-is-in-use">12.1</a>.</li>
+</ul>
+<hr />
+<h2 id="11-data-backup-and-migration">11. Data, backup, and
+migration</h2>
+<h3 id="111-where-data-lives">11.1 Where data lives</h3>
+<table>
+<thead>
+<tr>
+<th>Content</th>
+<th>Windows installer</th>
+<th>Docker</th>
+<th>Linux systemd</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Config</td>
+<td><code>%APPDATA%\Orcsy\config.yaml</code></td>
+<td><code>./orcsy-data/config.yaml</code></td>
+<td><code>/var/lib/orcsy/config.yaml</code></td>
+</tr>
+<tr>
+<td>Skills</td>
+<td><code>%APPDATA%\Orcsy\skills\</code></td>
+<td><code>./orcsy-data/skills/</code></td>
+<td><code>/var/lib/orcsy/skills/</code></td>
+</tr>
+<tr>
+<td>Logs</td>
+<td><code>%APPDATA%\Orcsy\logs\</code></td>
+<td><code>./orcsy-data/logs/</code></td>
+<td><code>/var/lib/orcsy/logs/</code></td>
+</tr>
+<tr>
+<td>Usage ledger</td>
+<td><code>%APPDATA%\Orcsy\logs\usage.jsonl</code></td>
+<td><code>./orcsy-data/logs/usage.jsonl</code></td>
+<td><code>/var/lib/orcsy/logs/usage.jsonl</code></td>
+</tr>
+<tr>
+<td>Tasks</td>
+<td>Each project's <code>tasks\</code></td>
+<td><code>./projects/&lt;project&gt;/tasks/</code></td>
+<td><code>/srv/orcsy-projects/&lt;project&gt;/tasks/</code></td>
+</tr>
+<tr>
+<td>Project guide</td>
+<td>Each project's <code>AGENT.md</code></td>
+<td><code>./projects/&lt;project&gt;/AGENT.md</code></td>
+<td><code>/srv/orcsy-projects/&lt;project&gt;/AGENT.md</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="112-backup">11.2 Backup</h3>
+<p>Back up:</p>
+<ul>
+<li>the data directory (config, skills, logs, usage);</li>
+<li>each project's <code>tasks/</code> and <code>AGENT.md</code>;</li>
+<li>the project code itself (use a Git remote).</li>
+</ul>
+<p><code>config.yaml</code> contains your API key. <strong>Never upload
+it to a public repository or share it.</strong></p>
+<h3 id="113-move-to-another-computer">11.3 Move to another computer</h3>
+<ol type="1">
+<li>Install Orcsy on the new computer;</li>
+<li>Close the program;</li>
+<li>Copy the old data directory to the corresponding location;</li>
+<li>Open <code>config.yaml</code> and update
+<code>projects[].path</code> to the new paths if needed;</li>
+<li>Start the program and check that projects and tasks are
+present.</li>
+</ol>
+<p>You can also set the <code>ORCSY_DATA_DIR</code> environment variable
+to move the whole data directory elsewhere (for example, an external
+drive).</p>
+<hr />
+<h2 id="12-faq-and-troubleshooting">12. FAQ and troubleshooting</h2>
+<h3 id="121-the-dashboard-does-not-open--port-is-in-use">12.1 The
+dashboard does not open / port is in use</h3>
+<ul>
+<li>Check that the program is running (is the tray icon still
+there?);</li>
+<li>The default address is <a
+href="http://127.0.0.1:5116">http://127.0.0.1:5116</a>;</li>
+<li>If the port is occupied:
+<ul>
+<li>started with the configured port: Orcsy automatically picks a free
+port and prints it in the console;</li>
+<li>started with an explicit <code>--port</code>: it exits with an error
+instead of silently changing ports (your explicit choice is
+respected);</li>
+</ul></li>
+<li>If another Orcsy is already running, it tells you and exits, so you
+do not accidentally run two.</li>
+</ul>
+<h3 id="122-a-task-stays-blocked">12.2 A task stays "Blocked"</h3>
+<p>Open the task and read <strong>Agent result</strong> plus the run
+log. Common causes:</p>
+<ul>
+<li>LLM request failed (timeout, 429, 500, 502, 503, 504): Orcsy retries
+with backoff; only after that does it mark blocked;</li>
+<li>The AI decided it lacks information or needs a human decision;</li>
+<li>An approval was rejected or timed out;</li>
+<li>A test command is missing or the toolchain is not installed;</li>
+<li>A merge conflict.</li>
+</ul>
+<p>What to do:</p>
+<ol type="1">
+<li>Read the log to find the cause;</li>
+<li>Improve the task description, add information, or narrow the
+scope;</li>
+<li>Click <strong>Requeue</strong>; it will be picked up first on the
+next scan.</li>
+</ol>
+<h3 id="123-will-a-task-hang-forever-if-nobody-handles-an-approval">12.3
+Will a task hang forever if nobody handles an approval?</h3>
+<p>No. After the approval timeout (default 30 minutes) it is
+automatically rejected; the AI receives the reason and either adjusts or
+finishes as blocked.</p>
+<h3 id="124-will-tasks-be-lost-if-i-shut-down-or-kill-the-process">12.4
+Will tasks be lost if I shut down or kill the process?</h3>
+<p>Task files are not lost. Execution progress is written into the
+task's <strong>## Execution progress</strong> section in real time. An
+interrupted task is reset to open on the next launch and re-queued.</p>
+<h3 id="125-dependency-downloads-fail-on-a-slow-network">12.5 Dependency
+downloads fail on a slow network</h3>
+<p>Try, in order:</p>
+<ol type="1">
+<li>Settings → <strong>Mirror management &amp; speed test</strong> →
+test → apply fastest;</li>
+<li>Set <code>GOPROXY</code> / <code>PIP_INDEX_URL</code> /
+<code>npm_config_registry</code> / <code>HTTP_PROXY</code> under
+<strong>Agent subprocess environment variables</strong>;</li>
+<li>Turn on <strong>Write missing tool directories into the user PATH at
+task start</strong>;</li>
+<li>If your company has an internal mirror, add it on the mirror page
+and test it.</li>
+</ol>
+<h3 id="126-which-models-are-supported">12.6 Which models are
+supported?</h3>
+<ul>
+<li>OpenAI-compatible: DeepSeek, Zhipu GLM, Kimi, Qwen, OpenAI, Ollama,
+vLLM, etc.;</li>
+<li>Anthropic protocol: Claude official and compatible services.</li>
+</ul>
+<p>Use <strong>Fetch list</strong> and <strong>Test connection</strong>
+to verify.</p>
+<h3
+id="127-what-should-i-watch-out-for-when-exposing-the-dashboard">12.7
+What should I watch out for when exposing the dashboard?</h3>
+<ul>
+<li>By default it listens only on <code>127.0.0.1</code>, which is
+safest for local use;</li>
+<li>If exposed, you must set <code>web.auth_password</code>;</li>
+<li>A non-loopback address with an empty password refuses to start;</li>
+<li>Authentication is not TLS; use a reverse proxy with HTTPS for
+internet exposure;</li>
+<li>Never commit <code>config.yaml</code> to a repository.</li>
+</ul>
+<h3 id="128-merge-conflict--push-failure">12.8 Merge conflict / push
+failure</h3>
+<ul>
+<li>Commits and merges are performed by the system; the AI does not
+operate Git directly;</li>
+<li>On a merge conflict, the <code>arranger/&lt;project&gt;</code>
+branch is kept, the task is marked blocked, and a human steps in;</li>
+<li>Push failures are usually credentials: use a token for HTTPS, a key
+for SSH;</li>
+<li>After fixing, click <strong>Requeue</strong>.</li>
+</ul>
+<h3 id="129-does-updating-on-windows-need-administrator-rights">12.9
+Does updating on Windows need administrator rights?</h3>
+<ul>
+<li>In a user-writable install directory: fully zero-UAC;</li>
+<li>Under <code>Program Files</code> or another system directory: one
+UAC prompt; click <strong>Yes</strong> to continue. Cancel leaves the
+app running without updating;</li>
+<li>A failed update rolls back and keeps the install log.</li>
+</ul>
+<h3
+id="1210-can-i-use-it-as-a-command-line-scheduler-without-the-dashboard">12.10
+Can I use it as a command-line scheduler without the dashboard?</h3>
+<p>Yes:</p>
+<pre class="bash"><code>orcsy run --config config.yaml          # keep scheduling
+orcsy run --config config.yaml --once   # one cycle, suitable for Task Scheduler / cron</code></pre>
+<p>The dashboard mode can also use <code>--no-sched</code> to keep only
+manual <strong>Scan now</strong>.</p>
+<h3 id="1211-the-tray-icon-is-missing--i-do-not-want-a-tray">12.11 The
+tray icon is missing / I do not want a tray</h3>
+<ul>
+<li>Start with <code>--no-tray</code>;</li>
+<li>Docker disables the tray automatically;</li>
+<li>The dashboard still works without a tray; just open the address.
+System notifications have no channel without a tray, though.</li>
+</ul>
+<h3 id="1212-where-did-the-code-go-after-a-task-finishes">12.12 Where
+did the code go after a task finishes?</h3>
+<ul>
+<li>Git project: committed and merged back to the main branch; pushed if
+a remote is configured;</li>
+<li>Non-Git project: edited directly in the project folder, no
+commit;</li>
+<li>Git project blocked/cancelled: the temporary copy is discarded and
+the main project folder is unchanged;</li>
+<li>Non-Git project blocked/cancelled: there is no temporary copy;
+changes the Agent already made stay in the project folder, so review or
+revert them yourself.</li>
+</ul>
+<hr />
+<h2 id="13-glossary">13. Glossary</h2>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Plain-English meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LLM</td>
+<td>The AI service that provides the intelligence, e.g. DeepSeek, GPT,
+Claude</td>
+</tr>
+<tr>
+<td>API Key</td>
+<td>The "key" for calling the LLM service, like an account password</td>
+</tr>
+<tr>
+<td>base_url</td>
+<td>The "front door address" of the LLM service</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>The AI assistant that reads code, edits files, and runs
+commands</td>
+</tr>
+<tr>
+<td>Task</td>
+<td>A Markdown file describing what to do</td>
+</tr>
+<tr>
+<td>Priority (P0–P4)</td>
+<td>Who goes first; P0 is most urgent, P4 least</td>
+</tr>
+<tr>
+<td>Status</td>
+<td>Where the task is now: open, in progress, done, blocked,
+cancelled</td>
+</tr>
+<tr>
+<td>AGENT.md</td>
+<td>The project's employee handbook, telling the AI the rules</td>
+</tr>
+<tr>
+<td>Git</td>
+<td>A version-control tool that records every change</td>
+</tr>
+<tr>
+<td>Repository (repo)</td>
+<td>A project folder managed by Git</td>
+</tr>
+<tr>
+<td>Commit</td>
+<td>A recorded change in Git history</td>
+</tr>
+<tr>
+<td>Branch</td>
+<td>An independent line of work in Git</td>
+</tr>
+<tr>
+<td>Worktree</td>
+<td>A temporary working copy where the AI edits code without touching
+the main tree</td>
+</tr>
+<tr>
+<td>Issue</td>
+<td>A problem ticket on GitHub/Gitee/etc.</td>
+</tr>
+<tr>
+<td>Token</td>
+<td>The LLM billing unit; roughly "amount of text"</td>
+</tr>
+<tr>
+<td>Approval</td>
+<td>The AI pauses before a sensitive operation and waits for you to
+approve or reject</td>
+</tr>
+<tr>
+<td>Skill</td>
+<td>A specialized handbook for the AI</td>
+</tr>
+<tr>
+<td>Mirror</td>
+<td>An alternative download address, often faster in some regions</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="14-appendix-task-template-and-command-reference">14. Appendix:
+task template and command reference</h2>
+<h3 id="141-general-task-template">14.1 General task template</h3>
+<pre class="markdown"><code>---
+title: One sentence describing the work
+priority: P2
+status: open
+labels: [bug]
+assignee:
+---
+
+## Background / symptoms
+
+What is happening now? What is wrong?
+
+## Steps to reproduce (bugs)
+
+1. …
+2. …
+3. …
+
+## Expected result
+
+What does &quot;done&quot; look like?
+
+## Acceptance criteria
+
+- [ ] …
+- [ ] …
+
+## Constraints
+
+- Only change these files/modules;
+- Do not change these things;
+- Must pass this test/build command.</code></pre>
+<h3 id="142-command-reference">14.2 Command reference</h3>
+<pre class="bash"><code># Initialize (source run)
+uv run orcsy init --dir run
+
+# Validate config and task files
+uv run orcsy validate --config run/config.yaml
+
+# Start the dashboard (with scheduled scanning)
+uv run orcsy web --config run/config.yaml
+
+# Run one cycle
+uv run orcsy run --config run/config.yaml --once
+
+# Keep scheduling without a dashboard
+uv run orcsy run --config run/config.yaml
+
+# Change the port
+uv run orcsy web --config run/config.yaml --port 8080
+
+# Allow LAN access (set a password!)
+uv run orcsy web --config run/config.yaml --host 0.0.0.0
+
+# Docker
+docker compose up -d --build
+docker compose logs -f
+docker compose down
+
+# Linux systemd
+systemctl status orcsy
+sudo systemctl restart orcsy
+journalctl -u orcsy -f</code></pre>
+<h3 id="143-minimal-configuration">14.3 Minimal configuration</h3>
+<pre class="yaml"><code>llm:
+  provider: openai
+  api_key: &quot;sk-your-key&quot;
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+
+scheduler:
+  interval_seconds: 300
+  max_parallel_agents: 1
+
+web:
+  host: 127.0.0.1
+  port: 5116
+  open_browser: true
+  auth_password: &quot;&quot;
+
+projects:
+  - name: my-app
+    path: D:/Repos/my-app
+    enabled: true</code></pre>
+<blockquote>
+<p>For the full configuration reference, see
+<code>config.example.yaml</code> and <code>README.md</code> in the
+repository root.</p>
+</blockquote>
+<hr />
+<p><strong>Now hand the repetitive work to Orcsy and keep your time for
+what matters.</strong></p>
+
+  </article>
+</main>
+
+
+<footer>
+  <div class="wrap foot-in">
+    <span class="brand" style="font-size:15px">
+      <img class="sm" src="assets/orcsy-icon.svg" alt="Orcsy 图标" width="20" height="20">
+      Orcsy · AI Agent 任务编排系统
+    </span>
+    <span class="sp"></span>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="guide.html">用户指南</a>
+    <a href="https://github.com/easy-open-meta/Orcsy" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://gitee.com/java-and-net/Orcsy" target="_blank" rel="noopener">Gitee</a>
+    <span>Copyright © 2026 易开元(EOM)</span>
+  </div>
+</footer>
+
+<a class="to-top" href="#" title="返回顶部" aria-label="返回顶部">↑</a>
+<script>
+(function () {
+  var btn = document.getElementById('themeBtn');
+  function sync() {
+    btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀' : '☾';
+    btn.title = document.documentElement.dataset.theme === 'dark' ? '切换浅色' : '切换深色';
+  }
+  btn.addEventListener('click', function () {
+    var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('ta-theme', next); } catch (e) {}
+    sync();
+  });
+  sync();
+
+  var links = Array.prototype.slice.call(document.querySelectorAll('#TOC a[href^="#"]'));
+  var map = {};
+  links.forEach(function (a) {
+    var id = decodeURIComponent(a.getAttribute('href').slice(1));
+    var el = document.getElementById(id);
+    if (el) map[id] = a;
+  });
+  if ('IntersectionObserver' in window && links.length) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting && map[en.target.id]) {
+          links.forEach(function (l) { l.classList.remove('on'); });
+          map[en.target.id].classList.add('on');
+        }
+      });
+    }, { rootMargin: '-15% 0px -75% 0px', threshold: 0 });
+    Object.keys(map).forEach(function (id) { io.observe(document.getElementById(id)); });
+  }
+})();
+</script>
+</body>
+</html>

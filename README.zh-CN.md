@@ -2,6 +2,8 @@
 
 [English](README.md) | 简体中文
 
+📖 **[用户指南（Wiki）](docs/用户指南.md)** —— 面向普通使用者的安装部署、功能说明与逐步操作教程。
+
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
 ![version](https://img.shields.io/badge/version-0.18.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
