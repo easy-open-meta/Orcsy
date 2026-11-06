@@ -440,9 +440,22 @@ const scanning = ref(false)
 const importing = ref(false)
 const scanErr = ref('')
 
+const allScanSkills = computed(() => scanSources.value.flatMap(s => s.skills))
 const checkedPaths = computed(() =>
-  scanSources.value.flatMap(s => s.skills)
+  allScanSkills.value
     .filter(k => scanChecked.value[k.path]).map(k => k.path))
+
+// 全选 / 反选：批量勾选多个工具目录下扫描到的技能（已导入的后端会跳过）
+function checkAll(): void {
+  const checked: Record<string, boolean> = {}
+  for (const k of allScanSkills.value) checked[k.path] = true
+  scanChecked.value = checked
+}
+function invertChecked(): void {
+  const checked: Record<string, boolean> = {}
+  for (const k of allScanSkills.value) checked[k.path] = !scanChecked.value[k.path]
+  scanChecked.value = checked
+}
 
 watch(scanVisible, async (v) => {
   if (!v) return
@@ -728,6 +741,11 @@ async function newFolder(): Promise<void> {
       <div v-if="!scanSources.length" class="hint">
         没有发现常见 AI 工具的技能目录。可手工选择目录导入，或在上述工具里先安装技能。
       </div>
+      <div v-if="scanSources.length" class="scan-toolbar">
+        <span class="hint">共 {{ allScanSkills.length }} 个技能，已选 {{ checkedPaths.length }} 个</span>
+        <NButton size="tiny" @click="checkAll">全选</NButton>
+        <NButton size="tiny" @click="invertChecked">反选</NButton>
+      </div>
       <div v-for="src in scanSources" :key="src.path" class="scan-group">
         <div class="scan-tool">{{ src.tool }} <span class="scan-path">{{ src.path }}</span></div>
         <label v-for="k in src.skills" :key="k.path" class="scan-item">
@@ -848,6 +866,8 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .geditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
 .keditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
 .scan-group { margin-bottom: 10px; }
+.scan-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.scan-toolbar .hint { flex: 1; margin: 0; }
 .scan-tool { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
 .scan-path { font-weight: 400; font-size: 11.5px; color: var(--faint); word-break: break-all; }
 .scan-item { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 4px; cursor: pointer; }
