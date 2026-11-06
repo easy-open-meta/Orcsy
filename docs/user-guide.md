@@ -662,26 +662,30 @@ Toolbar buttons:
 ### 9.2 Dashboard tab
 
 - Status chips: scheduling state, cycles, last scan, interval, per-project counts;
-- Project cards: name, enable switch, git badge, missing-guide badge, auto-pull badge, path, task counts;
+- Project cards: name, enable switch, git badge, missing-guide badge, review-gate status, auto-pull badge, path, task counts;
 - Quick add task;
 - Task list: priority color, status tag, pending-approval tag, collapsible description, actions;
 - Pagination (10 per page);
 - Archived tasks;
 - Run log.
 
-### 9.3 Projects & Settings tab
+### 9.3 Projects tab
 
-From top to bottom:
+Shows only the managed project cards (6 per page, paginated with lazy rendering); card actions match the dashboard: open folder, new task, AGENT.md, pull Issues, settings, remove. Project cards also show the review-gate status (Review on / Review off / Review model conflict).
+
+### 9.4 Settings tab
+
+An accordion menu of sections on the left (click to expand; the right side shows only the selected section), from top to bottom:
 
 1. **🤖 LLM Access**: model, key, endpoint, parameters;
 2. **⏱ Scheduler & dashboard**: interval, parallelism, port, log retention, login password;
 3. **🔔 Notifications**: sound, system notification;
-4. **🛠 Agent tools & permissions**: approval mode, timeout, tool switches, command whitelist, environment variables, PATH auto-fix;
-5. **🪞 Mirror management & speed test**: test, apply fastest, add/disable mirrors;
-6. **⚙️ App**: autostart, auto-update check, update source, manual package import;
-7. **📁 Managed projects**: project list and shortcuts.
+4. **🔍 Task review (Review Agent)**: review model binding, rework limit, test-command and squash-commit switches;
+5. **🛠 Agent tools & permissions**: approval mode, timeout, tool switches, command whitelist, environment variables, PATH auto-fix;
+6. **🪞 Mirror management & speed test**: test, apply fastest, add/disable mirrors;
+7. **⚙️ App**: autostart, auto-update check, update source, manual package import.
 
-### 9.4 Skills tab
+### 9.5 Skills tab
 
 - Browse the skill library;
 - Scan user-level skills from AI tools (ZCode / Claude Code / Codex / OpenCode, etc.);
@@ -690,7 +694,7 @@ From top to bottom:
 - Edit, enable/disable, open folder, delete/remove;
 - Select all, invert, batch delete.
 
-### 9.5 Usage tab
+### 9.6 Usage tab
 
 - Total tasks, total turns, input tokens, output tokens;
 - Per-project table (tasks, turns, input/output/total, last used);
@@ -810,7 +814,7 @@ Mirror categories include: Go installer, Go module proxy, npm registry, pip inde
 
 Settings → **🔔 Notifications**:
 
-- **Sound**: a "ding" for done, a warning tone for blocked;
+- **Sound**: the bundled "ding-dong" for done, a bundled warning tone for blocked (falls back to the Windows system sound if the bundled audio is missing);
 - **System notification**: tray balloon, works even when the dashboard is closed;
 - Manual stops (cancelled) stay silent;
 - With `--no-tray`, there is no tray and therefore no system-notification channel.
@@ -873,6 +877,34 @@ Behavior:
 - Takes effect on the **next start**;
 - You can also override it with `--port 8080`;
 - Port-conflict behavior is described in [12.1](#121-the-dashboard-does-not-open--port-is-in-use).
+
+---
+
+### 10.11 Task review (Review Agent): a second model as gatekeeper
+
+After a task finishes and before its changes are merged and archived, Orcsy can have an **independent review Agent** (**a different model** from the one that executed the task) inspect the result: it checks the implementation against the requirements and acceptance criteria, optionally running tests for real verification. Only a passed review gets merged into the main branch and archived; a failed review sends the task back for automatic rework with the issue list attached.
+
+**Default state: review is off.** Without a review model configured, everything works as before (tasks are merged and archived on completion). To enable it, just give the system a **second model** (a cheap small model works fine):
+
+1. Open the **🔍 Task review (Review Agent)** card on the settings page;
+2. Fill in the review model's provider / base_url / api_key / model (click **Fetch model list** to pull candidates);
+3. Save. The review gate immediately applies to **all projects** by default (to opt a project out, open that project's **Settings** → **Review Agent** and turn it off there).
+
+**Hard rule: the review model must differ from the task model.** The task model is configured under **LLM access** on the settings page (projects may bind a dedicated model); saving a review model with the same name is rejected — two different models cross-check each other so the system never lets the executor grade its own work.
+
+**How the review works:**
+
+- When the task Agent reports completion, the changes are committed to the working branch first (**not merged yet**);
+- The review Agent inspects the code read-only: it goes through the acceptance criteria in the task one by one, and actually runs tests when **Allow test commands** is on (default);
+- Pass → merged into the main branch automatically → archived to **Completed**;
+- Fail → the task is **automatically reworked** with the review comments (written into the task body, so the task Agent sees them on its next run); rework is allowed 2 times by default (globally adjustable 1–10, overridable per project); when the limit is reached the task becomes **Blocked** for human judgment — the work stays on the working branch, ready to inspect or merge manually;
+- If the program is shut down mid-review, nothing is lost: the changes are already committed on the branch, and the review resumes automatically on the next start without re-running the task.
+
+**Rework and commits:** after a reworked task finally passes review, its multiple WIP commits are squashed into a single commit before merging (**Squash commits after rework passes**, on by default), keeping the main-branch history clean.
+
+**Badges on the dashboard:** `🔍 Pending review` on a task card means it has finished and is being reviewed or waiting for a re-review; `🔍 Rework ×N` means it has been sent back by review N times. Project cards show a **Review on / Review off / Review model conflict** status.
+
+**Cost note:** one review costs roughly 3–8 rounds of read-only calls; on the settings **Usage** view it is recorded separately under the review kind, so you can account it apart from execution.
 
 ---
 

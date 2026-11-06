@@ -54,7 +54,8 @@ class Scheduler:
                          allowed_commands=resolve_commands(config.commands, p),
                          extra_env=config.env.vars or None,
                          mirror_runtime=self.mirror_runtime,
-                         path_autofix=config.env.path_autofix)
+                         path_autofix=config.env.path_autofix,
+                         review_cfg=config.review)
             for p in config.projects
             if p.enabled
         ]
@@ -127,7 +128,8 @@ class Scheduler:
                              allowed_commands=resolve_commands(new_config.commands, p),
                              extra_env=new_config.env.vars or None,
                              mirror_runtime=self.mirror_runtime,
-                             path_autofix=new_config.env.path_autofix)
+                             path_autofix=new_config.env.path_autofix,
+                             review_cfg=new_config.review)
                 for p in new_config.projects
                 if p.enabled
             ]

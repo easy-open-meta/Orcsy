@@ -238,7 +238,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <!-- ===== Hero ===== -->
 <div class="hero" id="top">
   <div class="wrap">
-    <span class="hero-badge">开源免费 · <b>v0.18.1</b> · Windows / Docker / Linux</span>
+    <span class="hero-badge">开源免费 · <b id="ver">v0.18.1</b> · Windows / Docker / Linux</span>
     <h1>让 AI Agent<br><span class="grad">按任务清单自动干活</span></h1>
     <p class="sub">Orcsy 是一个 <b>AI Agent 任务编排系统</b>：把需求与 Bug 写成 Markdown 任务清单，
       每个项目由一个专属 Agent 定时领取、真实改代码、跑测试，改动在独立 git worktree 中完成后自动提交合并——
@@ -266,6 +266,8 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
         <p>文件工具锁死在项目根内（路径穿越直接拒绝）、命令白名单、工具轮数上限、上下文成本自动裁剪——放开手让它跑，也出不了圈。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>三档访问权限 + 人工审批</h3>
         <p>变更前询问 / 自主模式 / 完全访问，全局默认、按项目覆盖。敏感操作挂起等看板批准，超时自动拒绝，任务不会永久卡住，全程进度留痕。</p></div>
+      <div class="fcard"><div class="ico">🔍</div><h3>独立审查 Agent（合并前把关）</h3>
+        <p>任务完成先提交到工作分支，由<b>另一个模型</b>只读审查：对照验收标准抽查实现、可实际跑测试验证；通过才合并归档，不通过带着问题清单自动返工（次数可调），审查意见与用量单独留痕——两个模型交叉验证，杜绝「自己审自己」。</p></div>
       <div class="fcard"><div class="ico">🛠️</div><h3>14 个内置工具，逐个可开关</h3>
         <p>读写/编辑/批量替换/删移文件、正则与文件名搜索、白名单命令、联网取正文（SSRF 防护）、技能读取、镜像源测速……全局 + 每项目双层开关，只读项目轻松实现。</p></div>
       <div class="fcard"><div class="ico">⚡</div><h3>国内镜像测速选源</h3>
@@ -283,7 +285,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <div class="fcard"><div class="ico">🔄</div><h3>程序自更新</h3>
         <p>从 Gitee Release 检查/下载/一键静默升级并自动重启；用户可写目录零 UAC，Program Files 自动走一次 UAC 提权兜底，失败自动回滚并留安装日志。</p></div>
       <div class="fcard"><div class="ico">🔔</div><h3>任务结束提醒</h3>
-        <p>任务完成/受阻时播提示音（Windows 系统音）并弹托盘气泡系统通知，<b>看板没开也能收到</b>；手动停止不打扰，提示音/系统通知可在设置页独立开关。</p></div>
+        <p>任务完成/受阻时播程序内置提示音（完成「叮咚」/ 受阻警示音）并弹托盘气泡系统通知，<b>看板没开也能收到</b>；手动停止不打扰，提示音/系统通知可在设置页独立开关。</p></div>
       <div class="fcard"><div class="ico">🔐</div><h3>看板登录鉴权</h3>
         <p>一个密码即可给看板加上登录门（HttpOnly 会话、防爆破延迟、改密即踢旧会话），配合 Docker / 服务器部署安全暴露到外网。</p></div>
       <div class="fcard"><div class="ico">🐳</div><h3>多平台部署</h3>
@@ -304,7 +306,8 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <div class="step"><h4>写任务</h4><p>往项目 <code>tasks/</code> 放一个 <code>.md</code>：标题、优先级、现象与验收标准；或在看板/Issues 一键生成。</p></div>
       <div class="step"><h4>调度领取</h4><p>调度器定时扫描各项目，按 P0~P4 排序领取待办（同优先级内按手动 order，尊重 assignee、每轮限额），任务置为进行中。</p></div>
       <div class="step"><h4>Agent 工具循环</h4><p>专属模型在独立 worktree 里用 14 个禁锢工具探索、改码、跑测试，缺工具链自动按 env-setup 技能安装修复；敏感操作按权限模式挂起等人工审批。</p></div>
-      <div class="step"><h4>提交合并</h4><p>Agent 报告完成后，系统在 worktree 内按 Conventional Commits 提交，<code>--no-ff</code> 合并回主分支并推送远端。</p></div>
+      <div class="step"><h4>独立审查</h4><p>改动先提交到工作分支，独立审查 Agent（与执行模型不同的第二个模型）对照验收标准只读核查、可跑测试实测；通过才放行合并。</p></div>
+      <div class="step"><h4>提交合并</h4><p>审查通过后，系统按 Conventional Commits 提交（返工多次的提交自动收敛为一个），<code>--no-ff</code> 合并回主分支并推送远端；不通过则带审查意见自动返工。</p></div>
       <div class="step"><h4>回写归档</h4><p>结果（摘要/轮数/token/变更文件）写回任务文件并归档到 <code>done/</code>，token 用量记入台账热力图；受阻任务标 blocked 等人处理，完成/受阻即时弹提示音与系统通知。</p></div>
     </div>
   </div>
@@ -532,6 +535,23 @@ document.querySelectorAll('.tab').forEach(btn => {
     sync();
   });
   sync();
+})();
+
+// 版本号实时化：页面加载后拉取 GitHub 最新发行版替换静态兜底值。
+// 发新版时无需再手改本页的 v0.x.x——发布 Release 即自动跟进。
+// 静态值仅作离线/API 不可达时的兜底；失败静默（不打扰首屏）。
+(function () {
+  var el = document.getElementById('ver');
+  if (!el) return;
+  fetch('https://api.github.com/repos/easy-open-meta/Orcsy/releases/latest', {
+    headers: { 'Accept': 'application/vnd.github+json' }
+  }).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function (d) {
+    var tag = (d && d.tag_name || '').trim();
+    if (tag) el.textContent = tag.charAt(0).toUpperCase() + tag.slice(1);
+  }).catch(function () { /* 网络失败/限流：保留静态兜底值 */ });
 })();
 </script>
 </body>

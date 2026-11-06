@@ -1,11 +1,14 @@
 // 全局共享状态：/api/state 数据 + 当前视图 + 弹窗开关（任一弹窗打开时轮询暂停）
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { api, setUnauthorizedHandler, type AppStateT } from './api'
 
 export const store = reactive({
   state: null as AppStateT | null,
-  view: 'dash' as 'dash' | 'settings' | 'skills' | 'usage',
+  view: 'dash' as 'dash' | 'projects' | 'settings' | 'skills' | 'usage',
 })
+
+// 设置页当前展开的功能分区（手风琴 key）；跨视图跳转定位用（openSettingsSection）
+export const settingsSection = ref('llm')
 
 // ---- 登录鉴权状态：enabled=配置了登录密码；authed=当前会话有效 ----
 // checked=false（启动探测未回）时不渲染登录层，避免闪屏
@@ -113,7 +116,7 @@ export async function refresh(force = false): Promise<void> {
 
 // 弹窗辅助开启函数（组件任意处调用）
 export function openProjectNew(): void {
-  store.view = 'settings'
+  store.view = 'projects'
   ui.projectDlg = { original: null }
 }
 export function openProjectEdit(name: string): void {
@@ -124,6 +127,11 @@ export function openTaskNew(project: string): void {
 }
 export function openTaskView(project: string, id: string): void {
   ui.taskDlg = { project, id, readonly: true }
+}
+// 打开设置页并定位到指定功能分区（手风琴展开 + 右侧渲染）；缺省定位到第一个分区
+export function openSettingsSection(section?: string): void {
+  store.view = 'settings'
+  settingsSection.value = section || 'llm'
 }
 export function openGuide(project: string): void {
   ui.guideDlg = { project }

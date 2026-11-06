@@ -64,8 +64,12 @@ class UsageStore:
 
     def record(self, project: str, task_id: str, outcome: str, turns: int,
                prompt_tokens: int, completion_tokens: int,
-               model: str = "") -> dict:
-        """追加一条任务用量记录；写盘失败只记日志，绝不影响任务本身。"""
+               model: str = "", kind: str = "task") -> dict:
+        """追加一条用量记录；写盘失败只记日志，绝不影响任务本身。
+
+        kind：task（执行 Agent，默认）/ review（审查 Agent）——审查的 token
+        消耗单列可核算；聚合视图对缺省 kind 兼容（旧记录视为 task）。
+        """
         entry = {
             "ts": time.time(),
             "at": time.strftime("%Y-%m-%d %H:%M"),
@@ -76,6 +80,7 @@ class UsageStore:
             "prompt_tokens": int(prompt_tokens or 0),
             "completion_tokens": int(completion_tokens or 0),
             "model": str(model or ""),
+            "kind": str(kind or "task"),
         }
         with self._lock:
             self._entries.append(entry)

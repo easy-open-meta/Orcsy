@@ -1362,8 +1362,8 @@ in the dashboard):</p>
 </thead>
 <tbody>
 <tr>
-<td>Dashboard / Projects &amp; Settings / Skills / Usage</td>
-<td>Switch between the four main tabs</td>
+<td>Dashboard / Projects / Settings / Skills / Usage</td>
+<td>Switch between the five main tabs</td>
 </tr>
 <tr>
 <td>Check for updates</td>
@@ -1407,7 +1407,7 @@ only)</td>
 <li>Status chips: scheduling state, cycles, last scan, interval,
 per-project counts;</li>
 <li>Project cards: name, enable switch, git badge, missing-guide badge,
-auto-pull badge, path, task counts;</li>
+review-gate status, auto-pull badge, path, task counts;</li>
 <li>Quick add task;</li>
 <li>Task list: priority color, status tag, pending-approval tag,
 collapsible description, actions;</li>
@@ -1415,25 +1415,31 @@ collapsible description, actions;</li>
 <li>Archived tasks;</li>
 <li>Run log.</li>
 </ul>
-<h3 id="93-projects--settings-tab">9.3 Projects &amp; Settings tab</h3>
-<p>From top to bottom:</p>
+<h3 id="93-projects-tab">9.3 Projects tab</h3>
+<p>Shows only the managed project cards (6 per page, paginated with lazy
+rendering); card actions match the dashboard: open folder, new task,
+AGENT.md, pull Issues, settings, remove. Project cards also show the
+review-gate status (Review on / Review off / Review model conflict).</p>
+<h3 id="94-settings-tab">9.4 Settings tab</h3>
+<p>An accordion menu of sections on the left (click to expand; the right
+side shows only the selected section), from top to bottom:</p>
 <ol type="1">
 <li><strong>🤖 LLM Access</strong>: model, key, endpoint,
 parameters;</li>
 <li><strong>⏱ Scheduler &amp; dashboard</strong>: interval, parallelism,
 port, log retention, login password;</li>
 <li><strong>🔔 Notifications</strong>: sound, system notification;</li>
+<li><strong>🔍 Task review (Review Agent)</strong>: review model
+binding, rework limit, test-command and squash-commit switches;</li>
 <li><strong>🛠 Agent tools &amp; permissions</strong>: approval mode,
 timeout, tool switches, command whitelist, environment variables, PATH
 auto-fix;</li>
 <li><strong>🪞 Mirror management &amp; speed test</strong>: test, apply
 fastest, add/disable mirrors;</li>
 <li><strong>⚙️ App</strong>: autostart, auto-update check, update
-source, manual package import;</li>
-<li><strong>📁 Managed projects</strong>: project list and
-shortcuts.</li>
+source, manual package import.</li>
 </ol>
-<h3 id="94-skills-tab">9.4 Skills tab</h3>
+<h3 id="95-skills-tab">9.5 Skills tab</h3>
 <ul>
 <li>Browse the skill library;</li>
 <li>Scan user-level skills from AI tools (ZCode / Claude Code / Codex /
@@ -1443,7 +1449,7 @@ OpenCode, etc.);</li>
 <li>Edit, enable/disable, open folder, delete/remove;</li>
 <li>Select all, invert, batch delete.</li>
 </ul>
-<h3 id="95-usage-tab">9.5 Usage tab</h3>
+<h3 id="96-usage-tab">9.6 Usage tab</h3>
 <ul>
 <li>Total tasks, total turns, input tokens, output tokens;</li>
 <li>Per-project table (tasks, turns, input/output/total, last
@@ -1628,8 +1634,9 @@ inherit the global config.</li>
 <h3 id="107-notifications">10.7 Notifications</h3>
 <p>Settings → <strong>🔔 Notifications</strong>:</p>
 <ul>
-<li><strong>Sound</strong>: a "ding" for done, a warning tone for
-blocked;</li>
+<li><strong>Sound</strong>: the bundled "ding-dong" for done, a bundled
+warning tone for blocked (falls back to the Windows system sound if the
+bundled audio is missing);</li>
 <li><strong>System notification</strong>: tray balloon, works even when
 the dashboard is closed;</li>
 <li>Manual stops (cancelled) stay silent;</li>
@@ -1720,6 +1727,67 @@ rights;</li>
 <li>Port-conflict behavior is described in <a
 href="#121-the-dashboard-does-not-open--port-is-in-use">12.1</a>.</li>
 </ul>
+<hr />
+<h3 id="1011-task-review-review-agent-a-second-model-as-gatekeeper">10.11 Task
+review (Review Agent): a second model as gatekeeper</h3>
+<p>After a task finishes and before its changes are merged and archived,
+Orcsy can have an <strong>independent review Agent</strong> (<strong>a
+different model</strong> from the one that executed the task) inspect the
+result: it checks the implementation against the requirements and acceptance
+criteria, optionally running tests for real verification. Only a passed
+review gets merged into the main branch and archived; a failed review sends
+the task back for automatic rework with the issue list attached.</p>
+<p><strong>Default state: review is off.</strong> Without a review model
+configured, everything works as before (tasks are merged and archived on
+completion). To enable it, just give the system a <strong>second
+model</strong> (a cheap small model works fine):</p>
+<ol>
+<li>Open the <strong>🔍 Task review (Review Agent)</strong> card on the
+settings page;</li>
+<li>Fill in the review model's provider / base_url / api_key / model (click
+<strong>Fetch model list</strong> to pull candidates);</li>
+<li>Save. The review gate immediately applies to <strong>all
+projects</strong> by default (to opt a project out, open that project's
+<strong>Settings</strong> → <strong>Review Agent</strong> and turn it off
+there).</li>
+</ol>
+<p><strong>Hard rule: the review model must differ from the task model.</strong>
+The task model is configured under <strong>LLM access</strong> on the
+settings page (projects may bind a dedicated model); saving a review model
+with the same name is rejected — two different models cross-check each other
+so the system never lets the executor grade its own work.</p>
+<p><strong>How the review works:</strong></p>
+<ul>
+<li>When the task Agent reports completion, the changes are committed to the
+working branch first (<strong>not merged yet</strong>);</li>
+<li>The review Agent inspects the code read-only: it goes through the
+acceptance criteria in the task one by one, and actually runs tests when
+<strong>Allow test commands</strong> is on (default);</li>
+<li>Pass → merged into the main branch automatically → archived to
+<strong>Completed</strong>;</li>
+<li>Fail → the task is <strong>automatically reworked</strong> with the
+review comments (written into the task body, so the task Agent sees them on
+its next run); rework is allowed 2 times by default (globally adjustable
+1–10, overridable per project); when the limit is reached the task becomes
+<strong>Blocked</strong> for human judgment — the work stays on the working
+branch, ready to inspect or merge manually;</li>
+<li>If the program is shut down mid-review, nothing is lost: the changes are
+already committed on the branch, and the review resumes automatically on the
+next start without re-running the task.</li>
+</ul>
+<p><strong>Rework and commits:</strong> after a reworked task finally passes
+review, its multiple WIP commits are squashed into a single commit before
+merging (<strong>Squash commits after rework passes</strong>, on by default),
+keeping the main-branch history clean.</p>
+<p><strong>Badges on the dashboard:</strong> <code>🔍 Pending review</code>
+on a task card means it has finished and is being reviewed or waiting for a
+re-review; <code>🔍 Rework ×N</code> means it has been sent back by review N
+times. Project cards show a <strong>Review on / Review off / Review model
+conflict</strong> status.</p>
+<p><strong>Cost note:</strong> one review costs roughly 3–8 rounds of
+read-only calls; on the settings <strong>Usage</strong> view it is recorded
+separately under the review kind, so you can account it apart from
+execution.</p>
 <hr />
 <h2 id="11-data-backup-and-migration">11. Data, backup, and
 migration</h2>

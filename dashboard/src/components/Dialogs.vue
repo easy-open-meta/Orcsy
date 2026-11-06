@@ -32,12 +32,18 @@ const pDraft = reactive({
   use_tools: false, tools: {} as Record<string, boolean>,
   // 项目级访问权限覆盖：'' = 跟随全局 permissions.mode
   perm_mode: '' as '' | PermissionMode,
+  // 审查 Agent：use_review 三态开关（false=跟随全局 review.enabled）；
+  // 审查模型绑定部分覆盖全局 review.llm；rounds null=跟随全局（1~10 自定义）
+  use_review: false, review_ll_provider: '' as '' | 'openai' | 'anthropic',
+  review_ll_base: '', review_ll_key: '', review_ll_model: '',
+  review_rounds: null as number | null,
 })
 // 密钥类字段三态（H2）：看板只回显掩码，不回填明文。未触碰的字段保存时不带
 // 对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除
 const llKeyTouched = ref(false)
 const repoTokenTouched = ref(false)
 const repoPassTouched = ref(false)
+const reviewKeyTouched = ref(false)
 // 正在编辑的项目（占位符展示已配置掩码用；新建时为空）
 const editingProject = computed(() =>
   ui.projectDlg?.original
@@ -144,6 +150,15 @@ watch(() => ui.projectDlg, (dlg) => {
     pDraft.tools[t.name] = pt?.[t.name] ?? store.state?.tools_cfg?.[t.name] ?? true
   }
   pDraft.perm_mode = (p?.permission_mode ?? '') as '' | PermissionMode
+  // 审查 Agent：开关三态（review_enabled null/true/false）+ 绑定回显 + 返工次数
+  pDraft.use_review = p?.review_enabled ?? false
+  const prl = p?.review_llm ?? null
+  pDraft.review_ll_provider = (prl?.provider as '' | 'openai' | 'anthropic') ?? ''
+  pDraft.review_ll_base = prl?.base_url ?? ''
+  pDraft.review_ll_key = ''  // 不回填明文：掩码占位，留空保持原值
+  reviewKeyTouched.value = false
+  pDraft.review_ll_model = prl?.model ?? ''
+  pDraft.review_rounds = p?.review_max_rounds ?? null
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
 })
 
@@ -214,6 +229,63 @@ async function testProjectModel(): Promise<void> {
   finally { pTesting.value = false }
 }
 
+// ---- 审查 Agent：模型列表拉取 / 与任务模型的互斥校验 ----
+const rModels = ref<ModelInfo[]>([])
+const rFetching = ref(false)
+const rModelOptions = computed(() => rModels.value.map(m => ({ label: m.id, value: m.id })))
+// 生效任务模型（项目绑定优先，回退全局）：审查模型与之同名即「自审自批」禁止
+const effTaskModel = computed(() => {
+  if (pDraft.use_llm && pDraft.ll_model.trim()) return pDraft.ll_model.trim()
+  return store.state?.llm.model || ''
+})
+// 生效审查模型（项目绑定优先，回退全局审查配置）：互斥校验与占位提示共用
+const effReviewModel = computed(() => {
+  if (!pDraft.use_review) return ''
+  if (pDraft.review_ll_model.trim()) return pDraft.review_ll_model.trim()
+  return store.state?.review_cfg?.model || ''
+})
+const reviewModelConflict = computed(() => {
+  if (!effReviewModel.value || !effTaskModel.value) return ''
+  return effReviewModel.value.trim().toLowerCase() === effTaskModel.value.trim().toLowerCase()
+    ? '审查模型不能与任务模型相同（独立模型交叉审查，禁止自审自批）' : ''
+})
+const reviewKeyPlaceholder = computed(() => {
+  const p = ui.projectDlg?.original
+    ? store.state?.projects.find(x => x.name === ui.projectDlg?.original) : null
+  return p?.review_llm?.api_key_masked
+    ? `已配置（${p.review_llm.api_key_masked}），留空保持原值`
+    : '审查模型服务密钥'
+})
+
+async function fetchReviewModels(): Promise<void> {
+  rFetching.value = true
+  try {
+    const r = await api.models({
+      provider: pDraft.review_ll_provider || store.state?.review_cfg?.provider || 'openai',
+      base_url: pDraft.review_ll_base.trim() || store.state?.review_cfg?.base_url || '',
+      api_key: pDraft.review_ll_key.trim(),
+      model: pDraft.review_ll_model.trim() || store.state?.review_cfg?.model || '',
+    })
+    rModels.value = r.models
+    message.success(`已获取 ${r.models.length} 个模型：在「模型」框下拉选择或输入`)
+  } catch (e: any) { message.error(e.message) }
+  finally { rFetching.value = false }
+}
+
+// ---- 结构化审查意见解析：从任务正文「## 审查结果」节提取 - [severity] file:line — msg ----
+interface ReviewIssueVm { severity: string; loc: string; message: string }
+const reviewIssues = computed<ReviewIssueVm[]>(() => {
+  const body = tDraft.description || ''
+  const m = /## 审查结果([\s\S]*?)(?=\n## |$)/.exec(body)
+  if (!m) return []
+  const out: ReviewIssueVm[] = []
+  for (const line of m[1].split('\n')) {
+    const hit = /^\s*-\s*\[(blocker|major|minor)\]\s*(.+?)\s+—\s+(.+)$/.exec(line.trim())
+    if (hit) out.push({ severity: hit[1], loc: hit[2], message: hit[3] })
+  }
+  return out
+})
+
 // 新建项目时按路径自动探测技术栈预填（防抖 400ms，输入完整路径后触发）；
 // 编辑项目不探测——AGENT.md 已存在，保存时不会重写
 let probeTimer: ReturnType<typeof setTimeout> | undefined
@@ -240,6 +312,11 @@ async function saveProject(): Promise<void> {
   if (!ui.projectDlg) return
   if (pDraft.use_repo && !pDraft.repo_url.trim()) {
     pDraft.err = '已启用仓库绑定，请填写仓库 URL'
+    return
+  }
+  // 审查模型互斥（前端第一道，后端仍强制校验）：同名直接拦截
+  if (reviewModelConflict.value) {
+    pDraft.err = reviewModelConflict.value
     return
   }
   try {
@@ -275,6 +352,16 @@ async function saveProject(): Promise<void> {
       tools: pDraft.use_tools ? { ...pDraft.tools } : null,
       // 访问权限覆盖：'' = 跟随全局（null 清除覆盖）
       permission_mode: pDraft.perm_mode || null,
+      // 审查 Agent：开关（关=跟随全局 null）；模型绑定部分覆盖全局 review.llm，
+      // api_key 三态同 llm；返工次数 null=跟随全局
+      review_enabled: pDraft.use_review ? true : null,
+      review_llm: pDraft.use_review ? {
+        ...(pDraft.review_ll_provider ? { provider: pDraft.review_ll_provider } : {}),
+        ...(pDraft.review_ll_base.trim() ? { base_url: pDraft.review_ll_base.trim() } : {}),
+        ...(reviewKeyTouched.value ? { api_key: pDraft.review_ll_key.trim() } : {}),
+        ...(pDraft.review_ll_model.trim() ? { model: pDraft.review_ll_model.trim() } : {}),
+      } : null,
+      review_max_rounds: pDraft.review_rounds,
       original_name: ui.projectDlg.original ?? undefined,
       // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
       ...(ui.projectDlg.original ? {} : {
@@ -283,7 +370,7 @@ async function saveProject(): Promise<void> {
     })
     message.success(ui.projectDlg.original ? '已修改项目' : '已新建项目')
     ui.projectDlg = null
-    store.view = 'settings'
+    store.view = 'projects'
   } catch (e: any) { pDraft.err = e.message }
   void refresh(true)
 }
@@ -587,6 +674,37 @@ async function newFolder(): Promise<void> {
         <span class="hint">未填写的字段自动继承全局「大模型接入」配置</span>
       </div>
     </template>
+    <label class="checkline" style="margin-top:12px">
+      <NSwitch v-model:value="pDraft.use_review" />
+      审查 Agent（任务合并前由独立模型审查，通过才归档；关闭=跟随全局开关）
+    </label>
+    <template v-if="pDraft.use_review">
+      <div class="duo" style="margin-top:6px">
+        <div class="f1"><label>协议 provider</label>
+          <NSelect v-model:value="pDraft.review_ll_provider" :options="llProviderOptions" /></div>
+        <div class="f2"><label>审查模型 model</label>
+          <NSelect v-model:value="pDraft.review_ll_model" :options="rModelOptions" filterable tag clearable
+                   :placeholder="'留空继承全局（当前 ' + (store.state?.review_cfg?.model || '未配置') + '）'"
+                   @update:value="(v: string | null) => { pDraft.review_ll_model = v || '' }" /></div>
+      </div>
+      <div class="duo">
+        <div class="f1"><label>接口 base_url</label>
+          <NInput v-model:value="pDraft.review_ll_base" placeholder="留空继承全局审查模型配置" /></div>
+        <div class="f1"><label>密钥 api_key</label>
+          <NInput v-model:value="pDraft.review_ll_key" type="password" show-password-on="click"
+                  :placeholder="reviewKeyPlaceholder" @update:value="reviewKeyTouched = true" /></div>
+      </div>
+      <div class="duo">
+        <div class="f1"><label>返工次数（审查不通过上限）</label>
+          <NInputNumber v-model:value="pDraft.review_rounds" :min="1" :max="10"
+                        placeholder="跟随全局" clearable /></div>
+        <div class="f1 btnrow" style="align-items:flex-end">
+          <NButton size="small" :loading="rFetching" @click="fetchReviewModels" style="margin-bottom:2px">获取模型列表</NButton>
+        </div>
+      </div>
+      <div class="hint" v-if="reviewModelConflict" style="color:#d03050">⚠ {{ reviewModelConflict }}</div>
+      <div class="hint" v-else>审查模型必须与任务模型不同；返工次数留空 = 跟随全局（当前 {{ store.state?.review_cfg?.max_review_rounds ?? 2 }} 次）。全局未配置审查模型时本项目审查不执行。</div>
+    </template>
     <label style="margin-top:12px">访问权限（人工审批模式）</label>
     <NSelect v-model:value="pDraft.perm_mode" :options="permOptions" />
     <div class="hint">询问 = 任务挂起等待看板顶栏「🔔 待审批」批准/拒绝；超时自动拒绝，任务不会永久挂起。</div>
@@ -683,6 +801,18 @@ async function newFolder(): Promise<void> {
     </div>
     <label>任务描述（Markdown 正文）</label>
     <NInput v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
+    <!-- 结构化审查意见（从正文「## 审查结果」节解析）：severity 色标条目列表 -->
+    <template v-if="reviewIssues.length">
+      <label style="margin-top:10px">审查意见（独立审查 Agent 退回的问题清单）</label>
+      <div class="review-issues">
+        <div v-for="(it, idx) in reviewIssues" :key="idx" class="review-issue">
+          <NTag size="tiny" :type="it.severity === 'blocker' ? 'error' : it.severity === 'major' ? 'warning' : 'default'"
+                :bordered="false">{{ it.severity }}</NTag>
+          <span class="ri-loc">{{ it.loc }}</span>
+          <span class="ri-msg">{{ it.message }}</span>
+        </div>
+      </div>
+    </template>
     <div class="dlg-actions">
       <NButton @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
       <NButton v-if="!tReadonly" type="primary" @click="saveTask">保存</NButton>
@@ -875,4 +1005,10 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .scan-item input { flex: none; }
 .scan-name { font-weight: 600; font-size: 12.5px; flex: none; }
 .scan-desc { flex: 1; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 结构化审查意见：severity 色标 + 文件位置 + 问题描述 */
+.review-issues { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow: auto; }
+.review-issue { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
+.ri-loc { font-family: Consolas, "Cascadia Mono", monospace; color: var(--dim); flex: none; }
+.ri-msg { color: var(--text); min-width: 0; word-break: break-word; }
 </style>

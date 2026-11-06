@@ -99,11 +99,15 @@ from .agent import ProjectAgent
 from .approvals import get_manager
 from .config import (AppConfig, CommandsConfig, EnvConfig, LLMConfig,
                      MirrorsConfig, NotifyConfig, PermissionsConfig,
-                     ProjectConfig, SchedulerConfig, TaskStatus,
-                     ToolsConfig, UpdateConfig, WebConfig, normalize_llm_override,
-                     resolve_commands, resolve_llm, resolve_permission_mode,
-                     resolve_tools, validate_env_vars, validate_permission_mode,
-                     validate_web_security)
+                     ProjectConfig, ReviewConfig, SchedulerConfig, TaskStatus,
+                     ToolsConfig, UpdateConfig, WebConfig,
+                     assert_review_model_distinct, normalize_llm_override,
+                     normalize_review_llm, resolve_commands, resolve_llm,
+                     resolve_permission_mode, resolve_review_llm,
+                     resolve_review_rounds, resolve_tools, validate_env_vars,
+                     validate_permission_mode, validate_web_security,
+                     review_enabled_for)
+from .config import _coerce_llm as _coerce_llm_cfg
 from .executor import WORKTREE_DIR
 from .git_ops import Git, GitError
 from .issues import IssueError, normalize_repo, sync_issues
@@ -206,7 +210,8 @@ class AppState:
                                  allowed_commands=resolve_commands(config.commands, p),
                                  extra_env=config.env.vars or None,
                                  mirror_runtime=self.mirror_runtime,
-                                 path_autofix=config.env.path_autofix)
+                                 path_autofix=config.env.path_autofix,
+                         review_cfg=config.review)
             for p in config.projects
         }
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
@@ -419,6 +424,12 @@ class AppState:
                 # 项目级密钥同样只出掩码（H2 同规则）：项目专属模型 api_key 与
                 # 仓库 token/密码都随 /api/state 外发，不能给明文
                 "llm": self._project_llm_public(p.llm),
+                # 项目级审查配置：原始覆盖值（review_enabled/review_llm/review_max_rounds）
+                # + 生效值（开关/模型掩码/返工上限），前端展示「跟随全局」态用
+                "review_enabled": p.review_enabled,
+                "review_llm": self._project_llm_public(p.review_llm),
+                "review_max_rounds": p.review_max_rounds,
+                "review": self._project_review_public(p),
                 "repo": self._repo_public(p.repo),
                 # 项目级工具开关覆盖；null = 跟随全局（前端显示「跟随全局」态）
                 "tools": p.tools or None,
@@ -457,6 +468,20 @@ class AppState:
                 "max_context_tokens": self.config.llm.max_context_tokens,
                 "enable_thinking": self.config.llm.enable_thinking,
                 "timeout_seconds": self.config.llm.timeout_seconds,
+            },
+            # 全局审查配置：模型掩码同规则（api_key 不出明文）；model_configured
+            # = 审查未启用默认态判定（设置页中性提示「配置一个不同模型即开启」）
+            "review_cfg": {
+                "enabled": self.config.review.enabled,
+                "model_configured": self.config.review.llm is not None,
+                "provider": self.config.review.llm.provider if self.config.review.llm else "openai",
+                "model": self.config.review.llm.model if self.config.review.llm else "",
+                "base_url": self.config.review.llm.base_url if self.config.review.llm else "",
+                "api_key_masked": mask_secret(self.config.review.llm.api_key) if self.config.review.llm else "",
+                "max_turns": self.config.review.max_turns,
+                "max_review_rounds": self.config.review.max_review_rounds,
+                "allow_test_commands": self.config.review.allow_test_commands,
+                "squash_merge": self.config.review.squash_merge,
             },
             "scheduler": self.scheduler.status(),
             "update": self._healed_update_state(),
@@ -540,6 +565,34 @@ class AppState:
         out["api_key_configured"] = bool(llm.get("api_key"))
         return out
 
+    def _project_review_public(self, p: ProjectConfig) -> dict:
+        """项目审查门的生效状态块（看板项目卡片/设置页展示用）。
+
+        enabled_effective：项目覆盖后的开关；model_configured/effective_model：
+        两级解析后的审查模型（api_key 只出掩码）；effective_max_rounds：两级
+        解析后的返工上限；warning：互斥冲突提示（运行时守卫同源判定）。
+        """
+        cfg = self.config.review
+        eff_llm = resolve_review_llm(cfg, p.review_llm,
+                                     context=f"项目 {p.name} 的 review_llm")
+        warning = ""
+        if eff_llm is not None and review_enabled_for(cfg, p):
+            try:
+                assert_review_model_distinct(
+                    resolve_llm(self.config.llm, p.llm,
+                                context=f"项目 {p.name} 的 llm"),
+                    eff_llm, context=f"项目 {p.name} 的 review")
+            except ValueError as e:
+                warning = str(e)
+        return {
+            "enabled_effective": review_enabled_for(cfg, p),
+            "model_configured": eff_llm is not None,
+            "effective_model": eff_llm.model if eff_llm else "",
+            "api_key_masked": mask_secret(str(eff_llm.api_key)) if eff_llm else "",
+            "effective_max_rounds": resolve_review_rounds(cfg, p),
+            "warning": warning,
+        }
+
     @staticmethod
     def _repo_public(repo: dict | None) -> dict | None:
         """项目仓库绑定的可外发形态：token/密码只出掩码与「已配置」标记（H2 同规则）。"""
@@ -562,6 +615,9 @@ class AppState:
             "description": t.description[:2000],
             # 看板拖拽排序的手动序号；null = 未手动排过（显示回退状态→优先级）
             "order": t.order,
+            # 审查门状态：任务卡片「待审查」徽标 + 审查轮数
+            "review_pending": t.review_pending,
+            "review_round": t.review_round,
         }
 
     # ---- 操作 ----
@@ -1008,13 +1064,54 @@ class AppState:
         perm = (validate_permission_mode(perm_raw,
                                          context=f"项目 {name} 的 permission_mode")
                 if perm_raw else None)
-        return ProjectConfig(
+        # 项目级审查配置：开关（三态 null=跟随全局）、模型绑定（部分覆盖全局
+        # review.llm；api_key 三态同 llm）、返工次数（null=跟随全局，1~10）
+        review_enabled_raw = data.get("review_enabled")
+        if review_enabled_raw is not None and not isinstance(review_enabled_raw, bool):
+            raise ValueError("review_enabled 必须是布尔值或 null（跟随全局）")
+        review_llm_raw = data.get("review_llm")
+        if review_llm_raw is not None and not isinstance(review_llm_raw, dict):
+            raise ValueError("review_llm 绑定必须是键值对字典或 null")
+        review_llm = None
+        if isinstance(review_llm_raw, dict):
+            review_llm_data = dict(review_llm_raw)
+            # api_key 三态（H2 配套）：键缺失=保持原值；带键（含空串）=新值/清除
+            if (existing is not None and existing.review_llm
+                    and "api_key" not in review_llm_data):
+                review_llm_data["api_key"] = existing.review_llm.get("api_key", "")
+            review_llm = normalize_review_llm(review_llm_data) or None
+            if review_llm:
+                # 显式 null/全空=清除绑定（回继承全局），同 llm 绑定语义
+                resolve_review_llm(self.config.review, review_llm,
+                                   context=f"项目 {name} 的 review_llm")
+        review_rounds_raw = data.get("review_max_rounds")
+        review_rounds = None
+        if review_rounds_raw is not None:
+            try:
+                review_rounds = int(review_rounds_raw)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"review_max_rounds 必须是整数：{e}") from e
+            if not (1 <= review_rounds <= 10):
+                raise ValueError(f"review_max_rounds 应为 1~10（当前：{review_rounds}）")
+        draft = ProjectConfig(
             name=name, path=path, enabled=bool(data.get("enabled", True)),
             tasks_dir=tasks_dir, guide_file=guide_file,
             max_tasks_per_cycle=max_tasks, max_agent_turns=max_turns,
             allowed_commands=allowed, allowed_branch=branch, llm=llm, repo=repo,
             tools=tools, permission_mode=perm,
+            review_enabled=review_enabled_raw,
+            review_llm=review_llm,
+            review_max_rounds=review_rounds,
         )
+        # 审查模型互斥校验（R4）：配置了审查模型且开关生效时，与该项目生效
+        # 任务模型同名即拒绝保存（400，前端红字提示同一文案）
+        eff_review_llm = resolve_review_llm(self.config.review, review_llm,
+                                            context=f"项目 {name} 的 review_llm")
+        if eff_review_llm is not None and review_enabled_for(self.config.review, draft):
+            assert_review_model_distinct(
+                resolve_llm(self.config.llm, llm, context=f"项目 {name} 的 llm"),
+                eff_review_llm, context=f"项目 {name} 的 review")
+        return draft
 
     def _save_config(self, cfg: AppConfig) -> None:
         """把配置对象写回 config.yaml（保留注释做不到，字段顺序固定）。"""
@@ -1062,6 +1159,25 @@ class AppState:
             # 任务结束提醒开关必须一起写回：漏写会在看板任意保存时静默
             # 重置为默认全开（同 update 节漏写的教训）
             "notify": {"sound": cfg.notify.sound, "system": cfg.notify.system},
+            # 任务审查（Review Agent）配置整体写回：漏写会在看板任意保存时
+            # 静默重置（llm=None = 审查未启用默认态；同 update/notify 教训）
+            "review": {
+                "enabled": cfg.review.enabled,
+                "llm": ({"provider": cfg.review.llm.provider,
+                         "api_key": cfg.review.llm.api_key,
+                         "base_url": cfg.review.llm.base_url,
+                         "model": cfg.review.llm.model,
+                         "temperature": cfg.review.llm.temperature,
+                         "max_tokens": cfg.review.llm.max_tokens,
+                         "max_context_tokens": cfg.review.llm.max_context_tokens,
+                         "enable_thinking": cfg.review.llm.enable_thinking,
+                         "timeout_seconds": cfg.review.llm.timeout_seconds}
+                        if cfg.review.llm else None),
+                "max_turns": cfg.review.max_turns,
+                "max_review_rounds": cfg.review.max_review_rounds,
+                "allow_test_commands": cfg.review.allow_test_commands,
+                "squash_merge": cfg.review.squash_merge,
+            },
             "projects": [
                 {
                     "name": p.name, "path": str(p.path), "enabled": p.enabled,
@@ -1071,6 +1187,11 @@ class AppState:
                     **({"allowed_branch": p.allowed_branch} if p.allowed_branch else {}),
                     **({"allowed_commands": p.allowed_commands} if p.allowed_commands else {}),
                     **({"llm": p.llm} if p.llm else {}),
+                    **({"review_enabled": p.review_enabled}
+                       if p.review_enabled is not None else {}),
+                    **({"review_llm": p.review_llm} if p.review_llm else {}),
+                    **({"review_max_rounds": p.review_max_rounds}
+                       if p.review_max_rounds is not None else {}),
                     **({"repo": p.repo} if p.repo else {}),
                     **({"tools": p.tools} if p.tools else {}),
                     **({"permission_mode": p.permission_mode} if p.permission_mode else {}),
@@ -1102,7 +1223,8 @@ class AppState:
                                             allowed_commands=resolve_commands(new_cfg.commands, p),
                                             extra_env=new_cfg.env.vars or None,
                                             mirror_runtime=self.mirror_runtime,
-                                            path_autofix=new_cfg.env.path_autofix)
+                                            path_autofix=new_cfg.env.path_autofix,
+                                            review_cfg=new_cfg.review)
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
@@ -1855,6 +1977,49 @@ class AppState:
             if not (1 <= timeout <= 1440):
                 raise ValueError("审批超时应为 1~1440 分钟")
             self.config.permissions = PermissionsConfig(mode=mode, timeout_minutes=timeout)
+
+        # 任务审查（Review Agent）：分块保存；模型三态 api_key 同 llm 全局节；
+        # 保存后全项目互斥复检（全局审查模型换了，可能与任何项目的任务模型撞名）。
+        # 先校验后赋值：复检失败抛 400 时配置保持原值（防半写）
+        if "review" in data:
+            rev = data.get("review") or {}
+            rev_llm_raw = rev.get("llm")
+            if rev_llm_raw is not None and not isinstance(rev_llm_raw, dict):
+                raise ValueError("review.llm 必须是键值对字典或 null（null=清除绑定）")
+            rev_llm = None
+            if isinstance(rev_llm_raw, dict) and rev_llm_raw:
+                rev_data = dict(rev_llm_raw)
+                # api_key 三态（H2 配套）：键缺失=保持原值；空串=清除；非空=换新
+                if ("api_key" not in rev_data and self.config.review.llm):
+                    rev_data["api_key"] = self.config.review.llm.api_key
+                rev_llm = _coerce_llm_cfg(rev_data, require_api_key=False,
+                                          context="review.llm")
+            rev_turns = int(rev.get("max_turns", self.config.review.max_turns))
+            if not (1 <= rev_turns <= 100):
+                raise ValueError(f"review.max_turns 应为 1~100（当前：{rev_turns}）")
+            rev_rounds = int(rev.get("max_review_rounds",
+                                     self.config.review.max_review_rounds))
+            if not (1 <= rev_rounds <= 10):
+                raise ValueError(f"review.max_review_rounds 应为 1~10（当前：{rev_rounds}）")
+            new_review = ReviewConfig(
+                enabled=bool(rev.get("enabled", self.config.review.enabled)),
+                llm=rev_llm,
+                max_turns=rev_turns,
+                max_review_rounds=rev_rounds,
+                allow_test_commands=bool(rev.get(
+                    "allow_test_commands", self.config.review.allow_test_commands)),
+                squash_merge=bool(rev.get("squash_merge", self.config.review.squash_merge)),
+            )
+            # 全项目互斥复检：审查模型与任一启用审查项目的生效任务模型撞名即拒绝
+            for p in self.config.projects:
+                eff_review = resolve_review_llm(new_review, p.review_llm,
+                                                context=f"项目 {p.name} 的 review_llm")
+                if eff_review is not None and review_enabled_for(new_review, p):
+                    assert_review_model_distinct(
+                        resolve_llm(self.config.llm, p.llm,
+                                    context=f"项目 {p.name} 的 llm"),
+                        eff_review, context=f"项目 {p.name} 的 review")
+            self.config.review = new_review  # 复检全过才落盘
 
         self.scheduler.reload_config(self.config)
         self._apply_config(self.config)

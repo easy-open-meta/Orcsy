@@ -1244,6 +1244,27 @@ TOOLS: dict[str, tuple[str, dict, object]] = {
                 "files_changed": {"type": "array", "items": {"type": "string"}},
                 "commit_message": {"type": "string"},
                 "notes": {"type": "string"},
+                # 可选结构化问题清单：仅审查 agent 的提示词要求提供（任务
+                # agent 不提及该字段，不受影响）；不通过时逐条列出问题
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "file": {"type": "string",
+                                     "description": "相对项目根的文件路径"},
+                            "line": {"type": "integer",
+                                     "description": "行号（可省略）"},
+                            "severity": {"type": "string",
+                                         "enum": ["blocker", "major", "minor"],
+                                         "description": "blocker=阻断验收；major=功能缺陷；minor=次要问题"},
+                            "message": {"type": "string",
+                                        "description": "问题描述与建议"},
+                        },
+                        "required": ["file", "severity", "message"],
+                    },
+                    "description": "结构化问题清单（审查场景使用；每条含 file/severity/message）",
+                },
             },
             "required": ["action", "summary"],
         },

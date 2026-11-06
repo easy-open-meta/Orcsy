@@ -4,7 +4,9 @@ git 项目的执行流程：
 1. 在 <项目根>/.worktree-arranger 创建/复用独立 worktree（隔离 Agent 的改动）；
 2. Agent 通过工具（list_dir/read_file/write_file/edit_file/grep/run_command）
    在 worktree 里探索与修改代码，最后调用 finish 给出结论；
-3. action=completed 时：worktree 内 commit → 主仓库 merge → push（如有远端）；
+3. action=completed 时：worktree 先 commit 到 arranger/<name> 工作分支 →
+   （审查门开启时）独立审查 agent 合并前审查，通过才 merge → push（如有远端）；
+   审查不通过不合并且不清 worktree（返工从分支尖续作）；
    blocked/cannot_do 时：丢弃 worktree 变更，主仓库任务状态置为 blocked。
 非 git 项目：Agent 直接在项目目录工作，只回写任务状态，不提交。
 """
@@ -17,7 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .approvals import args_preview, get_manager, requires_approval
-from .config import LLMConfig, ProjectConfig, TaskStatus
+from .config import (LLMConfig, ProjectConfig, ReviewConfig, TaskStatus,
+                     assert_review_model_distinct, resolve_commands,
+                     resolve_permission_mode, resolve_review_llm,
+                     resolve_review_rounds, review_enabled_for)
 from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
 from .logging_setup import get_logger
@@ -46,6 +51,10 @@ class TaskResult:
     turns: int = 0                 # Agent 工具循环轮数
     prompt_tokens: int = 0         # 输入 token 累计（各轮之和，含历史重发）
     completion_tokens: int = 0     # 输出 token 累计
+    # 审查门结论（合并前审查开启时非 None）；skipped = 未启用审查
+    review: object | None = None
+    # 审查阶段落下的 WIP 提交短哈希（审计可溯；未审查/无提交时为空）
+    wip_commit: str = ""
 
 
 class TaskExecutor:
@@ -56,7 +65,9 @@ class TaskExecutor:
                  allowed_commands: list[str] | None = None,
                  extra_env: dict[str, str] | None = None,
                  mirror_runtime=None,
-                 path_autofix: bool = False) -> None:
+                 path_autofix: bool = False,
+                 review_cfg: ReviewConfig | None = None,
+                 review_llm: LLMConfig | None = None) -> None:
         self.project = project
         self.llm = llm
         # 生效的工具开关 map（resolve_tools 的产物）；未列出的工具默认启用
@@ -71,6 +82,10 @@ class TaskExecutor:
         # 任务启动时把扫描到的缺失工具目录持久写入用户 PATH（config
         # env.path_autofix，看板开关；默认关——系统级修改须用户显式开启）
         self.path_autofix = bool(path_autofix)
+        # 审查门配置：cfg 为 None 时取默认（未配置模型 = 不审查，兼容旧调用）；
+        # review_llm 为调用方按配置解析出的生效审查模型（None = 审查未启用）
+        self.review_cfg = review_cfg or ReviewConfig()
+        self.review_llm = review_llm
         # 镜像源运行时（mirrors.MirrorRuntime）：speedtest_mirrors 工具 + env-setup
         # 技能正文动态追加「测速优选」段用；None = 未接线（技能保持静态默认序）
         self.mirror_runtime = mirror_runtime
@@ -176,10 +191,14 @@ class TaskExecutor:
             result.files_changed = response.files_changed
             if response.action == "completed":
                 if self.is_git_repo:
-                    merged = self._commit_and_merge(task, response, result)
-                    result.outcome = "done" if merged else "blocked"
+                    outcome, review = self._complete_with_review(task, response, result)
+                    result.outcome = outcome
+                    result.review = review
                 else:
-                    result.outcome = "done"
+                    # 非 git 项目：无提交/合并；审查读项目目录本身
+                    outcome, review = self._review_non_git(task, response, result)
+                    result.outcome = outcome
+                    result.review = review
             else:
                 self._cleanup_worktree_changes()
                 result.outcome = "blocked" if response.action == "blocked" else "cancelled"
@@ -209,8 +228,11 @@ class TaskExecutor:
             result.completion_tokens = int(usage.get("completion_tokens", 0))
             self._cleanup_worktree_changes()
 
-        # 任务结束后移除 worktree：改动要么已合并要么已放弃，避免残留未跟踪目录
-        if result.outcome in ("done", "cancelled"):
+        # 任务结束后移除 worktree：改动要么已合并要么已放弃，避免残留未跟踪目录。
+        # 审查不通过/审查失败例外：WIP 提交保留在分支上供返工续作或人工裁决，
+        # worktree 同步保留（D8/D9：审查受阻 ≠ 成果无效）
+        review_kept = getattr(result.review, "verdict", "") in ("fail", "error")
+        if result.outcome in ("done", "cancelled") and not review_kept:
             self.remove_worktree()
 
         controls.end(self.project.name, task.id)
@@ -339,7 +361,235 @@ class TaskExecutor:
         except GitError as e:
             self.log.warning("移除 worktree 失败：%s", e)
 
-    # ---- 提交与合并 ----
+    # ---- 提交、审查门与合并 ----
+
+    def _review_active(self) -> tuple[bool, str]:
+        """审查门是否生效：返回 (active, skip_reason)。
+
+        生效条件 = 审查开关开启（项目级覆盖全局）+ 审查模型已配置；运行时
+        守卫在此兜底拦截模型互斥冲突（防手改 yaml 绕过配置层校验）。
+        """
+        cfg = self.review_cfg
+        if not review_enabled_for(cfg, self.project):
+            return False, "审查未开启"
+        if self.review_llm is None:
+            return False, "未配置审查模型"
+        try:
+            assert_review_model_distinct(self.llm, self.review_llm,
+                                         context=f"项目 {self.project.name} 的 review")
+        except ValueError as e:
+            # 运行时守卫：冲突时跳过并告警，绝不执行同模型审查（R4 第三层）
+            self.log.warning("模型互斥守卫拦截：%s（本次跳过审查）", e)
+            return False, "审查模型与任务模型冲突（守卫拦截）"
+        return True, ""
+
+    def _review_diff(self) -> str:
+        """待合并改动 diff：相对主分支 merge-base 的累计改动（含返工轮 WIP 提交）。"""
+        main_branch = self.project.allowed_branch or self.git.current_branch()
+        try:
+            self.git.run("merge-base", main_branch, "HEAD")
+        except GitError:
+            return ""
+        return self.git.run("diff", f"{main_branch}...HEAD")
+
+    def _run_review(self, task: Task, review_pending_path: Path | None) -> "object":
+        """构建审查上下文并执行审查 agent（见 review.review_task）。"""
+        from .review import review_task  # 局部导入避免 executor→review 循环依赖
+
+        skills = self._load_skills_for_review()
+        gate = self._make_approval_gate(task)
+        try:
+            return review_task(
+                self.project, task, self.worktree,
+                "", "", self._review_diff(), self.review_llm,
+                guide_content=self._load_guide(), skill_bodies=skills,
+                allowed_commands=self.allowed_commands,
+                approval_gate=gate,
+                max_turns=max(1, self.review_cfg.max_turns),
+                allow_test_commands=self.review_cfg.allow_test_commands,
+                extra_env=self.extra_env)
+        finally:
+            pass
+
+    def _load_skills_for_review(self) -> dict[str, str]:
+        """审查 agent 的技能正文预载（与任务 agent 同库；read_skill 工具直接查内存）。"""
+        try:
+            from .agent import ProjectAgent  # 仅复用 _load_skills 逻辑
+            bodies = {}
+            if self.review_llm is not None:
+                # 审查与任务共用技能库；ProjectAgent._load_skills 是实例方法，
+                # 这里直接走底层函数，避免为一个加载动作构造整个 ProjectAgent
+                from .skills import load_skills, skills_for_project
+                base = getattr(self, "skills_base", None)
+                if base:
+                    bodies = skill_bodies(skills_for_project(load_skills(base),
+                                                            self.project.name))
+            return bodies
+        except Exception:  # noqa: BLE001 — 技能是旁路增强，失败不阻断审查
+            self.log.warning("审查技能加载失败（忽略）", exc_info=True)
+            return {}
+
+    def _record_review_usage(self, task: Task, review) -> None:
+        """审查用量入台账（kind=review）；旁路，任何异常吞掉。"""
+        try:
+            from .usage import get_usage_store
+            get_usage_store().record(
+                self.project.name, task.id, review.verdict, review.turns,
+                review.prompt_tokens, review.completion_tokens,
+                review.model, kind="review")
+        except Exception:  # noqa: BLE001 — 台账是旁路
+            self.log.warning("审查用量记录失败（可忽略）", exc_info=True)
+
+    def _complete_with_review(self, task: Task, response: AgentResponse,
+                              result: "TaskResult") -> tuple[str, object]:
+        """git 项目 action=completed 的完整路径：WIP 提交 → 审查门 → 合并。
+
+        返回 (outcome, ReviewResult)。合并前审查开启时：
+        - pass → 合并（返工任务且 squash_merge 开启时 --squash 收敛）→ done；
+        - fail/error → 不合并、不清 worktree（成果留分支供返工/人工），outcome
+          由 agent 层按 review_round 分派返工或受阻，此处一律 blocked；
+        - skipped（未启用）→ 走原合并路径。
+        """
+        branch = f"arranger/{self.project.name}"
+        message = response.commit_message or f"fix: {task.title}"
+        # 第一步提交（原 _commit_and_merge 的 commit 步骤前移）：提交是崩溃
+        # 安全点——审查前落 WIP 提交，任何时点被杀成果都不丢（返工轮续作）
+        committed = self.worktree_git.commit(message)
+        if not committed:
+            self.log.warning("模型报告 completed 但 worktree 无任何改动（任务 %s）", task.id)
+            result.notes = (result.notes + "\n" if result.notes else "") + \
+                "注意：Agent 报告完成但未产生文件改动，任务按 blocked 处理"
+            self._cleanup_worktree_changes()
+            return "blocked", None
+        result.wip_commit = self.worktree_git.run("rev-parse", "--short", "HEAD")
+
+        active, skip_reason = self._review_active()
+        if not active:
+            self.log.info("审查门跳过（%s），直接合并", skip_reason)
+            merged = self._merge_and_push(task, result, branch)
+            review = self._skipped_review(skip_reason)
+            return ("done" if merged else "blocked"), review
+
+        append_progress(task.path, "🔍 独立审查开始（合并前）")
+        from .task_model import set_task_file_review_pending
+        set_task_file_review_pending(task.path, True)
+        review = self._run_review(task, task.path)
+        result.review = review
+        set_task_file_review_pending(task.path, False)
+        self._record_review_usage(task, review)
+
+        if review.verdict == "pass":
+            merged = self._merge_and_push(task, result, branch)
+            if not merged:
+                return "blocked", review
+            return "done", review
+
+        # fail / error：不合并且不清 worktree（成果与 WIP 提交保留）
+        if review.verdict == "fail":
+            self.log.info("任务 %s 审查不通过：%s", task.id, review.summary)
+        else:
+            self.log.warning("任务 %s 审查失败（保持待审可补审）：%s", task.id, review.error)
+        return "blocked", review
+
+    def _skipped_review(self, reason: str):
+        """构造 skipped 审查结论（未启用审查时随结果落档）。"""
+        from .review import ReviewResult, VERDICT_SKIPPED
+        return ReviewResult(verdict=VERDICT_SKIPPED, summary=f"审查未执行（{reason}）",
+                            model=self.review_llm.model if self.review_llm else "")
+
+    def _review_non_git(self, task: Task, response: AgentResponse,
+                        result: "TaskResult") -> tuple[str, object]:
+        """非 git 项目 action=completed：无提交/合并，审查直接读项目目录。
+
+        fail 同样走返工（agent 层分派）；Agent 的改动已在盘上，返工从现状续作。
+        """
+        active, skip_reason = self._review_active()
+        if not active:
+            review = self._skipped_review(skip_reason)
+            return "done", review
+        append_progress(task.path, "🔍 独立审查开始（合并前）")
+        from .task_model import set_task_file_review_pending
+        set_task_file_review_pending(task.path, True)
+        review = self._run_review_non_git(task)
+        result.review = review
+        set_task_file_review_pending(task.path, False)
+        self._record_review_usage(task, review)
+        if review.verdict == "pass":
+            return "done", review
+        return "blocked", review
+
+    def _run_review_non_git(self, task: Task):
+        """非 git 项目的审查执行：根为项目目录，无 diff。"""
+        from .review import review_task
+        skills = self._load_skills_for_review()
+        return review_task(
+            self.project, task, self.project.path,
+            "", "", "", self.review_llm,
+            guide_content=self._load_guide(), skill_bodies=skills,
+            allowed_commands=self.allowed_commands,
+            approval_gate=self._make_approval_gate(task),
+            max_turns=max(1, self.review_cfg.max_turns),
+            allow_test_commands=self.review_cfg.allow_test_commands,
+            extra_env=self.extra_env)
+
+    def _merge_and_push(self, task: Task, result: "TaskResult",
+                        branch: str) -> bool:
+        """审查通过后合并工作分支回主分支（返回是否成功）。
+
+        返工任务（review_round>0）且 squash_merge 开启时用 --squash 收敛分支
+        上全部 WIP 提交为单提交；未返工任务维持 --no-ff（历史行为不变）。
+        """
+        reworked = (getattr(result.review, "verdict", "") == "pass"
+                    and self._review_round_of(task) > 0
+                    and self.review_cfg.squash_merge)
+        main_branch = self.project.allowed_branch or self.git.current_branch()
+        try:
+            self.git.checkout(main_branch)
+            if reworked:
+                # --squash 把分支尖内容暂存到索引但不产生 merge commit：
+                # 用 Agent 的提交信息收敛为单提交（正文附任务 ID 与审查轮数可溯）
+                message = (getattr(result.review, "summary", "") or f"fix: {task.title}")
+                self.git.run("merge", "--squash", branch)
+                commit_msg = (f"{message.splitlines()[0][:200]}\n\n"
+                              f"Task: {task.id}（审查返工后合并，squash 自 {branch}）")
+                self.git.commit(commit_msg)
+            else:
+                self.git.run("merge", "--no-ff", "-m",
+                             f"Merge arranger work for {task.id}", result.wip_commit or branch)
+        except GitError:
+            self.log.exception("合并任务 %s 的提交失败，保留分支 %s 供人工处理",
+                               task.id, branch)
+            result.notes = (result.notes + "\n" if result.notes else "") + \
+                f"合并主分支失败，提交保留在 {branch} 分支，需人工介入"
+            return False
+
+        result.commit = self.git.run("rev-parse", "--short", "HEAD")
+        result.pushed = False
+        if self.git.has_remote("origin"):
+            try:
+                self.git.push("origin", main_branch)
+                result.pushed = True
+            except GitError as e:
+                self.log.warning("推送失败（不影响本地结果）：%s", e)
+
+        self._cleanup_worktree_changes()
+        return True
+
+    def _review_round_of(self, task: Task) -> int:
+        """任务文件的当前返工轮数（解析回读；审查通过前 agent 层尚未累加）。"""
+        try:
+            from .task_model import parse_task_file
+            return parse_task_file(task.path).review_round
+        except Exception:  # noqa: BLE001 — 回读失败按未返工处理
+            return 0
+
+    def _load_guide(self) -> str:
+        """项目指引内容（审查 agent 的验收参照；任务 agent 的一份由 agent 层传）。"""
+        guide_path = self.project.path / self.project.guide_file
+        try:
+            return guide_path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
 
     def _commit_and_merge(self, task: Task, response: AgentResponse, result: TaskResult) -> bool:
         """提交 worktree 改动并合回主分支。返回是否成功完成合并。"""

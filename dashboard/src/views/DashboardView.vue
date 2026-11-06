@@ -120,8 +120,11 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
       allowed_branch: p.allowed_branch ?? undefined,
       allowed_commands: p.allowed_commands ?? undefined,
       // 绑定类字段必须原样回传：后端把缺失键当「清除」处理，
-      // 不带就会把 llm/repo/tools/permission_mode 绑定悄悄抹掉
+      // 不带就会把 llm/review_llm/repo/tools/permission_mode 绑定悄悄抹掉
       llm: p.llm ?? null,
+      review_enabled: p.review_enabled ?? null,
+      review_llm: p.review_llm ?? null,
+      review_max_rounds: p.review_max_rounds ?? null,
       repo: p.repo ?? null,
       tools: p.tools ?? null,
       permission_mode: p.permission_mode ?? null,
@@ -373,7 +376,10 @@ async function quickAdd(p: ProjectT): Promise<void> {
           </div>
         </template>
 
-        <div class="path">{{ p.path }} <span class="counts">{{ stats(p) }}</span></div>
+        <div class="pathline">
+          <span class="path">{{ p.path }}</span>
+          <span class="counts">{{ stats(p) }}</span>
+        </div>
 
         <div class="quickadd">
           <NInput v-model:value="q(p.name).title" size="small" placeholder="新任务标题，回车快速添加"
@@ -424,6 +430,15 @@ async function quickAdd(p: ProjectT): Promise<void> {
               <span class="title" :title="t.title">{{ t.title }}</span>
               <NTag size="small" :type="ST_TYPE[t.status] || 'default'" :bordered="false">
                 {{ ST_NAME[t.status] || t.status }}
+              </NTag>
+              <NTag v-if="t.review_pending" size="small" type="info" :bordered="false"
+                    title="任务已完成，独立审查进行中或等待补审；审查通过后合并归档">
+                🔍 待审查
+              </NTag>
+              <NTag v-else-if="(t.review_round || 0) > 0 && t.status !== 'done' && t.status !== 'cancelled'"
+                    size="small" type="warning" :bordered="false"
+                    :title="`已被审查退回 ${t.review_round} 次（返工轮）`">
+                🔍 返工 ×{{ t.review_round }}
               </NTag>
               <NTag v-if="waitingApproval(p.name, t.id)" size="small" type="warning"
                     :bordered="false" title="Agent 有操作挂起等待人工审批，点顶栏「🔔 待审批」处理">
@@ -494,8 +509,10 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
 .phead { display: flex; gap: 6px; align-items: center; }
 .git-refresh { padding: 0 6px; font-size: 13px; }
-.path { font-size: 12px; color: var(--dim); margin-bottom: 8px; word-break: break-all; }
-.counts { float: right; }
+/* 路径与任务统计同行两端对齐：路径过长自行折行，统计钉在右上角不随路径折行漂移 */
+.pathline { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.path { font-size: 12px; color: var(--dim); word-break: break-all; min-width: 0; }
+.counts { flex: none; font-size: 12px; color: var(--dim); }
 .quickadd { display: flex; gap: 6px; margin-bottom: 10px; }
 .quickadd .qpri { width: 88px; flex: none; }
 .tasks { display: flex; flex-direction: column; gap: 8px; }

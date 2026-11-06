@@ -103,6 +103,16 @@ def rotate_and_cleanup(log_file: str | Path, retention_days: int,
                 archive_dir.mkdir(parents=True, exist_ok=True)
                 stamp = time.strftime("%Y%m%d-%H%M%S")
                 dst = archive_dir / f"{log_path.stem}-{stamp}{log_path.suffix}"
+                # 目标已存在（升级换名落位时新旧进程同秒各归档一次 → stamp 相同）
+                # 时不能直接放弃：Path.rename 在 Windows 上目标已存在即 WinError 183，
+                # 原文件保留会让之后每轮调度反复重试刷屏。按秒去重重试（-2/-3/…），
+                # 归档成功且绝不覆盖已有归档。
+                seq = 1
+                while dst.exists():
+                    seq += 1
+                    dst = archive_dir / f"{log_path.stem}-{stamp}-{seq}{log_path.suffix}"
+                    if seq > 99:  # 兜底：极端重名下放弃本次归档，不影响日志续写
+                        break
                 try:
                     log_path.rename(dst)
                     notes.append(f"已归档 {log_path.name} → archive/{dst.name}")

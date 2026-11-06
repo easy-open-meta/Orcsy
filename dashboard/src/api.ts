@@ -14,6 +14,10 @@ export interface TaskT {
   error: string
   file: string
   description: string
+  /** 审查门状态：true = 已完成待审查（任务卡片「待审查」徽标） */
+  review_pending?: boolean
+  /** 累计审查不通过轮数（0 = 从未不通过） */
+  review_round?: number
   /** 看板拖拽排序的手动序号；null = 未手动排过（显示回退 状态→优先级→id） */
   order: number | null
 }
@@ -28,6 +32,25 @@ export interface ProjectT {
   max_agent_turns: number
   allowed_branch: string | null
   allowed_commands: string[] | null
+  /** 项目级审查开关；null/缺省 = 跟随全局 review_cfg.enabled */
+  review_enabled?: boolean | null
+  /** 项目级审查模型绑定（部分覆盖全局 review_cfg 的 llm）；null = 未绑定；
+   * api_key 只回掩码，绝不下发明文（同 llm 的 H2 规则） */
+  review_llm?: (Record<string, string> & {
+    api_key_masked?: string
+    api_key_configured?: boolean
+  }) | null
+  /** 项目级返工次数覆盖（1~10）；null = 跟随全局 review_cfg.max_review_rounds */
+  review_max_rounds?: number | null
+  /** 审查门生效状态（后端两级解析）：开关/模型/返工上限/互斥冲突提示 */
+  review?: {
+    enabled_effective: boolean
+    model_configured: boolean
+    effective_model: string
+    api_key_masked: string
+    effective_max_rounds: number
+    warning: string
+  }
   /** 项目专属模型绑定（部分覆盖全局 llm）；null = 未绑定；
    * api_key 只回掩码（api_key_masked + api_key_configured），绝不下发明文（安全审计 H2） */
   llm?: (Record<string, string> & {
@@ -140,6 +163,19 @@ export interface AppStateT {
     max_context_tokens: number
     enable_thinking: boolean
     timeout_seconds: number
+  }
+  /** 全局审查（Review Agent）配置：model_configured=false = 审查未启用默认态 */
+  review_cfg: {
+    enabled: boolean
+    model_configured: boolean
+    provider: 'openai' | 'anthropic'
+    model: string
+    base_url: string
+    api_key_masked: string
+    max_turns: number
+    max_review_rounds: number
+    allow_test_commands: boolean
+    squash_merge: boolean
   }
   scheduler: {
     running: boolean
@@ -311,7 +347,7 @@ export const api = {
   taskClear: (project: string) => post('/api/task/clear', { project }) as Promise<{
     ok: boolean; message: string; cleared: number
   }>,
-  models: (p: { provider: string; base_url: string; api_key: string }) =>
+  models: (p: { provider: string; base_url: string; api_key: string; model?: string }) =>
     post('/api/models', p) as Promise<{ models: ModelInfo[] }>,
   testModel: (p: { provider: string; base_url: string; api_key: string; model: string }) =>
     post('/api/llm/test', p) as Promise<{

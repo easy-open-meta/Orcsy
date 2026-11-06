@@ -6,7 +6,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.18.1-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.19.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -36,7 +36,7 @@
 - **每项目一个专属 Agent** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行；支持绑定**专属模型**（部分覆盖全局 llm 配置，未写字段自动继承），只有绑定的模型处理该项目的任务。
 - **仓库 Issues 集成** —— 项目可绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），看板一键把 open Issue 拉取为任务：优先级默认 P2，Issue 带 P0~P4 标签则按标签；带来源标注，含归档去重；单向导入，Issue 状态不回写。
 - **程序自更新** —— 从 Gitee Release 检查/下载新版本（启动自动检查可关），一键静默安装并自动重启（Windows 安装版；Docker/Linux 按各自方式升级）。装在用户可写目录时全程零 UAC；装在 Program Files 等系统目录时更新中会弹一次 UAC 授权（点「是」继续，取消则不更新、程序照常运行）。
-- **任务结束提醒** —— 任务完成/受阻时播提示音（Windows 系统音）并弹托盘气泡系统通知，看板没开也能收到；手动停止（cancelled）不打扰，提示音/系统通知可在设置页独立开关。
+- **任务结束提醒** —— 任务完成/受阻时播程序内置提示音（完成「叮咚」/ 受阻警示音）并弹托盘气泡系统通知，看板没开也能收到；手动停止（cancelled）不打扰，提示音/系统通知可在设置页独立开关。
 - **真实执行，安全禁锢** —— 文件工具锁定在项目 worktree 内、命令白名单、轮数上限；git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
 - **开箱即用的项目接入** —— 新建/导入现有项目只新增 `tasks/` 与 `AGENT.md`，不动项目其它文件；自动探测技术栈（Node/Python/Rust/Go/.NET/Java/C++…）预填运行与测试命令，也可手动指定。
 - **技能库（Skill）** —— 支持导入本地技能目录（含 SKILL.md）、看板新建技能，或一键扫描常见 AI 工具（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等）的用户级技能并批量勾选导入（同名去重）；技能可全局生效或绑定单个项目；删除技能只清技能库中的副本——外部导入的原样本仍在各工具目录里，重新扫描即可找回（自建技能删除后不可恢复）；技能统一存放在 Orcsy 数据目录（`%APPDATA%\Orcsy\skills\`），**绝不写入项目目录**；Agent 系统提示词只注入「名称+描述」索引，执行时按需经 `read_skill` 工具读取全文，技能再多也不撑爆上下文。内置 **`env-setup` 环境引导技能**（首次启动自动播种；用户没改过的副本在模板修订后随程序升级自动刷新）：Agent 遇到缺失的语言/工具链时按技能用 winget / scoop / choco / brew / apt / dnf 静默安装并验证后继续；**国内无代理网络下包管理器失败时自动切换镜像直下**（3 秒探测官方源 → golang.google.cn / npmmirror / 清华 TUNA 等国内镜像下载 zip → 解压到用户目录 `%LOCALAPPDATA%\Programs` 零管理员权限 → 立即注册用户级 PATH），并预置 Go / Node / Python / JDK 的镜像源速查表——安装/下载命令在自主模式/变更前询问下都会挂起等人工批准。
@@ -397,7 +397,16 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 | `env.vars` | 注入 Agent 子进程（`run_command`）的环境变量：**国内网络拉依赖失败（unexpected EOF / 超时）时配镜像或代理**——`GOPROXY: https://goproxy.cn,direct`、`HTTP_PROXY`、`PIP_INDEX_URL` 等；不允许覆盖 PATH/SYSTEMROOT/COMSPEC/WINDIR。看板设置页可视化编辑（每行一个 `KEY=VALUE`） |
 | `permissions.mode` | 全局访问权限模式：`ask_on_change` 变更前询问 / `autonomous` 自主模式（仅高风险询问）/ `full_access` 完全访问（默认，不询问）；敏感操作挂起等待看板「🔔 待审批」批准 |
 | `permissions.timeout_minutes` | 审批超时（分钟，默认 30）：无人响应自动拒绝 |
-| `notify.sound` / `notify.system` | 任务结束提醒：完成/受阻时播 Windows 系统音（完成「星号」/ 受阻「感叹号」）/ 弹托盘气泡系统通知，均默认开启；手动停止（cancelled）不提醒。看板设置页「🔔 提醒设置」可视化编辑 |
+| `notify.sound` / `notify.system` | 任务结束提醒：完成/受阻时播程序内置提示音（完成「叮咚」/ 受阻警示音；音频缺失回退 Windows 系统音）/ 弹托盘气泡系统通知，均默认开启；手动停止（cancelled）不提醒。看板设置页「🔔 提醒设置」可视化编辑 |
+| `review.enabled` | 任务审查（Review Agent）全局开关（默认 true）：审查模型已配置时任务完成先经**独立审查 Agent** 合并前审查（对照验收标准抽查 + 可选跑测试），通过才合并主分支归档；不通过自动返工（默认 2 次，超限转受阻等人工）。**默认未配置审查模型 = 审查未启用**（行为与旧版一致）；配置 `review.llm` 即对全部项目生效，看板设置页「🔍 任务审查」可视化编辑 |
+| `review.llm` | 审查模型绑定（provider / api_key / base_url / model 等，同 `llm` 字段；默认 `~` = 审查未启用）。**硬性约束：审查模型必须与各项目的生效任务模型不同**——同名配置拒绝启动/保存（防「自审自批」），可配便宜小模型交叉验证 |
+| `review.max_turns` | 审查工具循环轮数上限（1~100，默认 10，含跑测试的轮次） |
+| `review.max_review_rounds` | 返工次数全局默认（1~10，默认 2）：累计审查不通过达到上限转 blocked 等人工；项目级 `review_max_rounds` 可覆盖 |
+| `review.allow_test_commands` | 审查 agent 可用 `run_command` 跑测试/构建实测验证（默认 true；受项目命令白名单与访问权限审批门约束）；false = 纯只读审查 |
+| `review.squash_merge` | 返工任务通过审查后 `merge --squash` 收敛 WIP 提交为单提交（默认 true）；false = 一律 `--no-ff` |
+| `projects[].review_enabled` | 项目级审查开关（true/false/缺省 = 跟随全局 `review.enabled`）；某个项目不想审查时单独关闭。看板项目对话框「审查 Agent」可视化编辑 |
+| `projects[].review_llm` | 项目级审查模型绑定：部分覆盖全局 `review.llm`（未写字段继承全局审查模型）；缺省 = 跟随全局 |
+| `projects[].review_max_rounds` | 项目级返工次数覆盖（1~10）；缺省 = 跟随全局 `review.max_review_rounds` |
 | `projects[].path` | 项目根目录（建议绝对路径） |
 | `projects[].tasks_dir` | 任务清单目录，默认 `tasks` |
 | `projects[].guide_file` | 开发指引文件，默认 `AGENT.md` |
@@ -405,6 +414,7 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权�
 | `projects[].max_agent_turns` | 单个任务工具循环轮数上限，默认 40；**-1 = 不设上限**（靠 finish / 强制停止 / 人工审批兜底） |
 | frontmatter `order` | 看板拖拽排序落盘的手动序号：**优先级内决定看板显示与 Agent 领取顺序**（P0~P4 跨级始终优先，同 P 内按 order，未排序的排在同 P 已排序任务之后）；删除该行即回到自动排序 |
 | frontmatter `requeue_seq` | 受阻任务重新入队时的递增轮次戳（自动维护，无需手填）：**重入队的任务下一轮扫描最优先领取**（越过新任务——后端失败重跑应接着上次的上下文继续，前端任务等它完成才有意义）；任务开工后自动清除 |
+| frontmatter `review_pending` / `review_round` | 审查门状态（自动维护，无需手填）：`review_pending: true` = 已完成待审查（WIP 提交在分支上，补审扫描接续，崩溃安全）；`review_round: N` = 累计审查不通过轮数（达到生效返工上限转 blocked）。已归档任务永不追溯 |
 | `projects[].allowed_commands` | Agent 命令白名单：显式列表**整表替换**默认（不受全局 `commands` 开关影响），缺省跟随全局（默认白名单剔除禁用项） |
 | `projects[].allowed_branch` | 只在该分支上工作，缺省用当前分支 |
 | `projects[].llm` | 项目专属模型绑定：部分覆盖全局 `llm`（provider / base_url / api_key / model / temperature 等任意字段，未写字段继承全局）；只有绑定的模型处理该项目的任务，看板项目对话框可可视化编辑 |

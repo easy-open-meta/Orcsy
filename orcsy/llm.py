@@ -244,12 +244,15 @@ class AgentResponse:
     """Agent 对单个任务的结构化结论（来自 finish 工具）。"""
 
     def __init__(self, action: str, summary: str, files_changed: list[str],
-                 commit_message: str, notes: str) -> None:
+                 commit_message: str, notes: str,
+                 issues: list[dict] | None = None) -> None:
         self.action = action              # completed / blocked / cannot_do
         self.summary = summary
         self.files_changed = files_changed
         self.commit_message = commit_message
         self.notes = notes
+        # 结构化问题清单（可选，审查场景使用；[{file, line?, severity, message}]）
+        self.issues = issues or []
 
     @classmethod
     def fallback(cls, reason: str) -> "AgentResponse":
@@ -266,6 +269,31 @@ def parse_finish_args(args_json: str | dict) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _parse_issues(raw: object) -> list[dict]:
+    """宽松解析 finish.issues（审查场景的结构化问题清单）。
+
+    只收形状完整的条目（file/severity/message 必填），line 可缺失；其余字段
+    忽略。非法条目静默跳过——解析失败不应影响结论本身。
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        file = str(item.get("file") or "").strip()
+        severity = str(item.get("severity") or "").strip().lower()
+        message = str(item.get("message") or "").strip()
+        if not file or not message or severity not in ("blocker", "major", "minor"):
+            continue
+        entry: dict = {"file": file, "severity": severity, "message": message}
+        line = item.get("line")
+        if isinstance(line, int) and not isinstance(line, bool) and line > 0:
+            entry["line"] = line
+        out.append(entry)
+    return out
+
+
 def finish_response(payload: dict) -> AgentResponse:
     """把 finish 参数转成 AgentResponse，协议不完整时返回 blocked 兜底。"""
     action = str(payload.get("action", "")).strip().lower()
@@ -279,6 +307,7 @@ def finish_response(payload: dict) -> AgentResponse:
         files_changed=[str(f) for f in files] if isinstance(files, list) else [],
         commit_message=str(payload.get("commit_message", "")).strip(),
         notes=str(payload.get("notes", "")).strip(),
+        issues=_parse_issues(payload.get("issues")),
     )
 
 

@@ -55,6 +55,15 @@ class ProjectConfig:
     # 项目级访问权限模式覆盖（ask_on_change / autonomous / full_access）；
     # None = 跟随全局 permissions.mode
     permission_mode: str | None = None
+    # 项目级审查开关：None/缺省 = 跟随全局 review.enabled（任务归档前合并前审查，
+    # 详见 ReviewConfig）
+    review_enabled: bool | None = None
+    # 项目级审查模型绑定：部分覆盖全局 review.llm（只写需要换的字段，其余继承；
+    # 同任务模型 llm 绑定的部分覆盖语义）。存原始字典。
+    review_llm: dict[str, Any] | None = None
+    # 项目级返工次数覆盖：审查不通过的最大累计轮数；None = 跟随全局
+    # review.max_review_rounds（两级均校验 1~10）
+    review_max_rounds: int | None = None
 
 
 @dataclass
@@ -131,7 +140,7 @@ class UpdateConfig:
 class NotifyConfig:
     """任务结束提醒配置：完成/受阻时提示音 + 系统通知（cancelled 不提醒）。"""
 
-    sound: bool = True            # 提示音（Windows 系统音：完成 Asterisk / 受阻 Exclamation）
+    sound: bool = True            # 提示音（程序内置：完成「叮咚」/ 受阻警示音；音频缺失回退系统音）
     system: bool = True           # 系统通知（托盘气泡；--no-tray 启动时无渠道自动跳过）
 
 
@@ -218,6 +227,34 @@ class MirrorsConfig:
     disabled: list[str] = field(default_factory=list)
 
 
+# ReviewConfig.llm 与项目 review_llm 的可覆盖字段（同任务模型 _LLM_FIELDS 白名单）
+_REVIEW_LLM_FIELDS = _LLM_FIELDS
+
+
+@dataclass
+class ReviewConfig:
+    """任务审查（Review Agent）全局配置：合并前审查门，详见 docs/design-review-agent.md。
+
+    llm 默认 None = 未配置审查模型 = 审查未启用（默认态）：所有项目照常执行与
+    归档，与旧版行为一致。用户显式配置审查模型后，审查门即对全部项目默认生效
+    （项目级 review_enabled 可关）；审查模型必须与各项目的生效任务模型不同
+    （同名模型即冲突，加载期报错 + 运行时守卫双重拦截，不让模型自审自批）。
+    """
+
+    enabled: bool = True           # 全局总开关（false = 全局暂停，保留模型配置）
+    llm: LLMConfig | None = None   # 审查模型；None = 审查未启用（默认态）
+    max_turns: int = 10            # 审查工具循环轮数上限（含跑测试的轮次）
+    # 返工次数全局默认：累计审查不通过达到上限即转 blocked 等人工
+    # （项目级 review_max_rounds 可覆盖，resolve_review_rounds 解析）
+    max_review_rounds: int = 2
+    # 审查 agent 可用 run_command 跑测试/构建验证（受项目命令白名单与访问
+    # 权限审批门约束）；false = 纯只读审查
+    allow_test_commands: bool = True
+    # 返工任务（review_round>0）通过审查后 merge --squash 收敛 WIP 提交为
+    # 单提交；false = 一律 --no-ff
+    squash_merge: bool = True
+
+
 def validate_permission_mode(value: object, context: str = "permissions.mode") -> str:
     mode = str(value or "").strip()
     if mode not in PERMISSION_MODES:
@@ -238,6 +275,7 @@ class AppConfig:
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     mirrors: MirrorsConfig = field(default_factory=MirrorsConfig)
+    review: ReviewConfig = field(default_factory=ReviewConfig)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
 
@@ -318,6 +356,79 @@ def normalize_llm_override(data: dict[str, Any]) -> dict[str, Any]:
         if k in data and data[k] is not None
         and not (isinstance(data[k], str) and not data[k].strip())
     }
+
+
+def resolve_review_llm(global_review: ReviewConfig,
+                       override: dict[str, Any] | None,
+                       context: str = "review.llm") -> LLMConfig | None:
+    """解析生效审查模型：override 未写的字段继承全局 review.llm（部分覆盖语义）。
+
+    两级都未配置 → None（=审查未启用）；override 全空值也等价于未配置。
+    override 含任何有效字段但全局未配置模型时，以 override 重建（api_key
+    允许为空，校验交给 resolve 之后的互斥检查与实际调用）。
+    """
+    if not override:
+        return global_review.llm
+    merged: dict[str, Any] = asdict(global_review.llm) if global_review.llm else {
+        k: LLMConfig.__dataclass_fields__[k].default for k in _LLM_FIELDS
+    }
+    applied = False
+    for key in _REVIEW_LLM_FIELDS:
+        value = override.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        merged[key] = value
+        applied = True
+    if not applied:
+        return global_review.llm
+    return _coerce_llm(merged, require_api_key=False, context=context)
+
+
+def normalize_review_llm(data: dict[str, Any]) -> dict[str, Any]:
+    """清洗项目 review_llm 绑定字典（同 normalize_llm_override 语义）。"""
+    return normalize_llm_override(data)
+
+
+def resolve_review_rounds(review_cfg: ReviewConfig, project: ProjectConfig) -> int:
+    """生效返工上限：项目 review_max_rounds 覆盖优先，None = 跟随全局默认。
+
+    两级值都在加载期校验过范围（1~10），此处不重复校验。
+    """
+    if project.review_max_rounds is not None:
+        return project.review_max_rounds
+    return review_cfg.max_review_rounds
+
+
+def review_model_normalized(model: str) -> str:
+    """模型名规范化（互斥判重用）：strip + casefold——同名模型经不同
+    base_url 部署仍是同一模型，不得自审自批。"""
+    return (model or "").strip().casefold()
+
+
+def assert_review_model_distinct(task_llm: LLMConfig | None,
+                                 review_llm: LLMConfig | None,
+                                 context: str = "review") -> None:
+    """校验生效审查模型与生效任务模型不是同一个（需求硬约束 R4）。
+
+    任一未配置直接通过（未配置审查模型 = 审查未启用，无冲突可言）。
+    """
+    if task_llm is None or review_llm is None:
+        return
+    if review_model_normalized(task_llm.model) == review_model_normalized(review_llm.model):
+        raise ValueError(
+            f"{context}: 审查模型不能与任务模型相同（{review_llm.model}）。"
+            f"请为审查 agent 配置一个不同的模型。")
+
+
+def review_enabled_for(review_cfg: ReviewConfig, project: ProjectConfig) -> bool:
+    """生效审查开关：项目 review_enabled 覆盖优先，None = 跟随全局。
+
+    注意：开关开着但未配置审查模型时仍不审查（审查未启用态），
+    调用方须同时检查 resolve_review_llm 的结果。
+    """
+    if project.review_enabled is not None:
+        return project.review_enabled
+    return review_cfg.enabled
 
 
 def resolve_tools(global_tools: ToolsConfig,
@@ -462,6 +573,35 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     mirrors = MirrorsConfig(custom=mirrors_clean["custom"],
                             disabled=mirrors_clean["disabled"])
 
+    # 任务审查（Review Agent）：llm 默认 None = 审查未启用（默认态，行为同旧版）。
+    # 加载期即校验字段类型与范围；互斥校验在项目循环里逐项目做（依赖各自
+    # 生效的任务模型）
+    rev_raw = raw.get("review") or {}
+    if not isinstance(rev_raw, dict):
+        raise ValueError("review 配置必须是字典（键值对）。")
+    rev_llm_raw = rev_raw.get("llm")
+    if rev_llm_raw is not None and not isinstance(rev_llm_raw, dict):
+        raise ValueError("review.llm 必须是键值对字典或 null。")
+    rev_llm = _coerce_llm(rev_llm_raw, require_api_key=False, context="review.llm") \
+        if rev_llm_raw else None
+    try:
+        rev_rounds = int(rev_raw.get("max_review_rounds", 2))
+        rev_turns = int(rev_raw.get("max_turns", 10))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"review 数值字段有误：{e}") from e
+    if not (1 <= rev_rounds <= 10):
+        raise ValueError(f"review.max_review_rounds 应为 1~10（当前：{rev_rounds}）")
+    if not (1 <= rev_turns <= 100):
+        raise ValueError(f"review.max_turns 应为 1~100（当前：{rev_turns}）")
+    review_cfg = ReviewConfig(
+        enabled=bool(rev_raw.get("enabled", True)),
+        llm=rev_llm,
+        max_turns=rev_turns,
+        max_review_rounds=rev_rounds,
+        allow_test_commands=bool(rev_raw.get("allow_test_commands", True)),
+        squash_merge=bool(rev_raw.get("squash_merge", True)),
+    )
+
     # 全局访问权限：模式枚举 + 超时范围，加载期即校验
     perm_raw = raw.get("permissions") or {}
     if not isinstance(perm_raw, dict):
@@ -518,6 +658,28 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         p_perm = (validate_permission_mode(p_perm_raw,
                                            context=f"项目 {p_name} 的 permission_mode")
                   if p_perm_raw else None)
+        # 项目级审查配置：开关（None=跟随全局）、模型绑定（部分覆盖全局
+        # review.llm）、返工次数（None=跟随全局 max_review_rounds）
+        p_review_enabled_raw = item.get("review_enabled")
+        if p_review_enabled_raw is not None and not isinstance(p_review_enabled_raw, bool):
+            raise ValueError(f"项目 {p_name} 的 review_enabled 必须是布尔值或 null")
+        p_review_llm_raw = item.get("review_llm")
+        if p_review_llm_raw is not None and not isinstance(p_review_llm_raw, dict):
+            raise ValueError(f"项目 {p_name} 的 review_llm 配置必须是字典（键值对）。")
+        if p_review_llm_raw:
+            # 加载期即解析校验（typo/非法值立刻暴露，同任务模型 llm 绑定）
+            resolve_review_llm(review_cfg, p_review_llm_raw,
+                               context=f"项目 {p_name} 的 review_llm")
+        p_review_rounds_raw = item.get("review_max_rounds")
+        p_review_rounds = None
+        if p_review_rounds_raw is not None:
+            try:
+                p_review_rounds = int(p_review_rounds_raw)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"项目 {p_name} 的 review_max_rounds 必须是整数：{e}") from e
+            if not (1 <= p_review_rounds <= 10):
+                raise ValueError(
+                    f"项目 {p_name} 的 review_max_rounds 应为 1~10（当前：{p_review_rounds}）")
         projects.append(
             ProjectConfig(
                 name=p_name,
@@ -536,11 +698,22 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 repo=p_repo or None,
                 tools=p_tools,
                 permission_mode=p_perm,
+                review_enabled=p_review_enabled_raw,
+                review_llm=p_review_llm_raw or None,
+                review_max_rounds=p_review_rounds,
             )
         )
+        # 项目级审查模型互斥校验（R4）：审查模型已配置且与该项目生效任务模型
+        # 同名即报错拒启（未配置审查模型 = 审查未启用，无冲突可言）
+        p_task_llm = resolve_llm(llm, p_llm or None, context=f"项目 {p_name} 的 llm")
+        p_review_llm = resolve_review_llm(
+            review_cfg, p_review_llm_raw or None, context=f"项目 {p_name} 的 review_llm")
+        if p_review_llm is not None and review_enabled_for(review_cfg, projects[-1]):
+            assert_review_model_distinct(
+                p_task_llm, p_review_llm, context=f"项目 {p_name} 的 review")
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
                     update=update, tools=tools, commands=commands, env=env,
                     permissions=permissions, notify=notify, mirrors=mirrors,
-                    projects=projects, source_path=path.resolve())
+                    review=review_cfg, projects=projects, source_path=path.resolve())
     return cfg

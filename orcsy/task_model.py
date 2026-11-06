@@ -65,6 +65,14 @@ class Task:
     # 领取排序的最高优先信号：数值越大 = 越近被重新入队，越先领取——
     # 受阻任务（如后端失败）重跑不应排到队尾等所有新任务跑完
     requeue_seq: int = 0
+    # 待审查标记（frontmatter review_pending: true）：Agent 已完成并落 WIP
+    # 提交到工作分支，审查门未出结论（审查中 / 审查失败待重试 / 进程中断
+    # 残留）。补审扫描只认此标记——旧任务文件无此字段（解析为 false）天然
+    # 不受影响，已归档任务永不追溯
+    review_pending: bool = False
+    # 审查不通过累计轮数（frontmatter review_round: N）；达到生效返工上限
+    # 转 blocked 等人工。通过后保留作审计
+    review_round: int = 0
 
     @property
     def rank(self) -> int:
@@ -130,6 +138,17 @@ def parse_task_file(path: Path) -> Task:
     elif isinstance(seq_raw, str) and seq_raw.strip().isdigit():
         requeue_seq = int(seq_raw.strip())
 
+    # 待审查标记：truthy 即真（宽解析，不让脏值把任务判成解析失败）
+    review_pending = bool(meta.get("review_pending", False))
+
+    # 审查不通过轮数：缺失/非法按 0
+    review_round = 0
+    rr_raw = meta.get("review_round")
+    if isinstance(rr_raw, int) and not isinstance(rr_raw, bool) and rr_raw > 0:
+        review_round = rr_raw
+    elif isinstance(rr_raw, str) and rr_raw.strip().isdigit():
+        review_round = int(rr_raw.strip())
+
     if not title:
         return Task(id=task_id, path=path, error="缺少 frontmatter 中的 title 字段")
     if priority_rank(priority) > 4:
@@ -150,6 +169,8 @@ def parse_task_file(path: Path) -> Task:
         description=body,
         order=order,
         requeue_seq=requeue_seq,
+        review_pending=review_pending,
+        review_round=review_round,
     )
 
 
@@ -262,6 +283,36 @@ def set_task_file_order(path: Path, order: int | None) -> bool:
         return True
     except OSError:
         return False
+
+
+def set_task_file_review_pending(path: Path, pending: bool) -> bool:
+    """改写/清除任务文件 frontmatter 的 review_pending 字段（审查门状态落盘）。
+
+    WIP 提交后写 true（崩溃可无损恢复），出结论（pass/fail/返工/受阻）写
+    false；审查 error 待重试路径保持 true。写法与 set_task_file_status 同构。
+    """
+    return _set_frontmatter_field(path, None, "review_pending",
+                                  "true" if pending else None)
+
+
+def increment_task_file_review_round(path: Path) -> int:
+    """任务文件 frontmatter 的 review_round 加一并返回新值（审查 fail 落盘用）。
+
+    读取-改写在单线程调度循环内执行，无并发竞争。任何 I/O 问题按 0 处理。
+    """
+    current = 0
+    try:
+        meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
+        raw = meta.get("review_round")
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+            current = raw
+        elif isinstance(raw, str) and raw.strip().isdigit():
+            current = int(raw.strip())
+    except OSError:
+        pass
+    nxt = current + 1
+    _set_frontmatter_field(path, None, "review_round", str(nxt))
+    return nxt
 
 
 def set_task_file_status(path: Path, status: str) -> bool:

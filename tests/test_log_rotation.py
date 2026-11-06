@@ -75,6 +75,35 @@ def check_rotate_due(tmp: Path) -> None:
     print("2. 归档：超期活动日志挪进 archive/，新日志重建且输出不中断 ✅")
 
 
+    # 同秒双进程升级冲突：升级换名落位后新旧进程同秒各归档一次，第二次 rename 的
+    # 目标与第一次同名（stamp 只到秒）→ Windows 上 Path.rename 目标已存在即
+    # WinError 183。修复后按秒去重重试（-2/-3…），归档成功且不覆盖已有归档。
+    # rotate 内部的 stamp 用真实当前时间，无法从外部钉死 —— 预置「当前秒」同名
+    # 归档文件来构造冲突（mtime 拉到未来，避免被过期清理顺带删掉）。
+    stamp_now = time.strftime("%Y%m%d-%H%M%S")
+    preset2 = log.parent / "archive" / f"orcsy-{stamp_now}.log"
+    preset2.parent.mkdir(parents=True, exist_ok=True)
+    preset2.write_text("archived by the other process same second", encoding="utf-8")
+    # mtime 须晚于 cleanup 的 deadline（now_arg - 7d = time.time()+3d），
+    # 否则预置文件会被过期清理顺带删掉
+    future = time.time() + 5 * DAY
+    os.utime(preset2, (future, future))
+    ls.setup_logging("INFO", str(log))
+    ls.get_logger("rotate-test").info("third process boot")
+    real_created = ls._created_ts
+    try:
+        ls._created_ts = lambda p: NOW - 10 * DAY
+        msg3 = ls.rotate_and_cleanup(log, 7, now=time.time() + 10 * DAY)
+    finally:
+        ls._created_ts = real_created
+    assert "WinError 183" not in (msg3 or ""), f"同秒冲突仍报 183：{msg3}"
+    assert "-2.log" in (msg3 or ""), f"应归档到 -2 去重后缀：{msg3}"
+    assert preset2.read_text(encoding="utf-8") == "archived by the other process same second",         "已有归档不得被覆盖"
+    assert log.is_file(), "活动日志应重建"
+    ls.get_logger("rotate-test").handlers.clear()
+    print("2b. 同秒双进程归档冲突：去重后缀落位，已有归档完好，无 WinError 183 ✅")
+
+
 def check_not_due_and_disabled(tmp: Path) -> None:
     log = tmp / "logs" / "orcsy.log"
     log.parent.mkdir(parents=True, exist_ok=True)

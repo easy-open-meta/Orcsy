@@ -1,11 +1,32 @@
 <script setup lang="ts">
-import { NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
+import { NCollapse, NCollapseItem, NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import { api, type MirrorRowT, type ModelInfo } from '../api'
-import { beginRestartWait, openDirBrowser, openGuide, openProjectEdit, openProjectNew, openTaskNew, store } from '../store'
+import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
 import { cmpVersion, fmtTokens } from '../utils'
 
 const message = () => window.$message
+
+// ---- 功能分区手风琴：左侧分区菜单，右侧只渲染当前分区（懒加载，未点开不挂载） ----
+// key 与 settingsSection 联动（跨视图跳转定位，如看板「设置」按钮直达对应分区）
+const SECTIONS = [
+  { key: 'llm', label: '🤖 大模型接入' },
+  { key: 'sched', label: '⏱ 调度与看板' },
+  { key: 'notify', label: '🔔 提醒设置' },
+  { key: 'review', label: '🔍 任务审查（Review Agent）' },
+  { key: 'tools', label: '🛠 Agent 工具与访问权限' },
+  { key: 'mirrors', label: '🪞 镜像源管理与测速选源' },
+  { key: 'app', label: '⚙️ 应用' },
+] as const
+const activeSection = computed(() => settingsSection.value)
+function onSectionChange(v: string | number | (string | number)[] | null): void {
+  // NCollapse 单开形态回调数组/单值/null（再点已展开项收起）；取第一个有效 key。
+  // 收起（null）保持当前分区：右侧必须始终有内容可看
+  const k = Array.isArray(v) ? v[0] : v
+  if (k) settingsSection.value = String(k)
+}
+const sectionLabel = computed(() =>
+  SECTIONS.find(s => s.key === settingsSection.value)?.label ?? '')
 
 // ---- 草稿模式：首份数据到后回填一次，之后轮询不覆盖未保存的输入 ----
 const draft = reactive({
@@ -15,6 +36,20 @@ const draft = reactive({
   enable_thinking: false, timeout_seconds: 300,
   interval: 300, parallel: 1, port: 5116, retention: 7, max_total_mb: 200,
 })
+// ---- 任务审查（Review Agent）草稿：模型绑定 + 返工次数 + 测试命令 + squash ----
+const reviewDraft = reactive({
+  enabled: true,
+  provider: 'openai' as 'openai' | 'anthropic',
+  model: '', base_url: '', api_key: '',
+  max_turns: 10, max_review_rounds: 2,
+  allow_test_commands: true, squash_merge: true,
+})
+const reviewKeyMasked = ref('')
+const reviewKeyConfigured = ref(false)
+const reviewKeyTouched = ref(false)
+const reviewSaving = ref(false)
+const reviewModelOptions = ref<ModelInfo[]>([])
+const reviewFetching = ref(false)
 // ---- 密钥/令牌三态（H2）：后端只回掩码，不回填明文。未触碰的字段保存时不带
 //      对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除 ----
 const apiKeyMasked = ref('')
@@ -115,6 +150,19 @@ watch(() => store.state, (s) => {
   draft.max_context_tokens = s.llm.max_context_tokens
   draft.enable_thinking = s.llm.enable_thinking
   draft.timeout_seconds = s.llm.timeout_seconds
+  // 审查 Agent 配置回填（api_key 只回掩码；模型未配置时字段留空）
+  reviewDraft.enabled = s.review_cfg?.enabled ?? true
+  reviewDraft.provider = (s.review_cfg?.provider as 'openai' | 'anthropic') ?? 'openai'
+  reviewDraft.model = s.review_cfg?.model ?? ''
+  reviewDraft.base_url = s.review_cfg?.base_url ?? ''
+  reviewDraft.api_key = ''
+  reviewKeyMasked.value = s.review_cfg?.api_key_masked ?? ''
+  reviewKeyConfigured.value = s.review_cfg?.model_configured ?? false
+  reviewKeyTouched.value = false
+  reviewDraft.max_turns = s.review_cfg?.max_turns ?? 10
+  reviewDraft.max_review_rounds = s.review_cfg?.max_review_rounds ?? 2
+  reviewDraft.allow_test_commands = s.review_cfg?.allow_test_commands ?? true
+  reviewDraft.squash_merge = s.review_cfg?.squash_merge ?? true
   draft.interval = s.scheduler_cfg.interval_seconds
   draft.parallel = s.scheduler_cfg.max_parallel_agents
   draft.port = s.web_cfg.port
@@ -149,6 +197,60 @@ async function saveNotify(): Promise<void> {
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { notifySaving.value = false }
   void import('../store').then(m => m.refresh(true))
+}
+
+// ---- 审查 Agent 保存：模型三态 + 未配置模型时清除绑定（后端 null=审查未启用） ----
+async function saveReview(): Promise<void> {
+  reviewSaving.value = true
+  try {
+    const hasModel = reviewDraft.model.trim().length > 0
+    if (hasModel && effTaskModel().value && reviewDraft.model.trim().toLowerCase() === effTaskModel().value.trim().toLowerCase()) {
+      message()?.('审查模型不能与任务模型相同（' + effTaskModel().value + '）——请换一个独立模型', 'error')
+      return
+    }
+    const llm = hasModel ? {
+      provider: reviewDraft.provider,
+      base_url: reviewDraft.base_url.trim(),
+      model: reviewDraft.model.trim(),
+      ...(reviewKeyTouched.value ? { api_key: reviewDraft.api_key.trim() } : {}),
+    } : null
+    await api.config({
+      review: {
+        enabled: reviewDraft.enabled,
+        llm,
+        max_turns: reviewDraft.max_turns,
+        max_review_rounds: reviewDraft.max_review_rounds,
+        allow_test_commands: reviewDraft.allow_test_commands,
+        squash_merge: reviewDraft.squash_merge,
+      },
+    })
+    if (!hasModel) message()?.('已保存：审查未启用（未配置审查模型）')
+    else message()?.('已保存：审查门已对全部项目默认生效（项目级可单独关闭）')
+    reviewDraft.api_key = ''
+    reviewKeyTouched.value = false
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { reviewSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+
+async function fetchReviewModelList(): Promise<void> {
+  reviewFetching.value = true
+  try {
+    const r = await api.models({
+      provider: reviewDraft.provider,
+      base_url: reviewDraft.base_url.trim(),
+      api_key: reviewDraft.api_key.trim(),
+      model: reviewDraft.model.trim(),
+    })
+    reviewModelOptions.value = r.models
+    message()?.(`已获取 ${r.models.length} 个模型`)
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { reviewFetching.value = false }
+}
+
+/** 当前生效任务模型（全局 llm 配置）：审查模型互斥校验基准 */
+function effTaskModel(): { value: string } {
+  return { value: store.state?.llm.model || '' }
 }
 
 async function saveSched(): Promise<void> {
@@ -359,28 +461,6 @@ watch(() => store.state?.mirror_speeds, (sp) => {
   mirrorTestedAt.value = sp.tested_at ?? ''
 })
 
-async function delProject(name: string): Promise<void> {
-  window.$dialog?.warning({
-    title: '移除项目',
-    content: `确定从系统移除项目 ${name}？（项目目录与任务文件不会被删除）`,
-    positiveText: '移除',
-    negativeText: '取消',
-    async onPositiveClick() {
-      try { await api.projectDelete(name); message()?.('已移除') }
-      catch (e: any) { message()?.(e.message, 'error') }
-      void import('../store').then(m => m.refresh(true))
-    },
-  })
-}
-
-// 用系统文件管理器打开项目根目录（后端调起，浏览器自身无此权限）
-async function openFolder(p: { name: string; path: string }): Promise<void> {
-  try {
-    await api.projectOpenFolder(p.name)
-    message()?.(`已打开 ${p.path}`)
-  } catch (e: any) { message()?.(e.message, 'error') }
-}
-
 // ---- 软件更新：保存更新源 / 手动检查 / 手动导入本地安装包 ----
 const updSaving = ref(false)
 async function saveUpdate(): Promise<void> {
@@ -456,18 +536,6 @@ function installPackage(): void {
 }
 
 
-// ---- 拉取 Issues：项目绑定远程仓库后，把 open Issue 导入任务队列 ----
-const syncing = ref('')
-async function syncIssues(p: { name: string }): Promise<void> {
-  syncing.value = p.name
-  try {
-    const r = await api.issuesSync(p.name)
-    message()?.(r.message || '同步完成', 'success')
-  } catch (e: any) { message()?.(e.message, 'error') }
-  finally { syncing.value = '' }
-  void import('../store').then(m => m.refresh(true))
-}
-
 // ---- 模型列表与规格自动填充 ----
 const fetching = ref(false)
 const testing = ref(false)
@@ -524,8 +592,37 @@ const providerOptions = [
 
 <template>
   <div class="settings" v-if="store.state">
-    <NCard title="🤖 大模型接入" size="small" class="scard">
-      <template #header-extra><span class="hint">OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。</span></template>
+    <div class="layout">
+      <!-- 左：功能分区手风琴（单开；key 与 settingsSection 联动支持跨页定位） -->
+      <aside class="menu">
+        <NCollapse :expanded-names="activeSection" :accordion="true" @update:expanded-names="onSectionChange">
+          <NCollapseItem name="llm" :title="'🤖 大模型接入'">
+            <div class="menu-desc" v-if="activeSection === 'llm'">OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。</div>
+          </NCollapseItem>
+          <NCollapseItem name="sched" :title="'⏱ 调度与看板'">
+            <div class="menu-desc" v-if="activeSection === 'sched'">扫描间隔、并行数保存后立即生效；看板端口下次启动生效。</div>
+          </NCollapseItem>
+          <NCollapseItem name="notify" :title="'🔔 提醒设置'">
+            <div class="menu-desc" v-if="activeSection === 'notify'">任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。</div>
+          </NCollapseItem>
+          <NCollapseItem name="review" :title="'🔍 任务审查（Review Agent）'">
+            <div class="menu-desc" v-if="activeSection === 'review'">独立模型合并前审查任务成果；未配置审查模型时审查未启用。</div>
+          </NCollapseItem>
+          <NCollapseItem name="tools" :title="'🛠 Agent 工具与访问权限'">
+            <div class="menu-desc" v-if="activeSection === 'tools'">全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。</div>
+          </NCollapseItem>
+          <NCollapseItem name="mirrors" :title="'🪞 镜像源管理与测速选源'">
+            <div class="menu-desc" v-if="activeSection === 'mirrors'">Agent 装环境/拉依赖前测速，哪个快用哪个。</div>
+          </NCollapseItem>
+          <NCollapseItem name="app" :title="'⚙️ 应用'">
+            <div class="menu-desc" v-if="activeSection === 'app'">更新源、自更新检查、看板登录密码与开机自启动。</div>
+          </NCollapseItem>
+        </NCollapse>
+      </aside>
+      <!-- 右：当前分区内容（v-if 懒加载，未选中不挂载不轮询开销） -->
+      <section class="content">
+        <div v-if="settingsSection === 'llm'">
+          <NCard title="🤖 大模型接入" size="small" class="scard">
       <div class="frow">
         <div class="f1"><label>协议 provider</label>
           <NSelect v-model:value="draft.provider" :options="providerOptions" /></div>
@@ -569,10 +666,10 @@ const providerOptions = [
       <div class="sfoot">
         <NButton type="primary" @click="saveLlm">保存模型配置</NButton>
       </div>
-    </NCard>
-
-    <NCard title="⏱ 调度与看板" size="small" class="scard">
-      <template #header-extra><span class="hint">扫描间隔、并行数保存后立即生效；看板端口下次启动生效。</span></template>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'sched'">
+          <NCard title="⏱ 调度与看板" size="small" class="scard">
       <div class="frow">
         <div class="f1"><label>扫描间隔（秒，30~86400）</label><NInputNumber v-model:value="draft.interval" :min="30" :max="86400" /></div>
         <div class="f1"><label>并行 Agent 数（1~16）</label><NInputNumber v-model:value="draft.parallel" :min="1" :max="16" /></div>
@@ -602,15 +699,15 @@ const providerOptions = [
         将在保存后启用/更新登录密码，所有已登录会话立即失效，需用新密码重新登录。
       </div>
       <div class="sfoot"><NButton type="primary" @click="saveSched">保存调度配置</NButton></div>
-    </NCard>
-
-    <NCard title="🔔 提醒设置" size="small" class="scard">
-      <template #header-extra><span class="hint">任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。</span></template>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'notify'">
+          <NCard title="🔔 提醒设置" size="small" class="scard">
       <div class="frow">
         <div class="f1"><label class="checkline">
           <NSwitch v-model:value="notifyDraft.sound" />
           提示音
-          <span class="hint">完成/受阻时播 Windows 系统音（完成叮一声，受阻警示音），跟随系统声音方案。</span>
+          <span class="hint">完成/受阻时播程序内置提示音（完成「叮咚」，受阻警示音；随程序分发，不跟随系统声音方案），音频缺失时回退 Windows 系统音。</span>
         </label></div>
         <div class="f1"><label class="checkline">
           <NSwitch v-model:value="notifyDraft.system" />
@@ -619,10 +716,60 @@ const providerOptions = [
         </label></div>
       </div>
       <div class="sfoot"><NButton type="primary" :loading="notifySaving" @click="saveNotify">保存提醒设置</NButton></div>
-    </NCard>
-
-    <NCard title="🛠 Agent 工具与访问权限" size="small" class="scard">
-      <template #header-extra><span class="hint">全局默认：项目未单独覆盖时按这里生效；保存后立即生效。</span></template>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'review'">
+          <NCard title="🔍 任务审查（Review Agent）" size="small" class="scard">
+      <label class="checkline">
+        <NSwitch v-model:value="reviewDraft.enabled" />
+        启用审查（配置审查模型后即对全部项目默认生效；项目可单独关闭）
+      </label>
+      <template v-if="reviewDraft.enabled">
+        <div class="frow" style="margin-top:8px">
+          <div class="f1"><label>协议 provider</label>
+            <NSelect v-model:value="reviewDraft.provider" :options="[
+              { label: 'openai（兼容协议）', value: 'openai' },
+              { label: 'anthropic', value: 'anthropic' },
+            ]" /></div>
+          <div class="f2"><label>审查模型 model（必须与任务模型不同）</label>
+            <NSelect v-model:value="reviewDraft.model" :options="reviewModelOptions.map(m => ({ label: m.id, value: m.id }))"
+                     filterable tag clearable placeholder="如 deepseek-chat / glm-4-flash（可配便宜小模型）"
+                     @update:value="(v: string | null) => { reviewDraft.model = v || '' }" /></div>
+        </div>
+        <div class="frow">
+          <div class="f1"><label>接口 base_url</label>
+            <NInput v-model:value="reviewDraft.base_url" placeholder="https://api.deepseek.com/v1" /></div>
+          <div class="f1"><label>密钥 api_key</label>
+            <NInput v-model:value="reviewDraft.api_key" type="password" show-password-on="click"
+                    :placeholder="reviewKeyConfigured && reviewKeyMasked ? `已配置（${reviewKeyMasked}），留空保持原值` : '审查模型服务密钥'"
+                    @update:value="reviewKeyTouched = true" /></div>
+        </div>
+        <div class="frow">
+          <div class="f1"><label>审查轮数上限</label>
+            <NInputNumber v-model:value="reviewDraft.max_turns" :min="1" :max="100" /></div>
+          <div class="f1"><label>返工次数（全局默认，项目可覆盖）</label>
+            <NInputNumber v-model:value="reviewDraft.max_review_rounds" :min="1" :max="10" /></div>
+        </div>
+        <label class="checkline stack">
+          <NSwitch v-model:value="reviewDraft.allow_test_commands" />
+          审查可执行测试命令
+          <span class="hint">审查 agent 可用 run_command 实测验证（受项目命令白名单与访问权限审批约束）；关闭=纯只读审查。</span>
+        </label>
+        <label class="checkline stack">
+          <NSwitch v-model:value="reviewDraft.squash_merge" />
+          返工通过后收敛提交
+          <span class="hint">返工任务的多个 WIP 提交在通过审查后 merge --squash 收敛为单提交；关闭=保留 --no-ff 合并。</span>
+        </label>
+        <div class="btnrow" style="margin-top:6px">
+          <NButton size="small" :loading="reviewFetching" @click="fetchReviewModelList">获取模型列表</NButton>
+          <span class="hint">审查与任务使用不同模型交叉验证，防止「自审自批」；后端保存时强制校验互斥。</span>
+        </div>
+      </template>
+      <div class="sfoot"><NButton type="primary" :loading="reviewSaving" @click="saveReview">保存审查配置</NButton></div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'tools'">
+          <NCard title="🛠 Agent 工具与访问权限" size="small" class="scard">
       <div class="frow">
         <div class="f2"><label>访问权限模式（敏感操作是否挂起等待看板批准）</label>
           <NSelect v-model:value="permDraft.mode" :options="permOptions" /></div>
@@ -675,10 +822,10 @@ const providerOptions = [
       <div class="sfoot">
         <NButton type="primary" :loading="toolsSaving" @click="saveTools">保存工具与权限</NButton>
       </div>
-    </NCard>
-
-    <NCard title="🪞 镜像源管理与测速选源" size="small" class="scard">
-      <template #header-extra><span class="hint">Agent 装环境/拉依赖前测速，哪个快用哪个。</span></template>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'mirrors'">
+          <NCard title="🪞 镜像源管理与测速选源" size="small" class="scard">
       <div class="mirror-ops">
         <NButton size="small" :loading="mirrorTesting" @click="testMirrors()">测速全部源</NButton>
         <NButton size="small" type="primary" :loading="mirrorApplying" @click="applyMirrors">
@@ -729,10 +876,10 @@ const providerOptions = [
         <NButton type="primary" :loading="mirrorsSaving" :disabled="!mirrorsDirty"
                  @click="saveMirrors">保存镜像源配置</NButton>
       </div>
-    </NCard>
-
-    <NCard title="⚙️ 应用" size="small" class="scard">
-      <template #header-extra><span class="hint">本机应用行为设置，保存后立即生效。</span></template>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'app'">
+          <NCard title="⚙️ 应用" size="small" class="scard">
       <label class="checkline">
         <NSwitch :value="store.state.app_autostart.enabled" @update:value="toggleAutostart" />
         开机自动启动（写入当前用户注册表）
@@ -772,41 +919,24 @@ const providerOptions = [
             出错自动打开安装日志，无错误则不打开</span>
         </div>
       </div>
-    </NCard>
-
-    <NCard title="📁 受管项目" size="small" class="scard">
-      <template #header-extra>
-        <NButton type="primary" size="small" @click="openProjectNew">＋ 新建项目</NButton>
-      </template>
-      <div v-for="p in store.state.projects" :key="p.name" class="prow">
-        <div class="prow-head">
-          <NTag size="small" :bordered="false" :type="p.enabled ? 'info' : 'default'">{{ p.name }}</NTag>
-          <NTag size="small" :bordered="false" :type="p.is_git_repo ? 'default' : 'warning'">{{ p.is_git_repo ? 'git' : '非 git' }}</NTag>
-          <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
-          <NTag v-if="p.repo" size="small" :bordered="false" type="success">issues</NTag>
-          <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
-                :type="p.issue_auto_pull.last_error ? 'error' : 'success'">
-            自动拉取 {{ Math.round(p.issue_auto_pull.interval / 60) }}min</NTag>
+          </NCard>
         </div>
-        <div class="prow-meta">
-          {{ p.path }} · 任务目录 {{ p.tasks_dir || 'tasks' }} · 每轮 {{ p.max_tasks_per_cycle || 1 }} 任务
-        </div>
-        <div class="ops-row">
-          <NButton size="tiny" @click="openFolder(p)">打开文件夹</NButton>
-          <NButton size="tiny" @click="openTaskNew(p.name)">新建任务</NButton>
-          <NButton size="tiny" @click="openGuide(p.name)">编辑 AGENT.md</NButton>
-          <NButton size="tiny" :loading="syncing === p.name" @click="syncIssues(p)">拉取 Issues</NButton>
-          <NButton size="tiny" @click="openProjectEdit(p.name)">设置</NButton>
-          <NButton size="tiny" quaternary type="error" @click="delProject(p.name)">移除</NButton>
-        </div>
-      </div>
-      <div v-if="!store.state.projects.length" class="empty">还没有项目，点右上「新建项目」</div>
-    </NCard>
+      </section>
+    </div>
   </div>
 </template>
-
 <style scoped>
-.settings { padding: 0 20px; max-width: 1080px; display: flex; flex-direction: column; gap: 14px; }
+.settings { padding: 0 20px; max-width: 1180px; display: flex; flex-direction: column; gap: 14px; }
+/* 左手风琴分区 + 右内容区：窄屏自动竖排 */
+.layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+.menu { position: sticky; top: 14px; }
+.menu :deep(.n-collapse-item__header) { font-size: 13.5px; }
+.menu :deep(.n-collapse-item__content-inner) { padding-top: 0; }
+.menu-desc { font-size: 12px; color: var(--faint); cursor: pointer; }
+.menu-desc:hover { color: var(--dim); }
+.content { min-width: 0; }
+.content .scard { margin-bottom: 0; }
 .modelspec { font-size: 12px; color: var(--dim); margin: -4px 0 8px; }
 .hint { font-size: 12px; color: var(--faint); font-weight: 400; }
 .frow { display: flex; gap: 10px; margin-bottom: 10px; }
@@ -839,6 +969,9 @@ const providerOptions = [
 .tool-foot { margin-bottom: 10px; }
 @media (max-width: 900px) { .tools-grid { grid-template-columns: 1fr; } }
 .checkline { display: flex; gap: 10px; align-items: center; }
+/* 纵排开关行（如审查配置的两个开关）：hint 折行后行间不贴死 */
+.stack { margin-top: 12px; }
+.stack .hint { flex: 1; min-width: 0; }
 .prow { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
 .prow-head { display: flex; gap: 6px; align-items: center; }
 .prow-meta { font-size: 12px; color: var(--dim); margin: 4px 0; word-break: break-all; }

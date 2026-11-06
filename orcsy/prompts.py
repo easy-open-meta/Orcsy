@@ -216,3 +216,85 @@ def build_system_prompt(
         f"{_permissions_section(permission_mode)}\n"
         f"{_output_contract(tools)}"
     )
+
+
+# ---- 审查 Agent（Review Agent）提示词：独立模型、只读核查、通过/不通过 ----
+
+_REVIEW_FINISH_PROTOCOL = """\
+
+结束审查时**必须调用 finish 工具**给出结论：
+
+- action："completed"（审查通过）| "blocked"（审查不通过，发现问题）
+- summary：一句话审查结论
+- issues（action=blocked 时提供）：结构化问题数组，每条：
+  {"file": "相对根的文件路径", "line": 行号（可省）, "severity": "blocker|major|minor", "message": "问题与建议"}
+  severity 含义：blocker=不满足需求或阻断验收；major=功能缺陷/明显质量问题；minor=次要问题
+- notes：补充说明（可留空）；不要用纯文本回复结论，不要自己执行 git 操作
+"""
+
+
+def build_review_system_prompt(project: ProjectConfig, work_root: Path,
+                               guide_content: str,
+                               allow_test_commands: bool = True,
+                               skill_bodies: dict[str, str] | None = None,
+                               guide_max_chars: int = 12000) -> str:
+    """组装审查 agent 系统提示词：角色 → 指引（精简）→ 工作环境 → 结论协议。
+
+    与任务 agent 的系统提示词刻意不同源：审查角色、只读约束、issues 上报
+    协议、无技能索引节（技能按需由 read_skill 读取，正文已预载）。
+    """
+    guide = (guide_content or "").strip()
+    if len(guide) > guide_max_chars:
+        guide = guide[:guide_max_chars] + f"\n\n（指引过长，已截断至前 {guide_max_chars} 字符）"
+
+    tools_line = ("read_file / grep / list_dir / find_files 探查代码"
+                  + ("；run_command 只跑测试与构建验证（不可改动任何文件）"
+                     if allow_test_commands else ""))
+    return (
+        f"# 角色\n\n"
+        f"你是「{project.name}」项目的**独立审查 Agent**，与完成任务的开发 Agent 不是同一个模型。"
+        f"你的职责是在代码合并前进站核查：开发 Agent 声称完成的任务是否真的完成、"
+        f"实现是否满足需求与验收标准、有无明显缺陷。你不信任任何自述，一切以代码为准。\n\n"
+        f"# Development Guide (AGENT.md)（验收参照）\n\n"
+        f"<agent_guide>\n{guide}\n</agent_guide>\n\n"
+        f"# 工作环境与约束\n\n"
+        f"- 审查根目录：{work_root}（你的所有工具操作的相对路径都以它为根）。\n"
+        f"- **只读审查**：禁止修改任何文件、禁止执行任何 git 写操作"
+        f"（commit/merge/push 由系统在审查通过后统一处理）。\n"
+        f"- 你通过工具完成一切工作：{tools_line}。\n"
+        f"- 上下文成本控制：大文件先 grep 定位，再用 read_file 的 offset/limit 读区段，"
+        f"不要整读大文件，不要重复读取。\n\n"
+        f"{_REVIEW_FINISH_PROTOCOL}"
+    )
+
+
+def build_review_prompt(task: Task, agent_summary: str, agent_notes: str,
+                        diff_text: str, allow_test_commands: bool = True,
+                        diff_max_chars: int = 80000) -> str:
+    """组装审查任务提示词：任务原文 + Agent 自述 + 改动 diff + 审查要求。"""
+    diff = (diff_text or "").strip()
+    if len(diff) > diff_max_chars:
+        diff = diff[:diff_max_chars] + "\n\n（diff 过长已截断；请用 read_file 自行查看可疑文件全文）"
+    verify_line = (
+        "- 若任务声称验证通过：**必须实际运行相应测试/构建命令**复核，不能只信自述。"
+        if allow_test_commands else
+        "- 你没有命令执行权限：重点做代码级核对（实现是否存在、逻辑是否对应需求）。")
+    return (
+        f"# 待审查任务\n\n"
+        f"- 任务 ID：{task.id}\n"
+        f"- 标题：{task.title}\n"
+        f"- 优先级：{task.priority}\n\n"
+        f"## 任务内容（需求与验收标准）\n\n{task.description}\n\n"
+        f"## 开发 Agent 的自述\n\n"
+        f"- 摘要：{agent_summary or '（无）'}\n"
+        f"- 备注：{agent_notes or '（无）'}\n\n"
+        + (f"## 本次改动（git diff，相对主分支的累计改动）\n\n```diff\n{diff}\n```\n\n"
+           if diff else "## 本次改动\n\n（无 diff：非 git 项目，请直接探查项目目录中的实现）\n\n")
+        + f"## 审查要求\n\n"
+        f"1. 对照任务内容逐条核对：需求是否都实现？验收标准是否满足？\n"
+        f"2. 用 read_file/grep 抽查关键实现的真实性——防止「声称完成实则未做/只做了一半」。\n"
+        f"3. {verify_line}\n"
+        f"4. 只报实质问题（不满足需求、功能缺陷、明显质量问题）；代码风格与个人偏好不算问题。\n"
+        f"5. 全部通过则 finish(action=completed)；发现任何实质问题则 finish(action=blocked) "
+        f"并用 issues 逐条列出（宁缺勿滥：不通过的代价是整个任务返工）。\n"
+    )

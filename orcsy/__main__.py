@@ -104,8 +104,22 @@ update:
   auto_check: true             # 启动后自动检查一次更新
 
 notify:
-  sound: true                  # 任务结束提示音：完成/受阻时播 Windows 系统音（cancelled 不提醒）
+  sound: true                  # 任务结束提示音：完成/受阻时播程序内置提示音（cancelled 不提醒）
   system: true                 # 系统通知：完成/受阻时弹托盘气泡（看板没开也能收到；--no-tray 启动则无渠道）
+
+# review:                    # 任务审查（Review Agent）：任务完成合并前由独立审查
+#   enabled: true            #   agent 检查任务成果，通过才合并主分支并归档。
+#   llm: ~                   #   审查模型绑定（provider/api_key/base_url/model 等，同 llm
+#                            #   字段）；默认 ~（不配置）= 审查未启用，行为与旧版一致。
+#                            #   配置后即对全部项目生效（项目级 review_enabled 可关）；
+#                            #   审查模型必须与任务模型不同（同名配置拒绝启动/保存）
+#   max_turns: 10            #   审查工具循环轮数上限（1~100，含跑测试的轮次）
+#   max_review_rounds: 2     #   返工次数全局默认（1~10）：累计审查不通过达到上限即转
+#                            #   blocked 等人工；项目级 review_max_rounds 可覆盖
+#   allow_test_commands: true  # 审查 agent 可用 run_command 跑测试/构建验证（受项目
+#                            #   命令白名单与访问权限审批门约束）；false = 纯只读审查
+#   squash_merge: true       #   返工任务通过审查后 merge --squash 收敛 WIP 提交为
+#                            #   单提交；false = 一律 --no-ff
 
 # 受管项目列表：每个项目由一个独立 Agent 负责。
 # 推荐直接在看板「项目与设置」页可视化新建（会自动创建任务目录与 AGENT.md）；
@@ -127,6 +141,11 @@ projects: []
 #    #   base_url: https://open.bigmodel.cn/api/paas/v4
 #    #   api_key: sk-yyy
 #    #   model: glm-4-plus
+#    # review_enabled: true            # 项目级审查开关（true/false/缺省 = 跟随全局 review.enabled）
+#    # review_llm:                     # 项目级审查模型绑定（部分覆盖全局 review.llm；
+#    #   model: deepseek-chat          #   删除本节即回到全局审查模型）
+#    # review_max_rounds: 3            # 项目级返工次数覆盖（1~10；缺省 = 跟随全局
+#    #                                 # review.max_review_rounds）
 #    # repo:                           # 绑定远程仓库（GitHub/Gitee/GitLab/Gitea），
 #    #   url: https://github.com/owner/repo   # 看板「拉取 Issues」把 open Issue 导入任务
 #    #   token: ghp_xxx               # token 可选：私有仓库必填，公开仓库可省
