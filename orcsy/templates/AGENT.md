@@ -11,6 +11,14 @@
 - Run:
 - Test:
 
+## Local Debugging & Testing Services
+
+<!-- Optional: fill in when the project enables local debug tools (browser / dev_server / http_request) -->
+
+- Dev Server Command: <!-- e.g., npm run dev -- --port {PORT}  (Use {PORT} for dynamic port assignment) -->
+- Health Check URL: <!-- e.g., http://127.0.0.1:{PORT}/ -->
+- Mock Test Accounts: <!-- WARNING: NEVER write production credentials here; only local sandbox/test credentials -->
+
 ## Code Style
 
 - Follow the repo's existing style; never introduce a new formatting style.

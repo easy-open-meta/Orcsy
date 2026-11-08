@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from .logging_setup import get_logger
+from .tools import _windows_startupinfo
 
 log = get_logger("git")
 
@@ -31,10 +32,12 @@ class Git:
     def _run(self, *args: str, check: bool = True) -> str:
         proc = subprocess.run(
             ["git", "-C", str(self.repo), *args],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
+            startupinfo=_windows_startupinfo(),
             creationflags=_SUBPROCESS_FLAGS,
         )
         if check and proc.returncode != 0:
@@ -50,11 +53,37 @@ class Git:
     def is_repo(self) -> bool:
         proc = subprocess.run(
             ["git", "-C", str(self.repo), "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS,
+            stdin=subprocess.DEVNULL,
+            capture_output=True, text=True,
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
         )
         return proc.returncode == 0 and proc.stdout.strip() == "true"
 
+    def has_commits(self) -> bool:
+        """仓库是否已有至少一个 commit。"""
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "--verify", "HEAD"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True, text=True,
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        return proc.returncode == 0
+
     def current_branch(self) -> str:
+        # git branch --show-current 在空仓库（尚未产生任何 commit）也能正确返回当前分支名（如 main）
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "branch", "--show-current"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True, text=True,
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        branch = proc.stdout.strip()
+        if proc.returncode == 0 and branch:
+            return branch
+        # 分离头指针或老版本 Git 兜底
         return self._run("rev-parse", "--abbrev-ref", "HEAD")
 
     def status_porcelain(self) -> list[str]:

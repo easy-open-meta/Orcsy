@@ -125,6 +125,7 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
       review_enabled: p.review_enabled ?? null,
       review_llm: p.review_llm ?? null,
       review_max_rounds: p.review_max_rounds ?? null,
+      debug_allowed_hosts: p.debug_allowed_hosts ?? null,
       repo: p.repo ?? null,
       tools: p.tools ?? null,
       permission_mode: p.permission_mode ?? null,

@@ -37,7 +37,35 @@ const pDraft = reactive({
   use_review: false, review_ll_provider: '' as '' | 'openai' | 'anthropic',
   review_ll_base: '', review_ll_key: '', review_ll_model: '',
   review_rounds: null as number | null,
+  debug_hosts_text: '',
+  use_cam: false,
+  cam_enabled: false,
 })
+
+const browserToolNames = [
+  'browser_navigate', 'browser_snapshot', 'browser_click',
+  'browser_type', 'browser_wait', 'browser_screenshot',
+  'browser_console', 'browser_network', 'browser_eval',
+  'browser_close',
+]
+const devServerToolNames = [
+  'dev_server_start', 'dev_server_logs', 'dev_server_stop',
+]
+
+const pBrowserGroupEnabled = computed({
+  get: () => browserToolNames.some(k => pDraft.tools[k]),
+  set: (val: boolean) => {
+    for (const k of browserToolNames) pDraft.tools[k] = val
+  },
+})
+
+const pDevServerGroupEnabled = computed({
+  get: () => devServerToolNames.some(k => pDraft.tools[k]),
+  set: (val: boolean) => {
+    for (const k of devServerToolNames) pDraft.tools[k] = val
+  },
+})
+
 // 密钥类字段三态（H2）：看板只回显掩码，不回填明文。未触碰的字段保存时不带
 // 对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除
 const llKeyTouched = ref(false)
@@ -145,9 +173,13 @@ watch(() => ui.projectDlg, (dlg) => {
   const pt = p?.tools ?? null
   pDraft.use_tools = !!pt
   pDraft.tools = {}
+  const defaultOff = new Set(store.state?.default_off_tools ?? [
+    ...browserToolNames, ...devServerToolNames, 'http_request',
+  ])
   for (const t of store.state?.tools_catalog ?? []) {
     if (t.name === 'finish') continue
-    pDraft.tools[t.name] = pt?.[t.name] ?? store.state?.tools_cfg?.[t.name] ?? true
+    const defVal = !defaultOff.has(t.name)
+    pDraft.tools[t.name] = pt?.[t.name] ?? store.state?.tools_cfg?.[t.name] ?? defVal
   }
   pDraft.perm_mode = (p?.permission_mode ?? '') as '' | PermissionMode
   // 审查 Agent：开关三态（review_enabled null/true/false）+ 绑定回显 + 返工次数
@@ -159,6 +191,9 @@ watch(() => ui.projectDlg, (dlg) => {
   reviewKeyTouched.value = false
   pDraft.review_ll_model = prl?.model ?? ''
   pDraft.review_rounds = p?.review_max_rounds ?? null
+  pDraft.debug_hosts_text = (p?.debug_allowed_hosts ?? []).join('\n')
+  pDraft.use_cam = p?.commit_and_merge !== undefined && p?.commit_and_merge !== null
+  pDraft.cam_enabled = p?.commit_and_merge ?? false
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
 })
 
@@ -362,6 +397,10 @@ async function saveProject(): Promise<void> {
         ...(pDraft.review_ll_model.trim() ? { model: pDraft.review_ll_model.trim() } : {}),
       } : null,
       review_max_rounds: pDraft.review_rounds,
+      debug_allowed_hosts: pDraft.debug_hosts_text.trim()
+        ? pDraft.debug_hosts_text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)
+        : null,
+      commit_and_merge: pDraft.use_cam ? pDraft.cam_enabled : null,
       original_name: ui.projectDlg.original ?? undefined,
       // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
       ...(ui.projectDlg.original ? {} : {
@@ -713,6 +752,23 @@ async function newFolder(): Promise<void> {
       覆盖 Agent 工具开关（关闭=跟随全局「Agent 工具能力」配置）
     </label>
     <template v-if="pDraft.use_tools">
+      <div style="margin:8px 0;padding:8px 10px;background:rgba(0,128,255,0.06);border-radius:4px;border:1px solid rgba(0,128,255,0.2)">
+        <div style="font-weight:600;font-size:12px;margin-bottom:6px">本地调试工具组快捷开关：</div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px">
+          <label class="checkline" style="display:inline-flex;align-items:center;gap:6px">
+            <NSwitch size="small" v-model:value="pBrowserGroupEnabled" />
+            <span style="font-size:12px">浏览器调试 (browser)</span>
+          </label>
+          <label class="checkline" style="display:inline-flex;align-items:center;gap:6px">
+            <NSwitch size="small" v-model:value="pDevServerGroupEnabled" />
+            <span style="font-size:12px">开发服务 (dev_server)</span>
+          </label>
+          <label class="checkline" style="display:inline-flex;align-items:center;gap:6px">
+            <NSwitch size="small" v-model:value="pDraft.tools['http_request']" />
+            <span style="font-size:12px">本地 API (http_request)</span>
+          </label>
+        </div>
+      </div>
       <div class="ptools" style="margin-top:6px">
         <label v-for="t in store.state?.tools_catalog ?? []" :key="t.name" class="checkline ptool-line">
           <!-- finish 为协议工具：常开且禁用的展示行，不进覆盖 map -->
@@ -723,6 +779,22 @@ async function newFolder(): Promise<void> {
         </label>
       </div>
       <div class="hint">finish 为任务结束的协议工具，始终可用（开关仅为展示）；其余开关保存后立即生效（下一轮任务按此执行）。</div>
+    </template>
+    <div style="margin-top:10px">
+      <label style="font-size:12px;font-weight:bold">🌐 额外允许的调试主机（局域网测试机 / 内部域名）</label>
+      <NInput v-model:value="pDraft.debug_hosts_text" type="textarea" :rows="2"
+              placeholder="每行一个主机名或IP（如 192.168.1.50 或 dev.local，只追加，全局回环地址默认放行）" />
+      <div class="hint">该项目测试时允许额外访问的主机白名单；链路本地与云元数据等硬禁区强制拦截。</div>
+    </div>
+    <label class="checkline" style="margin-top:12px">
+      <NSwitch v-model:value="pDraft.use_cam" />
+      覆盖 Git 代码提交与合并策略（关闭 = 跟随全局设置{{ store.state?.git_cfg?.commit_and_merge ? '开启' : '关闭' }}）
+    </label>
+    <template v-if="pDraft.use_cam">
+      <label class="checkline" style="margin-top:6px;margin-left:16px">
+        <NSwitch size="small" v-model:value="pDraft.cam_enabled" />
+        任务完成后自动提交并合并代码（开启 = worktree 分支提交合并；关闭 = 直接保留在工作区）
+      </label>
     </template>
     <label class="checkline" style="margin-top:12px">
       <NSwitch v-model:value="pDraft.use_repo" />

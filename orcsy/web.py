@@ -97,16 +97,17 @@ from . import __version__
 from . import skills as skills_lib
 from .agent import ProjectAgent
 from .approvals import get_manager
-from .config import (AppConfig, CommandsConfig, EnvConfig, LLMConfig,
+from .config import (AppConfig, CommandsConfig, EnvConfig, GitConfig, LLMConfig,
+                     LOCAL_DEBUG_BROWSERS, LocalDebugConfig,
                      MirrorsConfig, NotifyConfig, PermissionsConfig,
                      ProjectConfig, ReviewConfig, SchedulerConfig, TaskStatus,
                      ToolsConfig, UpdateConfig, WebConfig,
                      assert_review_model_distinct, normalize_llm_override,
-                     normalize_review_llm, resolve_commands, resolve_llm,
+                     normalize_review_llm, resolve_commands, resolve_commit_and_merge, resolve_llm,
                      resolve_permission_mode, resolve_review_llm,
-                     resolve_review_rounds, resolve_tools, validate_env_vars,
-                     validate_permission_mode, validate_web_security,
-                     review_enabled_for)
+                     resolve_review_rounds, resolve_tools, validate_allowed_hosts,
+                     validate_env_vars, validate_permission_mode,
+                     validate_web_security, review_enabled_for)
 from .config import _coerce_llm as _coerce_llm_cfg
 from .executor import WORKTREE_DIR
 from .git_ops import Git, GitError
@@ -121,7 +122,8 @@ from .scheduler import Scheduler
 from .skills import Skill
 from .task_model import (Task, _next_requeue_seq, parse_task_file, priority_rank,
                          scan_tasks, set_task_file_order)
-from .tools import TOOLS, DEFAULT_ALLOWED_COMMANDS, validate_commands_map, validate_tools_map
+from .tools import (TOOLS, TOOL_GROUPS, DEFAULT_OFF_TOOLS, DEFAULT_ALLOWED_COMMANDS,
+                    validate_commands_map, validate_tools_map)
 from .usage import get_usage_store, init_usage_store
 
 log = get_logger("web")
@@ -211,7 +213,9 @@ class AppState:
                                  extra_env=config.env.vars or None,
                                  mirror_runtime=self.mirror_runtime,
                                  path_autofix=config.env.path_autofix,
-                         review_cfg=config.review)
+                                 review_cfg=config.review,
+                                 local_debug=config.local_debug,
+                                 commit_and_merge=resolve_commit_and_merge(config.git, p))
             for p in config.projects
         }
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
@@ -430,6 +434,9 @@ class AppState:
                 "review_llm": self._project_llm_public(p.review_llm),
                 "review_max_rounds": p.review_max_rounds,
                 "review": self._project_review_public(p),
+                "debug_allowed_hosts": p.debug_allowed_hosts or None,
+                "commit_and_merge": p.commit_and_merge,
+                "commit_and_merge_effective": resolve_commit_and_merge(self.config.git, p),
                 "repo": self._repo_public(p.repo),
                 # 项目级工具开关覆盖；null = 跟随全局（前端显示「跟随全局」态）
                 "tools": p.tools or None,
@@ -516,9 +523,30 @@ class AppState:
             # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
             "tools_cfg": dict(self.config.tools.enabled),
             "tools_catalog": [
-                {"name": name, "description": desc}
+                {
+                    "name": name,
+                    "description": desc,
+                    "group": next((g for g, members in TOOL_GROUPS.items() if name in members), None),
+                }
                 for name, (desc, _, _) in TOOLS.items()
             ],
+            "tool_groups": {k: list(v) for k, v in TOOL_GROUPS.items()},
+            "default_off_tools": sorted(DEFAULT_OFF_TOOLS),
+            # 本地调试配置（Chrome/Edge 与后台服务）
+            "local_debug_cfg": {
+                "browser": self.config.local_debug.browser,
+                "browser_executable": self.config.local_debug.browser_executable,
+                "headless": self.config.local_debug.headless,
+                "allowed_hosts": list(self.config.local_debug.allowed_hosts),
+                "navigation_timeout_seconds": self.config.local_debug.navigation_timeout_seconds,
+                "service_ready_timeout_seconds": self.config.local_debug.service_ready_timeout_seconds,
+                "max_services": self.config.local_debug.max_services,
+                "artifacts_retention_days": self.config.local_debug.artifacts_retention_days,
+            },
+            # Git 提交与合并配置（默认关闭，改动直接保留在工作区）
+            "git_cfg": {
+                "commit_and_merge": self.config.git.commit_and_merge,
+            },
             # 访问权限：全局配置 + 当前挂起的审批请求（看板 5s 轮询刷新，
             # 顶栏「待审批」徽标与审批面板都读这里）
             "permissions_cfg": {
@@ -941,6 +969,35 @@ class AppState:
         return {"ok": True, "reply": reply,
                 "elapsed_seconds": r["elapsed_seconds"], "message": message}
 
+    def test_browser_api(self, data: dict) -> dict:
+        """测试 Chrome / Edge 浏览器连通性与版本探测。"""
+        engine = str(data.get("browser") or self.config.local_debug.browser or "auto").strip().lower()
+        custom_path = str(data.get("browser_executable") or self.config.local_debug.browser_executable or "").strip()
+        from .browser.discover import find_browser, launch_browser, terminate_browser
+        import httpx
+        try:
+            exe_path, found_engine = find_browser(engine, custom_path)
+            proc, port, ws_url, profile_dir = launch_browser(exe_path, headless=True)
+            version_info = "未知版本"
+            try:
+                resp = httpx.get(f"http://127.0.0.1:{port}/json/version", timeout=3.0)
+                if resp.status_code == 200:
+                    v_data = resp.json()
+                    version_info = v_data.get("Browser", v_data.get("product", "未知版本"))
+            except Exception:
+                pass
+            finally:
+                terminate_browser(proc, ws_url=ws_url, profile_dir=profile_dir)
+            return {
+                "ok": True,
+                "engine": found_engine,
+                "path": exe_path,
+                "version": version_info,
+                "message": f"探测成功：{found_engine} ({version_info})",
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e), "message": f"浏览器探测失败：{e}"}
+
     # ---- 项目管理 ----
 
     @staticmethod
@@ -1093,6 +1150,13 @@ class AppState:
                 raise ValueError(f"review_max_rounds 必须是整数：{e}") from e
             if not (1 <= review_rounds <= 10):
                 raise ValueError(f"review_max_rounds 应为 1~10（当前：{review_rounds}）")
+        debug_hosts_raw = data.get("debug_allowed_hosts")
+        debug_hosts = (
+            validate_allowed_hosts(debug_hosts_raw, context=f"项目 {name} 的 debug_allowed_hosts")
+            if debug_hosts_raw is not None else None
+        )
+        cam_raw = data.get("commit_and_merge")
+        commit_and_merge = bool(cam_raw) if cam_raw is not None else None
         draft = ProjectConfig(
             name=name, path=path, enabled=bool(data.get("enabled", True)),
             tasks_dir=tasks_dir, guide_file=guide_file,
@@ -1102,6 +1166,8 @@ class AppState:
             review_enabled=review_enabled_raw,
             review_llm=review_llm,
             review_max_rounds=review_rounds,
+            debug_allowed_hosts=debug_hosts,
+            commit_and_merge=commit_and_merge,
         )
         # 审查模型互斥校验（R4）：配置了审查模型且开关生效时，与该项目生效
         # 任务模型同名即拒绝保存（400，前端红字提示同一文案）
@@ -1178,6 +1244,21 @@ class AppState:
                 "allow_test_commands": cfg.review.allow_test_commands,
                 "squash_merge": cfg.review.squash_merge,
             },
+            # 本地调试配置整体写回
+            "local_debug": {
+                "browser": cfg.local_debug.browser,
+                "browser_executable": cfg.local_debug.browser_executable,
+                "headless": cfg.local_debug.headless,
+                "allowed_hosts": list(cfg.local_debug.allowed_hosts),
+                "navigation_timeout_seconds": cfg.local_debug.navigation_timeout_seconds,
+                "service_ready_timeout_seconds": cfg.local_debug.service_ready_timeout_seconds,
+                "max_services": cfg.local_debug.max_services,
+                "artifacts_retention_days": cfg.local_debug.artifacts_retention_days,
+            },
+            # Git 自动化工作流配置
+            "git": {
+                "commit_and_merge": cfg.git.commit_and_merge,
+            },
             "projects": [
                 {
                     "name": p.name, "path": str(p.path), "enabled": p.enabled,
@@ -1192,6 +1273,10 @@ class AppState:
                     **({"review_llm": p.review_llm} if p.review_llm else {}),
                     **({"review_max_rounds": p.review_max_rounds}
                        if p.review_max_rounds is not None else {}),
+                    **({"debug_allowed_hosts": p.debug_allowed_hosts}
+                       if p.debug_allowed_hosts is not None else {}),
+                    **({"commit_and_merge": p.commit_and_merge}
+                       if p.commit_and_merge is not None else {}),
                     **({"repo": p.repo} if p.repo else {}),
                     **({"tools": p.tools} if p.tools else {}),
                     **({"permission_mode": p.permission_mode} if p.permission_mode else {}),
@@ -1224,7 +1309,9 @@ class AppState:
                                             extra_env=new_cfg.env.vars or None,
                                             mirror_runtime=self.mirror_runtime,
                                             path_autofix=new_cfg.env.path_autofix,
-                                            review_cfg=new_cfg.review)
+                                            review_cfg=new_cfg.review,
+                                            local_debug=new_cfg.local_debug,
+                                            commit_and_merge=resolve_commit_and_merge(new_cfg.git, p))
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
@@ -1294,6 +1381,10 @@ class AppState:
                 ])
                 if added:
                     git_notes.append(f".gitignore 已忽略 {'、'.join(added)}")
+                if not git.has_commits():
+                    git.add_all()
+                    git.commit("chore: 初始化项目仓库")
+                    git_notes.append("已创建初始提交")
             except (GitError, OSError) as e:
                 log.warning("项目 %s git 初始化/忽略规则失败：%s", proj.name, e)
 
@@ -2021,6 +2112,49 @@ class AppState:
                         eff_review, context=f"项目 {p.name} 的 review")
             self.config.review = new_review  # 复检全过才落盘
 
+        # 本地调试配置：分块保存，只带 local_debug 的请求生效
+        if "local_debug" in data:
+            dbg_raw = data.get("local_debug") or {}
+            dbg_browser = str(dbg_raw.get("browser", self.config.local_debug.browser)).strip().lower()
+            if dbg_browser not in LOCAL_DEBUG_BROWSERS:
+                raise ValueError(f"local_debug.browser 只能是 {' / '.join(LOCAL_DEBUG_BROWSERS)}（当前：{dbg_browser}）")
+            dbg_nav = int(dbg_raw.get("navigation_timeout_seconds", self.config.local_debug.navigation_timeout_seconds))
+            if not (5 <= dbg_nav <= 300):
+                raise ValueError("页面导航超时应为 5~300 秒")
+            dbg_srv = int(dbg_raw.get("service_ready_timeout_seconds", self.config.local_debug.service_ready_timeout_seconds))
+            if not (5 <= dbg_srv <= 600):
+                raise ValueError("服务就绪超时应为 5~600 秒")
+            dbg_max = int(dbg_raw.get("max_services", self.config.local_debug.max_services))
+            if not (1 <= dbg_max <= 10):
+                raise ValueError("单任务最大后台服务数应为 1~10")
+            dbg_ret = int(dbg_raw.get("artifacts_retention_days", self.config.local_debug.artifacts_retention_days))
+            if not (0 <= dbg_ret <= 365):
+                raise ValueError("工件保留天数应为 0~365 天")
+
+            hosts_raw = dbg_raw.get("allowed_hosts")
+            if hosts_raw is not None:
+                dbg_hosts = validate_allowed_hosts(hosts_raw, context="local_debug.allowed_hosts")
+            else:
+                dbg_hosts = self.config.local_debug.allowed_hosts
+
+            self.config.local_debug = LocalDebugConfig(
+                browser=dbg_browser,
+                browser_executable=str(dbg_raw.get("browser_executable", self.config.local_debug.browser_executable) or "").strip(),
+                headless=bool(dbg_raw.get("headless", self.config.local_debug.headless)),
+                allowed_hosts=dbg_hosts,
+                navigation_timeout_seconds=dbg_nav,
+                service_ready_timeout_seconds=dbg_srv,
+                max_services=dbg_max,
+                artifacts_retention_days=dbg_ret,
+            )
+
+        # Git 自动化工作流配置（任务完成后的提交与合并开关）
+        if "git" in data:
+            git_raw = data.get("git") or {}
+            self.config.git = GitConfig(
+                commit_and_merge=bool(git_raw.get("commit_and_merge", self.config.git.commit_and_merge)),
+            )
+
         self.scheduler.reload_config(self.config)
         self._apply_config(self.config)
         self._save_config(self.config)
@@ -2151,8 +2285,31 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "message": f"扫描失败：{e}"}, 500)
         elif path == "/api/app-autostart":
             self._json(self.state.app_autostart_status())
+        elif path == "/api/artifact":
+            try:
+                self._serve_artifact(self._query_params())
+            except Exception as e:
+                self._json({"ok": False, "message": str(e)}, 400)
         else:
             self._json({"error": "not found"}, 404)
+
+    def _serve_artifact(self, query: dict) -> None:
+        p_raw = str(query.get("path") or "").strip()
+        if not p_raw:
+            return self._json({"error": "缺少 path 参数"}, 400)
+        p = Path(p_raw).resolve()
+        if not p.is_file():
+            return self._json({"error": "工件文件不存在"}, 404)
+        if p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+            return self._json({"error": "仅支持预览图片工件"}, 400)
+        data = p.read_bytes()
+        mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _query_params(self) -> dict:
         from urllib.parse import parse_qs
@@ -2198,6 +2355,11 @@ class WebHandler(BaseHTTPRequestHandler):
             elif path == "/api/llm/test":
                 try:
                     self._json(self.state.test_model(body))
+                except (ValueError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/debug/browser-test":
+                try:
+                    self._json(self.state.test_browser_api(body))
                 except (ValueError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/browse":

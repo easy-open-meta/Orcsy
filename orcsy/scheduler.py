@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
-from .config import AppConfig, resolve_commands, resolve_llm, resolve_permission_mode, resolve_tools
+from .config import AppConfig, resolve_commands, resolve_commit_and_merge, resolve_llm, resolve_permission_mode, resolve_tools
 from .issues import sync_issues
 from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
 from .mirrors import mirror_runtime_for
@@ -55,7 +55,9 @@ class Scheduler:
                          extra_env=config.env.vars or None,
                          mirror_runtime=self.mirror_runtime,
                          path_autofix=config.env.path_autofix,
-                         review_cfg=config.review)
+                         review_cfg=config.review,
+                         local_debug=config.local_debug,
+                         commit_and_merge=resolve_commit_and_merge(config.git, p))
             for p in config.projects
             if p.enabled
         ]
@@ -129,7 +131,9 @@ class Scheduler:
                              extra_env=new_config.env.vars or None,
                              mirror_runtime=self.mirror_runtime,
                              path_autofix=new_config.env.path_autofix,
-                             review_cfg=new_config.review)
+                             review_cfg=new_config.review,
+                             local_debug=new_config.local_debug,
+                             commit_and_merge=resolve_commit_and_merge(new_config.git, p))
                 for p in new_config.projects
                 if p.enabled
             ]

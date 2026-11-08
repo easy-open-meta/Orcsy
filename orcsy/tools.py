@@ -34,6 +34,20 @@ log = get_logger("tools")
 # 无窗口实例（托盘 exe）派生控制台程序会闪黑窗，CREATE_NO_WINDOW 抑制之
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+
+def _windows_startupinfo() -> subprocess.STARTUPINFO | None:
+    """Windows 下彻底隐藏控制台子进程窗口的 STARTUPINFO。
+
+    配合 CREATE_NO_WINDOW 与 stdin=DEVNULL 使用，确保 Windows 窗口管理器
+    在创建进程第一帧即以 SW_HIDE 初始，彻底杜绝控制台黑框闪烁。
+    """
+    if os.name == "nt":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+        si.wShowWindow = 0  # SW_HIDE
+        return si
+    return None
+
 # 命令白名单：测试、构建、lint 等 Agent 自验证所需的常见命令。
 # 通配符按 argv[0] 的文件名匹配（小写、fnmatch）；不在表内的命令一律拒绝。
 # 列表需覆盖 orcsy/probe.py 为各技术栈推荐的命令（pnpm/yarn 项目、CMake
@@ -317,6 +331,9 @@ class ToolContext:
     # 当前正在执行的任务（task_model.Task）：create_tasks 拆分工具用它定位
     # 任务目录并关闭原任务；None（如单元测试直构）时工具拒绝拆分
     current_task: object | None = None
+    # 本地调试会话（orcsy.debug_session.DebugSession）：持有开发服务管理器、
+    # 会话级 HTTP 客户端与浏览器 CDP 客户端；None = 未启用本地调试
+    session: object | None = None
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()
@@ -555,7 +572,10 @@ def _kill_process_tree(proc: "subprocess.Popen") -> None:
         if os.name == "nt":
             subprocess.run(
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                capture_output=True, creationflags=_NO_WINDOW,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                startupinfo=_windows_startupinfo(),
+                creationflags=_NO_WINDOW,
             )
             if proc.poll() is None:  # taskkill 失败（如权限）：兜底直杀
                 proc.kill()
@@ -577,16 +597,35 @@ def kill_running_children() -> int:
     return killed
 
 
+def register_child_proc(proc: "subprocess.Popen") -> None:
+    """注册一个运行中的子进程，供程序退出时统一杀灭。"""
+    with _CHILD_PROCS_LOCK:
+        _CHILD_PROCS.add(proc)
+
+
+def unregister_child_proc(proc: "subprocess.Popen") -> None:
+    """注销已结束的子进程。"""
+    with _CHILD_PROCS_LOCK:
+        _CHILD_PROCS.discard(proc)
+
+
+def check_command_allowed(command: list[str],
+                          allowed: list[str] | None = None) -> tuple[bool, str]:
+    """校验命令是否符合白名单约束（run_command 与 dev_server_start 共用）。"""
+    if not command:
+        return False, "错误：command 不能为空"
+    exe = _EXE_SUFFIX_RE.sub("", Path(command[0]).name.lower())
+    eff_allowed = allowed if allowed is not None else DEFAULT_ALLOWED_COMMANDS
+    if not any(fnmatch.fnmatch(exe, pat.lower()) for pat in eff_allowed):
+        return False, f"错误：命令 {exe} 不在白名单内（{', '.join(eff_allowed)}），如需放开请修改配置 allowed_commands"
+    return True, ""
+
+
 def tool_run_command(ctx: ToolContext, args: dict) -> str:
     command = [str(c) for c in args.get("command", [])]
-    if not command:
-        return "错误：command 不能为空"
-    # 白名单按 basename 过（.exe/.cmd/.bat 后缀不参与）：绝对路径调用
-    # D:\...\go.exe 与 go 等价——新装工具未进 PATH 时的官方出路
-    exe = _EXE_SUFFIX_RE.sub("", Path(command[0]).name.lower())
-    allowed = ctx.allowed_commands if ctx.allowed_commands is not None else DEFAULT_ALLOWED_COMMANDS
-    if not any(fnmatch.fnmatch(exe, pat.lower()) for pat in allowed):
-        return f"错误：命令 {exe} 不在白名单内（{', '.join(allowed)}），如需放开请修改配置 allowed_commands"
+    ok, err = check_command_allowed(command, ctx.allowed_commands)
+    if not ok:
+        return err
     timeout = min(int(args.get("timeout_seconds", 120)), 600)
     # 新装工具（本进程 PATH 快照里没有）自动到常见安装目录解析
     command = _resolve_new_install(command)
@@ -595,9 +634,12 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
         # Windows 上用任务对象/进程树终止：start_new_session 让整组进程可一并 kill；
         # env 带上扩充 PATH：go 等工具派生子进程（编译器/链接器）时也能找到兄弟工具
         proc = subprocess.Popen(
-            command, cwd=str(ctx.root), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            command, cwd=str(ctx.root),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", shell=False,
             env=_augmented_env(ctx),
+            startupinfo=_windows_startupinfo(),
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _NO_WINDOW,
         )
     except FileNotFoundError:
@@ -608,16 +650,14 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
                 "\"C:\\Program Files\\Go\\bin\\go.exe\" version，白名单按文件名匹配）；"
                 "若确认未安装，按 env-setup 技能安装；该项目若无法安装此工具链，"
                 "不要反复重试，调用 finish（action=blocked）说明缺少的环境。")
-    with _CHILD_PROCS_LOCK:
-        _CHILD_PROCS.add(proc)
+    register_child_proc(proc)
     try:
         stdout, stderr = _wait_with_stop(ctx, proc, timeout)
         code = proc.returncode
     except _CommandTimeout as e:
         return f"错误：命令超时（>{timeout}s）\n{e.out[:MAX_OUTPUT_CHARS]}"
     finally:
-        with _CHILD_PROCS_LOCK:
-            _CHILD_PROCS.discard(proc)
+        unregister_child_proc(proc)
     out = (stdout or "") + (("\n[stderr]\n" + stderr) if stderr else "")
     if len(out) > MAX_OUTPUT_CHARS:
         # 头尾保留：命令回显/进度在头部，报错摘要多在尾部
@@ -1272,6 +1312,28 @@ TOOLS: dict[str, tuple[str, dict, object]] = {
     ),
 }
 
+# 动态载入本地调试工具集（14 个：dev_server 组 + http_request + browser 组）
+from .tools_debug import DEBUG_TOOLS
+TOOLS.update(DEBUG_TOOLS)
+
+# 工具分组（看板与配置支持按组一键开关）
+TOOL_GROUPS: dict[str, tuple[str, ...]] = {
+    "browser": (
+        "browser_navigate", "browser_snapshot", "browser_click",
+        "browser_type", "browser_wait", "browser_screenshot",
+        "browser_console", "browser_network", "browser_eval",
+        "browser_close",
+    ),
+    "dev_server": (
+        "dev_server_start", "dev_server_logs", "dev_server_stop",
+    ),
+}
+
+# 默认关闭的工具集合（本地调试相关工具；未显式启用时默认关闭，节省轮次 token 且零安全暴露）
+DEFAULT_OFF_TOOLS: frozenset[str] = frozenset(
+    TOOL_GROUPS["browser"] + TOOL_GROUPS["dev_server"] + ("http_request",)
+)
+
 
 def tool_definitions_openai(enabled: frozenset[str] | None = None) -> list[dict]:
     return [
@@ -1296,21 +1358,22 @@ TOGGLEABLE_TOOLS: tuple[str, ...] = tuple(n for n in TOOLS if n != "finish")
 
 
 def validate_tools_map(data: object, context: str = "tools") -> dict[str, bool]:
-    """校验「工具名 → bool」映射：未知工具名/禁用 finish/非布尔值都直接报错。
+    """校验「工具名或工具组名 → bool」映射：未知工具名/禁用 finish/非布尔值都直接报错。
 
-    返回清洗后的 dict（空 dict = 全默认启用）。风格对齐 config._coerce_llm：
+    返回清洗后的 dict（空 dict = 默认配置）。风格对齐 config._coerce_llm：
     加载/保存期即失败，中文错误信息经 Web 层透传到看板。
     """
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise ValueError(f"{context} 必须是「工具名: true/false」的键值对")
+        raise ValueError(f"{context} 必须是「工具名/组名: true/false」的键值对")
     out: dict[str, bool] = {}
+    valid_names = set(TOOLS) | set(TOOL_GROUPS)
     for key, value in data.items():
         name = str(key).strip()
-        if name not in TOOLS:
-            raise ValueError(f"{context} 含未知工具：{name}"
-                             f"（可用：{', '.join(TOOLS)}）")
+        if name not in valid_names:
+            raise ValueError(f"{context} 含未知工具或工具组：{name}"
+                             f"（可用：{', '.join(sorted(valid_names))}）")
         if name == "finish":
             # UI 把 finish 展示为「常开且禁用」的开关；true 容忍并剥掉
             # （前端全量 map 带上它也不算错），false/非布尔一律拒绝

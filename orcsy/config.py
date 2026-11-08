@@ -64,6 +64,11 @@ class ProjectConfig:
     # 项目级返工次数覆盖：审查不通过的最大累计轮数；None = 跟随全局
     # review.max_review_rounds（两级均校验 1~10）
     review_max_rounds: int | None = None
+    # 项目级调试主机白名单追加：仅限裸主机名或 IP，合并到全局 local_debug.allowed_hosts 之上
+    # （只增不减，None/空 = 仅用全局配置）
+    debug_allowed_hosts: list[str] | None = None
+    # 代码提交与合并开关：任务完成后是否自动提交代码并合并回主分支（默认 None = 跟随全局 git.commit_and_merge）
+    commit_and_merge: bool | None = None
 
 
 @dataclass
@@ -255,6 +260,81 @@ class ReviewConfig:
     squash_merge: bool = True
 
 
+LOCAL_DEBUG_BROWSERS = ("auto", "chrome", "edge")
+
+
+@dataclass
+class LocalDebugConfig:
+    """本地调试工具配置（驱动 Chrome/Edge 与开发服务）。"""
+
+    browser: str = "auto"                   # auto | chrome | edge
+    browser_executable: str = ""           # 手动指定可执行文件绝对路径
+    headless: bool = True                  # 是否以无头模式运行
+    allowed_hosts: list[str] = field(default_factory=lambda: ["localhost", "127.0.0.1", "::1"])
+    navigation_timeout_seconds: int = 30   # 页面导航及等待超时（秒，5~300）
+    service_ready_timeout_seconds: int = 60  # 开发服务就绪探针超时（秒，5~600）
+    max_services: int = 3                  # 单任务最大后台服务数（1~10）
+    artifacts_retention_days: int = 7      # 截图工件保留天数（0=不清理）
+
+
+@dataclass
+class GitConfig:
+    """Git 自动化工作流配置：任务完成后的提交与合并策略。"""
+
+    # 任务完成后是否自动提交代码并合并回主分支（默认 False 关闭：改动直接保留在工作区供人工检查）
+    commit_and_merge: bool = False
+
+
+def resolve_commit_and_merge(global_git: GitConfig, project: ProjectConfig) -> bool:
+    """项目生效的代码提交与合并开关：项目覆盖优先，None = 跟随全局（全局默认 False 关闭）。"""
+    if project.commit_and_merge is not None:
+        return bool(project.commit_and_merge)
+    return bool(global_git.commit_and_merge)
+
+
+def validate_allowed_hosts(data: object, context: str = "allowed_hosts") -> list[str]:
+    """校验主机白名单列表：拒绝通配符、CIDR、协议或端口，仅允许裸主机名或 IP。"""
+    if data is None:
+        return []
+    if not isinstance(data, (list, tuple, set)):
+        raise ValueError(f"{context} 必须是主机名或 IP 的列表")
+    out: list[str] = []
+    seen: set[str] = set()
+    for i, item in enumerate(data, 1):
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        if "://" in raw:
+            raise ValueError(f"{context} 第 {i} 项 '{raw}' 包含协议头，白名单只允许填写裸主机名或 IP")
+        if "/" in raw or "\\" in raw:
+            raise ValueError(f"{context} 第 {i} 项 '{raw}' 包含斜杠（不支持 CIDR 网段，只允许单个主机名或 IP）")
+        if "*" in raw or "?" in raw:
+            raise ValueError(f"{context} 第 {i} 项 '{raw}' 包含通配符（出于安全考虑不支持通配符）")
+        # 允许 ::1 等 IPv6 字面量，但不允许带端口如 localhost:8080
+        if ":" in raw and not (raw.startswith("[") or raw.count(":") >= 2):
+            raise ValueError(f"{context} 第 {i} 项 '{raw}' 包含端口号，白名单只匹配主机名或 IP")
+        host_clean = raw.strip("[]").lower()
+        if host_clean not in seen:
+            seen.add(host_clean)
+            out.append(host_clean)
+    return out
+
+
+def resolve_debug_hosts(global_cfg: LocalDebugConfig, project_hosts: list[str] | None) -> list[str]:
+    """解析项目生效的主机白名单（全局 ∪ 项目追加，只增不减）。"""
+    base = list(global_cfg.allowed_hosts or ["localhost", "127.0.0.1", "::1"])
+    if not project_hosts:
+        return base
+    combined = list(base)
+    seen = {h.lower() for h in base}
+    for h in project_hosts:
+        clean = h.strip("[]").lower()
+        if clean and clean not in seen:
+            seen.add(clean)
+            combined.append(clean)
+    return combined
+
+
 def validate_permission_mode(value: object, context: str = "permissions.mode") -> str:
     mode = str(value or "").strip()
     if mode not in PERMISSION_MODES:
@@ -276,6 +356,8 @@ class AppConfig:
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     mirrors: MirrorsConfig = field(default_factory=MirrorsConfig)
     review: ReviewConfig = field(default_factory=ReviewConfig)
+    local_debug: LocalDebugConfig = field(default_factory=LocalDebugConfig)
+    git: GitConfig = field(default_factory=GitConfig)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
 
@@ -431,16 +513,36 @@ def review_enabled_for(review_cfg: ReviewConfig, project: ProjectConfig) -> bool
     return review_cfg.enabled
 
 
+def _expand_tools_map(m: dict[str, bool] | None) -> dict[str, bool]:
+    """把可能含工具组名（如 browser、dev_server）的 map 展开为扁平的工具名映射。"""
+    if not m:
+        return {}
+    from .tools import TOOL_GROUPS
+    out: dict[str, bool] = {}
+    # 先展开组名
+    for k, v in m.items():
+        if k in TOOL_GROUPS:
+            for tool_name in TOOL_GROUPS[k]:
+                out[tool_name] = bool(v)
+    # 单工具名覆盖（优先级高于组名）
+    for k, v in m.items():
+        if k not in TOOL_GROUPS:
+            out[k] = bool(v)
+    return out
+
+
 def resolve_tools(global_tools: ToolsConfig,
                   override: dict[str, bool] | None) -> dict[str, bool]:
-    """解析项目生效的工具开关：项目覆盖逐项合并到全局之上（部分覆盖语义）。
-
-    override 为 None/空字典时原样返回全局 map（保持同一性，未绑定项目行为
-    与旧版完全一致）；否则返回 {**全局, **项目} 的新字典。
-    """
-    if not override:
+    """解析项目生效的工具开关：项目覆盖逐项合并到全局之上（部分覆盖语义），支持工具组名展开。"""
+    from .tools import TOOL_GROUPS
+    has_groups = any(k in TOOL_GROUPS for k in global_tools.enabled)
+    if not override and not has_groups:
         return global_tools.enabled
-    return {**global_tools.enabled, **override}
+    g_expanded = _expand_tools_map(global_tools.enabled)
+    if not override:
+        return g_expanded
+    p_expanded = _expand_tools_map(override)
+    return {**g_expanded, **p_expanded}
 
 
 def resolve_permission_mode(global_perms: PermissionsConfig,
@@ -602,6 +704,56 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         squash_merge=bool(rev_raw.get("squash_merge", True)),
     )
 
+    # 本地调试配置（驱动 Chrome/Edge 与开发服务）
+    debug_raw = raw.get("local_debug") or {}
+    if not isinstance(debug_raw, dict):
+        raise ValueError("local_debug 配置必须是字典（键值对）。")
+    dbg_browser = str(debug_raw.get("browser", "auto")).strip().lower()
+    if dbg_browser not in LOCAL_DEBUG_BROWSERS:
+        raise ValueError(
+            f"local_debug.browser 只能是 {' / '.join(LOCAL_DEBUG_BROWSERS)}（当前：{dbg_browser}）"
+        )
+    try:
+        dbg_nav_timeout = int(debug_raw.get("navigation_timeout_seconds", 30))
+        dbg_srv_timeout = int(debug_raw.get("service_ready_timeout_seconds", 60))
+        dbg_max_srv = int(debug_raw.get("max_services", 3))
+        dbg_retention = int(debug_raw.get("artifacts_retention_days", 7))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"local_debug 数值字段有误：{e}") from e
+    if not (5 <= dbg_nav_timeout <= 300):
+        raise ValueError(
+            f"local_debug.navigation_timeout_seconds 应为 5~300 秒（当前：{dbg_nav_timeout}）"
+        )
+    if not (5 <= dbg_srv_timeout <= 600):
+        raise ValueError(
+            f"local_debug.service_ready_timeout_seconds 应为 5~600 秒（当前：{dbg_srv_timeout}）"
+        )
+    if not (1 <= dbg_max_srv <= 10):
+        raise ValueError(f"local_debug.max_services 应为 1~10（当前：{dbg_max_srv}）")
+    if not (0 <= dbg_retention <= 365):
+        raise ValueError(
+            f"local_debug.artifacts_retention_days 应为 0~365 天（当前：{dbg_retention}）"
+        )
+
+    dbg_hosts_raw = debug_raw.get("allowed_hosts")
+    if dbg_hosts_raw is None:
+        dbg_hosts = ["localhost", "127.0.0.1", "::1"]
+    else:
+        dbg_hosts = validate_allowed_hosts(
+            dbg_hosts_raw, context="local_debug.allowed_hosts"
+        )
+
+    local_debug_cfg = LocalDebugConfig(
+        browser=dbg_browser,
+        browser_executable=str(debug_raw.get("browser_executable") or "").strip(),
+        headless=bool(debug_raw.get("headless", True)),
+        allowed_hosts=dbg_hosts,
+        navigation_timeout_seconds=dbg_nav_timeout,
+        service_ready_timeout_seconds=dbg_srv_timeout,
+        max_services=dbg_max_srv,
+        artifacts_retention_days=dbg_retention,
+    )
+
     # 全局访问权限：模式枚举 + 超时范围，加载期即校验
     perm_raw = raw.get("permissions") or {}
     if not isinstance(perm_raw, dict):
@@ -624,6 +776,14 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     notify = NotifyConfig(
         sound=bool(not_raw.get("sound", True)),
         system=bool(not_raw.get("system", True)),
+    )
+
+    # Git 自动化工作流：默认关闭自动代码提交与合并（改动直接留在工作区供人工检查）
+    git_raw = raw.get("git") or {}
+    if not isinstance(git_raw, dict):
+        raise ValueError("git 配置必须是字典（键值对）。")
+    git_cfg = GitConfig(
+        commit_and_merge=bool(git_raw.get("commit_and_merge", False)),
     )
 
     projects: list[ProjectConfig] = []
@@ -701,6 +861,19 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 review_enabled=p_review_enabled_raw,
                 review_llm=p_review_llm_raw or None,
                 review_max_rounds=p_review_rounds,
+                debug_allowed_hosts=(
+                    validate_allowed_hosts(
+                        item.get("debug_allowed_hosts"),
+                        context=f"项目 {p_name} 的 debug_allowed_hosts",
+                    )
+                    if item.get("debug_allowed_hosts") is not None
+                    else None
+                ),
+                commit_and_merge=(
+                    bool(item.get("commit_and_merge"))
+                    if item.get("commit_and_merge") is not None
+                    else None
+                ),
             )
         )
         # 项目级审查模型互斥校验（R4）：审查模型已配置且与该项目生效任务模型
@@ -715,5 +888,6 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
                     update=update, tools=tools, commands=commands, env=env,
                     permissions=permissions, notify=notify, mirrors=mirrors,
-                    review=review_cfg, projects=projects, source_path=path.resolve())
+                    review=review_cfg, local_debug=local_debug_cfg,
+                    git=git_cfg, projects=projects, source_path=path.resolve())
     return cfg

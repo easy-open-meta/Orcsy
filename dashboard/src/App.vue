@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from './api'
 import Dialogs from './components/Dialogs.vue'
 import DashboardView from './views/DashboardView.vue'
+import ProjectsView from './views/ProjectsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import UsageView from './views/UsageView.vue'
 import { auth, beginRestartWait, clearPendingUpdate, doLogin, doLogout, getPendingUpdate, initAuth, needLogin, openProjectNew, refresh, store, ui } from './store'
@@ -191,7 +192,8 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
         <div class="actions">
           <NTabs type="segment" :value="store.view" @update:value="(v: any) => store.view = v" class="navseg">
             <NTab name="dash">看板</NTab>
-            <NTab name="settings">项目与设置</NTab>
+            <NTab name="projects">项目</NTab>
+            <NTab name="settings">设置</NTab>
             <NTab name="skills">技能</NTab>
             <NTab name="usage">用量</NTab>
           </NTabs>
@@ -219,6 +221,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
         </div>
       </header>
       <DashboardView v-show="store.view === 'dash'" />
+      <ProjectsView v-show="store.view === 'projects'" />
       <SettingsView v-show="store.view === 'settings'" />
       <SkillsView v-show="store.view === 'skills'" />
       <UsageView v-show="store.view === 'usage'" />

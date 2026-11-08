@@ -64,6 +64,12 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
         clauses.append("speedtest_mirrors 测镜像源延迟选最快的下载")
     if on("create_tasks"):
         clauses.append("create_tasks 在任务过大时自主拆分子任务")
+    if on("dev_server_start"):
+        clauses.append("dev_server_* 管理后台开发服务")
+    if on("http_request"):
+        clauses.append("http_request 调试本地或内网 API")
+    if on("browser_navigate"):
+        clauses.append("browser_* 操作本地浏览器调试 Web 页面")
     work_line = ("你通过工具完成一切工作：" + "，".join(clauses) + "。") if clauses else (
         "你当前没有可用的工作工具：直接调用 finish（action=cannot_do）说明受阻原因。")
 
@@ -91,6 +97,11 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
             "明显做不完，即用 create_tasks 拆成可独立验证的子任务（每个带明确验收"
             "命令），再 finish(action=split)。拆分前把已验证的现状写进子任务描述，"
             "避免后续任务重做或误判已有文件损坏。")
+    if on("dev_server_start") or on("browser_navigate") or on("http_request"):
+        bullets.append(
+            "- 本地调试流程：先用 dev_server_start 启动被测服务（命令中使用 {PORT} 自动分配端口并等待就绪），"
+            "再用 browser_navigate 访问页面或 http_request 调接口验证；操作页面前先用 browser_snapshot "
+            "获取元素 ref，发生异常及时查看 browser_console / dev_server_logs；任务交付前调用 dev_server_stop 释放服务。")
     resources = ("## 资源约定（上下文成本控制，必须遵守）\n\n"
                  "对话历史每一轮都会整体重发，冗长的工具结果会按轮次重复计费：\n\n"
                  + "\n".join(bullets) + "\n") if bullets else ""

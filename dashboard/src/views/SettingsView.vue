@@ -74,9 +74,33 @@ watch(() => store.state?.update_cfg?.token_masked, (v) => {
 watch(() => store.state?.update_cfg?.token_configured, (v) => {
   if (v !== undefined) updTokenConfigured.value = v
 })
-// ---- Agent 工具开关草稿（全局默认；只上报关闭项，未列出 = 启用） ----
-const toolsCatalog = ref<{ name: string; description: string }[]>([])
+// ---- Agent 工具开关草稿（全局默认；常规工具未列出 = 启用，本地调试工具未列出 = 关闭） ----
+const toolsCatalog = ref<{ name: string; description: string; group?: string | null }[]>([])
 const toolsDraft = reactive<Record<string, boolean>>({})
+
+const browserTools = [
+  'browser_navigate', 'browser_snapshot', 'browser_click',
+  'browser_type', 'browser_wait', 'browser_screenshot',
+  'browser_console', 'browser_network', 'browser_eval',
+  'browser_close',
+]
+const devServerTools = [
+  'dev_server_start', 'dev_server_logs', 'dev_server_stop',
+]
+
+const browserGroupEnabled = computed({
+  get: () => browserTools.some(k => toolsDraft[k]),
+  set: (val: boolean) => {
+    for (const k of browserTools) toolsDraft[k] = val
+  },
+})
+
+const devServerGroupEnabled = computed({
+  get: () => devServerTools.some(k => toolsDraft[k]),
+  set: (val: boolean) => {
+    for (const k of devServerTools) toolsDraft[k] = val
+  },
+})
 // ---- 命令白名单开关草稿（全局默认；只上报禁用项，未列出 = 放行） ----
 const commandsCatalog = ref<string[]>([])
 const commandsDraft = reactive<Record<string, boolean>>({})
@@ -85,6 +109,36 @@ const envDraft = ref('')
 // PATH 自动修复开关：任务启动时把扫描到的缺失工具目录持久写入用户 PATH
 const pathAutofix = ref(false)
 const toolsSaving = ref(false)
+// ---- 本地调试工具与浏览器配置草稿 ----
+const localDebugDraft = reactive({
+  browser: 'auto' as 'auto' | 'chrome' | 'edge',
+  browser_executable: '',
+  headless: true,
+  hosts_text: 'localhost\n127.0.0.1\n::1',
+  navigation_timeout_seconds: 30,
+  service_ready_timeout_seconds: 60,
+  max_services: 3,
+  artifacts_retention_days: 7,
+})
+const testingBrowser = ref(false)
+async function onTestBrowser(): Promise<void> {
+  testingBrowser.value = true
+  try {
+    const res = await api.testBrowser({
+      browser: localDebugDraft.browser,
+      browser_executable: localDebugDraft.browser_executable.trim(),
+    })
+    if (res.ok) {
+      message()?.(res.message, 'success')
+    } else {
+      message()?.(res.message || res.error || '测试失败', 'error')
+    }
+  } catch (e: any) {
+    message()?.(e.message, 'error')
+  } finally {
+    testingBrowser.value = false
+  }
+}
 // ---- 访问权限草稿（全局默认；项目可在对话框里逐个覆盖） ----
 const permOptions = [
   { label: '变更前询问（发生变更时询问：写/改/删/移文件、执行命令都挂起等批准）', value: 'ask_on_change' },
@@ -92,6 +146,8 @@ const permOptions = [
   { label: '完全访问（减少确认次数：一律不询问，与历史行为一致）', value: 'full_access' },
 ]
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
+// ---- Git 提交与合并开关（默认关闭：改动直接保留在工作区） ----
+const gitCommitAndMergeDraft = ref(false)
 // ---- 任务结束提醒草稿（完成/受阻时提示音 + 系统通知；cancelled 不提醒） ----
 const notifyDraft = reactive({ sound: true, system: true })
 const notifySaving = ref(false)
@@ -120,10 +176,14 @@ watch(() => store.state, (s) => {
   updTokenTouched.value = false
   updDraft.auto_check = s.update_cfg?.auto_check ?? true
   toolsCatalog.value = s.tools_catalog ?? []
+  const defaultOff = new Set(s.default_off_tools ?? [
+    ...browserTools, ...devServerTools, 'http_request',
+  ])
   // finish 只是展示行（常开且禁用），不进草稿、不参与保存
   for (const t of toolsCatalog.value) {
     if (t.name === 'finish') continue
-    toolsDraft[t.name] = s.tools_cfg?.[t.name] ?? true
+    const defVal = !defaultOff.has(t.name)
+    toolsDraft[t.name] = s.tools_cfg?.[t.name] ?? defVal
   }
   commandsCatalog.value = s.commands_catalog ?? []
   for (const c of commandsCatalog.value) commandsDraft[c] = s.commands_cfg?.[c] ?? true
@@ -132,6 +192,18 @@ watch(() => store.state, (s) => {
   pathAutofix.value = s.env_path_autofix ?? false
   permDraft.mode = s.permissions_cfg?.mode ?? 'full_access'
   permDraft.timeout_minutes = s.permissions_cfg?.timeout_minutes ?? 30
+  const dbg = s.local_debug_cfg
+  if (dbg) {
+    localDebugDraft.browser = dbg.browser ?? 'auto'
+    localDebugDraft.browser_executable = dbg.browser_executable ?? ''
+    localDebugDraft.headless = dbg.headless ?? true
+    localDebugDraft.hosts_text = (dbg.allowed_hosts ?? ['localhost', '127.0.0.1', '::1']).join('\n')
+    localDebugDraft.navigation_timeout_seconds = dbg.navigation_timeout_seconds ?? 30
+    localDebugDraft.service_ready_timeout_seconds = dbg.service_ready_timeout_seconds ?? 60
+    localDebugDraft.max_services = dbg.max_services ?? 3
+    localDebugDraft.artifacts_retention_days = dbg.artifacts_retention_days ?? 7
+  }
+  gitCommitAndMergeDraft.value = s.git_cfg?.commit_and_merge ?? false
   notifyDraft.sound = s.notify_cfg?.sound ?? true
   notifyDraft.system = s.notify_cfg?.system ?? true
   syncMirrorDraft()
@@ -301,9 +373,18 @@ async function toggleAutostart(enabled: boolean): Promise<void> {
 async function saveTools(): Promise<void> {
   toolsSaving.value = true
   try {
-    // 只上报关闭项：后端语义「未列出 = 默认启用」，config.yaml 保持干净
-    const disabled = Object.fromEntries(
-      Object.entries(toolsDraft).filter(([, v]) => !v))
+    const defaultOff = new Set(store.state?.default_off_tools ?? [
+      ...browserTools, ...devServerTools, 'http_request',
+    ])
+    // 常规工具未列出=启用（仅上报 false）；调试类工具未列出=关闭（仅上报 true）
+    const toolsPayload: Record<string, boolean> = {}
+    for (const [k, v] of Object.entries(toolsDraft)) {
+      if (defaultOff.has(k)) {
+        if (v) toolsPayload[k] = true
+      } else {
+        if (!v) toolsPayload[k] = false
+      }
+    }
     // 命令白名单同理：只上报禁用的命令
     const cmdsOff = Object.fromEntries(
       Object.entries(commandsDraft).filter(([, v]) => !v))
@@ -327,10 +408,21 @@ async function saveTools(): Promise<void> {
       message()?.(`以下行无法解析为 KEY=VALUE，已跳过：${skipped.join('；')}`, 'warning')
     }
     await api.config({
-      tools: disabled,
+      tools: toolsPayload,
       commands: cmdsOff,
       env: { vars: envVars, path_autofix: pathAutofix.value },
       permissions: { mode: permDraft.mode, timeout_minutes: permDraft.timeout_minutes },
+      git: { commit_and_merge: gitCommitAndMergeDraft.value },
+      local_debug: {
+        browser: localDebugDraft.browser,
+        browser_executable: localDebugDraft.browser_executable.trim(),
+        headless: localDebugDraft.headless,
+        allowed_hosts: localDebugDraft.hosts_text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean),
+        navigation_timeout_seconds: localDebugDraft.navigation_timeout_seconds,
+        service_ready_timeout_seconds: localDebugDraft.service_ready_timeout_seconds,
+        max_services: localDebugDraft.max_services,
+        artifacts_retention_days: localDebugDraft.artifacts_retention_days,
+      },
     })
     message()?.('工具 / 命令白名单 / 访问权限已保存并生效')
   } catch (e: any) { message()?.(e.message, 'error') }
@@ -779,6 +871,14 @@ const providerOptions = [
       <div class="hint pwd-hint">
         询问 = 任务挂起，顶栏出现「🔔 待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。
       </div>
+
+      <label class="checkline stack" style="margin: 10px 0 12px; padding: 8px 12px; background: rgba(128,128,128,0.06); border-radius: 6px; border: 1px solid rgba(128,128,128,0.15);">
+        <div style="display:flex;align-items:center;gap:8px">
+          <NSwitch v-model:value="gitCommitAndMergeDraft" />
+          <span style="font-weight: 600;">任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
+        </div>
+        <span class="hint">默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。</span>
+      </label>
       <div class="tools-grid">
         <label v-for="t in toolsCatalog" :key="t.name" class="checkline tool-line">
           <!-- finish 为协议工具：常开且禁用的展示行，不可配置 -->
@@ -817,6 +917,63 @@ const providerOptions = [
         启动任务时扫描 node/npm/go/java 等常用命令：不在 PATH 的自动注入 Agent
         会话并写进提示词（模型无需自己找绝对路径）；开启后还会把缺失目录持久写入
         用户 PATH（你自己的终端也能直接用）。
+      </div>
+
+      <label class="subhead">🌐 本地调试与浏览器配置（Web / API 测试支持）</label>
+      <div class="dbg-switches" style="margin: 8px 0 12px; padding: 10px 12px; background: rgba(0, 128, 255, 0.05); border: 1px solid rgba(0, 128, 255, 0.2); border-radius: 6px;">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--n-text-color)">调试工具组开关（默认关闭，按需激活后 Agent 即可获得对应能力）：</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label class="checkline" style="display: flex; align-items: center; gap: 8px;">
+            <NSwitch size="small" v-model:value="browserGroupEnabled" />
+            <span style="font-weight: 500;">启用本地 Chromium 浏览器调试（browser_* 工具，共 10 个）</span>
+            <span class="hint">驱动本地 Chrome/Edge 浏览器，支持访问页面、点击输入、截图与监听控制台/网络</span>
+          </label>
+          <label class="checkline" style="display: flex; align-items: center; gap: 8px;">
+            <NSwitch size="small" v-model:value="devServerGroupEnabled" />
+            <span style="font-weight: 500;">启用后台开发服务管理（dev_server_* 工具，共 3 个）</span>
+            <span class="hint">支持任务中后台常驻启动 dev server（自动端口与就绪等待），任务结束自动清理</span>
+          </label>
+          <label class="checkline" style="display: flex; align-items: center; gap: 8px;">
+            <NSwitch size="small" v-model:value="toolsDraft['http_request']" />
+            <span style="font-weight: 500;">启用本地 HTTP API 调试（http_request 工具）</span>
+            <span class="hint">放行本地/局域网 API 调试（Cookie 会话保持，受下方白名单约束）</span>
+          </label>
+        </div>
+      </div>
+      <div class="frow">
+        <div class="f1"><label>浏览器引擎</label>
+          <NSelect v-model:value="localDebugDraft.browser" :options="[
+            { label: 'auto（优先 Chrome，无则回退 Edge）', value: 'auto' },
+            { label: 'Google Chrome', value: 'chrome' },
+            { label: 'Microsoft Edge', value: 'edge' },
+          ]" /></div>
+        <div class="f2"><label>自定义浏览器路径（留空则自动探测系统安装）</label>
+          <NInput v-model:value="localDebugDraft.browser_executable" placeholder="C:\...\chrome.exe" /></div>
+      </div>
+      <div class="frow" style="margin-top:6px;align-items:center">
+        <label class="cmd-chip">
+          <NSwitch size="small" v-model:value="localDebugDraft.headless" />
+          <span class="cmd-name">无头模式运行（关闭时在桌面弹出浏览器窗口，可直观围观操作）</span>
+        </label>
+        <NButton size="small" :loading="testingBrowser" @click="onTestBrowser">测试浏览器探测</NButton>
+      </div>
+
+      <div class="frow" style="margin-top:8px">
+        <div class="f2">
+          <label>允许访问的主机白名单（每行一个，防内网穿透；默认仅限回环）</label>
+          <NInput v-model:value="localDebugDraft.hosts_text" type="textarea" :rows="3"
+                  placeholder="localhost&#10;127.0.0.1&#10;::1" />
+        </div>
+        <div class="f1">
+          <label>导航超时 / 服务就绪超时（秒）</label>
+          <div style="display:flex;gap:8px">
+            <NInputNumber v-model:value="localDebugDraft.navigation_timeout_seconds" :min="5" :max="300" placeholder="导航" />
+            <NInputNumber v-model:value="localDebugDraft.service_ready_timeout_seconds" :min="5" :max="600" placeholder="就绪" />
+          </div>
+        </div>
+      </div>
+      <div class="hint tool-foot">
+        浏览器顶层导航与 http_request 仅放行上述白名单主机；云元数据等敏感网段强制拦截；项目级设置可额外追加局域网测试机。
       </div>
 
       <div class="sfoot">

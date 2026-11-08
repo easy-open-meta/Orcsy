@@ -25,8 +25,13 @@ from orcsy.web import AppState
 
 
 def check_classification() -> None:
-    readonly = {"list_dir", "read_file", "grep", "find_files", "read_skill",
-                "web_fetch", "finish"}
+    readonly = {
+        "list_dir", "read_file", "grep", "find_files", "read_skill",
+        "web_fetch", "finish",
+        "browser_navigate", "browser_snapshot", "browser_screenshot",
+        "browser_console", "browser_network", "browser_wait", "browser_close",
+        "dev_server_logs", "dev_server_stop",
+    }
     for tool in TOOLS:
         # 完全访问：任何工具都不询问
         assert requires_approval("full_access", tool) is False
@@ -41,11 +46,24 @@ def check_classification() -> None:
     assert requires_approval("ask_on_change", "delete_file") is True
     assert requires_approval("ask_on_change", "move_file") is True
     assert requires_approval("ask_on_change", "run_command") is True
+    assert requires_approval("ask_on_change", "dev_server_start") is True
+    assert requires_approval("ask_on_change", "browser_click") is True
+    assert requires_approval("ask_on_change", "browser_type") is True
+    assert requires_approval("ask_on_change", "browser_eval") is True
+
+    # http_request: GET 不问，POST 问
+    assert requires_approval("ask_on_change", "http_request", {"method": "GET"}) is False
+    assert requires_approval("ask_on_change", "http_request", {"method": "HEAD"}) is False
+    assert requires_approval("ask_on_change", "http_request", {"method": "POST"}) is True
+    assert requires_approval("autonomous", "http_request", {"method": "POST"}) is False
+
     assert requires_approval("autonomous", "write_file") is False
     assert requires_approval("autonomous", "edit_file") is False
     assert requires_approval("autonomous", "delete_file") is True
     assert requires_approval("autonomous", "move_file") is True
     assert requires_approval("autonomous", "run_command") is True
+    assert requires_approval("autonomous", "dev_server_start") is True
+    assert requires_approval("autonomous", "browser_click") is False
     # 未知模式按最宽松处理（校验层已挡非法值，运行期不因脏值卡死任务）
     assert requires_approval("bogus", "delete_file") is False
     assert RISKY_TOOLS < MUTATING_TOOLS  # 高风险是变更类的真子集

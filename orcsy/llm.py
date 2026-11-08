@@ -238,6 +238,11 @@ _NO_TOOL_FORCE_TURNS = 3
 # 完全相同参数的同一工具调用第 N 次起在结果里附警告（模型打转止损，
 # 实测会 100+ 轮重读同一批文件）；计数仅存内存，任务结束即弃
 _REPEAT_CALL_WARN = 3
+# 轮询类调试工具豁免打转警告（等待条件/拉取新日志/查看快照天然会以相同参数调用）
+_POLLING_EXEMPT_TOOLS = frozenset({
+    "browser_snapshot", "browser_wait", "browser_console",
+    "browser_network", "dev_server_logs",
+})
 
 
 class AgentResponse:
@@ -441,10 +446,11 @@ class LLMClient:
                         pass
                 result = dispatch_tool(ctx, name, args_json)
                 # 完全相同参数的重复调用检测：给打转的模型一个止损信号
-                # （实测会 100+ 轮重读同一批文件）。计数仅存内存，任务结束即弃
+                # （实测会 100+ 轮重读同一批文件）。计数仅存内存，任务结束即弃；
+                # 轮询类调试工具豁免
                 repeat_calls[(name, args_json or "")] += 1
                 repeats = repeat_calls[(name, args_json or "")]
-                if repeats >= _REPEAT_CALL_WARN:
+                if name not in _POLLING_EXEMPT_TOOLS and repeats >= _REPEAT_CALL_WARN:
                     if repeats == _REPEAT_CALL_WARN:
                         log.warning("工具调用 [%d] %s 已 %d 次以完全相同的"
                                     "参数重复执行", turn, name, repeats)

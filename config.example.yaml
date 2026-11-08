@@ -39,10 +39,12 @@ web:
                              # host 非回环（0.0.0.0 / 局域网 IP）时必须设置，否则拒绝启动；
                              # 留空 = 关闭鉴权，仅限 127.0.0.1 本机使用（零打扰）
 
-# tools:                     # Agent 工具开关（全局默认）：未列出的工具默认启用。
-#   run_command: false       # 可开关 12 个：list_dir / read_file / write_file / edit_file /
-#   web_fetch: false         #   multi_edit / delete_file / move_file / grep / find_files /
-#                            #   run_command / read_skill / web_fetch；
+# tools:                     # Agent 工具开关（全局默认）：未列出的常规工具默认启用。
+#   browser: true            # 可一键按组开关：browser（10个浏览器工具）/ dev_server（3个后台服务工具）；
+#   dev_server: true         # 亦可单独开关 http_request；本地调试类工具默认关闭，按需激活。
+#   run_command: false       # 常规工具默认启用，可置 false 单独禁用：list_dir / read_file /
+#   web_fetch: false         #   write_file / edit_file / multi_edit / delete_file / move_file /
+#                            #   grep / find_files / run_command / read_skill / web_fetch；
 #                            #   finish 是任务结束的协议工具，不可禁用
 
 # commands:                  # 命令白名单开关（对默认白名单逐命令禁用/启用）：
@@ -105,6 +107,24 @@ notify:
 #   squash_merge: true       #   返工任务通过审查后 merge --squash 收敛 WIP 提交为
 #                            #   单提交；false = 一律 --no-ff
 
+# local_debug:               # 本地调试配置（驱动 Chrome/Edge 浏览器与管理后台服务）：
+#   browser: auto            #   浏览器引擎：auto（优先 Chrome，无则回退 Edge）/ chrome / edge
+#   browser_executable: ""   #   自定义可执行文件路径；留空自动探测
+#   headless: true           #   true=无头静默；false=桌面弹窗（可直观围观 Agent 操作页面）
+#   allowed_hosts:           #   允许访问的主机白名单（防内网渗透；硬禁区如元数据地址恒拒）
+#     - localhost
+#     - 127.0.0.1
+#     - "::1"
+#   navigation_timeout_seconds: 30    # 页面导航及等待超时（秒，5~300）
+#   service_ready_timeout_seconds: 60 # 后台开发服务就绪探针超时（秒，5~600）
+#   max_services: 3                   # 单任务最大后台并发服务数（1~10）
+#   artifacts_retention_days: 7       # 截图工件保留天数（0=不清理）
+
+# git:                         # Git 自动化工作流配置：
+#   commit_and_merge: false    # 任务完成后是否自动提交代码并合并回主分支（默认关闭：
+#                              # 改动直接留在工作区，方便人工检查与自由提交；
+#                              # 开启后在独立 worktree 分支完成开发并自动提交合并）
+
 # 受管项目列表：每个项目由一个独立 Agent 负责。
 # 推荐直接在看板「项目与设置」页可视化新建（会自动创建任务目录与 AGENT.md）；
 # 也可手动添加，格式如下：
@@ -130,12 +150,18 @@ projects: []
 #    #   model: deepseek-chat          #   删除本节即回到全局审查模型）
 #    # review_max_rounds: 3            # 项目级返工次数覆盖（1~10；缺省 = 跟随全局
 #    #                                 # review.max_review_rounds）
+#    # debug_allowed_hosts:            # 项目级追加的调试主机白名单（只增不减）：
+#    #   - 192.168.1.50                #   局域网测试机 / 内部测试域名
+#    #   - dev.local
 #    # repo:                           # 绑定远程仓库（GitHub/Gitee/GitLab/Gitea），
 #    #   url: https://github.com/owner/repo   # 看板「拉取 Issues」把 open Issue 导入任务
 #    #   token: ghp_xxx               # token 可选：私有仓库必填，公开仓库可省
 #    #   auto_pull_interval: 600      # 定时自动拉取间隔（秒），最小 60；缺省 = 仅手动拉取
 #    # tools:                          # 项目级工具开关覆盖：按工具名逐项覆盖全局 tools
-#    #   run_command: true             # 配置；删除本节 = 跟随全局（可开关工具同上，
-#    #   web_fetch: false              # finish 不可禁用）
+#    #   browser: true                 # 一键开启本地浏览器相关工具（默认关闭）
+#    #   dev_server: true              # 一键开启后台开发服务管理工具（默认关闭）
+#    #   http_request: true            # 开启本地 API 请求调试工具（默认关闭）
 #    # permission_mode: autonomous     # 项目级访问权限覆盖（ask_on_change / autonomous /
 #    #                                 # full_access）；缺省 = 跟随全局 permissions.mode
+#    # commit_and_merge: true          # 项目级覆盖：任务完成后自动提交并合并代码（缺省 = 跟随全局 git.commit_and_merge 关闭）
+

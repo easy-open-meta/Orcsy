@@ -6,7 +6,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.19.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.20.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -306,20 +306,48 @@ Agent 执行任务时通过一组**禁锢在项目内的工具**真实地工作�
 
 ### 工具能力开关（全局 + 每项目）
 
-除 `finish`（任务结束的协议工具，恒可用）外，其余 12 个工具都可按名开关：
+除 `finish`（任务结束的协议工具，恒可用）外，所有工具均可按名或按组开关。本地调试工具组（`browser`、`dev_server`、`http_request`）默认关闭，按需激活：
 
 ```yaml
-tools:                     # 全局默认：未列出的工具默认启用
-  web_fetch: false         # 例：全局关闭联网
+tools:                     # 全局默认：未列出的常规工具默认启用
+  web_fetch: false         # 例：全局关闭联网抓取
+  browser: true            # 一键开启本地浏览器相关工具（browser_* 10 个）
+  dev_server: true         # 一键开启后台开发服务管理工具（dev_server_* 3 个）
+  http_request: true       # 开启本地 API 调试工具
 projects:
   - name: my-app
     path: D:/Repos/my-app
-    tools:                 # 项目级覆盖：按工具名逐项覆盖全局；删除本节 = 跟随全局
-      web_fetch: true      # 例：仅该项目放开联网
+    tools:                 # 项目级覆盖：按工具名/组名逐项覆盖全局；删除本节 = 跟随全局
+      browser: true        # 例：仅该项目开启浏览器调试
       run_command: false   # 例：该项目只许改代码不许跑命令（只读审查类项目）
 ```
 
 看板等价操作：设置页「🛠 Agent 工具能力」卡片（全局），项目编辑对话框「覆盖 Agent 工具开关」（项目级），保存后立即生效。开关是双层强制：被禁工具既不会出现在下发给模型的 schema 里，`dispatch` 层也会兜底拦截；系统提示词与任务提示词同步不再提及被禁工具。
+
+### 本地调试工具（浏览器 / 开发服务 / 本地 API）
+
+支持驱动本地 Chrome / Edge 浏览器及后台开发服务进行真实的 Web 与 API 交互调试（零外部 Driver 依赖，直连系统 Chromium CDP）：
+
+```yaml
+local_debug:
+  browser: auto            # 浏览器引擎：auto（优先 Chrome，无则回退 Edge）/ chrome / edge
+  browser_executable: ""   # 自定义浏览器绝对路径（留空自动探测）
+  headless: true           # true=无头静默；false=桌面弹窗（直观围观 Agent 操作页面）
+  allowed_hosts:           # 全局白名单（防内网渗透；云元数据等硬禁区强制拦截）
+    - localhost
+    - 127.0.0.1
+    - "::1"
+  navigation_timeout_seconds: 30    # 页面导航及等待超时（秒）
+  service_ready_timeout_seconds: 60 # 后台开发服务就绪探针超时（秒）
+  max_services: 3                   # 单任务最大后台并发服务数
+  artifacts_retention_days: 7       # 截图工件保留天数
+
+projects:
+  - name: my-web
+    debug_allowed_hosts:   # 项目级追加调试白名单（只增不减）：局域网测试机/内部域名
+      - 192.168.1.50
+      - dev.local
+```
 
 ### 访问权限模式（人工审批）
 
@@ -327,8 +355,8 @@ projects:
 
 | 模式 | 语义 | 挂起等待批准的操作 |
 |---|---|---|
-| `ask_on_change` | 变更前询问 | write_file / edit_file / multi_edit / delete_file / move_file / run_command |
-| `autonomous` | 自主模式（有风险时询问） | delete_file / move_file / run_command |
+| `ask_on_change` | 变更前询问 | write_file / edit_file / multi_edit / delete_file / move_file / run_command / dev_server_start / browser_click / browser_type / browser_eval / http_request(非 GET/HEAD) |
+| `autonomous` | 自主模式（有风险时询问） | delete_file / move_file / run_command / dev_server_start |
 | `full_access` | 完全访问（减少确认次数） | 无（默认，与历史行为一致） |
 
 只读类工具（list_dir / read_file / grep / find_files / read_skill / web_fetch）与 finish 永不询问。

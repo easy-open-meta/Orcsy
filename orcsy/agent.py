@@ -14,7 +14,7 @@ import datetime as _dt
 import re
 from pathlib import Path
 
-from .config import (ProjectConfig, ReviewConfig, resolve_review_llm,
+from .config import (LocalDebugConfig, ProjectConfig, ReviewConfig, resolve_review_llm,
                      resolve_review_rounds, review_enabled_for)
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
@@ -94,7 +94,9 @@ class ProjectAgent:
                  extra_env: dict[str, str] | None = None,
                  mirror_runtime=None,
                  path_autofix: bool = False,
-                 review_cfg: ReviewConfig | None = None) -> None:
+                 review_cfg: ReviewConfig | None = None,
+                 local_debug: LocalDebugConfig | None = None,
+                 commit_and_merge: bool = False) -> None:
         self.project = project
         # tools / permission_* / allowed_commands / extra_env：构造方按全局+
         # 项目覆盖解析后的生效值（resolve_tools / resolve_permission_mode /
@@ -102,6 +104,7 @@ class ProjectAgent:
         # 审查配置：cfg 缺省取默认（未配置模型 = 不审查，兼容旧调用点）；
         # 生效审查模型按项目绑定解析（None = 审查未启用）
         self.review_cfg = review_cfg or ReviewConfig()
+        self.local_debug = local_debug or LocalDebugConfig()
         self.review_llm = resolve_review_llm(self.review_cfg, project.review_llm,
                                              context=f"项目 {project.name} 的 review_llm")
         if self.review_llm is not None:
@@ -122,7 +125,9 @@ class ProjectAgent:
                                      mirror_runtime=mirror_runtime,
                                      path_autofix=path_autofix,
                                      review_cfg=self.review_cfg,
-                                     review_llm=self.review_llm)
+                                     review_llm=self.review_llm,
+                                     local_debug=self.local_debug,
+                                     commit_and_merge=commit_and_merge)
         self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
         self.log = get_logger(f"agent.{project.name}")
 

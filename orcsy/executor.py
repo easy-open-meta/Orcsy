@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .approvals import args_preview, get_manager, requires_approval
-from .config import (LLMConfig, ProjectConfig, ReviewConfig, TaskStatus,
+from .config import (LLMConfig, LocalDebugConfig, ProjectConfig, ReviewConfig, TaskStatus,
                      assert_review_model_distinct, resolve_commands,
                      resolve_permission_mode, resolve_review_llm,
                      resolve_review_rounds, review_enabled_for)
@@ -67,11 +67,15 @@ class TaskExecutor:
                  mirror_runtime=None,
                  path_autofix: bool = False,
                  review_cfg: ReviewConfig | None = None,
-                 review_llm: LLMConfig | None = None) -> None:
+                 review_llm: LLMConfig | None = None,
+                 local_debug: LocalDebugConfig | None = None,
+                 commit_and_merge: bool = False) -> None:
         self.project = project
         self.llm = llm
-        # 生效的工具开关 map（resolve_tools 的产物）；未列出的工具默认启用
-        self.tools_map: dict[str, bool] = dict(tools or {})
+        self.commit_and_merge = bool(commit_and_merge)
+        # 生效的工具开关 map（resolve_tools 的产物，支持组名展开）；未列出的工具默认启用
+        from .config import _expand_tools_map
+        self.tools_map: dict[str, bool] = _expand_tools_map(tools)
         # 生效的访问权限模式（resolve_permission_mode 的产物）与审批超时
         self.permission_mode = permission_mode
         self.permission_timeout_minutes = permission_timeout_minutes
@@ -86,6 +90,8 @@ class TaskExecutor:
         # review_llm 为调用方按配置解析出的生效审查模型（None = 审查未启用）
         self.review_cfg = review_cfg or ReviewConfig()
         self.review_llm = review_llm
+        # 本地调试配置（Chrome/Edge 与后台服务）
+        self.local_debug = local_debug or LocalDebugConfig()
         # 镜像源运行时（mirrors.MirrorRuntime）：speedtest_mirrors 工具 + env-setup
         # 技能正文动态追加「测速优选」段用；None = 未接线（技能保持静态默认序）
         self.mirror_runtime = mirror_runtime
@@ -125,7 +131,7 @@ class TaskExecutor:
         always_allowed: set[str] = set()
 
         def gate(name: str, args: dict) -> str | None:
-            if not requires_approval(mode, name) or name in always_allowed:
+            if not requires_approval(mode, name, args) or name in always_allowed:
                 return None
             brief = args_preview(args, limit=120)
             append_progress(task.path,
@@ -152,9 +158,16 @@ class TaskExecutor:
 
     def _enabled_tools(self) -> frozenset[str] | None:
         """把开关 map 解析成启用工具名集合；全启用时返回 None（不过滤，保持旧行为）。"""
-        if not self.tools_map:
-            return None
-        enabled = {name for name in TOGGLEABLE_TOOLS if self.tools_map.get(name, True)}
+        from .tools import DEFAULT_OFF_TOOLS, TOGGLEABLE_TOOLS
+
+        enabled = set()
+        for name in TOGGLEABLE_TOOLS:
+            if name in DEFAULT_OFF_TOOLS:
+                if self.tools_map.get(name, False):
+                    enabled.add(name)
+            else:
+                if self.tools_map.get(name, True):
+                    enabled.add(name)
         if len(enabled) == len(TOGGLEABLE_TOOLS):
             return None
         return frozenset(enabled | {"finish"})  # finish 是协议工具，恒可用
@@ -190,12 +203,12 @@ class TaskExecutor:
             result.notes = response.notes
             result.files_changed = response.files_changed
             if response.action == "completed":
-                if self.is_git_repo:
+                if self.is_git_repo and self.commit_and_merge:
                     outcome, review = self._complete_with_review(task, response, result)
                     result.outcome = outcome
                     result.review = review
                 else:
-                    # 非 git 项目：无提交/合并；审查读项目目录本身
+                    # 未开启提交合并或非 git 项目：无自动提交/合并，改动直接保留在工作区供人工检查
                     outcome, review = self._review_non_git(task, response, result)
                     result.outcome = outcome
                     result.review = review
@@ -232,7 +245,7 @@ class TaskExecutor:
         # 审查不通过/审查失败例外：WIP 提交保留在分支上供返工续作或人工裁决，
         # worktree 同步保留（D8/D9：审查受阻 ≠ 成果无效）
         review_kept = getattr(result.review, "verdict", "") in ("fail", "error")
-        if result.outcome in ("done", "cancelled") and not review_kept:
+        if self.is_git_repo and self.commit_and_merge and result.outcome in ("done", "cancelled") and not review_kept:
             self.remove_worktree()
 
         controls.end(self.project.name, task.id)
@@ -263,8 +276,9 @@ class TaskExecutor:
     def _agent_loop(self, task: Task, guide_content: str, skills: list[Skill],
                     on_progress=None, usage_out: dict | None = None,
                     stop_event=None) -> AgentResponse:
-        work_root = self.worktree if self.is_git_repo else self.project.path
-        if self.is_git_repo:
+        use_worktree = self.is_git_repo and self.commit_and_merge
+        work_root = self.worktree if use_worktree else self.project.path
+        if use_worktree:
             branch = self._prepare_worktree()
             self.log.debug("worktree 就绪，工作分支：%s", branch)
 
@@ -290,13 +304,31 @@ class TaskExecutor:
                               ", ".join(sorted(tool_map["tools"])) or "（无）")
         except Exception:  # noqa: BLE001 — 扫描是旁路增强，失败不阻断任务
             self.log.warning("任务启动工具扫描失败（忽略）", exc_info=True)
+        # 构建本地调试会话（DebugSession）
+        session = None
+        try:
+            from .debug_session import DebugSession
+            from .config import resolve_debug_hosts
+            effective_hosts = resolve_debug_hosts(self.local_debug, self.project.debug_allowed_hosts)
+            session = DebugSession(
+                root=work_root,
+                allowed_commands=self.allowed_commands,
+                local_debug=self.local_debug,
+                effective_hosts=effective_hosts,
+                extra_env=self.extra_env,
+                stop_event=stop_event,
+            )
+        except Exception:
+            self.log.warning("初始化调试会话失败（可忽略）", exc_info=True)
+
         ctx = ToolContext(root=work_root,
                           allowed_commands=self.allowed_commands,
                           skills=bodies, enabled_tools=enabled,
                           approval_gate=self._make_approval_gate(task),
                           stop_event=stop_event, extra_env=self.extra_env,
                           mirror_runtime=self.mirror_runtime,
-                          current_task=task)
+                          current_task=task,
+                          session=session)
         client = LLMClient(self.llm)
         client.reset(build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,
@@ -311,6 +343,11 @@ class TaskExecutor:
             # run_task_loop 内部会捕获并转换；这里兜底处理（替身/异常路径）
             resp = finish_response(sig.payload)
         finally:
+            if session is not None:
+                try:
+                    session.close()
+                except Exception:
+                    pass
             # 任何结束路径（含 LLM 异常）都回收 token 计量
             if usage_out is not None:
                 usage_out.update(getattr(client, "usage", {}) or {})
@@ -333,6 +370,19 @@ class TaskExecutor:
             shutil.rmtree(self.worktree)
 
         self.project.path.mkdir(parents=True, exist_ok=True)
+        if self.is_git_repo and not self.git.has_commits():
+            try:
+                self.git.ensure_gitignore([
+                    f"{self.project.tasks_dir.strip('/')}/",
+                    self.project.guide_file,
+                    f"{WORKTREE_DIR}/",
+                ])
+                self.git.add_all()
+                self.git.commit("chore: 初始化项目仓库")
+                self.log.info("空仓库已自动创建初始提交")
+            except GitError as e:
+                self.log.warning("空仓库创建初始提交失败：%s", e)
+
         if self._branch_exists(branch):
             self.git.run("worktree", "add", str(self.worktree), branch)
         else:
@@ -344,7 +394,7 @@ class TaskExecutor:
 
     def _cleanup_worktree_changes(self) -> None:
         """任务结束后清空 worktree 的未提交改动。"""
-        if not self.is_git_repo or not (self.worktree / ".git").exists():
+        if not self.is_git_repo or not self.commit_and_merge or not (self.worktree / ".git").exists():
             return
         try:
             self.worktree_git.run("reset", "--hard")
@@ -386,11 +436,21 @@ class TaskExecutor:
     def _review_diff(self) -> str:
         """待合并改动 diff：相对主分支 merge-base 的累计改动（含返工轮 WIP 提交）。"""
         main_branch = self.project.allowed_branch or self.git.current_branch()
+        work_branch = f"arranger/{self.project.name}"
+        if not self.git.has_commits():
+            try:
+                # 零提交空仓库：直接读取 worktree 上的改动
+                return self.worktree_git.run("show", "--stat", "--patch", "HEAD")
+            except GitError:
+                return ""
         try:
-            self.git.run("merge-base", main_branch, "HEAD")
+            self.git.run("merge-base", main_branch, work_branch)
         except GitError:
-            return ""
-        return self.git.run("diff", f"{main_branch}...HEAD")
+            try:
+                return self.worktree_git.run("diff", f"{main_branch}...HEAD")
+            except GitError:
+                return ""
+        return self.git.run("diff", f"{main_branch}...{work_branch}")
 
     def _run_review(self, task: Task, review_pending_path: Path | None) -> "object":
         """构建审查上下文并执行审查 agent（见 review.review_task）。"""
@@ -519,12 +579,18 @@ class TaskExecutor:
         return "blocked", review
 
     def _run_review_non_git(self, task: Task):
-        """非 git 项目的审查执行：根为项目目录，无 diff。"""
+        """工作区模式（未开启提交合并或非 git 项目）的审查执行：根为项目目录。"""
         from .review import review_task
         skills = self._load_skills_for_review()
+        diff = ""
+        if self.is_git_repo:
+            try:
+                diff = self.git.run("diff")
+            except GitError:
+                diff = ""
         return review_task(
             self.project, task, self.project.path,
-            "", "", "", self.review_llm,
+            "", "", diff, self.review_llm,
             guide_content=self._load_guide(), skill_bodies=skills,
             allowed_commands=self.allowed_commands,
             approval_gate=self._make_approval_gate(task),
@@ -544,18 +610,22 @@ class TaskExecutor:
                     and self.review_cfg.squash_merge)
         main_branch = self.project.allowed_branch or self.git.current_branch()
         try:
-            self.git.checkout(main_branch)
-            if reworked:
-                # --squash 把分支尖内容暂存到索引但不产生 merge commit：
-                # 用 Agent 的提交信息收敛为单提交（正文附任务 ID 与审查轮数可溯）
-                message = (getattr(result.review, "summary", "") or f"fix: {task.title}")
-                self.git.run("merge", "--squash", branch)
-                commit_msg = (f"{message.splitlines()[0][:200]}\n\n"
-                              f"Task: {task.id}（审查返工后合并，squash 自 {branch}）")
-                self.git.commit(commit_msg)
+            if not self.git.has_commits():
+                # 零提交空仓库：主分支尚无 commit，直接以工作分支成果作为主分支起始提交
+                self.git.run("checkout", "-B", main_branch, branch)
             else:
-                self.git.run("merge", "--no-ff", "-m",
-                             f"Merge arranger work for {task.id}", result.wip_commit or branch)
+                self.git.checkout(main_branch)
+                if reworked:
+                    # --squash 把分支尖内容暂存到索引但不产生 merge commit：
+                    # 用 Agent 的提交信息收敛为单提交（正文附任务 ID 与审查轮数可溯）
+                    message = (getattr(result.review, "summary", "") or f"fix: {task.title}")
+                    self.git.run("merge", "--squash", branch)
+                    commit_msg = (f"{message.splitlines()[0][:200]}\n\n"
+                                  f"Task: {task.id}（审查返工后合并，squash 自 {branch}）")
+                    self.git.commit(commit_msg)
+                else:
+                    self.git.run("merge", "--no-ff", "-m",
+                                 f"Merge arranger work for {task.id}", result.wip_commit or branch)
         except GitError:
             self.log.exception("合并任务 %s 的提交失败，保留分支 %s 供人工处理",
                                task.id, branch)
@@ -606,9 +676,12 @@ class TaskExecutor:
         # 合回主分支
         main_branch = self.project.allowed_branch or self.git.current_branch()
         try:
-            self.git.checkout(main_branch)
-            self.git.run("merge", "--no-ff", "-m", f"Merge arranger work for {task.id}",
-                         result.commit)
+            if not self.git.has_commits():
+                self.git.run("checkout", "-B", main_branch, result.commit)
+            else:
+                self.git.checkout(main_branch)
+                self.git.run("merge", "--no-ff", "-m", f"Merge arranger work for {task.id}",
+                             result.commit)
         except GitError:
             self.log.exception("合并任务 %s 的提交失败，保留分支 %s 供人工处理",
                                task.id, f"arranger/{self.project.name}")

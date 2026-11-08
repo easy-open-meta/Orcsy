@@ -111,7 +111,11 @@ def check_edit_does_not_touch_git() -> None:
         state = _state(tmp)
         # 先建一个非 git 项目（此时会自动 init）；删掉 .git 模拟用户事后清理
         state.save_project({"name": "edit-me", "path": str(root)})
-        shutil.rmtree(root / ".git")
+        import os, stat
+        def _rm_ro(action, name, exc):
+            os.chmod(name, stat.S_IWRITE)
+            os.unlink(name)
+        shutil.rmtree(root / ".git", onexc=_rm_ro)
         (root / ".gitignore").unlink()
         state.save_project({"name": "edit-me", "path": str(root),
                             "original_name": "edit-me"})

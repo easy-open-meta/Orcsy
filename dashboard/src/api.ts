@@ -42,6 +42,11 @@ export interface ProjectT {
   }) | null
   /** 项目级返工次数覆盖（1~10）；null = 跟随全局 review_cfg.max_review_rounds */
   review_max_rounds?: number | null
+  /** 项目级调试主机白名单追加；null = 仅用全局 allowed_hosts */
+  debug_allowed_hosts?: string[] | null
+  /** 代码提交与合并开关：任务完成后是否自动 commit 并 merge 到主分支；null = 跟随全局（全局默认 false 关闭） */
+  commit_and_merge?: boolean | null
+  commit_and_merge_effective?: boolean
   /** 审查门生效状态（后端两级解析）：开关/模型/返工上限/互斥冲突提示 */
   review?: {
     enabled_effective: boolean
@@ -199,8 +204,27 @@ export interface AppStateT {
   logging: { retention_days: number; max_total_mb: number }
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
-  /** 可开关工具目录（名称+中文描述；finish 为协议工具不在其中） */
-  tools_catalog: { name: string; description: string }[]
+  /** 可开关工具目录（名称+中文描述+所属组；finish 为协议工具不在其中） */
+  tools_catalog: { name: string; description: string; group?: string | null }[]
+  /** 工具组映射字典 */
+  tool_groups?: Record<string, string[]>
+  /** 默认关闭的工具清单（如本地调试相关工具） */
+  default_off_tools?: string[]
+  /** 本地调试配置（Chrome/Edge 与后台服务） */
+  local_debug_cfg?: {
+    browser: 'auto' | 'chrome' | 'edge'
+    browser_executable: string
+    headless: boolean
+    allowed_hosts: string[]
+    navigation_timeout_seconds: number
+    service_ready_timeout_seconds: number
+    max_services: number
+    artifacts_retention_days: number
+  }
+  /** Git 自动化工作流配置：任务完成后的提交与合并策略 */
+  git_cfg?: {
+    commit_and_merge: boolean
+  }
   /** 全局访问权限：模式 + 审批超时（分钟） */
   permissions_cfg: { mode: PermissionMode; timeout_minutes: number }
   /** 当前挂起的人工审批请求（5s 轮询刷新；处理后条目消失） */
@@ -392,6 +416,15 @@ export const api = {
     skipped: { path: string; reason: string }[]
   }>,
   skillOpenFolder: (name: string) => post('/api/skill/open-folder', { name }),
+  testBrowser: (data: { browser?: string; browser_executable?: string }) =>
+    post('/api/debug/browser-test', data) as Promise<{
+      ok: boolean
+      engine?: string
+      path?: string
+      version?: string
+      message: string
+      error?: string
+    }>,
   config: (p: Record<string, unknown>) => post('/api/config', p),
   /** 响应一条挂起的审批：approved=批准/拒绝；always=本任务内始终允许该工具（仅批准时有意义） */
   approvalRespond: (id: string, approved: boolean, always = false) =>

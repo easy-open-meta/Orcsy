@@ -18,7 +18,7 @@ from orcsy.config import (AppConfig, UpdateConfig, LLMConfig, ProjectConfig, Too
 from orcsy.executor import TaskExecutor
 from orcsy.prompts import _output_contract, _skills_section, build_system_prompt
 from orcsy.scheduler import Scheduler
-from orcsy.tools import (TOGGLEABLE_TOOLS, FinishSignal, ToolContext,
+from orcsy.tools import (TOOLS, TOGGLEABLE_TOOLS, FinishSignal, ToolContext,
                          dispatch_tool, tool_definitions_anthropic,
                          tool_definitions_openai, validate_tools_map)
 from orcsy.web import AppState
@@ -125,31 +125,51 @@ def check_schema_filter_and_dispatch() -> None:
 def check_executor_enabled_set() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="tools-exec-"))
     try:
+        from orcsy.tools import DEFAULT_OFF_TOOLS
         proj = ProjectConfig(name="p", path=tmp)
         llm = LLMConfig(api_key="k", model="m")
-        # 空 map / 全 true → None（不过滤，零配置零变化）
-        assert TaskExecutor(proj, llm)._enabled_tools() is None
-        assert TaskExecutor(proj, llm, tools={})._enabled_tools() is None
+        # 默认零配置：常规工具全开，DEFAULT_OFF_TOOLS（本地调试）默认关闭
+        default_en = TaskExecutor(proj, llm)._enabled_tools()
+        assert default_en is not None
+        assert "finish" in default_en
+        assert "run_command" in default_en
+        assert "browser_navigate" not in default_en
+        assert "dev_server_start" not in default_en
+        assert len(default_en) == len(TOGGLEABLE_TOOLS) - len(DEFAULT_OFF_TOOLS) + 1
+
+        # 全量显式开启（含调试工具） → None（不过滤）
         all_on = {n: True for n in TOGGLEABLE_TOOLS}
         assert TaskExecutor(proj, llm, tools=all_on)._enabled_tools() is None
+
+        # 开启 dev_server 组
+        dev_en = TaskExecutor(proj, llm, tools={"dev_server": True})._enabled_tools()
+        assert dev_en is not None
+        assert "dev_server_start" in dev_en
+        assert "browser_navigate" not in dev_en
+
         # 有关闭项 → 启用集含 finish、不含被禁项
         en = TaskExecutor(proj, llm, tools={"run_command": False})._enabled_tools()
         assert en is not None and "finish" in en and "run_command" not in en
-        assert "read_file" in en and len(en) == len(TOGGLEABLE_TOOLS)  # 未列出的默认启用
-        print("ok: TaskExecutor._enabled_tools（默认 None、部分关闭收敛为启用集）")
+        assert "read_file" in en
+        print("ok: TaskExecutor._enabled_tools（DEFAULT_OFF 默认排除、组展开、全开为 None）")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def check_prompts() -> None:
     proj = ProjectConfig(name="demo", path=Path("."))
-    full = build_system_prompt(proj, "# g", False)
+    all_on = frozenset(TOOLS.keys())
+    full = build_system_prompt(proj, "# g", False, tools=all_on)
     assert "必须调用 finish 工具" in full and "资源约定" in full
-    # read_skill 只随技能索引节出现（无技能时协议节不点名它，与旧版行为一致）
-    for name in TOGGLEABLE_TOOLS:
-        if name == "read_skill":
-            continue
+    core_tools = [
+        "list_dir", "read_file", "write_file", "edit_file", "multi_edit",
+        "delete_file", "move_file", "run_command", "grep", "find_files",
+        "web_fetch", "speedtest_mirrors", "create_tasks",
+    ]
+    for name in core_tools:
         assert name in full, f"全启用时提示词应提及 {name}"
+    assert "browser_*" in full
+    assert "dev_server_*" in full
 
     class _S:  # 鸭子类型 Skill（_skills_section 只用 name/description）
         name, description = "skill-a", "描述A"

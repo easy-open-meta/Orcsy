@@ -33,34 +33,41 @@ MODE_LABELS = {
     "full_access": "完全访问",
 }
 
-# 变更类操作（ask_on_change 询问）：改文件 + 执行命令
+# 变更类操作（ask_on_change 询问）：改文件 + 执行命令 + 浏览器点击/输入/求值 + 启动后台服务
 MUTATING_TOOLS = frozenset({
     "write_file", "edit_file", "multi_edit",
     "delete_file", "move_file", "run_command",
     "create_tasks",   # 拆分任务会写任务文件并关闭原任务，按写操作对待
+    "dev_server_start",
+    "browser_click", "browser_type", "browser_eval",
 })
 
-# 高风险操作（autonomous 也询问）：破坏性文件操作 + 执行命令。
+# 高风险操作（autonomous 也询问）：破坏性文件操作 + 执行命令 + 启动后台开发服务。
 # 包管理器（装环境）也在内——装系统软件影响整台机器，即使 full_access 之外的
 # 任何模式都应过一道人工确认
-RISKY_TOOLS = frozenset({"delete_file", "move_file", "run_command"})
+RISKY_TOOLS = frozenset({"delete_file", "move_file", "run_command", "dev_server_start"})
 
 # 审批请求 args 预览的截断长度（看板卡片展示用）
 _ARGS_PREVIEW_CHARS = 300
 
 
-def requires_approval(mode: str, tool: str) -> bool:
+def requires_approval(mode: str, tool: str, args: dict | None = None) -> bool:
     """按模式判定一个工具调用是否需要人工审批。
 
-    只读类（list_dir/read_file/grep/find_files/read_skill/web_fetch）与
-    协议工具 finish 在任何模式下都不询问。
+    只读类与协议工具 finish 在任何模式下都不询问。
+    http_request 视方法而定：GET/HEAD 视为只读，其余方法在 ask_on_change 模式下询问。
     """
     if mode == "full_access":
         return False
-    if mode == "ask_on_change":
-        return tool in MUTATING_TOOLS
     if mode == "autonomous":
         return tool in RISKY_TOOLS
+    if mode == "ask_on_change":
+        if tool in MUTATING_TOOLS:
+            return True
+        if tool == "http_request":
+            method = str((args or {}).get("method", "GET")).strip().upper()
+            return method not in ("GET", "HEAD")
+        return False
     return False  # 未知模式按最宽松处理（校验层已挡住非法值）
 
 
