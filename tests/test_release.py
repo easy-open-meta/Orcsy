@@ -130,6 +130,22 @@ def check_artifacts() -> None:
     try:
         files = release.check_artifacts((0, 15, 0), setup_dir=d)
         assert [f.name for f in files] == EXPECTED_NAMES, files
+        # 测试新架构后缀 windows-amd64 匹配
+        (d / "orcsy-setup-0.15.0.exe").unlink()
+        (d / "orcsy-setup-0.15.0-windows-amd64.exe").write_bytes(b"MZ" + b"x" * 2048)
+        files_arch = release.check_artifacts((0, 15, 0), setup_dir=d)
+        assert files_arch[0].name == "orcsy-setup-0.15.0-windows-amd64.exe"
+        (d / "orcsy-setup-0.15.0-windows-amd64.exe").unlink()
+        (d / "orcsy-setup-0.15.0.exe").write_bytes(b"MZ" + b"x" * 2048)
+        # 测试 windows-arm64 产物自动识别与追加
+        (d / "orcsy-0.15.0-windows-arm64.zip").write_bytes(b"PK" + b"z" * 1024)
+        (d / "orcsy-0.15.0-windows-arm64.zip.sha256").write_text("0" * 64 + "  orcsy-0.15.0-windows-arm64.zip\n")
+        files_arm = release.check_artifacts((0, 15, 0), setup_dir=d)
+        names_arm = [f.name for f in files_arm]
+        assert "orcsy-0.15.0-windows-arm64.zip" in names_arm
+        assert "orcsy-0.15.0-windows-arm64.zip.sha256" in names_arm
+        (d / "orcsy-0.15.0-windows-arm64.zip").unlink()
+        (d / "orcsy-0.15.0-windows-arm64.zip.sha256").unlink()
         # 缺 zip（只发了 exe）→ 明确报错，不许「顺手」漏发
         (d / "orcsy-update-0.15.0.zip").unlink()
         try:

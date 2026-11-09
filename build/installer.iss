@@ -1,5 +1,5 @@
 ﻿; orcsy Windows 安装包脚本（Inno Setup 6）
-; 产物： build/Setup/orcsy-setup-<版本>.exe
+; 产物： build/Setup/orcsy-setup-<版本>-windows-amd64.exe
 
 #define MyAppName "Orcsy"
 #define MyAppNameEn "Orcsy"
@@ -28,13 +28,13 @@ DefaultGroupName={#MyAppName}
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 OutputDir=Setup
-OutputBaseFilename=orcsy-setup-{#MyAppVersion}
+OutputBaseFilename=orcsy-setup-{#MyAppVersion}-windows-amd64
 SetupIconFile=icon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible arm64
 MinVersion=10.0
 
 [Languages]

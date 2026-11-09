@@ -60,7 +60,7 @@ Write tasks as Markdown and let Orcsy handle the rest: a scheduler scans each ma
 
 ### Option 1: Windows installer (recommended)
 
-1. Run `build/Setup/orcsy-setup-<version>.exe` and follow the wizard;
+1. Run `build/Setup/orcsy-setup-<version>-windows-amd64.exe` and follow the wizard;
 2. Optionally check "Initialize sample tasks" to place sample templates in the data directory; **no manual config.yaml setup needed** — it is auto-generated on first launch at `%APPDATA%\Orcsy` (Roaming; local files, unaffected by OneDrive);
 3. Open the dashboard, fill in `llm.api_key`, `base_url` and `model` on the "Projects & Settings" page and create a project (or edit `%APPDATA%\Orcsy\config.yaml` directly; `projects[].path` must be **absolute**);
 4. Launch "Task Orchestration System" from the Start menu / desktop → the dashboard opens in your browser;

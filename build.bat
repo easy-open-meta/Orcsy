@@ -1,10 +1,13 @@
 @echo off
 rem One-click packaging: version -> frontend build -> PyInstaller -> Inno Setup installer + zip update package
 rem Only edit version in orcsy/__init__.py (never touch build/version.ini)
-rem Output: build\Setup\orcsy-setup-<version>.exe     (Windows first install)
+rem Output: build\Setup\orcsy-setup-<version>-windows-amd64.exe (Windows first install)
 rem         build\Setup\orcsy-update-<version>.zip    (Windows self-update package)
+rem         build\Setup\orcsy-<version>-windows-arm64.zip (Windows arm64 portable package)
 rem         build\Setup\orcsy-<version>-linux-amd64.tar.gz (Linux amd64 portable package)
 rem         build\Setup\orcsy-<version>-linux-arm64.tar.gz (Linux arm64 portable package)
+rem         build\Setup\orcsy_<version>_amd64.deb     (Linux amd64 desktop package)
+rem         build\Setup\orcsy_<version>_arm64.deb     (Linux arm64 desktop package)
 setlocal
 cd /d "%~dp0"
 title Orcsy Build
@@ -33,7 +36,7 @@ set RC=%errorlevel%
 echo.
 if "%RC%"=="0" (
     rem NOTE: never put parens inside echo text here - cmd treats ) as end of block
-    echo [OK] Artifacts written to build\Setup\ - Windows setup/update + Linux amd64/arm64
+    echo [OK] Artifacts written to build\Setup\ - Windows + Linux tar.gz / deb desktop packages
 ) else (
     echo [FAIL] Build aborted, exit code %RC%. Check the error above.
 )

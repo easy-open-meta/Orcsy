@@ -61,17 +61,30 @@ def expected_artifacts(ver: tuple[int, int, int],
     """
     v = ".".join(map(str, ver))
     d = Path(setup_dir) if setup_dir else ROOT / "build" / "Setup"
-    base = [d / f"orcsy-setup-{v}.exe",
+    # Windows 安装包：优先匹配带 windows-amd64 架构平台的命名，兼容历史命名
+    setup_candidates = [
+        d / f"orcsy-setup-{v}-windows-amd64.exe",
+        d / f"orcsy-{v}-windows-amd64.exe",
+        d / f"orcsy-setup-{v}.exe",
+    ]
+    setup_file = next((f for f in setup_candidates if f.is_file()), setup_candidates[0])
+    base = [setup_file,
             d / f"orcsy-update-{v}.zip",
             d / f"orcsy-update-{v}.zip.sha256"]
-    linux = [
+    extra = [
+        d / f"orcsy-{v}-windows-arm64.zip",
+        d / f"orcsy-{v}-windows-arm64.zip.sha256",
         d / f"orcsy-{v}-linux-amd64.tar.gz",
         d / f"orcsy-{v}-linux-amd64.tar.gz.sha256",
         d / f"orcsy-{v}-linux-arm64.tar.gz",
         d / f"orcsy-{v}-linux-arm64.tar.gz.sha256",
+        d / f"orcsy_{v}_amd64.deb",
+        d / f"orcsy_{v}_amd64.deb.sha256",
+        d / f"orcsy_{v}_arm64.deb",
+        d / f"orcsy_{v}_arm64.deb.sha256",
     ]
-    # 若构建产物目录中生成了 Linux 产物，自动加入发布清单
-    return base + [f for f in linux if f.is_file()]
+    # 若构建产物目录中生成了跨平台发布产物，自动加入发布清单
+    return base + [f for f in extra if f.is_file()]
 
 
 def check_artifacts(ver: tuple[int, int, int],

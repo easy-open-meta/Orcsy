@@ -153,7 +153,7 @@ When it works, it:
 
 #### Steps
 
-1. Download `orcsy-setup-0.18.0.exe` from the release page:
+1. Download `orcsy-setup-0.21.0-windows-amd64.exe` from the release page:
    - Gitee: <https://gitee.com/java-and-net/Orcsy/releases>
    - GitHub: <https://github.com/easy-open-meta/Orcsy/releases>
 2. Double-click it. If Windows SmartScreen appears, click **More info** → **Run anyway**.

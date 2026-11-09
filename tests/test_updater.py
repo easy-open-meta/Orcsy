@@ -48,6 +48,7 @@ def check_parse_version() -> None:
 
 def check_detect_installer() -> None:
     assert detect_installer_version("orcsy-setup-0.14.0.exe") == "0.14.0"
+    assert detect_installer_version("orcsy-setup-0.14.0-windows-amd64.exe") == "0.14.0"
     assert detect_installer_version("orcsy-update-0.15.0.zip") == "0.15.0"
     assert detect_installer_version("orcsy-setup-0.14.exe") == "0.14"
     assert detect_installer_version("随便.exe") is None

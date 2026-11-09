@@ -10,6 +10,7 @@ ZCode/
 
 *.exe
 *.tar.gz
+*.deb
 build/task-arranger
 
 # 前端工程（Vue3 + Vite）

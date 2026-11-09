@@ -60,7 +60,7 @@
 
 ### 方式一：Windows 安装包（推荐）
 
-1. 运行 `build/Setup/orcsy-setup-<版本>.exe`，按向导安装；
+1. 运行 `build/Setup/orcsy-setup-<版本>-windows-amd64.exe`，按向导安装；
 2. 可勾选「初始化示例任务」在数据目录放置示例模板；**config.yaml 无需手动初始化**——首次启动时自动生成在数据目录 `%APPDATA%\Orcsy`（Roaming，本地实体，不受 OneDrive 干扰）；
 3. 打开看板，在「项目与设置」页填写 `llm.api_key`、`base_url`、`model` 并新建项目（也可直接编辑 `%APPDATA%\Orcsy\config.yaml`，`projects[].path` 用**绝对路径**）；
 4. 从开始菜单/桌面打开「任务编排系统」→ 浏览器自动打开看板；
