@@ -1789,6 +1789,25 @@ read-only calls; on the settings <strong>Usage</strong> view it is recorded
 separately under the review kind, so you can account it apart from
 execution.</p>
 <hr />
+<h3 id="1012-multi-model-agent-project-team">10.12 Multi-Model Agent Project Team</h3>
+<p>Orcsy 0.21.0 introduces <strong>Multi-Model Agent Project Teams</strong>. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:</p>
+<ul>
+<li><strong>👑 Project Manager (PM)</strong>: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using <code>depends_on_refs</code>, or dispatches single-component tasks directly via <code>reassign_task</code>.</li>
+<li><strong>⚙️ Backend / 🎨 Frontend Developers</strong>: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries automatically injected into prompts.</li>
+<li><strong>🧪 Test Engineer (QA)</strong>: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using <code>report_bug</code>, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.</li>
+<li><strong>🛡️ Sandboxed Worktree + Human-Gated Final Commit</strong>: all coding runs safely inside isolated worktrees and merges into the main working tree unstaged/uncommitted — <strong>Orcsy never auto-commits or auto-pushes to main branch by default</strong>, leaving 100% of final commit and push authority to the human reviewer!</li>
+<li><strong>⚡ Intra-Cycle Chaining (<code>chain_within_cycle</code>)</strong>: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.</li>
+<li><strong>👥 Two-Tier Configuration</strong>: global <code>agent_profiles</code> pool reusable across projects, with project-level team customization and fallback routing.</li>
+</ul>
+<hr />
+<h3 id="1013-local-debugging-chromium-cdp-automation">10.13 Local Debugging & Chromium CDP Automation</h3>
+<p>For Web and API projects, Orcsy ships built-in tools for end-to-end verification:</p>
+<ul>
+<li><strong>Chromium Browser Automation (<code>browser_*</code>)</strong>: native Python CDP client connected to local Google Chrome or Microsoft Edge (zero external drivers required), providing element snapshots with <code>ref</code> addressing, clicking, typing, waiting, screenshots, and console/network log listening.</li>
+<li><strong>Dev Server Management (<code>dev_server_*</code>)</strong>: runs background services with dynamic <code>{PORT}</code> allocation and readiness probing, terminating child processes cleanly on task end.</li>
+<li><strong>Local HTTP API Client (<code>http_request</code>)</strong>: tests local/LAN REST and GraphQL endpoints with cookie jars and host allowlist enforcement to block intranet penetration.</li>
+</ul>
+<hr />
 <h2 id="11-data-backup-and-migration">11. Data, backup, and
 migration</h2>
 <h3 id="111-where-data-lives">11.1 Where data lives</h3>

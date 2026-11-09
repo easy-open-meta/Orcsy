@@ -40,7 +40,76 @@ const pDraft = reactive({
   debug_hosts_text: '',
   use_cam: false,
   cam_enabled: false,
+  team: {
+    enabled: false,
+    execution_mode: 'parallel_worktree' as 'parallel_worktree' | 'sequential',
+    max_qa_rounds: 3,
+    max_split_depth: 1,
+    chain_within_cycle: true,
+    max_chain_steps_per_cycle: 10,
+    fallback_role: 'backend',
+    members: [] as any[],
+  },
 })
+
+const teamMemberKeyTouched = reactive<Record<string, boolean>>({})
+const gitIniting = ref(false)
+
+const roleSelectOptions = [
+  { label: '👑 项目经理 (PM)', value: 'pm' },
+  { label: '⚙️ 后端开发工程师', value: 'backend' },
+  { label: '🎨 前端开发工程师', value: 'frontend' },
+  { label: '🧪 测试工程师 (QA)', value: 'qa' },
+  { label: '🧩 自定义专职角色', value: 'custom' },
+]
+
+function getMemberRoleIcon(role: string): string {
+  const map: Record<string, string> = { pm: '👑', backend: '⚙️', frontend: '🎨', qa: '🧪', custom: '🧩' }
+  return map[role] || '🤖'
+}
+
+const globalProfileOptions = computed(() => {
+  const profs = store.state?.agent_profiles || {}
+  return Object.values(profs).map(p => ({
+    label: `${p.name} (${p.role.toUpperCase()})`,
+    value: p.id,
+  }))
+})
+
+function addTeamMember(): void {
+  const base = 'custom'
+  let id = base
+  let n = 2
+  const existing = new Set(pDraft.team.members.map((m: any) => m.id))
+  while (existing.has(id)) {
+    id = `${base}_${n}`
+    n++
+  }
+  pDraft.team.members.push({
+    id, profile: '', enabled: true, name: '', role: 'custom',
+    description: '', ll_model: '', ll_key: '', ll_key_masked: '',
+    allow_test_scripts: false, extra_prompt: '',
+  })
+}
+
+function removeTeamMember(idx: number): void {
+  pDraft.team.members.splice(idx, 1)
+}
+
+async function onGitInitProject(): Promise<void> {
+  const pName = pDraft.name.trim() || ui.projectDlg?.original || ''
+  if (!pName) return
+  gitIniting.value = true
+  try {
+    const res = await api.gitInitProject({ name: pName })
+    message.success(res.message || '已成功初始化 Git 仓库')
+    void refresh(true)
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    gitIniting.value = false
+  }
+}
 
 const browserToolNames = [
   'browser_navigate', 'browser_snapshot', 'browser_click',
@@ -65,6 +134,93 @@ const pDevServerGroupEnabled = computed({
     for (const k of devServerToolNames) pDraft.tools[k] = val
   },
 })
+
+const defaultProjectToolCategories = [
+  {
+    key: 'file_ops',
+    label: '文件操作与编辑',
+    icon: '📁',
+    tools: ['read_file', 'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'list_dir'],
+  },
+  {
+    key: 'code_search',
+    label: '代码搜索与定位',
+    icon: '🔍',
+    tools: ['find_files', 'grep'],
+  },
+  {
+    key: 'command_exec',
+    label: '终端命令执行',
+    icon: '💻',
+    tools: ['run_command'],
+  },
+  {
+    key: 'task_collab',
+    label: '任务管理与协议',
+    icon: '⚡',
+    tools: ['create_tasks', 'finish'],
+  },
+  {
+    key: 'external_net',
+    label: '网络与外部知识',
+    icon: '🌐',
+    tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
+  },
+  {
+    key: 'local_debug',
+    label: '本地开发服务与 API',
+    icon: '🚀',
+    tools: ['dev_server_start', 'dev_server_logs', 'dev_server_stop', 'http_request'],
+  },
+  {
+    key: 'browser_auto',
+    label: 'Chromium 浏览器自动化',
+    icon: '🧭',
+    tools: [
+      'browser_navigate', 'browser_snapshot', 'browser_click',
+      'browser_type', 'browser_wait', 'browser_screenshot',
+      'browser_console', 'browser_network', 'browser_eval',
+      'browser_close',
+    ],
+  },
+]
+
+const projectToolCategories = computed(() => {
+  return store.state?.tool_categories ?? defaultProjectToolCategories
+})
+
+function pToggleToolsGroup(tools: string[], enable: boolean): void {
+  for (const name of tools) {
+    if (name === 'finish') continue
+    pDraft.tools[name] = enable
+  }
+}
+
+function pGetGroupToolsCount(tools: string[]): { enabled: number; total: number } {
+  let enabled = 0
+  for (const t of tools) {
+    if (t === 'finish' || pDraft.tools[t]) enabled++
+  }
+  return { enabled, total: tools.length }
+}
+
+const pMutatingToolsSet = new Set([
+  'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'run_command',
+  'create_tasks', 'dev_server_start', 'browser_click', 'browser_type', 'browser_eval',
+])
+const pRiskyToolsSet = new Set(['delete_file', 'move_file', 'run_command', 'dev_server_start'])
+
+function pGetToolRiskTag(name: string): { label: string; type: 'success' | 'warning' | 'error' | 'info' } {
+  if (name === 'finish') return { label: '核心协议', type: 'info' }
+  if (pRiskyToolsSet.has(name)) return { label: '高危', type: 'error' }
+  if (pMutatingToolsSet.has(name)) return { label: '变更', type: 'warning' }
+  return { label: '只读', type: 'success' }
+}
+
+function pGetToolDesc(name: string): string {
+  const t = store.state?.tools_catalog?.find(x => x.name === name)
+  return t ? t.description : ''
+}
 
 // 密钥类字段三态（H2）：看板只回显掩码，不回填明文。未触碰的字段保存时不带
 // 对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除
@@ -194,6 +350,46 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.debug_hosts_text = (p?.debug_allowed_hosts ?? []).join('\n')
   pDraft.use_cam = p?.commit_and_merge !== undefined && p?.commit_and_merge !== null
   pDraft.cam_enabled = p?.commit_and_merge ?? false
+
+  for (const k of Object.keys(teamMemberKeyTouched)) delete teamMemberKeyTouched[k]
+  const ptTeam = p?.team ?? null
+  if (ptTeam) {
+    pDraft.team.enabled = !!ptTeam.enabled
+    pDraft.team.execution_mode = ptTeam.execution_mode || 'parallel_worktree'
+    pDraft.team.max_qa_rounds = ptTeam.max_qa_rounds ?? 3
+    pDraft.team.max_split_depth = ptTeam.max_split_depth ?? 1
+    pDraft.team.chain_within_cycle = ptTeam.chain_within_cycle ?? true
+    pDraft.team.max_chain_steps_per_cycle = ptTeam.max_chain_steps_per_cycle ?? 10
+    pDraft.team.fallback_role = ptTeam.fallback_role || 'backend'
+    pDraft.team.members = (ptTeam.members || []).map((m: any) => ({
+      id: m.id,
+      profile: m.profile || '',
+      enabled: m.enabled !== false,
+      name: m.name || '',
+      role: m.role || '',
+      description: m.description || '',
+      ll_model: m.llm?.model || '',
+      ll_key: '',
+      ll_key_masked: m.llm?.api_key_masked || '',
+      allow_test_scripts: m.allow_test_scripts ?? false,
+      extra_prompt: m.extra_prompt || '',
+    }))
+  } else {
+    pDraft.team.enabled = false
+    pDraft.team.execution_mode = 'parallel_worktree'
+    pDraft.team.max_qa_rounds = 3
+    pDraft.team.max_split_depth = 1
+    pDraft.team.chain_within_cycle = true
+    pDraft.team.max_chain_steps_per_cycle = 10
+    pDraft.team.fallback_role = 'backend'
+    pDraft.team.members = [
+      { id: 'pm', profile: 'pm_default', enabled: true, name: '', role: 'pm', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
+      { id: 'backend', profile: 'backend_default', enabled: true, name: '', role: 'backend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
+      { id: 'frontend', profile: 'frontend_default', enabled: true, name: '', role: 'frontend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
+      { id: 'qa', profile: 'qa_default', enabled: true, name: '', role: 'qa', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
+    ]
+  }
+
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
 })
 
@@ -401,6 +597,34 @@ async function saveProject(): Promise<void> {
         ? pDraft.debug_hosts_text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)
         : null,
       commit_and_merge: pDraft.use_cam ? pDraft.cam_enabled : null,
+      team: pDraft.team.enabled ? {
+        enabled: true,
+        execution_mode: pDraft.team.execution_mode,
+        max_qa_rounds: pDraft.team.max_qa_rounds,
+        max_split_depth: pDraft.team.max_split_depth,
+        chain_within_cycle: pDraft.team.chain_within_cycle,
+        max_chain_steps_per_cycle: pDraft.team.max_chain_steps_per_cycle,
+        fallback_role: pDraft.team.fallback_role.trim() || undefined,
+        members: pDraft.team.members.map((m: any) => {
+          const mObj: any = {
+            id: m.id.trim(),
+            profile: m.profile.trim() || undefined,
+            enabled: m.enabled !== false,
+            name: m.name.trim() || undefined,
+            role: m.role.trim() || undefined,
+            description: m.description.trim() || undefined,
+            allow_test_scripts: m.allow_test_scripts,
+            extra_prompt: m.extra_prompt.trim() || undefined,
+          }
+          if (m.ll_model.trim() || teamMemberKeyTouched[m.id]) {
+            const mLlm: any = {}
+            if (m.ll_model.trim()) mLlm.model = m.ll_model.trim()
+            if (teamMemberKeyTouched[m.id]) mLlm.api_key = m.ll_key.trim()
+            mObj.llm = mLlm
+          }
+          return mObj
+        }),
+      } : null,
       original_name: ui.projectDlg.original ?? undefined,
       // 新建项目时把技术栈三项写进 AGENT.md；编辑项目不传（指引已存在不重写）
       ...(ui.projectDlg.original ? {} : {
@@ -426,6 +650,10 @@ const tTitle = ref('任务')
 const tDraft = reactive({
   id: '', idLocked: false, title: '', priority: 'P2',
   labels: '', assignee: '', description: '', err: '',
+  depends_on: [] as string[],
+  parent_id: '',
+  qa_round: 0,
+  dep_state: '',
 })
 const PRI_OPTIONS = ['P0', 'P1', 'P2', 'P3', 'P4']
 const priOptions = computed(() => {
@@ -434,6 +662,44 @@ const priOptions = computed(() => {
     opts.push({ label: tDraft.priority, value: tDraft.priority })
   return opts
 })
+
+const activeTaskProject = computed(() =>
+  ui.taskDlg ? store.state?.projects.find(x => x.name === ui.taskDlg?.project) ?? null : null)
+
+const projectTaskOptions = computed(() => {
+  if (!activeTaskProject.value) return []
+  const currentId = tDraft.id
+  return (activeTaskProject.value.tasks || [])
+    .filter(t => t.id !== currentId)
+    .map(t => ({
+      label: `[${t.priority}] ${t.title || t.id} (${t.status === 'done' ? '已完成' : t.status})`,
+      value: t.id,
+    }))
+})
+
+const projectAssigneeOptions = computed(() => {
+  const p = activeTaskProject.value
+  const opts: { label: string; value: string }[] = [
+    { label: '未指派（由 PM 拆解或自动认领）', value: '' },
+  ]
+  if (p && p.team_members_effective && p.team_members_effective.length > 0) {
+    for (const m of p.team_members_effective) {
+      opts.push({
+        label: `${m.icon} ${m.name} (${m.role})`,
+        value: m.id,
+      })
+    }
+  } else {
+    opts.push(
+      { label: '👑 项目经理 (pm)', value: 'pm' },
+      { label: '⚙️ 后端开发 (backend)', value: 'backend' },
+      { label: '🎨 前端开发 (frontend)', value: 'frontend' },
+      { label: '🧪 测试工程师 (qa)', value: 'qa' },
+    )
+  }
+  return opts
+})
+
 watch(() => ui.taskDlg, async (dlg) => {
   if (!dlg) return
   tReadonly.value = !!dlg.readonly
@@ -445,6 +711,10 @@ watch(() => ui.taskDlg, async (dlg) => {
   tDraft.idLocked = dlg.id != null
   tDraft.title = ''; tDraft.priority = 'P2'; tDraft.labels = ''
   tDraft.assignee = ''; tDraft.description = ''
+  tDraft.depends_on = []
+  tDraft.parent_id = ''
+  tDraft.qa_round = 0
+  tDraft.dep_state = ''
   if (dlg.id) {
     // 先用看板缓存填，再拉全文覆盖（/api/state 描述截断 2000 字）；
     // 归档任务不在 tasks 里，从 archived 缓存找，最终以 /api/task 的全文为准
@@ -454,10 +724,17 @@ watch(() => ui.taskDlg, async (dlg) => {
       tDraft.title = t.title; tDraft.priority = t.priority
       tDraft.labels = t.labels.join(', '); tDraft.assignee = t.assignee
       tDraft.description = t.description
+      tDraft.depends_on = t.depends_on ? [...t.depends_on] : []
+      tDraft.parent_id = t.parent_id || ''
+      tDraft.qa_round = t.qa_round || 0
+      tDraft.dep_state = t.dep_state || ''
     }
     try {
       const r = await api.taskFull(dlg.project, dlg.id)
       if (r.description) tDraft.description = r.description
+      if (r.depends_on) tDraft.depends_on = [...r.depends_on]
+      if (r.parent_id) tDraft.parent_id = r.parent_id
+      if (r.qa_round) tDraft.qa_round = r.qa_round
       if (r.error) tDraft.err = `注意：任务文件解析有问题 —— ${r.error}`
     } catch { /* 拉不到就用缓存 */ }
   }
@@ -473,12 +750,59 @@ async function saveTask(): Promise<void> {
       priority: tDraft.priority, status: 'open',
       labels: tDraft.labels.split(/[,，]/).map(s => s.trim()).filter(Boolean),
       assignee: tDraft.assignee.trim(),
+      depends_on: tDraft.depends_on,
       description: tDraft.description,
     })
     message.success('任务已保存')
     ui.taskDlg = null
   } catch (e: any) { tDraft.err = e.message }
   void refresh(true)
+}
+
+// ---------- 人工确认主分支提交与推送对话框 ----------
+const commitVisible = computed({
+  get: () => !!ui.commitDlg,
+  set: (v: boolean) => { if (!v) ui.commitDlg = null },
+})
+const commitDraft = reactive({
+  message: '',
+  push: false,
+  submitting: false,
+  err: '',
+})
+const committingProject = computed(() =>
+  ui.commitDlg ? store.state?.projects.find(x => x.name === ui.commitDlg?.project) ?? null : null)
+
+watch(() => ui.commitDlg, (dlg) => {
+  if (!dlg) return
+  commitDraft.message = ''
+  commitDraft.push = false
+  commitDraft.submitting = false
+  commitDraft.err = ''
+})
+
+async function submitManualCommit(): Promise<void> {
+  if (!ui.commitDlg || !committingProject.value) return
+  if (!commitDraft.message.trim()) {
+    commitDraft.err = '请填写 Commit Message 提交说明'
+    return
+  }
+  commitDraft.submitting = true
+  commitDraft.err = ''
+  try {
+    const res = await api.commitProject({
+      name: ui.commitDlg.project,
+      message: commitDraft.message.trim(),
+      push: commitDraft.push,
+    })
+    message.success(res.message || '已成功提交并把关入库！')
+    ui.commitDlg = null
+    void refresh(true)
+  } catch (e: any) {
+    commitDraft.err = e.message
+  } finally {
+    commitDraft.submitting = false
+  }
 }
 
 // ---------- AGENT.md 编辑 ----------
@@ -684,6 +1008,107 @@ async function newFolder(): Promise<void> {
     </div>
     <label>命令白名单（逗号分隔，留空用默认：python/pytest/node/npm/git…）</label>
     <NInput v-model:value="pDraft.cmds" placeholder="python, pytest, npm, dotnet" />
+    <!-- 多模型 Agent 项目小组模式切换 -->
+    <div style="margin-top:12px; padding: 10px 12px; background: rgba(0,128,255,0.05); border: 1px solid rgba(0,128,255,0.25); border-radius: 8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <label class="checkline" style="margin:0; gap:8px;">
+          <NSwitch v-model:value="pDraft.team.enabled" />
+          <span style="font-weight:600; font-size:13px; color:var(--text)">👥 多模型 Agent 项目小组模式 (Team)</span>
+        </label>
+        <NTag size="tiny" round :type="pDraft.team.enabled ? 'info' : 'default'">
+          {{ pDraft.team.enabled ? '小组协同模式已启用' : '传统单兵模式' }}
+        </NTag>
+      </div>
+
+      <template v-if="pDraft.team.enabled">
+        <div style="margin-top:8px; font-size:12px; color:var(--dim); line-height:1.6">
+          🛡 <b>工作区沙盒已强制启用</b>：所有写代码角色按任务在独立 Worktree 沙盒中编码，通过审查后安全合入主分支工作区（未提交状态），<b>默认不自动 commit 与 push</b>，最后提交完全由人工把关！
+        </div>
+
+        <div v-if="editingProject && !editingProject.is_git_repo" style="margin-top:6px; display:flex; align-items:center; gap:8px;">
+          <NTag size="small" type="warning">非 Git 目录</NTag>
+          <span style="font-size:12px; color:var(--text)">Worktree 沙盒隔离需在 Git 仓库运行：</span>
+          <NButton size="tiny" type="primary" secondary :loading="gitIniting" @click="onGitInitProject">一键初始化 Git 仓库</NButton>
+        </div>
+
+        <div class="duo" style="margin-top:8px">
+          <div class="f1"><label>并发策略</label>
+            <NSelect v-model:value="pDraft.team.execution_mode" :options="[
+              { label: '按任务独立 Worktree 安全并发 (推荐)', value: 'parallel_worktree' },
+              { label: '项目内单任务串行互斥', value: 'sequential' },
+            ]" />
+          </div>
+          <div class="f1"><label>无 PM 时未指派任务兜底角色</label>
+            <NSelect v-model:value="pDraft.team.fallback_role" :options="pDraft.team.members.map(m => ({ label: `${m.name || m.id} (${m.role || m.id})`, value: m.id }))" clearable placeholder="留空则需手动指派" />
+          </div>
+        </div>
+
+        <div class="duo" style="margin-top:6px">
+          <div class="f1"><label>QA 最大回归轮数（防死循环熔断）</label>
+            <NInputNumber v-model:value="pDraft.team.max_qa_rounds" :min="1" :max="10" />
+          </div>
+          <div class="f1" style="display:flex; flex-direction:column; justify-content:center;">
+            <label class="checkline" style="margin-top:14px">
+              <NSwitch size="small" v-model:value="pDraft.team.chain_within_cycle" />
+              <span style="font-size:12px">同周期链式推进（前置完成立即接棒下一阶段）</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 小组成员列表 -->
+        <div style="margin-top:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-weight:600; font-size:12px; color:var(--text)">小组成员名册与专属模型配置：</span>
+            <NButton size="tiny" quaternary type="primary" @click="addTeamMember">+ 添加成员</NButton>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div v-for="(m, mIdx) in pDraft.team.members" :key="m.id" style="border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:var(--card);">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <NSwitch size="small" v-model:value="m.enabled" />
+                  <span style="font-weight:600; font-size:12px;">{{ getMemberRoleIcon(m.role || m.id) }} {{ m.name || m.id }}</span>
+                  <NTag size="tiny" round type="info">{{ (m.role || m.id).toUpperCase() }}</NTag>
+                  <span class="hint" style="font-family:Consolas, monospace; font-size:11px">id: {{ m.id }}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <NButton size="tiny" quaternary type="error" @click="removeTeamMember(mIdx)">删除</NButton>
+                </div>
+              </div>
+
+              <div v-if="m.enabled" style="margin-top:8px; display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                <div>
+                  <label style="font-size:11px">引用全局预设</label>
+                  <NSelect size="small" v-model:value="m.profile" :options="globalProfileOptions" clearable placeholder="自定义配置" />
+                </div>
+                <div>
+                  <label style="font-size:11px">角色类型</label>
+                  <NSelect size="small" v-model:value="m.role" :options="roleSelectOptions" />
+                </div>
+                <div>
+                  <label style="font-size:11px">专属模型覆盖 (留空继承预设/全局)</label>
+                  <NInput size="small" v-model:value="m.ll_model" placeholder="如 deepseek-reasoner" />
+                </div>
+                <div>
+                  <label style="font-size:11px">API Key 覆盖</label>
+                  <NInput size="small" v-model:value="m.ll_key" type="password" show-password-on="click"
+                          :placeholder="m.ll_key_masked ? `已配置(${m.ll_key_masked})` : '留空继承'"
+                          @update:value="teamMemberKeyTouched[m.id] = true" />
+                </div>
+              </div>
+
+              <div v-if="m.enabled && (m.role === 'qa' || m.id === 'qa')" style="margin-top:6px;">
+                <label class="checkline" style="margin:0">
+                  <NSwitch size="small" v-model:value="m.allow_test_scripts" />
+                  <span style="font-size:11.5px">允许 QA 编写自动化测试脚本并纳入提交</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <label class="checkline" style="margin-top:12px">
       <NSwitch v-model:value="pDraft.use_llm" />
       绑定专属模型（仅该模型处理本项目任务；关闭=跟随全局大模型配置）
@@ -752,7 +1177,7 @@ async function newFolder(): Promise<void> {
       覆盖 Agent 工具开关（关闭=跟随全局「Agent 工具能力」配置）
     </label>
     <template v-if="pDraft.use_tools">
-      <div style="margin:8px 0;padding:8px 10px;background:rgba(0,128,255,0.06);border-radius:4px;border:1px solid rgba(0,128,255,0.2)">
+      <div style="margin:8px 0;padding:8px 10px;background:rgba(0,128,255,0.06);border-radius:6px;border:1px solid rgba(0,128,255,0.2)">
         <div style="font-weight:600;font-size:12px;margin-bottom:6px">本地调试工具组快捷开关：</div>
         <div style="display:flex;flex-wrap:wrap;gap:12px">
           <label class="checkline" style="display:inline-flex;align-items:center;gap:6px">
@@ -769,16 +1194,35 @@ async function newFolder(): Promise<void> {
           </label>
         </div>
       </div>
-      <div class="ptools" style="margin-top:6px">
-        <label v-for="t in store.state?.tools_catalog ?? []" :key="t.name" class="checkline ptool-line">
-          <!-- finish 为协议工具：常开且禁用的展示行，不进覆盖 map -->
-          <NSwitch v-if="t.name === 'finish'" size="small" :value="true" disabled />
-          <NSwitch v-else size="small" v-model:value="pDraft.tools[t.name]" />
-          <span class="ptool-name">{{ t.name }}</span>
-          <span class="hint ptool-desc">{{ t.description }}</span>
-        </label>
+      <div class="ptools-grouped" style="margin-top:6px; max-height:280px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px 10px;">
+        <div v-for="cat in projectToolCategories" :key="cat.key" class="pcat-group">
+          <div class="pcat-head">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span>{{ cat.icon }}</span>
+              <span style="font-weight:600;font-size:12px;color:var(--text)">{{ cat.label }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <NTag size="tiny" round :type="pGetGroupToolsCount(cat.tools).enabled === pGetGroupToolsCount(cat.tools).total ? 'success' : 'warning'">
+                {{ pGetGroupToolsCount(cat.tools).enabled }}/{{ pGetGroupToolsCount(cat.tools).total }}
+              </NTag>
+              <NButton size="tiny" quaternary @click="pToggleToolsGroup(cat.tools, true)">全选</NButton>
+              <NButton size="tiny" quaternary @click="pToggleToolsGroup(cat.tools, false)">全关</NButton>
+            </div>
+          </div>
+          <div class="pcat-items">
+            <label v-for="name in cat.tools" :key="name" class="checkline ptool-line">
+              <NSwitch v-if="name === 'finish'" size="small" :value="true" disabled />
+              <NSwitch v-else size="small" v-model:value="pDraft.tools[name]" />
+              <span class="ptool-name">{{ name }}</span>
+              <NTag size="tiny" :bordered="false" :type="pGetToolRiskTag(name).type" style="font-size:10px;padding:0 3px">
+                {{ pGetToolRiskTag(name).label }}
+              </NTag>
+              <span class="hint ptool-desc">{{ pGetToolDesc(name) }}</span>
+            </label>
+          </div>
+        </div>
       </div>
-      <div class="hint">finish 为任务结束的协议工具，始终可用（开关仅为展示）；其余开关保存后立即生效（下一轮任务按此执行）。</div>
+      <div class="hint" style="margin-top:4px">finish 为协议工具始终可用；其余开关保存后立即生效（下一轮任务按此执行）。</div>
     </template>
     <div style="margin-top:10px">
       <label style="font-size:12px;font-weight:bold">🌐 额外允许的调试主机（局域网测试机 / 内部域名）</label>
@@ -844,7 +1288,7 @@ async function newFolder(): Promise<void> {
         <div class="f1"><label>测试 Test</label><NInput v-model:value="pDraft.test" placeholder="npm test" /></div>
       </div>
     </template>
-    <label class="checkline" style="margin-top:4px">
+    <label class="checkline" style="margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line);">
       <NSwitch v-model:value="pDraft.enabled" />
       启用该项目（停用后调度器跳过，配置保留）
     </label>
@@ -869,7 +1313,17 @@ async function newFolder(): Promise<void> {
     <NInput v-model:value="tDraft.title" :disabled="tReadonly" placeholder="一句话描述要做什么" />
     <div class="duo">
       <div class="f1"><label>标签（逗号分隔）</label><NInput v-model:value="tDraft.labels" :disabled="tReadonly" placeholder="bug, ui" /></div>
-      <div class="f1"><label>指派（留空任意 Agent）</label><NInput v-model:value="tDraft.assignee" :disabled="tReadonly" /></div>
+      <div class="f1">
+        <label>指派执行角色</label>
+        <NSelect v-model:value="tDraft.assignee" :options="projectAssigneeOptions" :disabled="tReadonly" filterable tag clearable placeholder="留空自动认领" />
+      </div>
+    </div>
+    <div style="margin-bottom: 6px;">
+      <label>前置依赖任务（全部完成后本任务方可认领执行）</label>
+      <NSelect v-model:value="tDraft.depends_on" multiple filterable :options="projectTaskOptions" :disabled="tReadonly" placeholder="选择依赖的前置任务（可选）..." />
+      <div v-if="tDraft.parent_id" class="hint" style="margin-top: 4px;">
+        🔗 关联父需求/来源任务：{{ tDraft.parent_id }} {{ tDraft.qa_round ? `· 回归轮次 #${tDraft.qa_round}` : '' }}
+      </div>
     </div>
     <label>任务描述（Markdown 正文）</label>
     <NInput v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
@@ -1029,6 +1483,35 @@ async function newFolder(): Promise<void> {
       </div>
     </div>
   </NModal>
+
+  <!-- 人工确认主分支提交与推送对话框 -->
+  <NModal v-model:show="commitVisible" preset="card" :title="`人工把关提交 · ${ui.commitDlg?.project}`"
+          style="width: min(560px, 92vw)">
+    <div style="font-size: 13px; color: var(--text); line-height: 1.6; margin-bottom: 10px;">
+      主分支工作区目前有 <b>{{ committingProject?.pending_git_changes?.count || 0 }}</b> 个已通过测试联调但未提交的文件。
+      确认后将由系统以规范的 commit message 提交至当前主分支（可选推送到远程仓库）。
+    </div>
+    <div v-if="committingProject?.pending_git_changes?.files?.length" style="max-height: 140px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 10px;">
+      <div v-for="f in committingProject.pending_git_changes.files" :key="f" style="font-family: Consolas, monospace; font-size: 11.5px; color: var(--dim); padding: 2px 0;">
+        {{ f }}
+      </div>
+    </div>
+    <div style="margin-bottom: 10px;">
+      <label style="font-size: 12px; font-weight: 600; margin-bottom: 4px; display: block;">提交说明 Commit Message</label>
+      <NInput v-model:value="commitDraft.message" placeholder="如 feat: 完成用户登录与前后端联调测试" />
+    </div>
+    <div style="margin-bottom: 14px;">
+      <label class="checkline">
+        <NSwitch size="small" v-model:value="commitDraft.push" />
+        <span style="font-size: 12.5px;">同时推送到远程仓库 (git push origin)</span>
+      </label>
+    </div>
+    <div class="err" v-if="commitDraft.err">{{ commitDraft.err }}</div>
+    <div class="dlg-actions">
+      <NButton @click="ui.commitDlg = null">取消</NButton>
+      <NButton type="primary" :loading="commitDraft.submitting" @click="submitManualCommit">确认提交主分支</NButton>
+    </div>
+  </NModal>
 </template>
 
 <style scoped>
@@ -1051,7 +1534,30 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .bempty { padding: 12px; font-size: 12.5px; color: var(--faint); }
 .ptools { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
   max-height: 220px; overflow: auto; margin-bottom: 6px; }
-.ptool-line { align-items: baseline; margin-top: 6px; }
+.pcat-group {
+  margin-bottom: 8px;
+  border-bottom: 1px dashed var(--line);
+  padding-bottom: 6px;
+}
+.pcat-group:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.pcat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  margin-bottom: 4px;
+}
+.pcat-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 2px;
+}
+.ptool-line { align-items: baseline; margin-top: 4px; }
 .ptool-name { font-family: Consolas, monospace; font-size: 12px; color: var(--text);
   flex: none; min-width: 88px; }
 .ptool-desc { flex: 1; min-width: 0; margin-bottom: 0; }

@@ -96,17 +96,19 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 from . import __version__
 from . import skills as skills_lib
 from .agent import ProjectAgent
-from .approvals import get_manager
-from .config import (AppConfig, CommandsConfig, EnvConfig, GitConfig, LLMConfig,
+from .approvals import get_manager, MUTATING_TOOLS, RISKY_TOOLS
+from .config import (BUILT_IN_ROLES, AgentProfileConfig, AppConfig, CommandsConfig,
+                     EnvConfig, GitConfig, LLMConfig,
                      LOCAL_DEBUG_BROWSERS, LocalDebugConfig,
                      MirrorsConfig, NotifyConfig, PermissionsConfig,
-                     ProjectConfig, ReviewConfig, SchedulerConfig, TaskStatus,
-                     ToolsConfig, UpdateConfig, WebConfig,
+                     ProjectConfig, ProjectTeamConfig, ReviewConfig, SchedulerConfig,
+                     TaskStatus, TeamMemberConfig, ToolsConfig, UpdateConfig, WebConfig,
                      assert_review_model_distinct, normalize_llm_override,
                      normalize_review_llm, resolve_commands, resolve_commit_and_merge, resolve_llm,
-                     resolve_permission_mode, resolve_review_llm,
-                     resolve_review_rounds, resolve_tools, validate_allowed_hosts,
-                     validate_env_vars, validate_permission_mode,
+                     resolve_permission_mode, resolve_project_team_members, resolve_review_llm,
+                     resolve_review_rounds, resolve_tools, resolve_worktree_isolation,
+                     validate_agent_profiles, validate_allowed_hosts,
+                     validate_env_vars, validate_permission_mode, validate_project_team,
                      validate_web_security, review_enabled_for)
 from .config import _coerce_llm as _coerce_llm_cfg
 from .executor import WORKTREE_DIR
@@ -120,9 +122,12 @@ from .mirrors import (CATEGORIES, CATEGORY_KEYS, mirror_runtime_for,
                       validate_mirrors)
 from .scheduler import Scheduler
 from .skills import Skill
-from .task_model import (Task, _next_requeue_seq, parse_task_file, priority_rank,
-                         scan_tasks, set_task_file_order)
+from .task_model import (Task, _next_requeue_seq, collect_task_statuses,
+                         detect_dependency_cycle, evaluate_task_dependencies,
+                         parse_task_file, priority_rank, scan_tasks,
+                         set_task_file_order)
 from .tools import (TOOLS, TOOL_GROUPS, DEFAULT_OFF_TOOLS, DEFAULT_ALLOWED_COMMANDS,
+                    COMMAND_CATEGORIES, TOOL_CATEGORIES,
                     validate_commands_map, validate_tools_map)
 from .usage import get_usage_store, init_usage_store
 
@@ -215,7 +220,9 @@ class AppState:
                                  path_autofix=config.env.path_autofix,
                                  review_cfg=config.review,
                                  local_debug=config.local_debug,
-                                 commit_and_merge=resolve_commit_and_merge(config.git, p))
+                                 commit_and_merge=resolve_commit_and_merge(config.git, p),
+                                 agent_profiles=config.agent_profiles,
+                                 global_tools=config.tools)
             for p in config.projects
         }
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
@@ -404,6 +411,7 @@ class AppState:
         for name, agent in self.agents.items():
             p = agent.project
             open_tasks, errors = scan_tasks(agent.tasks_dir)
+            all_statuses, done_ids = collect_task_statuses(agent.tasks_dir)
             archive_dir = agent.tasks_dir / "done"
             archived = []
             if archive_dir.is_dir():
@@ -414,7 +422,10 @@ class AppState:
             if agent.tasks_dir.is_dir():
                 for f in sorted(agent.tasks_dir.glob("*.md")):
                     t = parse_task_file(f)
-                    all_tasks.append(self._task_dict(t))
+                    dep_info = None if t.error else evaluate_task_dependencies(t, all_statuses, done_ids)
+                    all_tasks.append(self._task_dict(t, dep_info))
+            is_git = agent.executor.probe_git_repo()
+            pending_git = Git(p.path).pending_changes_summary() if is_git else {"is_git": False, "count": 0, "files": []}
             projects.append({
                 "name": name,
                 "path": str(p.path),
@@ -437,6 +448,12 @@ class AppState:
                 "debug_allowed_hosts": p.debug_allowed_hosts or None,
                 "commit_and_merge": p.commit_and_merge,
                 "commit_and_merge_effective": resolve_commit_and_merge(self.config.git, p),
+                "worktree_isolation_effective": resolve_worktree_isolation(self.config.git, p),
+                "pending_git_changes": pending_git,
+                "team": self._team_public(p.team),
+                "team_enabled": bool(p.team and p.team.enabled),
+                "team_members_effective": self._team_members_effective(p),
+                "active_roles": dict(getattr(agent, "active_roles", {}) or {}),
                 "repo": self._repo_public(p.repo),
                 # 项目级工具开关覆盖；null = 跟随全局（前端显示「跟随全局」态）
                 "tools": p.tools or None,
@@ -452,7 +469,7 @@ class AppState:
                 ),
                 # 实时探测而非会话缓存：用户可能事后手动 init git，5s 轮询
                 # 也能看到最新状态（探测带 .git 存在性预判，开销可忽略）
-                "is_git_repo": agent.executor.probe_git_repo(),
+                "is_git_repo": is_git,
                 "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),
                 "tasks": all_tasks,
@@ -527,10 +544,15 @@ class AppState:
                     "name": name,
                     "description": desc,
                     "group": next((g for g, members in TOOL_GROUPS.items() if name in members), None),
+                    "category": next((c["key"] for c in TOOL_CATEGORIES if name in c["tools"]), None),
+                    "is_mutating": name in MUTATING_TOOLS,
+                    "is_risky": name in RISKY_TOOLS,
+                    "default_off": name in DEFAULT_OFF_TOOLS,
                 }
                 for name, (desc, _, _) in TOOLS.items()
             ],
             "tool_groups": {k: list(v) for k, v in TOOL_GROUPS.items()},
+            "tool_categories": TOOL_CATEGORIES,
             "default_off_tools": sorted(DEFAULT_OFF_TOOLS),
             # 本地调试配置（Chrome/Edge 与后台服务）
             "local_debug_cfg": {
@@ -557,6 +579,7 @@ class AppState:
             # 命令白名单开关：全局生效 map + 默认白名单目录（逐命令 NSwitch 用）
             "commands_cfg": dict(self.config.commands.enabled),
             "commands_catalog": list(DEFAULT_ALLOWED_COMMANDS),
+            "command_categories": COMMAND_CATEGORIES,
             # Agent 子进程自定义环境变量（代理/国内镜像），设置页可视化编辑
             "env_cfg": dict(self.config.env.vars),
             # PATH 自动修复开关（env 节的 path_autofix）：env_cfg 本体保持
@@ -574,8 +597,14 @@ class AppState:
                 "disabled": list(self.config.mirrors.disabled),
             },
             "mirror_speeds": self.mirror_runtime.load_speeds(),
-            # 模型用量：总体 + 各项目 + 近 12 周逐日（热力图按周分列）+ 最近记录
+            # 模型用量：总体 + 各项目 + 按角色 + 近 12 周逐日 + 最近记录
             "usage": get_usage_store().summary(days=84),
+            # 项目小组：全局内置角色元信息 + 用户自定义预设池（api_key 仅出掩码）
+            "built_in_roles": BUILT_IN_ROLES,
+            "agent_profiles": {
+                pid: self._profile_public(prof)
+                for pid, prof in self.config.agent_profiles.items()
+            },
             "app_autostart": self.app_autostart_status(),
             "skills_dir": str(self.skills_dir),
             "skills": [self._skill_dict(s) for s in skills_lib.load_skills(self.skills_dir)],
@@ -633,9 +662,80 @@ class AppState:
         out["password_configured"] = bool(repo.get("password"))
         return out
 
-    @staticmethod
-    def _task_dict(t: Task) -> dict:
+    @classmethod
+    def _profile_public(cls, prof: AgentProfileConfig) -> dict:
+        """全局 Agent 角色预设的可外发形态（api_key 脱敏）。"""
         return {
+            "id": prof.id,
+            "name": prof.name,
+            "role": prof.role,
+            "description": prof.description,
+            "llm": cls._project_llm_public(prof.llm),
+            "tools": prof.tools or None,
+            "max_turns": prof.max_turns,
+            "produces_code": prof.produces_code,
+            "allow_test_scripts": prof.allow_test_scripts,
+            "extra_prompt": prof.extra_prompt,
+        }
+
+    @classmethod
+    def _team_public(cls, team: ProjectTeamConfig | None) -> dict | None:
+        """项目小组编排的可外发形态（成员 api_key 脱敏）。"""
+        if team is None:
+            return None
+        return {
+            "enabled": team.enabled,
+            "execution_mode": team.execution_mode,
+            "max_qa_rounds": team.max_qa_rounds,
+            "max_split_depth": team.max_split_depth,
+            "chain_within_cycle": team.chain_within_cycle,
+            "max_chain_steps_per_cycle": team.max_chain_steps_per_cycle,
+            "fallback_role": team.fallback_role,
+            "members": [
+                {
+                    "id": m.id,
+                    "profile": m.profile,
+                    "enabled": m.enabled,
+                    "name": m.name,
+                    "role": m.role,
+                    "description": m.description,
+                    "llm": cls._project_llm_public(m.llm),
+                    "tools": m.tools or None,
+                    "max_turns": m.max_turns,
+                    "produces_code": m.produces_code,
+                    "allow_test_scripts": m.allow_test_scripts,
+                    "extra_prompt": m.extra_prompt,
+                }
+                for m in team.members
+            ],
+        }
+
+    def _team_members_effective(self, p: ProjectConfig) -> list[dict]:
+        """项目小组已启用成员的生效摘要列表（供看板展示角色徽标与实际模型）。"""
+        if not p.team or not p.team.enabled:
+            return []
+        resolved = resolve_project_team_members(
+            p, self.config.agent_profiles, self.config.llm, self.config.tools
+        )
+        return [
+            {
+                "id": m["id"],
+                "role": m["role"],
+                "name": m["name"],
+                "icon": m["icon"],
+                "description": m["description"],
+                "model": m["llm"].model,
+                "provider": m["llm"].provider,
+                "produces_code": m["produces_code"],
+                "allow_test_scripts": m["allow_test_scripts"],
+                "max_turns": m["max_turns"],
+            }
+            for m in resolved.values()
+        ]
+
+    @staticmethod
+    def _task_dict(t: Task, dep_info: dict | None = None) -> dict:
+        out = {
             "id": t.id, "title": t.title, "priority": t.priority,
             "rank": t.rank, "status": t.status, "labels": t.labels,
             "assignee": t.assignee, "error": t.error,
@@ -646,7 +746,24 @@ class AppState:
             # 审查门状态：任务卡片「待审查」徽标 + 审查轮数
             "review_pending": t.review_pending,
             "review_round": t.review_round,
+            # 项目小组协同与 DAG 依赖字段
+            "depends_on": list(t.depends_on),
+            "parent_id": t.parent_id,
+            "split_depth": t.split_depth,
+            "qa_round": t.qa_round,
+            "created_by": t.created_by,
         }
+        if dep_info is not None:
+            out["dep_state"] = dep_info["dep_state"]
+            out["blocking_deps"] = dep_info["blocking_deps"]
+            out["dep_done_count"] = dep_info["done_count"]
+            out["dep_total_count"] = dep_info["total_deps"]
+        else:
+            out["dep_state"] = "ready"
+            out["blocking_deps"] = []
+            out["dep_done_count"] = len(t.depends_on)
+            out["dep_total_count"] = len(t.depends_on)
+        return out
 
     # ---- 操作 ----
 
@@ -691,21 +808,81 @@ class AppState:
         path = self._task_path(project, task_id)
         labels = data.get("labels") or []
         labels_line = ", ".join(str(x) for x in labels) if isinstance(labels, list) else ""
+
+        # 保留已有任务的协同元字段（编辑任务不得静默丢失 parent_id/split_depth/qa_round 等）
+        old = parse_task_file(path) if path.exists() else None
+        if old is not None and old.error:
+            old = None
+
+        # 前置依赖：请求带 depends_on 键则以请求为准（空列表=清除），否则沿用原值
+        if "depends_on" in data:
+            deps_raw = data.get("depends_on") or []
+            if isinstance(deps_raw, str):
+                deps_raw = [x for x in re.split(r"[,，\s]+", deps_raw) if x]
+            if not isinstance(deps_raw, list):
+                raise ValueError("depends_on 必须是任务 ID 列表")
+            depends_on: list[str] = []
+            for d in deps_raw:
+                d = str(d).strip()
+                if d and d not in depends_on:
+                    depends_on.append(d)
+        else:
+            depends_on = list(old.depends_on) if old else []
+        if task_id in depends_on:
+            raise ValueError("任务不能依赖自身")
+        if depends_on:
+            agent = self.agents.get(project)
+            known = {p.stem for p in agent.tasks_dir.glob("*.md")} if agent and agent.tasks_dir.is_dir() else set()
+            done_dir = agent.tasks_dir / "done" if agent else None
+            if done_dir and done_dir.is_dir():
+                known |= {p.stem for p in done_dir.glob("*.md")}
+            missing = [d for d in depends_on if d not in known]
+            if missing:
+                raise ValueError(f"前置任务不存在：{', '.join(missing)}")
+            cyc = detect_dependency_cycle(agent.tasks_dir, extra_edges={task_id: depends_on})
+            if cyc:
+                raise ValueError(f"前置依赖存在循环：{' -> '.join(cyc)}")
+
+        assignee = str(data.get("assignee") or "").strip()
+        agent_cfg = self.agents.get(project)
+        if (assignee and agent_cfg is not None and agent_cfg.team_enabled
+                and assignee != project and assignee not in agent_cfg.members):
+            raise ValueError(
+                f"指派角色 {assignee!r} 不在本项目小组内，可用角色："
+                f"{', '.join(agent_cfg.members) or '（无）'}")
+
+        title_yaml = (json.dumps(title, ensure_ascii=False)
+                      if any(ch in title for ch in (":", "#", "[", "]", "{", "}", '"', "'"))
+                      else title)
         fm = [
             "---",
-            f"title: {title}",
+            f"title: {title_yaml}",
             f"priority: {priority}",
             f"status: {status}",
         ]
         if labels_line:
             fm.append(f"labels: [{labels_line}]")
-        assignee = str(data.get("assignee") or "").strip()
         if assignee:
             fm.append(f"assignee: {assignee}")
+        if depends_on:
+            fm.append("depends_on: [" + ", ".join(depends_on) + "]")
+        if old is not None:
+            if old.parent_id:
+                fm.append(f"parent_id: {old.parent_id}")
+            if old.split_depth:
+                fm.append(f"split_depth: {old.split_depth}")
+            if old.qa_round:
+                fm.append(f"qa_round: {old.qa_round}")
+            if old.created_by:
+                fm.append(f"created_by: {old.created_by}")
+        else:
+            fm.append("created_by: user")
         # 新建任务排到手动序末尾（已有 order 的最大值 +1）：看板里新建的
         # 任务接在已排序列后面，而不是插队到最前；更新已有任务不动 order
         if not path.exists():
             fm.append(f"order: {self._next_task_order(project)}")
+        elif old is not None and old.order is not None:
+            fm.append(f"order: {old.order}")
         fm.append("---")
         path.parent.mkdir(parents=True, exist_ok=True)
         # 描述留空用标题兜底：空正文会被解析器判为格式错误任务
@@ -884,9 +1061,11 @@ class AppState:
         if t.error:
             return {"ok": True, "id": task_id, "title": t.title, "archived": archived,
                     "priority": "P2", "labels": [], "assignee": "",
-                    "description": "", "error": t.error}
+                    "depends_on": [], "description": "", "error": t.error}
         return {"ok": True, "id": t.id, "title": t.title, "priority": t.priority,
                 "status": t.status, "labels": t.labels, "assignee": t.assignee,
+                "depends_on": list(t.depends_on), "parent_id": t.parent_id,
+                "qa_round": t.qa_round,
                 "description": t.description, "archived": archived}
 
     def make_dir(self, data: dict) -> dict:
@@ -1157,6 +1336,39 @@ class AppState:
         )
         cam_raw = data.get("commit_and_merge")
         commit_and_merge = bool(cam_raw) if cam_raw is not None else None
+
+        # 项目小组编排：null / 缺失 = 沿用单兵模式；成员 llm.api_key 三态同其它密钥字段
+        # （键缺失=保持原值；带键含空串=新值/清除）
+        team = None
+        if "team" in data and data.get("team") is not None:
+            team_raw = data.get("team")
+            if not isinstance(team_raw, dict):
+                raise ValueError("team 配置必须是字典或 null")
+            team_data = dict(team_raw)
+            members_in = team_data.get("members") or []
+            if not isinstance(members_in, list):
+                raise ValueError("team.members 必须是列表")
+            old_members = {m.id: m for m in (existing.team.members if existing and existing.team else [])}
+            merged_members = []
+            for m in members_in:
+                if not isinstance(m, dict):
+                    raise ValueError("team.members 每项必须是字典")
+                m2 = dict(m)
+                old = old_members.get(str(m2.get("id") or "").strip())
+                m_llm = m2.get("llm")
+                if isinstance(m_llm, dict) and old is not None and old.llm and "api_key" not in m_llm:
+                    m_llm = dict(m_llm)
+                    m_llm["api_key"] = old.llm.get("api_key", "")
+                    m2["llm"] = m_llm
+                merged_members.append(m2)
+            team_data["members"] = merged_members
+            team = validate_project_team(
+                team_data, self.config.agent_profiles, self.config.llm,
+                context=f"项目 {name} 的 team")
+        elif existing is not None and "team" not in data:
+            # 兼容未携带 team 键的旧调用方（如 toggleProject 回传遗漏）：保持原值不清空
+            team = existing.team
+
         draft = ProjectConfig(
             name=name, path=path, enabled=bool(data.get("enabled", True)),
             tasks_dir=tasks_dir, guide_file=guide_file,
@@ -1168,6 +1380,7 @@ class AppState:
             review_max_rounds=review_rounds,
             debug_allowed_hosts=debug_hosts,
             commit_and_merge=commit_and_merge,
+            team=team,
         )
         # 审查模型互斥校验（R4）：配置了审查模型且开关生效时，与该项目生效
         # 任务模型同名即拒绝保存（400，前端红字提示同一文案）
@@ -1259,6 +1472,10 @@ class AppState:
             "git": {
                 "commit_and_merge": cfg.git.commit_and_merge,
             },
+            # 全局 Agent 角色预设池整体写回（漏写会在看板任意保存时静默丢失）
+            "agent_profiles": {
+                pid: self._profile_to_yaml(prof) for pid, prof in cfg.agent_profiles.items()
+            },
             "projects": [
                 {
                     "name": p.name, "path": str(p.path), "enabled": p.enabled,
@@ -1280,6 +1497,7 @@ class AppState:
                     **({"repo": p.repo} if p.repo else {}),
                     **({"tools": p.tools} if p.tools else {}),
                     **({"permission_mode": p.permission_mode} if p.permission_mode else {}),
+                    **({"team": self._team_to_yaml(p.team)} if p.team else {}),
                 }
                 for p in cfg.projects
             ],
@@ -1289,6 +1507,64 @@ class AppState:
             + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _profile_to_yaml(prof: AgentProfileConfig) -> dict:
+        d: dict = {"name": prof.name, "role": prof.role}
+        if prof.description:
+            d["description"] = prof.description
+        if prof.llm:
+            d["llm"] = dict(prof.llm)
+        if prof.tools:
+            d["tools"] = dict(prof.tools)
+        if prof.max_turns is not None:
+            d["max_turns"] = prof.max_turns
+        if prof.produces_code is not None:
+            d["produces_code"] = prof.produces_code
+        if prof.allow_test_scripts:
+            d["allow_test_scripts"] = True
+        if prof.extra_prompt:
+            d["extra_prompt"] = prof.extra_prompt
+        return d
+
+    @staticmethod
+    def _team_to_yaml(team: ProjectTeamConfig) -> dict:
+        members = []
+        for m in team.members:
+            md: dict = {"id": m.id, "enabled": m.enabled}
+            if m.profile:
+                md["profile"] = m.profile
+            if m.name:
+                md["name"] = m.name
+            if m.role:
+                md["role"] = m.role
+            if m.description:
+                md["description"] = m.description
+            if m.llm:
+                md["llm"] = dict(m.llm)
+            if m.tools:
+                md["tools"] = dict(m.tools)
+            if m.max_turns is not None:
+                md["max_turns"] = m.max_turns
+            if m.produces_code is not None:
+                md["produces_code"] = m.produces_code
+            if m.allow_test_scripts is not None:
+                md["allow_test_scripts"] = m.allow_test_scripts
+            if m.extra_prompt:
+                md["extra_prompt"] = m.extra_prompt
+            members.append(md)
+        out: dict = {
+            "enabled": team.enabled,
+            "execution_mode": team.execution_mode,
+            "max_qa_rounds": team.max_qa_rounds,
+            "max_split_depth": team.max_split_depth,
+            "chain_within_cycle": team.chain_within_cycle,
+            "max_chain_steps_per_cycle": team.max_chain_steps_per_cycle,
+        }
+        if team.fallback_role:
+            out["fallback_role"] = team.fallback_role
+        out["members"] = members
+        return out
 
     def _apply_config(self, new_cfg: AppConfig) -> None:
         self.config = new_cfg
@@ -1311,7 +1587,9 @@ class AppState:
                                             path_autofix=new_cfg.env.path_autofix,
                                             review_cfg=new_cfg.review,
                                             local_debug=new_cfg.local_debug,
-                                            commit_and_merge=resolve_commit_and_merge(new_cfg.git, p))
+                                            commit_and_merge=resolve_commit_and_merge(new_cfg.git, p),
+                                            agent_profiles=new_cfg.agent_profiles,
+                                            global_tools=new_cfg.tools)
                        for p in new_cfg.projects}
 
     def save_project(self, data: dict) -> dict:
@@ -1447,6 +1725,56 @@ class AppState:
             subprocess.Popen([opener, str(path)])
         log.info("Web 打开项目文件夹 %s（%s）", name, path)
         return {"ok": True, "path": str(path)}
+
+    def manual_commit_project(self, data: dict) -> dict:
+        """人工把关确认：将主工作区已落地的未提交变更在主分支执行 git commit（可选推送）。"""
+        name = str(data.get("name") or data.get("project") or "").strip()
+        message = str(data.get("message") or "").strip()
+        push = bool(data.get("push", False))
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"未知项目：{name}")
+        p = agent.project
+        if not agent.executor.probe_git_repo():
+            raise ValueError(f"项目 {name} 不是 Git 仓库，无法提交")
+
+        g = Git(p.path)
+        res = g.commit_and_push_manual(message, push=push, branch=p.allowed_branch)
+        # 人工提交完成，主工作区恢复干净，重置 stage 分支到最新 HEAD
+        stage_branch = f"orcsy/stage/{p.name}"
+        if g.branch_exists(stage_branch):
+            g.ensure_stage_branch(stage_branch, g.current_branch(),
+                                  stage_worktree=p.path / WORKTREE_DIR / "_stage")
+        log.info("Web 人工确认提交项目 %s：%s（commit=%s, push=%s）",
+                 name, message, res.get("commit"), res.get("pushed"))
+        msg = f"已成功提交至主分支（{res.get('commit')}）" + ("并推送到远程仓库" if res.get("pushed") else "")
+        if res.get("push_note"):
+            msg += f"（推送警告：{res.get('push_note')}）"
+        return {"ok": True, **res, "message": msg}
+
+    def git_init_project(self, data: dict) -> dict:
+        """为非 Git 目录一键初始化 Git 仓库并创建基础提交与忽略规则（开启小组 Worktree 必备）。"""
+        name = str(data.get("name") or data.get("project") or "").strip()
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"未知项目：{name}")
+        p = agent.project
+        if not p.path.is_dir():
+            raise ValueError(f"项目目录不存在：{p.path}")
+        g = Git(p.path)
+        if g.is_repo():
+            return {"ok": True, "message": "该目录已是 Git 仓库"}
+        g.init()
+        g.ensure_gitignore([
+            f"{p.tasks_dir.strip('/')}/",
+            p.guide_file,
+            f"{WORKTREE_DIR}/",
+        ])
+        g.add_all()
+        g.commit("chore: 初始化项目仓库")
+        agent.executor.probe_git_repo()
+        log.info("Web 为项目 %s 初始化 Git 仓库", name)
+        return {"ok": True, "message": f"已成功为项目 {name} 初始化 Git 仓库"}
 
     # ---- AGENT.md 编辑 ----
 
@@ -2155,6 +2483,35 @@ class AppState:
                 commit_and_merge=bool(git_raw.get("commit_and_merge", self.config.git.commit_and_merge)),
             )
 
+        # 全局 Agent 角色预设池（分块保存；llm.api_key 三态脱敏保护）
+        if "agent_profiles" in data:
+            profs_in = data.get("agent_profiles") or {}
+            if not isinstance(profs_in, dict):
+                raise ValueError("agent_profiles 必须是字典")
+            cleaned_profs: dict = {}
+            for pid, item in profs_in.items():
+                if not isinstance(item, dict):
+                    raise ValueError(f"agent_profiles.{pid} 必须是字典")
+                p_item = dict(item)
+                old_prof = self.config.agent_profiles.get(pid)
+                m_llm = p_item.get("llm")
+                if isinstance(m_llm, dict) and old_prof and old_prof.llm and "api_key" not in m_llm:
+                    m_llm = dict(m_llm)
+                    m_llm["api_key"] = old_prof.llm.get("api_key", "")
+                    p_item["llm"] = m_llm
+                cleaned_profs[pid] = p_item
+            new_profs = validate_agent_profiles(cleaned_profs, self.config.llm, context="agent_profiles")
+            # 校验删除安全性：若已有启用的小组成员引用该预设，拒绝删除以防配置悬空
+            for p in self.config.projects:
+                if p.team:
+                    for m in p.team.members:
+                        if m.profile and m.profile not in new_profs:
+                            raise ValueError(
+                                f"预设 '{m.profile}' 正被项目 '{p.name}' 的小组成员 '{m.id}' 引用，"
+                                f"请先在项目设置中解绑该预设后再删除。"
+                            )
+            self.config.agent_profiles = new_profs
+
         self.scheduler.reload_config(self.config)
         self._apply_config(self.config)
         self._save_config(self.config)
@@ -2377,6 +2734,16 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.delete_project(body))
             elif path == "/api/project/open-folder":
                 self._json(self.state.open_project_folder(body))
+            elif path == "/api/project/commit":
+                try:
+                    self._json(self.state.manual_commit_project(body))
+                except (ValueError, GitError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/project/git-init":
+                try:
+                    self._json(self.state.git_init_project(body))
+                except (ValueError, GitError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/project/issues-sync":
                 self._json(self.state.sync_project_issues(body))
             elif path == "/api/guide":

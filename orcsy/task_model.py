@@ -73,6 +73,12 @@ class Task:
     # 审查不通过累计轮数（frontmatter review_round: N）；达到生效返工上限
     # 转 blocked 等人工。通过后保留作审计
     review_round: int = 0
+    # 项目小组协同与 DAG 依赖字段（均可选，老任务缺省取默认值）
+    depends_on: list[str] = field(default_factory=list)  # 前置任务 ID 列表；全部进入 done/ 后才可领取
+    parent_id: str = ""      # 所属父需求或触发当前 Bug 的 QA 任务 ID
+    split_depth: int = 0     # 拆分深度（用户下发=0，PM 拆出=1），防 PM 递归无限拆分
+    qa_round: int = 0        # QA 回归测试已执行轮数（防 Bug 修复死循环）
+    created_by: str = ""     # 创建者标识（user / issue / pm / qa）
 
     @property
     def rank(self) -> int:
@@ -149,6 +155,39 @@ def parse_task_file(path: Path) -> Task:
     elif isinstance(rr_raw, str) and rr_raw.strip().isdigit():
         review_round = int(rr_raw.strip())
 
+    # 前置依赖任务 ID 列表：支持列表或逗号分隔字符串，去重保序
+    depends_on: list[str] = []
+    deps_raw = meta.get("depends_on")
+    if isinstance(deps_raw, list):
+        raw_list = [str(x).strip() for x in deps_raw if str(x).strip()]
+    elif isinstance(deps_raw, str) and deps_raw.strip():
+        raw_list = [x.strip() for x in deps_raw.split(",") if x.strip()]
+    else:
+        raw_list = []
+    seen_deps: set[str] = set()
+    for d in raw_list:
+        if d not in seen_deps:
+            seen_deps.add(d)
+            depends_on.append(d)
+
+    parent_id = str(meta.get("parent_id") or "").strip()
+
+    split_depth = 0
+    sd_raw = meta.get("split_depth")
+    if isinstance(sd_raw, int) and not isinstance(sd_raw, bool) and sd_raw > 0:
+        split_depth = sd_raw
+    elif isinstance(sd_raw, str) and sd_raw.strip().isdigit():
+        split_depth = int(sd_raw.strip())
+
+    qa_round = 0
+    qa_raw = meta.get("qa_round")
+    if isinstance(qa_raw, int) and not isinstance(qa_raw, bool) and qa_raw > 0:
+        qa_round = qa_raw
+    elif isinstance(qa_raw, str) and qa_raw.strip().isdigit():
+        qa_round = int(qa_raw.strip())
+
+    created_by = str(meta.get("created_by") or "").strip()
+
     if not title:
         return Task(id=task_id, path=path, error="缺少 frontmatter 中的 title 字段")
     if priority_rank(priority) > 4:
@@ -171,6 +210,11 @@ def parse_task_file(path: Path) -> Task:
         requeue_seq=requeue_seq,
         review_pending=review_pending,
         review_round=review_round,
+        depends_on=depends_on,
+        parent_id=parent_id,
+        split_depth=split_depth,
+        qa_round=qa_round,
+        created_by=created_by,
     )
 
 
@@ -384,3 +428,253 @@ def _set_frontmatter_field(path: Path, text: str | None, field: str,
         return True
     except OSError:
         return False
+
+
+def set_task_file_assignee(path: Path, assignee: str | None) -> bool:
+    """改写或清除任务文件 frontmatter 的 assignee 字段。"""
+    clean = str(assignee or "").strip()
+    return _set_frontmatter_field(path, None, "assignee", clean if clean else None)
+
+
+def set_task_file_dependencies(path: Path, deps: list[str]) -> bool:
+    """改写或清除任务文件 frontmatter 的 depends_on 字段（兼容单行与多行列表）。"""
+    clean: list[str] = []
+    seen: set[str] = set()
+    for d in deps:
+        s = str(d).strip()
+        if s and s != path.stem and s not in seen:
+            seen.add(s)
+            clean.append(s)
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+    m = _FRONTMATTER_SPLIT_RE.match(text)
+    if m:
+        front = m.group(0)
+        # 剥离可能存在的单行或缩进多行 depends_on 块（(?!-) 防止误匹配收尾 ---）
+        stripped_front = re.sub(
+            r"^depends_on:.*(?:\n[ \t]*-(?!-).*)*\n?",
+            "",
+            front,
+            flags=re.MULTILINE,
+        )
+        if clean:
+            formatted = "[" + ", ".join(clean) + "]"
+            new_text = _insert_frontmatter_field(
+                stripped_front + text[m.end():],
+                stripped_front,
+                len(stripped_front),
+                f"depends_on: {formatted}\n",
+            )
+        else:
+            if stripped_front == front:
+                return True
+            new_text = stripped_front + text[m.end():]
+    elif clean:
+        formatted = "[" + ", ".join(clean) + "]"
+        new_text = f"---\ndepends_on: {formatted}\n---\n\n{text}"
+    else:
+        return True
+
+    try:
+        path.write_text(new_text, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def append_task_dependencies(path: Path, new_deps: list[str]) -> list[str]:
+    """向任务文件追加新的前置依赖（去重保序）并返回更新后的列表。"""
+    t = parse_task_file(path)
+    merged = list(t.depends_on)
+    seen = set(merged)
+    for d in new_deps:
+        s = str(d).strip()
+        if s and s != path.stem and s not in seen:
+            seen.add(s)
+            merged.append(s)
+    if merged != t.depends_on:
+        set_task_file_dependencies(path, merged)
+    return merged
+
+
+def increment_task_file_qa_round(path: Path) -> int:
+    """任务文件 frontmatter 的 qa_round 加一并返回新值（QA 回归计数）。"""
+    current = 0
+    try:
+        meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
+        raw = meta.get("qa_round")
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+            current = raw
+        elif isinstance(raw, str) and raw.strip().isdigit():
+            current = int(raw.strip())
+    except OSError:
+        pass
+    nxt = current + 1
+    _set_frontmatter_field(path, None, "qa_round", str(nxt))
+    return nxt
+
+
+# ---- 任务 DAG 依赖引擎 ----
+
+def collect_task_statuses(tasks_dir: Path) -> tuple[dict[str, str], set[str]]:
+    """收集项目任务目录的状态映射与已完成集合（含 tasks/done/）。
+
+    返回 (all_statuses, done_ids)：
+    - done_ids: tasks/done/*.md 的文件名 stem，以及 tasks/*.md 中 status=="done" 的 ID；
+    - all_statuses: 所有已知任务的 {task_id: status}（done/ 内固定为 "done"）。
+    """
+    all_statuses: dict[str, str] = {}
+    done_ids: set[str] = set()
+    if not tasks_dir.is_dir():
+        return all_statuses, done_ids
+
+    done_dir = tasks_dir / "done"
+    if done_dir.is_dir():
+        for f in done_dir.glob("*.md"):
+            done_ids.add(f.stem)
+            all_statuses[f.stem] = "done"
+
+    for f in tasks_dir.glob("*.md"):
+        t = parse_task_file(f)
+        if t.error:
+            all_statuses[f.stem] = "error"
+        else:
+            all_statuses[f.stem] = t.status
+            if t.status == "done":
+                done_ids.add(f.stem)
+    return all_statuses, done_ids
+
+
+def evaluate_task_dependencies(
+    task: Task,
+    all_statuses: dict[str, str],
+    done_ids: set[str],
+) -> dict:
+    """评估单个任务的依赖就绪状态。
+
+    返回字典：
+    - dep_state: "ready"（可领取）| "waiting"（等待前置进行中）| "upstream_blocked"（前置受阻/取消/解析失败）
+    - blocking_deps: 尚未满足的前置任务列表 [{"id": str, "status": str}]
+    - done_count: 已完成前置数量
+    - total_deps: 总前置数量
+    """
+    deps = task.depends_on
+    if not deps:
+        return {
+            "dep_state": "ready",
+            "blocking_deps": [],
+            "done_count": 0,
+            "total_deps": 0,
+        }
+
+    done_count = 0
+    blocking_deps: list[dict[str, str]] = []
+    has_upstream_blocked = False
+    for dep_id in deps:
+        if dep_id in done_ids:
+            done_count += 1
+        else:
+            st = all_statuses.get(dep_id, "missing")
+            blocking_deps.append({"id": dep_id, "status": st})
+            if st in ("blocked", "cancelled", "error"):
+                has_upstream_blocked = True
+
+    if done_count == len(deps):
+        dep_state = "ready"
+    elif has_upstream_blocked:
+        dep_state = "upstream_blocked"
+    else:
+        dep_state = "waiting"
+
+    return {
+        "dep_state": dep_state,
+        "blocking_deps": blocking_deps,
+        "done_count": done_count,
+        "total_deps": len(deps),
+    }
+
+
+def detect_dependency_cycle(
+    tasks_dir: Path,
+    extra_edges: dict[str, list[str]] | None = None,
+) -> list[str] | None:
+    """检查任务依赖图是否存在环。无环返回 None，有环返回环路径列表 [a, b, ..., a]。"""
+    adj: dict[str, list[str]] = {}
+    if tasks_dir.is_dir():
+        for f in tasks_dir.glob("*.md"):
+            t = parse_task_file(f)
+            if not t.error:
+                adj[t.id] = list(t.depends_on)
+    if extra_edges:
+        for k, v in extra_edges.items():
+            adj[k] = list(v)
+
+    state: dict[str, int] = {}  # 0=未访问, 1=访问中, 2=已完成
+    stack: list[str] = []
+
+    def dfs(node: str) -> list[str] | None:
+        state[node] = 1
+        stack.append(node)
+        for nxt in adj.get(node, ()):
+            st = state.get(nxt, 0)
+            if st == 1:
+                idx = stack.index(nxt)
+                return stack[idx:] + [nxt]
+            if st == 0:
+                cyc = dfs(nxt)
+                if cyc:
+                    return cyc
+        stack.pop()
+        state[node] = 2
+        return None
+
+    for nid in list(adj):
+        if state.get(nid, 0) == 0:
+            cyc = dfs(nid)
+            if cyc:
+                return cyc
+    return None
+
+
+def read_done_summaries(
+    tasks_dir: Path,
+    dep_ids: list[str],
+    max_chars_per_dep: int = 1500,
+) -> list[dict[str, str]]:
+    """读取前置已完成任务的「## Agent 处理结果」摘要（供下游任务契约对齐）。"""
+    out: list[dict[str, str]] = []
+    if not dep_ids or not tasks_dir.is_dir():
+        return out
+
+    for dep_id in dep_ids:
+        cand = tasks_dir / "done" / f"{dep_id}.md"
+        if not cand.is_file():
+            cand = tasks_dir / f"{dep_id}.md"
+        if not cand.is_file():
+            continue
+        t = parse_task_file(cand)
+        if t.error:
+            continue
+        body = t.description
+        heading = "## Agent 处理结果"
+        idx = body.find(heading)
+        if idx >= 0:
+            rest = body[idx:]
+            nxt = re.search(r"\n## (?!Agent 处理结果)", rest)
+            section = rest[:nxt.start()].strip() if nxt else rest.strip()
+        else:
+            section = body.strip()
+        if len(section) > max_chars_per_dep:
+            section = section[:max_chars_per_dep].rstrip() + "\n…（已截断）"
+        out.append({
+            "id": dep_id,
+            "title": t.title,
+            "assignee": t.assignee,
+            "summary": section,
+        })
+    return out
+

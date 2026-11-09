@@ -132,6 +132,26 @@ class Git:
                 f.write(f"{e}\n")
         return missing
 
+    def ensure_local_exclude(self, entries: list[str]) -> None:
+        """把 entries 写入 .git/info/exclude（本地私有忽略，不改动仓库 .gitignore）。"""
+        exclude = self.repo / ".git" / "info" / "exclude"
+        if not exclude.parent.is_dir():
+            return
+        existing: set[str] = set()
+        if exclude.exists():
+            existing = {
+                line.strip() for line in
+                exclude.read_text(encoding="utf-8", errors="replace").splitlines()
+            }
+        missing = [e for e in entries if e not in existing]
+        if not missing:
+            return
+        with exclude.open("a", encoding="utf-8") as f:
+            if existing:
+                f.write("\n")
+            for e in missing:
+                f.write(f"{e}\n")
+
     def add_all(self) -> None:
         self._run("add", "-A")
 
@@ -163,3 +183,155 @@ class Git:
             self._run("checkout", "-B", branch)
         else:
             self._run("checkout", branch)
+
+    def branch_exists(self, branch: str) -> bool:
+        return bool(self._run("branch", "--list", branch).strip())
+
+    def rev_parse(self, ref: str = "HEAD") -> str:
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "--verify", ref],
+            stdin=subprocess.DEVNULL,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        return proc.stdout.strip() if proc.returncode == 0 else ""
+
+    def delete_branch(self, branch: str, force: bool = True) -> None:
+        flag = "-D" if force else "-d"
+        self._run("branch", flag, branch, check=False)
+
+    def ensure_stage_branch(self, stage_branch: str, main_branch: str,
+                            stage_worktree: Path | None = None) -> str:
+        """确保集成分支存在；若主工作区干净，自动将其同步对齐到主分支最新 HEAD。
+
+        设计原因：当人工在主分支检查无误并手动执行 git commit 后，主工作区变为
+        干净且 main HEAD 前进；此时重置 stage 分支，确保后续任务严格基于人工
+        确认后的最新基线继续开发。若主工作区仍有未提交的已落地改动（dirty），
+        保留 stage 分支上的已验收进度以供同需求下游任务无缝衔接。
+        """
+        if not self.branch_exists(stage_branch):
+            self._run("branch", stage_branch, main_branch)
+        elif not self.is_dirty():
+            if stage_worktree and (stage_worktree / ".git").exists():
+                Git(stage_worktree).run("reset", "--hard", main_branch)
+            else:
+                self._run("branch", "-f", stage_branch, main_branch)
+        return self.rev_parse(stage_branch)
+
+    def merge_into_stage(
+        self,
+        stage_branch: str,
+        stage_worktree: Path,
+        source_ref: str,
+        message: str,
+        *,
+        squash: bool = False,
+        commit_msg: str = "",
+    ) -> tuple[bool, str, str, str]:
+        """在隔离的 stage worktree 中将 source_ref 合并入 stage_branch（绝不触碰主工作区）。
+
+        返回 (ok, prev_hash, new_hash, error_detail)。
+        """
+        prev_hash = self.rev_parse(stage_branch)
+        if not (stage_worktree / ".git").exists():
+            if stage_worktree.exists():
+                import shutil
+                shutil.rmtree(stage_worktree, ignore_errors=True)
+            self._run("worktree", "add", str(stage_worktree), stage_branch)
+
+        wt = Git(stage_worktree)
+        try:
+            wt.run("reset", "--hard", stage_branch)
+            wt.run("clean", "-fd")
+            if squash:
+                wt.run("merge", "--squash", source_ref)
+                if wt.is_dirty():
+                    wt.commit(commit_msg or message)
+            else:
+                wt.run("merge", "--no-ff", "-m", message, source_ref)
+        except GitError as e:
+            wt.run("merge", "--abort", check=False)
+            wt.run("reset", "--hard", stage_branch, check=False)
+            return False, prev_hash, prev_hash, str(e)
+
+        new_hash = self.rev_parse(stage_branch)
+        return True, prev_hash, new_hash, ""
+
+    def apply_commit_delta_to_main(self, base_ref: str, head_ref: str) -> tuple[bool, str]:
+        """将 base_ref..head_ref 的二进制安全增量 diff 落地到主工作区（不执行 commit/push）。
+
+        使用原始 bytes 传递补丁并启用 --3way，防止 Windows CRLF/UTF-8 转换损毁，
+        同时保留用户在主工作区其他未跟踪或未改动文件。
+        """
+        if not base_ref or not head_ref or base_ref == head_ref:
+            return True, ""
+        diff_proc = subprocess.run(
+            ["git", "-C", str(self.repo), "diff", "--binary", base_ref, head_ref],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        if diff_proc.returncode != 0:
+            err = diff_proc.stderr.decode("utf-8", errors="replace").strip()
+            return False, f"生成增量补丁失败：{err}"
+        patch_bytes = diff_proc.stdout
+        if not patch_bytes.strip():
+            return True, ""
+
+        apply_proc = subprocess.run(
+            ["git", "-C", str(self.repo), "apply", "--3way"],
+            input=patch_bytes,
+            capture_output=True,
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        if apply_proc.returncode != 0:
+            err = apply_proc.stderr.decode("utf-8", errors="replace").strip()
+            return False, f"增量合入主工作区冲突：{err}"
+        return True, ""
+
+    def pending_changes_summary(self) -> dict:
+        """统计主工作区当前未提交的改动文件信息（看板「待人工审阅提交」展示用）。"""
+        if not self.is_repo():
+            return {"is_git": False, "count": 0, "files": []}
+        try:
+            lines = self.status_porcelain()
+        except GitError:
+            return {"is_git": True, "count": 0, "files": []}
+        files: list[str] = []
+        for ln in lines:
+            parts = ln.split(maxsplit=1)
+            if len(parts) == 2:
+                files.append(parts[1].strip())
+        return {"is_git": True, "count": len(files), "files": files[:50]}
+
+    def commit_and_push_manual(self, message: str, *, push: bool = False,
+                               branch: str | None = None) -> dict:
+        """人工确认把关后执行的最终主分支提交（可选推送）。"""
+        msg = str(message or "").strip()
+        if not msg:
+            raise GitError("提交信息（commit message）不能为空")
+        if not self.is_dirty():
+            raise GitError("主工作区当前没有可提交的改动")
+        committed = self.commit(msg)
+        commit_hash = self.rev_parse("HEAD")[:7] if committed else ""
+        pushed = False
+        push_note = ""
+        target_branch = branch or self.current_branch()
+        if push and committed and self.has_remote("origin"):
+            try:
+                self.push("origin", target_branch)
+                pushed = True
+            except GitError as e:
+                push_note = str(e)
+        return {
+            "committed": committed,
+            "commit": commit_hash,
+            "pushed": pushed,
+            "branch": target_branch,
+            "push_note": push_note,
+        }
+

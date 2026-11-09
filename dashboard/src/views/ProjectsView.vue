@@ -5,7 +5,7 @@
 import { NButton, NCard, NCheckbox, NEmpty, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref } from 'vue'
 import { api, type ProjectT, type TaskT } from '../api'
-import { openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
+import { openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 
 // ---- 项目分页懒加载：翻到哪页渲染哪页（数据全量在 store，渲染按页切片） ----
@@ -20,6 +20,13 @@ const pagedProjects = computed(() =>
   projects.value.slice((safePage.value - 1) * PAGE_SIZE, safePage.value * PAGE_SIZE))
 function onPageChange(pg: number): void {
   page.value = pg
+}
+
+function roleBadgeText(role: string): string {
+  const map: Record<string, string> = {
+    pm: '👑 PM', backend: '⚙️ 后端', frontend: '🎨 前端', qa: '🧪 测试',
+  }
+  return map[role] || `🤖 ${role}`
 }
 
 // ---- 任务排序与卡片内分页（与看板页同规则：状态分组 → 优先级 → 拖拽 order） ----
@@ -134,6 +141,9 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
       repo: p.repo ?? null,
       tools: p.tools ?? null,
       permission_mode: p.permission_mode ?? null,
+      debug_allowed_hosts: p.debug_allowed_hosts ?? null,
+      commit_and_merge: p.commit_and_merge ?? null,
+      team: p.team ?? null,
       original_name: p.name,
     })
     window.$message?.(enabled ? `已启用 ${p.name}` : `已停用 ${p.name}`)
@@ -353,13 +363,24 @@ async function quickAdd(p: ProjectT): Promise<void> {
                      title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
                      @click="refreshGit(p)">↻</NButton>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
+            <NTag v-if="p.team_enabled" size="small" type="info" :bordered="false"
+                  :title="'已启用项目小组：' + (p.team_members_effective?.map(m => m.name).join('、') || '')">
+              👥 小组 ({{ p.team_members_effective?.length || 0 }})
+            </NTag>
+            <NButton v-if="p.pending_git_changes && p.pending_git_changes.count > 0"
+                     size="tiny" type="warning" secondary
+                     title="主工作区有已通过测试但未提交的变更，点此人工把关确认提交"
+                     @click="openCommitDlg(p.name)">
+              待人工提交 ({{ p.pending_git_changes.count }})
+            </NButton>
             <NTag v-if="p.review?.warning" size="small" type="error" :bordered="false"
                   :title="p.review.warning">审查模型冲突</NTag>
             <NTag v-else-if="p.review?.model_configured && p.review?.enabled_effective"
                   size="small" type="success" :bordered="false"
                   :title="`审查模型 ${p.review.effective_model} · 返工上限 ${p.review.effective_max_rounds} 次`">
               审查开启</NTag>
-            <NTag v-else-if="p.review_enabled === false" size="small" :bordered="false"
+            <NTag v-else-if="p.review_enabled === false || (p.review?.enabled_effective === false && p.review?.model_configured)"
+                  size="small" :bordered="false"
                   title="本项目已关闭审查门（跟随关闭优先于全局开关）">审查关闭</NTag>
             <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
                   :type="p.issue_auto_pull.last_error ? 'error' : 'success'"
@@ -434,6 +455,20 @@ async function quickAdd(p: ProjectT): Promise<void> {
               <NTag size="small" :type="ST_TYPE[t.status] || 'default'" :bordered="false">
                 {{ ST_NAME[t.status] || t.status }}
               </NTag>
+              <NTag v-if="t.assignee" size="small" type="info" :bordered="false">
+                {{ roleBadgeText(t.assignee) }}
+              </NTag>
+              <NTag v-if="t.dep_state === 'waiting'" size="small" :bordered="false"
+                    title="等待前置依赖任务完成">
+                ⏳ 等待前置 ({{ t.dep_done_count }}/{{ t.dep_total_count }})
+              </NTag>
+              <NTag v-else-if="t.dep_state === 'upstream_blocked'" size="small" type="error" :bordered="false"
+                    title="前置依赖任务存在受阻/取消">
+                ⚠ 前置受阻
+              </NTag>
+              <NTag v-if="(t.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
+                🔁 回归 #{{ t.qa_round }}
+              </NTag>
               <NTag v-if="t.review_pending" size="small" type="info" :bordered="false"
                     title="任务已完成，独立审查进行中或等待补审；审查通过后合并归档">
                 🔍 待审查
@@ -449,7 +484,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
               </NTag>
             </div>
             <div class="t-meta">
-              {{ t.id }}<template v-if="t.labels.length"> · {{ t.labels.join(', ') }}</template><template v-if="t.assignee"> · 指派 {{ t.assignee }}</template>
+              {{ t.id }}<template v-if="t.labels.length"> · {{ t.labels.join(', ') }}</template><template v-if="t.assignee"> · 角色 {{ t.assignee }}</template><template v-if="t.depends_on && t.depends_on.length"> · 前置 {{ t.depends_on.join(', ') }}</template>
             </div>
             <details v-if="t.description" class="tdesc">
               <summary>描述</summary>

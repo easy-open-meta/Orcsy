@@ -6,7 +6,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.20.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.21.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
 
@@ -31,16 +31,30 @@
 
 ## ✨ 特性
 
+- **多模型 Agent 项目小组（Project Team）** —— 支持自由组合多个不同专长的大模型 Agent 进驻任意项目组建研发小组：
+  - **👑 项目经理（PM）**：只读探索项目代码库与架构，拆解前后端/联调子任务并使用 `depends_on_refs` 编排有向无环图（DAG）依赖，或调用 `reassign_task` 将小任务免拆分直接转派下游；
+  - **⚙️ 后端 / 🎨 前端专职开发**：在按任务隔离的 Git Worktree 沙盒中专注本端代码编写与单测，Prompt 自动透传前置依赖任务的交付摘要（接口路由/数据契约）；
+  - **🧪 测试工程师（QA）**：拉起本地后台服务与浏览器进行端到端联调测试；发现缺陷调用 `report_bug` 派发 Bug 任务，原测试任务自动挂靠依赖并进入等待回归状态，待前后端修复后自动唤醒 QA 开展多轮回归测试（配熔断保护）；
+  - **🛡️ 强制沙盒隔离 + 人工把关最终提交**：写代码任务在独立 Worktree 沙盒中安全开发，通过审查后仅增量落地主分支工作区（未提交状态），**绝不自动执行 git commit 与 git push**，最终代码提交与推送 100% 留由人工把关确认；
+  - **⚡ 同周期链式推进（chain_within_cycle）**：依赖解锁后毫秒级连续接棒推进下一阶段，单个需求无需跨越多个调度周期即可完整闭环；
+  - **👥 双层配置复用**：全局「Agent 角色预设池」一次配置各角色专属模型 + 项目小组自由引用与局部技术栈微调。
+- **🔍 独立审查 Agent（Review Agent，合并前把关）** —— 任务完成先在工作分支落 WIP 提交，由**另一个不同模型**只读审查：对照验收标准抽查实现，可实际运行测试/构建命令实测验证；通过才放行合并主分支并归档，不通过带着结构化问题清单（blocker/major/minor 严重度）自动返工（次数可调，返工通过后可选 `--squash` 收敛提交），两个模型交叉验证，杜绝「自己审自己」。
+- **🌐 本地调试与 Chromium 浏览器自动化（Local Debug）** —— 内置强大的 Web / API 前后端联调工具链：
+  - **浏览器自动化（browser_*）**：纯 Python CDP 协议直连系统 Chromium 系浏览器（Google Chrome / Microsoft Edge，零外部 driver 依赖），支持元素结构化快照、按 ref 寻址点击与输入、页面等待、截图落盘及 Console/Network 日志监听；
+  - **开发服务管理（dev_server_*）**：任务中后台常驻启动 dev server（支持 `{PORT}` 动态分配端口与健康检查 URL 探测），任务结束自动清理子进程；
+  - **本地接口调试（http_request）**：受控放行本地/局域网 HTTP API 调试（Cookie 会话保持，受主机白名单严格约束，杜绝内网穿透与敏感元数据泄露）。
+- **🛠️ 工具能力与命令白名单三级分组** —— 设置页按四项子标签页（Agent 工具能力 / 终端命令白名单 / 本地调试与浏览器 / 权限与环境）分级呈现；按 9 大技术生态（Python、Node、编译语言、C/C++ 构建、版本控制、包管理器、系统 Shell、Windows/POSIX 探测等）结构化管理 90+ 默认白名单命令，支持一键批量「全选/全关」与即时过滤搜索；工具明确标注「只读安全」、「变更·需审批」与「高危·需审批」风险标签。
 - **任意大模型** —— OpenAI 兼容协议（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）与 Anthropic 协议均原生 function calling，改 `base_url` + `model` 即可切换；可选开启模型思考内容查看。
 - **Markdown 即任务** —— 每个任务一个 `.md` 文件，frontmatter 写元信息、正文写需求与验收标准，纯文本可版本化、可人工编辑。
-- **每项目一个专属 Agent** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行；支持绑定**专属模型**（部分覆盖全局 llm 配置，未写字段自动继承），只有绑定的模型处理该项目的任务。
+- **每项目一个专属 Agent / 小组** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行；支持单兵专属模型绑定或多角色项目小组。
 - **仓库 Issues 集成** —— 项目可绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），看板一键把 open Issue 拉取为任务：优先级默认 P2，Issue 带 P0~P4 标签则按标签；带来源标注，含归档去重；单向导入，Issue 状态不回写。
 - **程序自更新** —— 从 Gitee Release 检查/下载新版本（启动自动检查可关），一键静默安装并自动重启（Windows 安装版；Docker/Linux 按各自方式升级）。装在用户可写目录时全程零 UAC；装在 Program Files 等系统目录时更新中会弹一次 UAC 授权（点「是」继续，取消则不更新、程序照常运行）。
 - **任务结束提醒** —— 任务完成/受阻时播程序内置提示音（完成「叮咚」/ 受阻警示音）并弹托盘气泡系统通知，看板没开也能收到；手动停止（cancelled）不打扰，提示音/系统通知可在设置页独立开关。
 - **真实执行，安全禁锢** —— 文件工具锁定在项目 worktree 内、命令白名单、轮数上限；git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
 - **开箱即用的项目接入** —— 新建/导入现有项目只新增 `tasks/` 与 `AGENT.md`，不动项目其它文件；自动探测技术栈（Node/Python/Rust/Go/.NET/Java/C++…）预填运行与测试命令，也可手动指定。
 - **技能库（Skill）** —— 支持导入本地技能目录（含 SKILL.md）、看板新建技能，或一键扫描常见 AI 工具（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等）的用户级技能并批量勾选导入（同名去重）；技能可全局生效或绑定单个项目；删除技能只清技能库中的副本——外部导入的原样本仍在各工具目录里，重新扫描即可找回（自建技能删除后不可恢复）；技能统一存放在 Orcsy 数据目录（`%APPDATA%\Orcsy\skills\`），**绝不写入项目目录**；Agent 系统提示词只注入「名称+描述」索引，执行时按需经 `read_skill` 工具读取全文，技能再多也不撑爆上下文。内置 **`env-setup` 环境引导技能**（首次启动自动播种；用户没改过的副本在模板修订后随程序升级自动刷新）：Agent 遇到缺失的语言/工具链时按技能用 winget / scoop / choco / brew / apt / dnf 静默安装并验证后继续；**国内无代理网络下包管理器失败时自动切换镜像直下**（3 秒探测官方源 → golang.google.cn / npmmirror / 清华 TUNA 等国内镜像下载 zip → 解压到用户目录 `%LOCALAPPDATA%\Programs` 零管理员权限 → 立即注册用户级 PATH），并预置 Go / Node / Python / JDK 的镜像源速查表——安装/下载命令在自主模式/变更前询问下都会挂起等人工批准。
-- **Web 可视化看板** —— 状态总览、任务增删改、一键重新入队 blocked、手动触发扫描、模型列表拉取与一键连通性测试（发送极短对话验证密钥/模型可用）、运行日志从新到旧展示（模型思考内容可折叠展开）；托盘常驻、开机自启、Windows 安装包开箱即用。
+- **Web 可视化看板** —— 状态总览、任务增删改（支持角色分派与前置依赖多选）、任务拖拽排序、活动项目动态过滤、待人工提交把关弹窗（查看未提交文件并一键确认 commit/push）、模型列表拉取与一键连通性测试、运行日志从新到旧展示（模型思考内容可折叠展开）；托盘常驻、开机自启、Windows 安装包开箱即用。
+- **用量台账与热力图** —— 统计总体、各项目及**按 Agent 角色（PM / 后端 / 前端 / 测试 / 审查）**的详细任务数/轮数/输入输出 tokens，近 12 周 GitHub 风格用量热力图（色深=当日 tokens），任务级台账持久化在 `usage.jsonl`，重启不丢。
 
 ## 🚀 快速开始
 

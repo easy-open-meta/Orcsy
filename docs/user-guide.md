@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.18.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.21.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 > ℹ️ The dashboard is currently Chinese-only. This guide uses English names for buttons and cards; a Chinese-label reference is in [section 9.1](#91-top-toolbar).
 
@@ -905,6 +905,28 @@ After a task finishes and before its changes are merged and archived, Orcsy can 
 **Badges on the dashboard:** `🔍 Pending review` on a task card means it has finished and is being reviewed or waiting for a re-review; `🔍 Rework ×N` means it has been sent back by review N times. Project cards show a **Review on / Review off / Review model conflict** status.
 
 **Cost note:** one review costs roughly 3–8 rounds of read-only calls; on the settings **Usage** view it is recorded separately under the review kind, so you can account it apart from execution.
+
+---
+
+### 10.12 Multi-Model Agent Project Team
+
+Orcsy 0.21.0 introduces **Multi-Model Agent Project Teams**. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:
+
+- **👑 Project Manager (PM)**: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using `depends_on_refs`, or dispatches single-component tasks directly via `reassign_task`.
+- **⚙️ Backend / 🎨 Frontend Developers**: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries automatically injected into prompts.
+- **🧪 Test Engineer (QA)**: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using `report_bug`, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.
+- **🛡️ Sandboxed Worktree + Human-Gated Final Commit**: all coding runs safely inside isolated worktrees and merges into the main working tree unstaged/uncommitted — **Orcsy never auto-commits or auto-pushes to main branch by default**, leaving 100% of final commit and push authority to the human reviewer!
+- **⚡ Intra-Cycle Chaining (`chain_within_cycle`)**: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.
+- **👥 Two-Tier Configuration**: global `agent_profiles` pool reusable across projects, with project-level team customization and fallback routing.
+
+---
+
+### 10.13 Local Debugging & Chromium CDP Automation
+
+For Web and API projects, Orcsy ships built-in tools for end-to-end verification:
+- **Chromium Browser Automation (`browser_*`)**: native Python CDP client connected to local Google Chrome or Microsoft Edge (zero external drivers required), providing element snapshots with `ref` addressing, clicking, typing, waiting, screenshots, and console/network log listening.
+- **Dev Server Management (`dev_server_*`)**: runs background services with dynamic `{PORT}` allocation and readiness probing, terminating child processes cleanly on task end.
+- **Local HTTP API Client (`http_request`)**: tests local/LAN REST and GraphQL endpoints with cookie jars and host allowlist enforcement to block intranet penetration.
 
 ---
 

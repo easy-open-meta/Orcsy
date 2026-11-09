@@ -238,10 +238,10 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <!-- ===== Hero ===== -->
 <div class="hero" id="top">
   <div class="wrap">
-    <span class="hero-badge">开源免费 · <b id="ver">v0.20.0</b> · Windows / Docker / Linux</span>
+    <span class="hero-badge">开源免费 · <b id="ver">v0.21.0</b> · Windows / Docker / Linux</span>
     <h1>让 AI Agent<br><span class="grad">按任务清单自动干活</span></h1>
     <p class="sub">Orcsy 是一个 <b>AI Agent 任务编排系统</b>：把需求与 Bug 写成 Markdown 任务清单，
-      每个项目由一个专属 Agent 定时领取、真实改代码、跑测试，改动在独立 git worktree 中完成后自动提交合并——
+      支持单兵或<b>多模型 Agent 项目小组（PM、后端、前端、测试）</b>进驻协作；Agent 在独立 Git Worktree 沙盒中真实改代码、跑联调测试，改动安全落地主工作区，最终代码提交完全由人工把关——
       全程由 <b>Web 看板</b>可视化掌控。</p>
     <p class="hero-note">Windows 一键安装包 <code>orcsy-setup-*.exe</code> · 在线更新包 <code>orcsy-update-*.zip</code> · 也支持 <code>docker compose up</code> 与 systemd / 源码运行 · <a href="#download">⬇ 前往下载</a></p>
   </div>
@@ -253,31 +253,35 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
     <div class="sec-head">
       <span class="kicker">Why Orcsy</span>
       <h2>产品优势</h2>
-      <p>不是一个聊天窗口，而是一支「按清单干活的 AI 开发小队」：任务驱动、真实执行、安全可控、全程可视。</p>
+      <p>不是一个聊天窗口，而是一支「按清单干活的 AI 研发小队」：角色协同、真实执行、安全可控、全程可视。</p>
     </div>
     <div class="grid">
-      <div class="fcard"><div class="ico">🤖</div><h3>每项目一个专属 Agent</h3>
-        <p>独立的 <code>AGENT.md</code> 行为准则、任务清单与对话上下文；支持绑定<b>专属模型</b>（部分覆盖全局配置），多 Agent 并行处理不同项目。</p></div>
-      <div class="fcard"><div class="ico">🧾</div><h3>Markdown 任务清单驱动</h3>
-        <p>一个任务一个 <code>.md</code> 文件，优先级、状态、验收标准都写在 frontmatter 里；Git 友好、可评审、可被任何编辑器管理，Agent 按 P0~P4 排队领取，看板拖拽排序落盘 <code>order</code>、同优先级内生效。</p></div>
-      <div class="fcard"><div class="ico">🌿</div><h3>git worktree 隔离 + 自动合并</h3>
-        <p>Agent 的全部改动发生在独立 worktree，不碰主工作区；报告完成后系统统一 commit → merge → push，冲突时保留分支等人工介入。提交权不在模型手里。</p></div>
+      <div class="fcard"><div class="ico">👥</div><h3>多模型 Agent 项目小组（Project Team）</h3>
+        <p>自由编排专业角色进驻项目：<b>👑 项目经理 PM</b>（只读摸底、拆解 DAG 任务或直派）、<b>⚙️ 后端 / 🎨 前端专职开发</b>（专注本端编码与单测）、<b>🧪 测试工程师 QA</b>（前后端真机联调与 Bug 提单）。同周期链式推进，下游自动继承上游接口契约。</p></div>
+      <div class="fcard"><div class="ico">🛡️</div><h3>Worktree 沙盒隔离 + 人工把关最终提交</h3>
+        <p>所有写代码任务在独立 <code>.worktree-arranger/</code> 沙盒中编码，通过审查后仅增量合入主分支工作区（未提交态），<b>默认绝不擅自执行 git commit 与 push</b>，最后提交权 100% 留给人把关，杜绝代码互踩与脏提交。</p></div>
+      <div class="fcard"><div class="ico">🌐</div><h3>本地 Chromium 浏览器与服务调试</h3>
+        <p>纯 Python CDP 协议直连本地 Chrome / Edge 浏览器，进行页面结构化快照、按 ref 点击输入、截图落盘与控制台/网络日志监听；配合 <code>dev_server_*</code> 动态端口服务起停与 <code>http_request</code> 本地接口调试，构成完整联调闭环。</p></div>
+      <div class="fcard"><div class="ico">🛠️</div><h3>工具能力与命令白名单三级分组</h3>
+        <p>设置页按四大标签（工具能力 / 命令行白名单 / 本地调试 / 权限与环境）三级分层；9 大技术生态（Python、Node、编译语言等）结构化管理 90+ 默认白名单命令，支持一键「全选/全关」与即时搜索过滤，标注安全风险等级。</p></div>
+      <div class="fcard"><div class="ico">🤖</div><h3>每项目专属 Agent 或小组</h3>
+        <p>独立的 <code>AGENT.md</code> 行为准则、任务清单与对话上下文；支持绑定<b>专属模型</b>或多模型小组成员，多 Agent 并行处理不同项目与无依赖任务。</p></div>
+      <div class="fcard"><div class="ico">🧾</div><h3>Markdown 任务清单与 DAG 依赖</h3>
+        <p>一个任务一个 <code>.md</code> 文件，优先级、状态、角色指派与 <code>depends_on</code> 依赖关系都写在 frontmatter 里；Git 友好、可版本化，支持有向无环图依赖就绪调度与环依赖死锁拦截。</p></div>
+      <div class="fcard"><div class="ico">🔍</div><h3>独立审查 Agent（合并前把关）</h3>
+        <p>任务完成先提交到工作分支，由<b>另一个模型</b>只读审查：对照验收标准抽查实现、可实际跑测试验证；通过才放行合并，不通过带着问题清单自动返工（次数可调，返工通过后可选 <code>--squash</code> 收敛提交），杜绝「自己审自己」。</p></div>
       <div class="fcard"><div class="ico">🔒</div><h3>真实执行，安全禁锢</h3>
         <p>文件工具锁死在项目根内（路径穿越直接拒绝）、命令白名单、工具轮数上限、上下文成本自动裁剪——放开手让它跑，也出不了圈。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>三档访问权限 + 人工审批</h3>
         <p>变更前询问 / 自主模式 / 完全访问，全局默认、按项目覆盖。敏感操作挂起等看板批准，超时自动拒绝，任务不会永久卡住，全程进度留痕。</p></div>
-      <div class="fcard"><div class="ico">🔍</div><h3>独立审查 Agent（合并前把关）</h3>
-        <p>任务完成先提交到工作分支，由<b>另一个模型</b>只读审查：对照验收标准抽查实现、可实际跑测试验证；通过才合并归档，不通过带着问题清单自动返工（次数可调），审查意见与用量单独留痕——两个模型交叉验证，杜绝「自己审自己」。</p></div>
-      <div class="fcard"><div class="ico">🛠️</div><h3>14 个内置工具，逐个可开关</h3>
-        <p>读写/编辑/批量替换/删移文件、正则与文件名搜索、白名单命令、联网取正文（SSRF 防护）、技能读取、镜像源测速……全局 + 每项目双层开关，只读项目轻松实现。</p></div>
       <div class="fcard"><div class="ico">⚡</div><h3>国内镜像测速选源</h3>
         <p>内置 7 类 19 个镜像源（清华 TUNA / 阿里云 / 七牛 goproxy.cn / npmmirror 等），看板一键 HTTP 测速、「哪个快用哪个」，最快源自动写入 Agent 子进程环境变量；支持自定义源与逐个禁用。</p></div>
       <div class="fcard"><div class="ico">🧰</div><h3>缺环境自动装（env-setup）</h3>
         <p>遇到缺失的语言/工具链，Agent 按内置技能走「预检 → 幂等安装 → 会话修复 → 验证」闭环：包管理器优先，无代理网络自动切国内镜像直下（零管理员权限、用户级 PATH 即装即用）；安装命令同样要过人工审批。</p></div>
       <div class="fcard"><div class="ico">🖥️</div><h3>Web 可视化看板</h3>
-        <p>单文件页面零依赖：项目/任务/归档/进度/日志一屏掌握，执行中任务可强制停止、任务可拖拽排序，模型接入、技能库、调度参数全部图形化配置；深浅双主题，5 秒自动刷新。</p></div>
+        <p>单文件页面零依赖：项目/任务/归档/进度/日志一屏掌握，活动项目动态过滤、待人工提交把关弹窗（查看未提交文件清单并一键确认 commit/push）、任务拖拽排序，模型接入、技能库、调度参数全部图形化配置；深浅双主题，5 秒自动刷新。</p></div>
       <div class="fcard"><div class="ico">📊</div><h3>用量台账与热力图</h3>
-        <p>「用量」页签统计总体与各项目的任务数/轮数/输入输出 tokens，git 提交热力图风格的近 12 周用量图（色深=当日 tokens，悬停看单日明细），任务级台账持久化在 <code>usage.jsonl</code>，重启不丢。</p></div>
+        <p>「用量」页签统计总体、各项目及<b>按 Agent 角色（PM / 后端 / 前端 / 测试 / 审查）</b>的详细任务数/轮数/输入输出 tokens，近 12 周 GitHub 风格用量热力图，任务级台账持久化在 <code>usage.jsonl</code>，重启不丢。</p></div>
       <div class="fcard"><div class="ico">🐙</div><h3>仓库 Issues 一键转任务</h3>
         <p>绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），open Issue 自动导入任务队列（标签映射优先级、归档去重），支持定时自动拉取。</p></div>
       <div class="fcard"><div class="ico">📚</div><h3>技能库（Skill）</h3>
@@ -300,15 +304,15 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
     <div class="sec-head">
       <span class="kicker">How it works</span>
       <h2>工作原理</h2>
-      <p>从一条 Markdown 任务到一次干净的 git 提交，全程无人值守、步步留痕。</p>
+      <p>从一条 Markdown 需求到一次干净的成果交付，全程无人值守协同、最终提交由人把关。</p>
     </div>
     <div class="flow">
-      <div class="step"><h4>写任务</h4><p>往项目 <code>tasks/</code> 放一个 <code>.md</code>：标题、优先级、现象与验收标准；或在看板/Issues 一键生成。</p></div>
-      <div class="step"><h4>调度领取</h4><p>调度器定时扫描各项目，按 P0~P4 排序领取待办（同优先级内按手动 order，尊重 assignee、每轮限额），任务置为进行中。</p></div>
-      <div class="step"><h4>Agent 工具循环</h4><p>专属模型在独立 worktree 里用 14 个禁锢工具探索、改码、跑测试，缺工具链自动按 env-setup 技能安装修复；敏感操作按权限模式挂起等人工审批。</p></div>
-      <div class="step"><h4>独立审查</h4><p>改动先提交到工作分支，独立审查 Agent（与执行模型不同的第二个模型）对照验收标准只读核查、可跑测试实测；通过才放行合并。</p></div>
-      <div class="step"><h4>提交合并</h4><p>审查通过后，系统按 Conventional Commits 提交（返工多次的提交自动收敛为一个），<code>--no-ff</code> 合并回主分支并推送远端；不通过则带审查意见自动返工。</p></div>
-      <div class="step"><h4>回写归档</h4><p>结果（摘要/轮数/token/变更文件）写回任务文件并归档到 <code>done/</code>，token 用量记入台账热力图；受阻任务标 blocked 等人处理，完成/受阻即时弹提示音与系统通知。</p></div>
+      <div class="step"><h4>1. 下发需求</h4><p>往项目 <code>tasks/</code> 放一个 <code>.md</code>，或在看板/Issues 一键生成需求描述与验收目标。</p></div>
+      <div class="step"><h4>2. PM 调研与拆分</h4><p>项目经理 Agent 只读调研代码架构，拆解为后端、前端、联调子任务并使用 DAG 编排依赖，或直接指派责任角色。</p></div>
+      <div class="step"><h4>3. 前后端分工开发</h4><p>开发 Agent 在按任务隔离的 Worktree 沙盒内专注编码与单测，自动继承上游交付的接口契约，无依赖任务可安全并行。</p></div>
+      <div class="step"><h4>4. 独立审查门把关</h4><p>改动先提交到沙盒分支，独立审查 Agent（与开发模型不同的第二个模型）对照验收标准只读核查、跑测试实测，通过才放行。</p></div>
+      <div class="step"><h4>5. QA 前后端联调验收</h4><p>测试 Agent 拉起服务与本地浏览器真机测试，发现缺陷通过 <code>report_bug</code> 提单并自动挂靠回归依赖，修复后自动唤醒回归复测。</p></div>
+      <div class="step"><h4>6. 安全落地与人工把关</h4><p>成果安全增量合入主分支工作区（未提交状态，不自动 commit/push），由人工最终检查 <code>git diff</code> 并亲自确认提交与推送！</p></div>
     </div>
   </div>
 </section>

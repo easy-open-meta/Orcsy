@@ -264,7 +264,8 @@ title: 修复登录页在 125% 缩放下的布局错位
 priority: P1            <span class="c"># P0~P4，数字越小越优先</span>
 status: open            <span class="c"># open / in_progress / done / blocked / cancelled</span>
 labels: [bug, ui]
-assignee: my-app        <span class="c"># 可选：只允许指定项目的 Agent 领取</span>
+assignee: frontend      <span class="c"># 负责角色（如 pm / backend / frontend / qa / custom）</span>
+depends_on: [P1-api]    <span class="c"># 前置依赖任务 ID 列表（全部进入 done/ 后才可被领取）</span>
 ---
 
 <span class="c">## 现象</span>
@@ -274,30 +275,29 @@ assignee: my-app        <span class="c"># 可选：只允许指定项目的 Agen
 - 100% / 125% / 150% 缩放下布局正常</pre>
       <ul>
         <li>状态机：<code>open → in_progress → done / blocked / cancelled</code>；done 自动归档到 <code>tasks/done/</code>；</li>
+        <li>任务依赖（DAG）：声明 <code>depends_on</code> 的任务在所有前置任务完成归档前处于等待锁定状态，前置完成后同周期内自动毫秒级接棒，上游交付成果自动注入下游提示词；</li>
         <li>执行进度实时写回任务文件的「执行进度」节——进程被强杀也不丢；意外中断的任务下次启动自动重置回 open；</li>
         <li>看板拖拽排序落盘 frontmatter 的 <code>order</code> 字段：Agent 领取顺序<b>优先级 P0~P4 始终优先，同一优先级内按 order</b>（未排序的排在同 P 已排序任务之后，删除该行回到自动排序）；</li>
         <li>每个项目的 <code>AGENT.md</code> 是该项目的最高行为准则（技术栈、运行/测试命令、编码规范），新建项目时可按探测出的技术栈自动生成。</li>
       </ul>
 
-      <h3 id="doc-tools">Agent 工具清单（14 个，除 finish 外逐个可开关）</h3>
+      <h3 id="doc-tools">Agent 工具能力（分级分组，除 finish 外逐个可开关）</h3>
       <table>
         <tr><th>工具</th><th>作用</th><th>类型</th></tr>
-        <tr><td>list_dir</td><td>列出项目文件结构（自动忽略 .git / node_modules 等）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>read_file</td><td>读文件（按行分页，超长自动截断）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>grep</td><td>正则搜索代码（glob 过滤）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>find_files</td><td>按文件名 glob 查找（如 <code>*.py</code>）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>read_skill</td><td>读取技能库中某个技能的全文</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>web_fetch</td><td>抓取公网 URL 正文（HTML 剥标签；内网/回环地址一律拒绝，SSRF 防护）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>speedtest_mirrors</td><td>HTTP 测速内置/自定义镜像源，按各类别给出「最快优先」排序（结果与看板共享）</td><td><span class="pill pill-ok">只读</span></td></tr>
-        <tr><td>write_file</td><td>创建 / 整体重写文件</td><td><span class="pill pill-acc">变更</span></td></tr>
-        <tr><td>edit_file</td><td>精确文本替换（old_string 须唯一匹配）</td><td><span class="pill pill-acc">变更</span></td></tr>
-        <tr><td>multi_edit</td><td>同一文件一次多处替换（全有或全无，失败不落盘）</td><td><span class="pill pill-acc">变更</span></td></tr>
-        <tr><td>delete_file</td><td>删除文件；删目录须显式 <code>recursive: true</code></td><td><span class="pill pill-warn">高风险</span></td></tr>
-        <tr><td>move_file</td><td>移动 / 重命名（目标已存在须 <code>overwrite: true</code>）</td><td><span class="pill pill-warn">高风险</span></td></tr>
-        <tr><td>run_command</td><td>执行白名单命令（python / pytest / node / cargo / go / dotnet / git / uv、winget / scoop 等包管理器、powershell / curl / tar / setx 镜像直下与 PATH 注册、ls / cat / grep / where 等只读探测统计…）；缺工具链时按 <code>env-setup</code> 技能自动安装（需过审批），新装工具立即可用</td><td><span class="pill pill-warn">高风险</span></td></tr>
-        <tr><td>finish</td><td>给出结构化结论（completed / blocked / cannot_do + 摘要 + 提交信息）</td><td><span class="pill pill-ok">协议</span></td></tr>
+        <tr><td>list_dir / find_files / read_file / grep</td><td>了解项目代码结构与检索定位文件（按行分页读取）</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>read_skill / web_fetch / speedtest_mirrors</td><td>读取技能库全文、抓取公网资料正文（SSRF防护）、镜像源测速选快</td><td><span class="pill pill-ok">只读</span></td></tr>
+        <tr><td>create_tasks</td><td>任务过大或项目经理（PM）拆分需求为子任务（支持 depends_on_refs 依赖编排与角色指派）</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>reassign_task</td><td>项目经理（PM）将单一小需求直接指派给目标开发/测试角色（免拆分直派）</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>report_bug</td><td>测试工程师（QA）联调发现缺陷时新建 Bug 任务并派发修复，原测试任务自动挂靠依赖并进入等待回归</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>write_file / edit_file / multi_edit</td><td>创建或编辑代码文件（精确唯一匹配替换，多处原子替换）</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>delete_file / move_file</td><td>删除或重命名文件目录</td><td><span class="pill pill-warn">高风险</span></td></tr>
+        <tr><td>run_command</td><td>在受管项目内执行白名单命令（测试/构建/检查等），新装工具立即可用</td><td><span class="pill pill-warn">高风险</span></td></tr>
+        <tr><td>dev_server_* (3个)</td><td>管理后台开发服务（动态 {PORT} 分配与就绪探针，任务结束必清理）</td><td><span class="pill pill-warn">高风险</span></td></tr>
+        <tr><td>http_request</td><td>本地或内网开发服务 HTTP API 调试（Cookie 保持，受白名单严格约束）</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>browser_* (10个)</td><td>Chromium 浏览器自动化（页面导航、结构化快照、ref 点击输入、截图落盘、Console/Network 监听）</td><td><span class="pill pill-ok">调试</span></td></tr>
+        <tr><td>finish</td><td>任务完成或受阻时给出结构化结论（completed / blocked / cannot_do / split / wait_retest）</td><td><span class="pill pill-ok">协议</span></td></tr>
       </table>
-      <p>工具开关支持<b>全局默认 + 每项目覆盖</b>（看板设置页与项目对话框可视化编辑，或配置文件 <code>tools:</code> / <code>projects[].tools:</code>）；被禁工具不会下发给模型，执行层兜底拦截。<code>finish</code> 为任务结束的协议工具，始终可用。</p>
+      <p>工具开关支持<b>设置页按模块 Tab 三级分组展示 + 9 大生态命令白名单一键批量开关</b>；被禁工具不会下发给模型，执行层兜底拦截。<code>finish</code> 为协议工具恒可用。</p>
 
       <h3 id="doc-perms">访问权限模式（人工审批）</h3>
       <table>
@@ -319,8 +319,12 @@ assignee: my-app        <span class="c"># 可选：只允许指定项目的 Agen
         <tr><td>scheduler.*</td><td>扫描间隔（默认 300s）、并行 Agent 数（1~16）、run_once 单轮模式</td></tr>
         <tr><td>web.*</td><td>看板监听地址/端口（默认 127.0.0.1:5116）、自动开浏览器、<b>auth_password 登录鉴权</b>（外网部署务必设置）</td></tr>
         <tr><td>tools / permissions</td><td>全局工具开关（未列出默认启用）；全局访问权限模式与审批超时</td></tr>
+        <tr><td>agent_profiles.*</td><td>全局 Agent 角色预设池（PM / 后端 / 前端 / 测试 / 自定义专职角色的专属模型与工具预设，可供任意项目小组选用）</td></tr>
+        <tr><td>review.*</td><td>任务审查（Review Agent）：合并前独立模型把关、支持测试验证、返工次数与 squash 收敛</td></tr>
+        <tr><td>local_debug.*</td><td>本地 Chromium 浏览器（Chrome/Edge）调试引擎与后台开发服务参数</td></tr>
+        <tr><td>git.*</td><td>Git 自动化工作流配置：commit_and_merge（单兵模式是否自动提交合并；项目小组模式下强制沙盒隔离且默认不自动提交，由人把关）</td></tr>
         <tr><td>env / mirrors</td><td>Agent 子进程环境变量注入（GOPROXY / HTTP_PROXY / PIP_INDEX_URL 等，国内拉依赖兜底，不允许覆盖 PATH）；镜像源管理：7 类内置 + 自定义源、逐个禁用，测速选源</td></tr>
-        <tr><td>projects[]</td><td>name / path / enabled / tasks_dir / guide_file / 每轮任务数 / 轮数上限（<b>-1 不设上限</b>）/ allowed_branch / allowed_commands，以及 llm、repo（Issues）、tools、permission_mode 四个按项目覆盖项</td></tr>
+        <tr><td>projects[]</td><td>name / path / enabled / tasks_dir / guide_file / 每轮任务数 / 轮数上限（<b>-1 不设上限</b>）/ allowed_branch / allowed_commands，以及 llm、team（多模型项目小组自由编排）、review_llm、repo（Issues）、tools、permission_mode 按项目覆盖项</td></tr>
         <tr><td>update.*</td><td>Gitee 自更新源仓库 / 私有令牌 / 启动自动检查</td></tr>
         <tr><td>notify.*</td><td>任务结束提醒：完成/受阻时提示音 + 托盘气泡系统通知（默认全开，手动停止不提醒），看板设置页「🔔 提醒设置」可视化编辑</td></tr>
         <tr><td>logging.*</td><td>级别、文件路径、保留天数（写满 N 天自动归档清理）</td></tr>

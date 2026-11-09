@@ -22,6 +22,18 @@ const OUT_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error
   cancelled: { type: 'default', name: '取消' },
 }
 
+function roleLabel(role: string): string {
+  const map: Record<string, string> = {
+    pm: '👑 项目经理 (PM)',
+    backend: '⚙️ 后端开发工程师',
+    frontend: '🎨 前端开发工程师',
+    qa: '🧪 测试工程师 (QA)',
+    review: '🔍 任务审查 (Review Agent)',
+    solo: '🤖 全栈单兵 / 传统模式',
+  }
+  return map[role] || `🧩 ${role}`
+}
+
 // ---- GitHub 贡献图风格热力图：列=周（周一起列）、行=星期、色深=当日 tokens ----
 interface HeatCell { date: string; tasks: number; tokens: number; level: number; title: string }
 const heat = computed(() => {
@@ -92,6 +104,28 @@ const heat = computed(() => {
         </tbody>
       </table>
       <div v-else class="uempty">还没有用量记录——跑一轮任务后这里会按项目累计 tokens。</div>
+    </NCard>
+
+    <NCard v-if="usage?.roles?.length" title="👥 按 Agent 角色用量" size="small" class="scard">
+      <template #header-extra>
+        <span class="hint">按总 tokens 降序统计各角色消耗</span>
+      </template>
+      <table class="utable">
+        <thead><tr>
+          <th>角色</th><th>任务数</th><th>轮数</th>
+          <th>输入 tokens</th><th>输出 tokens</th><th>合计</th>
+        </tr></thead>
+        <tbody>
+          <tr v-for="r in usage.roles" :key="r.role">
+            <td class="pname">{{ roleLabel(r.role) }}</td>
+            <td>{{ r.tasks }}</td>
+            <td>{{ fmtFull(r.turns) }}</td>
+            <td>{{ fmt(r.prompt_tokens) }}</td>
+            <td>{{ fmt(r.completion_tokens) }}</td>
+            <td class="sum">{{ fmt(r.prompt_tokens + r.completion_tokens) }}</td>
+          </tr>
+        </tbody>
+      </table>
     </NCard>
 
     <NCard title="🔥 用量热力图（近 12 周）" size="small" class="scard">

@@ -12,14 +12,20 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from .config import (LocalDebugConfig, ProjectConfig, ReviewConfig, resolve_review_llm,
-                     resolve_review_rounds, review_enabled_for)
+from .config import (AgentProfileConfig, LocalDebugConfig, ProjectConfig,
+                     ReviewConfig, ToolsConfig, resolve_project_team_members,
+                     resolve_review_llm, resolve_review_rounds, review_enabled_for)
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
+from .prompts import build_role_prompt_extra
 from .skills import Skill, load_skills, skills_for_project
 from .task_model import (Task, _parse_frontmatter, append_progress,
+                         append_task_dependencies, collect_task_statuses,
+                         evaluate_task_dependencies, increment_task_file_qa_round,
                          increment_task_file_review_round, parse_task_file,
                          scan_tasks, set_task_file_review_pending,
                          set_task_file_status)
@@ -96,15 +102,15 @@ class ProjectAgent:
                  path_autofix: bool = False,
                  review_cfg: ReviewConfig | None = None,
                  local_debug: LocalDebugConfig | None = None,
-                 commit_and_merge: bool = False) -> None:
+                 commit_and_merge: bool = False,
+                 *,
+                 agent_profiles: dict[str, AgentProfileConfig] | None = None,
+                 global_tools: ToolsConfig | None = None) -> None:
         self.project = project
-        # tools / permission_* / allowed_commands / extra_env：构造方按全局+
-        # 项目覆盖解析后的生效值（resolve_tools / resolve_permission_mode /
-        # resolve_commands，与 llm 的 resolve_llm 同型）
-        # 审查配置：cfg 缺省取默认（未配置模型 = 不审查，兼容旧调用点）；
-        # 生效审查模型按项目绑定解析（None = 审查未启用）
+        self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
         self.review_cfg = review_cfg or ReviewConfig()
         self.local_debug = local_debug or LocalDebugConfig()
+        self.commit_and_merge = bool(commit_and_merge)
         self.review_llm = resolve_review_llm(self.review_cfg, project.review_llm,
                                              context=f"项目 {project.name} 的 review_llm")
         if self.review_llm is not None:
@@ -117,6 +123,7 @@ class ProjectAgent:
                 get_logger(f"agent.{project.name}").warning(
                     "审查模型互斥守卫：%s（审查将跳过）", e)
                 self.review_llm = None
+
         self.executor = TaskExecutor(project, llm, tools=tools,
                                      permission_mode=permission_mode,
                                      permission_timeout_minutes=permission_timeout_minutes,
@@ -127,9 +134,82 @@ class ProjectAgent:
                                      review_cfg=self.review_cfg,
                                      review_llm=self.review_llm,
                                      local_debug=self.local_debug,
-                                     commit_and_merge=commit_and_merge)
-        self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
+                                     commit_and_merge=commit_and_merge,
+                                     skills_base=skills_base)
         self.log = get_logger(f"agent.{project.name}")
+
+        # 项目小组（多模型协同模式）初始化
+        self.team_cfg = project.team
+        self.team_enabled = bool(self.team_cfg and self.team_cfg.enabled)
+        self.merge_lock = threading.Lock()
+        self._active_lock = threading.Lock()
+        self.active_roles: dict[str, str] = {}  # task_id -> member_id
+        self.members: dict[str, dict] = {}
+        self.team_roles_meta: dict[str, dict] = {}
+        self.member_executors: dict[str, TaskExecutor] = {}
+
+        if self.team_enabled and self.team_cfg is not None:
+            gt = global_tools if global_tools is not None else ToolsConfig(enabled=dict(tools or {}))
+            self.members = resolve_project_team_members(project, agent_profiles or {}, llm, gt)
+            self.team_roles_meta = {
+                mid: {
+                    "name": m["name"],
+                    "role": m["role"],
+                    "icon": m["icon"],
+                    "description": m["description"],
+                    "produces_code": m["produces_code"],
+                }
+                for mid, m in self.members.items()
+            }
+            from .config import assert_review_model_distinct
+            for mid, m in self.members.items():
+                mem_review_llm = resolve_review_llm(
+                    self.review_cfg, project.review_llm,
+                    context=f"项目 {project.name} 成员 {mid} 的 review_llm",
+                )
+                if mem_review_llm is not None:
+                    try:
+                        assert_review_model_distinct(
+                            m["llm"], mem_review_llm,
+                            context=f"项目 {project.name} 成员 {mid} 的 review",
+                        )
+                    except ValueError as e:
+                        self.log.warning("成员 %s 审查模型互斥守卫：%s（该成员跳过审查）", mid, e)
+                        mem_review_llm = None
+
+                extra_sys = build_role_prompt_extra(
+                    m["role"],
+                    m["name"],
+                    self.team_roles_meta,
+                    allow_test_scripts=m["allow_test_scripts"],
+                    extra_prompt=m["extra_prompt"],
+                )
+                self.member_executors[mid] = TaskExecutor(
+                    project,
+                    m["llm"],
+                    tools=m["tools"],
+                    permission_mode=permission_mode,
+                    permission_timeout_minutes=permission_timeout_minutes,
+                    allowed_commands=allowed_commands,
+                    extra_env=extra_env,
+                    mirror_runtime=mirror_runtime,
+                    path_autofix=path_autofix,
+                    review_cfg=self.review_cfg,
+                    review_llm=mem_review_llm,
+                    local_debug=self.local_debug,
+                    commit_and_merge=commit_and_merge,
+                    worktree_isolation=True,
+                    per_task_worktree=True,
+                    produces_code=m["produces_code"],
+                    team_role=m["role"],
+                    agent_name=m["name"],
+                    team_roles=self.team_roles_meta,
+                    max_split_depth=self.team_cfg.max_split_depth,
+                    max_agent_turns=m["max_turns"],
+                    extra_system_prompt=extra_sys,
+                    merge_lock=self.merge_lock,
+                    skills_base=skills_base,
+                )
 
     # ---- 对外 ----
 
@@ -137,8 +217,56 @@ class ProjectAgent:
     def tasks_dir(self) -> Path:
         return self.project.path / self.project.tasks_dir
 
+    def _select_member_for_task(self, task: Task) -> tuple[str, TaskExecutor] | None:
+        """为任务匹配执行者（单兵模式返回 ('', self.executor)；小组模式按角色路由）。"""
+        if not self.team_enabled:
+            if task.assignee and task.assignee != self.project.name:
+                self.log.debug("任务 %s 指派给 %s，跳过", task.id, task.assignee)
+                return None
+            return "", self.executor
+
+        assignee = (task.assignee or "").strip()
+        if assignee and assignee != self.project.name:
+            ex = self.member_executors.get(assignee)
+            if ex is None:
+                self.log.debug("任务 %s 指派的角色 %s 未启用或不在小组内，跳过", task.id, assignee)
+                return None
+            return assignee, ex
+
+        # 未指派（或指派为项目名）的原始需求：优先派给 PM 拆解
+        pm_id = next((mid for mid, m in self.members.items() if m["role"] == "pm"), None)
+        if pm_id and task.split_depth == 0:
+            return pm_id, self.member_executors[pm_id]
+
+        # 无 PM 或已是子任务：按 fallback_role → 标签匹配 → 单一非 PM 成员兜底
+        fb = (self.team_cfg.fallback_role or "").strip() if self.team_cfg else ""
+        if fb and fb in self.member_executors:
+            return fb, self.member_executors[fb]
+        for lbl in task.labels:
+            if lbl in self.member_executors:
+                return lbl, self.member_executors[lbl]
+        non_pm = [mid for mid, m in self.members.items() if m["role"] != "pm"]
+        if len(non_pm) == 1:
+            mid = non_pm[0]
+            return mid, self.member_executors[mid]
+        self.log.debug("任务 %s 缺少 assignee 且无 PM/兜底角色可认领，等待指派", task.id)
+        return None
+
+    def _run_member_task(self, task: Task, member_id: str, executor: TaskExecutor,
+                         guide: str, skills: list[Skill]) -> tuple[Task, str, TaskResult]:
+        if member_id:
+            with self._active_lock:
+                self.active_roles[task.id] = member_id
+        try:
+            res = executor.run_task(task, guide, skills)
+            return task, member_id, res
+        finally:
+            if member_id:
+                with self._active_lock:
+                    self.active_roles.pop(task.id, None)
+
     def scan_and_work(self) -> list[TaskResult]:
-        """执行一轮扫描与任务处理，返回本轮的任务结果列表。"""
+        """执行一轮扫描与任务处理（支持依赖就绪门控、小组波次并行与周期内链式推进）。"""
         log = self.log
         if not self.project.path.is_dir():
             log.error("项目目录不存在：%s，跳过", self.project.path)
@@ -146,39 +274,102 @@ class ProjectAgent:
 
         guide = self._load_guide()
         skills = self._load_skills()
-        tasks, errors = scan_tasks(self.tasks_dir)
-
-        if errors:
-            for t in errors:
-                log.warning("任务文件解析失败 %s：%s", t.id, t.error)
-            self._write_back_errors(errors)
-
-        if not tasks:
-            log.info("没有可执行的 open 任务")
-            self._rescan_pending_reviews()
-            return []
-
-        log.info("发现 %d 个 open 任务：%s", len(tasks),
-                 ", ".join(f"{t.id}(P{t.rank})" for t in tasks))
-
         results: list[TaskResult] = []
-        budget = max(1, self.project.max_tasks_per_cycle)
-        claimed = 0
-        for task in tasks:
-            if claimed >= budget:
-                remaining = len(tasks) - claimed
-                log.info("本轮任务额度（%d）已用完，剩余 %d 个任务下轮处理", budget, remaining)
-                break
-            # assignee 非空时只有匹配的 Agent 能领取（支持一个项目里按角色分派）
-            if task.assignee and task.assignee != self.project.name:
-                log.debug("任务 %s 指派给 %s，跳过", task.id, task.assignee)
-                continue
+        total_claimed = 0
 
-            self._mark_in_progress(task)
-            result = self.executor.run_task(task, guide, skills)
-            self._write_back_result(task, result)
-            results.append(result)
-            claimed += 1
+        if self.team_enabled and self.team_cfg is not None:
+            step_limit = (
+                max(1, max(self.project.max_tasks_per_cycle, self.team_cfg.max_chain_steps_per_cycle))
+                if self.team_cfg.chain_within_cycle
+                else max(1, self.project.max_tasks_per_cycle)
+            )
+        else:
+            step_limit = max(1, self.project.max_tasks_per_cycle)
+
+        errors_written = False
+        while total_claimed < step_limit:
+            tasks, errors = scan_tasks(self.tasks_dir)
+            if errors and not errors_written:
+                for t in errors:
+                    log.warning("任务文件解析失败 %s：%s", t.id, t.error)
+                self._write_back_errors(errors)
+                errors_written = True
+
+            if not tasks:
+                if total_claimed == 0:
+                    log.info("没有可执行的 open 任务")
+                break
+
+            all_statuses, done_ids = collect_task_statuses(self.tasks_dir)
+            ready_candidates: list[tuple[Task, str, TaskExecutor]] = []
+            for task in tasks:
+                dep_info = evaluate_task_dependencies(task, all_statuses, done_ids)
+                if dep_info["dep_state"] != "ready":
+                    log.debug("任务 %s 依赖未就绪（%s），跳过", task.id, dep_info["dep_state"])
+                    continue
+                picked = self._select_member_for_task(task)
+                if picked is None:
+                    continue
+                mid, ex = picked
+                ready_candidates.append((task, mid, ex))
+
+            if not ready_candidates:
+                if total_claimed == 0:
+                    log.info("发现 %d 个 open 任务，但当前无依赖就绪且匹配角色的待领任务", len(tasks))
+                break
+
+            remaining = step_limit - total_claimed
+            can_parallel = (
+                self.team_enabled
+                and self.team_cfg is not None
+                and self.team_cfg.execution_mode == "parallel_worktree"
+                and self.executor.probe_git_repo()
+            )
+            wave: list[tuple[Task, str, TaskExecutor]] = []
+            if not can_parallel:
+                wave = [ready_candidates[0]]
+            else:
+                first_t, first_mid, first_ex = ready_candidates[0]
+                if not first_ex.produces_code:
+                    # 只读/联调角色在主工作区运行，独占当前波次以保证工作区代码视图一致
+                    wave = [(first_t, first_mid, first_ex)]
+                else:
+                    for item in ready_candidates:
+                        if len(wave) >= remaining:
+                            break
+                        if item[2].produces_code:
+                            wave.append(item)
+
+            if total_claimed == 0:
+                log.info("发现 %d 个 open 任务，本波次领取 %d 个：%s",
+                         len(tasks), len(wave),
+                         ", ".join(f"{t.id}->{mid or 'default'}" for t, mid, _ in wave))
+
+            for t, _, _ in wave:
+                self._mark_in_progress(t)
+
+            wave_outputs: list[tuple[Task, str, TaskResult]] = []
+            if len(wave) == 1:
+                t, mid, ex = wave[0]
+                wave_outputs.append(self._run_member_task(t, mid, ex, guide, skills))
+            else:
+                with ThreadPoolExecutor(max_workers=len(wave)) as pool:
+                    futs = [
+                        pool.submit(self._run_member_task, t, mid, ex, guide, skills)
+                        for t, mid, ex in wave
+                    ]
+                    for fut in as_completed(futs):
+                        wave_outputs.append(fut.result())
+
+            for t, _mid, res in wave_outputs:
+                self._write_back_result(t, res)
+                results.append(res)
+                total_claimed += 1
+
+            # 单兵模式若未启用小组链式流转：正常按 max_tasks_per_cycle 循环即可；
+            # 小组模式关闭 chain_within_cycle 时只推进 1 波次
+            if self.team_enabled and self.team_cfg is not None and not self.team_cfg.chain_within_cycle:
+                break
 
         # 补审扫描：审查 error 待重试 / 审查中被强杀的 review_pending 残留，
         # 只重跑审查不重跑任务（审查默认关闭时 pending 标记不会产生，天然空转）
@@ -218,24 +409,40 @@ class ProjectAgent:
 
     def _review_pending_task(self, task: Task) -> TaskResult | None:
         """对 pending 任务只执行审查门并落结果；返回合成 TaskResult 或 None。"""
-        if self.executor.review_llm is None:
+        ex = self.executor
+        if self.team_enabled and task.assignee and task.assignee in self.member_executors:
+            ex = self.member_executors[task.assignee]
+
+        if ex.review_llm is None:
             # 审查已停用（如配置热重载清掉了模型）：放行归档，兜底清队
             self.log.info("审查未启用，任务 %s 放行归档（兜底清 pending）", task.id)
             set_task_file_review_pending(task.path, False)
             self._archive_task(task, review_note="审查未执行（审查已停用，兜底放行）")
             return None
-        result = TaskResult(task_id=task.id, outcome="blocked")
-        review = self.executor._run_review(task, task.path)
+
+        wt_path = ex._task_worktree(task)
+        branch = ex._task_branch(task)
+        base_branch = ex._base_branch()
+        result = TaskResult(task_id=task.id, outcome="blocked",
+                            role=ex.team_role, agent_name=ex.agent_name)
+        review = ex._run_review(task, task.path, wt_path=wt_path,
+                                base_branch=base_branch, work_branch=branch)
         result.review = review
         set_task_file_review_pending(task.path, False)
         self._record_review_usage(task, review)
         if review.verdict == "pass":
             result.outcome = "done"
-            merged = self.executor._merge_and_push(task, result,
-                                                   f"arranger/{self.project.name}")
+            lock = ex.merge_lock or threading.Lock()
+            with lock:
+                if ex.commit_and_merge:
+                    merged = ex._merge_and_push(task, result, branch, wt_path=wt_path)
+                else:
+                    merged = ex._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
             if not merged:
                 result.outcome = "blocked"
                 result.notes = (result.notes or "") + "审查通过但合并失败，需人工介入"
+            else:
+                ex.remove_worktree(wt_path=wt_path, branch=branch if ex.per_task_worktree else None)
         # fail/error：outcome=blocked，交 _write_back_result 按 verdict 分派
         return result
 
@@ -364,8 +571,68 @@ class ProjectAgent:
             self._handle_review_error(task, result, review)
             return
 
+        # PM 调用 reassign_task 直接转交下游角色：保持 open 且不覆盖 assignee，立即交接
+        if getattr(result, "reassigned_to", ""):
+            set_task_file_status(task.path, "open")
+            self.log.info("任务 %s 已由 PM 直接分派给 %s（保持 open 待接单）",
+                          task.id, result.reassigned_to)
+            return
+
+        # QA 联调发现 Bug 触发等待回归：绑定 Bug 为前置依赖并回到 open（或超限熔断）
+        if getattr(result, "wait_retest", False):
+            max_qa = self.team_cfg.max_qa_rounds if self.team_cfg else 3
+            new_qa_round = increment_task_file_qa_round(task.path)
+            bugs = list(getattr(result, "created_bugs", None) or [])
+            if bugs:
+                append_task_dependencies(task.path, bugs)
+            if bugs and new_qa_round < max_qa:
+                lines = [
+                    f"- 时间：{_now_str()}",
+                    f"- 负责角色：{result.agent_name or result.role or 'qa'}",
+                    f"- 轮次：第 {new_qa_round}/{max_qa} 轮联调（待前置 Bug 修复后自动回归）",
+                    f"- 派发 Bug：{', '.join(bugs)}",
+                ]
+                if result.summary:
+                    lines.append(f"- 摘要：{result.summary}")
+                self._set_status(task.path, "open", result_section="\n".join(lines))
+                set_task_file_status(task.path, "open")
+                append_progress(
+                    task.path,
+                    f"🔁 QA 第 {new_qa_round}/{max_qa} 轮联调发现 {len(bugs)} 个 Bug（{', '.join(bugs)}），"
+                    "已绑定为前置依赖并等待修复后自动回归",
+                )
+                self.log.info("任务 %s 等待 Bug 修复后回归（%d/%d）：%s",
+                              task.id, new_qa_round, max_qa, bugs)
+                return
+
+            reason = (
+                f"QA 联调回归已达上限（{new_qa_round}/{max_qa} 轮），转人工裁决"
+                if bugs else "QA 请求等待回归但未创建任何 Bug 任务，转人工核查"
+            )
+            lines = [
+                f"- 时间：{_now_str()}",
+                f"- 结果：blocked",
+                f"- 原因：{reason}",
+            ]
+            if bugs:
+                lines.append(f"- 关联 Bug：{', '.join(bugs)}")
+            self._set_status(task.path, "blocked", result_section="\n".join(lines))
+            append_progress(task.path, f"⛔ {reason}")
+            try:
+                from .notify import notify_task_end
+                notify_task_end(self.project.name, task.id, task.title, "blocked")
+            except Exception:  # noqa: BLE001
+                pass
+            self.log.warning("任务 %s 转 blocked：%s", task.id, reason)
+            return
+
         lines = [f"- 时间：{_now_str()}",
                  f"- 结果：{result.outcome}"]
+        if result.role or result.agent_name:
+            who = (f"{result.agent_name}（{result.role}）"
+                   if result.agent_name and result.role
+                   else (result.agent_name or result.role))
+            lines.append(f"- 负责角色：{who}")
         if result.commit:
             lines.append(f"- 提交：{result.commit}{'（已推送）' if result.pushed else ''}")
         if result.turns:

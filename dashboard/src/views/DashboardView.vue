@@ -1,11 +1,27 @@
 <script setup lang="ts">
 import { NButton, NCard, NCheckbox, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref } from 'vue'
-import { openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
+import { openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { parseLogEntries, relTime } from '../utils'
 import type { ProjectT, TaskT } from '../api'
 import { api } from '../api'
+
+function roleBadgeText(role: string): string {
+  const map: Record<string, string> = {
+    pm: '👑 PM', backend: '⚙️ 后端', frontend: '🎨 前端', qa: '🧪 测试',
+  }
+  return map[role] || `🤖 ${role}`
+}
+
+// ---- 看板仅展示有正在执行任务的项目（其余项目在「项目」页管理） ----
+const runningProjects = computed(() => {
+  const list = store.state?.projects || []
+  return list.filter(p =>
+    p.tasks.some(t => t.status === 'in_progress') ||
+    (p.active_roles && Object.keys(p.active_roles).length > 0)
+  )
+})
 
 // 运行日志按从新到旧展示；💭 思考条目在渲染层折叠成可展开块
 const logEntries = computed(() => parseLogEntries(store.state?.log_tail || ''))
@@ -129,6 +145,8 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
       repo: p.repo ?? null,
       tools: p.tools ?? null,
       permission_mode: p.permission_mode ?? null,
+      commit_and_merge: p.commit_and_merge ?? null,
+      team: p.team ?? null,
       original_name: p.name,
     })
     window.$message?.(enabled ? `已启用 ${p.name}` : `已停用 ${p.name}`)
@@ -346,8 +364,8 @@ async function quickAdd(p: ProjectT): Promise<void> {
       </NTag>
     </div>
 
-    <div class="grid">
-      <NCard v-for="p in store.state?.projects || []" :key="p.name" class="proj"
+    <div v-if="runningProjects.length" class="grid">
+      <NCard v-for="p in runningProjects" :key="p.name" class="proj"
              :title="p.name" size="small">
         <template #header-extra>
           <div class="phead">
@@ -359,6 +377,25 @@ async function quickAdd(p: ProjectT): Promise<void> {
                      title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
                      @click="refreshGit(p)">↻</NButton>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
+            <NTag v-if="p.team_enabled" size="small" type="info" :bordered="false"
+                  :title="'已启用项目小组：' + (p.team_members_effective?.map(m => m.name).join('、') || '')">
+              👥 小组 ({{ p.team_members_effective?.length || 0 }})
+            </NTag>
+            <NButton v-if="p.pending_git_changes && p.pending_git_changes.count > 0"
+                     size="tiny" type="warning" secondary
+                     title="主工作区有已通过测试但未提交的变更，点此人工把关确认提交"
+                     @click="openCommitDlg(p.name)">
+              待人工提交 ({{ p.pending_git_changes.count }})
+            </NButton>
+            <NTag v-if="p.review?.warning" size="small" type="error" :bordered="false"
+                  :title="p.review.warning">审查模型冲突</NTag>
+            <NTag v-else-if="p.review?.model_configured && p.review?.enabled_effective"
+                  size="small" type="success" :bordered="false"
+                  :title="`审查模型 ${p.review.effective_model} · 返工上限 ${p.review.effective_max_rounds} 次`">
+              审查开启</NTag>
+            <NTag v-else-if="p.review_enabled === false || (p.review?.enabled_effective === false && p.review?.model_configured)"
+                  size="small" :bordered="false"
+                  title="本项目已关闭审查门（跟随关闭优先于全局开关）">审查关闭</NTag>
             <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
                   :type="p.issue_auto_pull.last_error ? 'error' : 'success'"
                   :title="p.issue_auto_pull.last_error || undefined">
@@ -432,6 +469,20 @@ async function quickAdd(p: ProjectT): Promise<void> {
               <NTag size="small" :type="ST_TYPE[t.status] || 'default'" :bordered="false">
                 {{ ST_NAME[t.status] || t.status }}
               </NTag>
+              <NTag v-if="t.assignee" size="small" type="info" :bordered="false">
+                {{ roleBadgeText(t.assignee) }}
+              </NTag>
+              <NTag v-if="t.dep_state === 'waiting'" size="small" :bordered="false"
+                    title="等待前置依赖任务完成">
+                ⏳ 等待前置 ({{ t.dep_done_count }}/{{ t.dep_total_count }})
+              </NTag>
+              <NTag v-else-if="t.dep_state === 'upstream_blocked'" size="small" type="error" :bordered="false"
+                    title="前置依赖任务存在受阻/取消">
+                ⚠ 前置受阻
+              </NTag>
+              <NTag v-if="(t.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
+                🔁 回归 #{{ t.qa_round }}
+              </NTag>
               <NTag v-if="t.review_pending" size="small" type="info" :bordered="false"
                     title="任务已完成，独立审查进行中或等待补审；审查通过后合并归档">
                 🔍 待审查
@@ -447,7 +498,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
               </NTag>
             </div>
             <div class="t-meta">
-              {{ t.id }}<template v-if="t.labels.length"> · {{ t.labels.join(', ') }}</template><template v-if="t.assignee"> · 指派 {{ t.assignee }}</template>
+              {{ t.id }}<template v-if="t.labels.length"> · {{ t.labels.join(', ') }}</template><template v-if="t.assignee"> · 角色 {{ t.assignee }}</template><template v-if="t.depends_on && t.depends_on.length"> · 前置 {{ t.depends_on.join(', ') }}</template>
             </div>
             <details v-if="t.description" class="tdesc">
               <summary>描述</summary>
@@ -473,18 +524,27 @@ async function quickAdd(p: ProjectT): Promise<void> {
                        @update:page="(pg: number) => onPageChange(p, pg)" />
         </div>
 
-        <details v-if="p.archived.length" class="arch">
-          <summary>已归档（{{ p.archived.length }}）· 点击查看详情</summary>
-          <div v-for="t in [...p.archived].reverse()" :key="t.id" class="task">
-            <div class="t-main clickable" title="点击查看任务详情（只读）" @click="openTaskView(p.name, t.id)">
-              <NTag size="small" :color="{ color: PRI_COLOR[t.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ t.priority }}</NTag>
-              <span class="title">{{ t.title }}</span>
-              <NTag size="small" type="success" :bordered="false">已完成</NTag>
+          <details v-if="p.archived.length" class="arch">
+            <summary>已归档（{{ p.archived.length }}）· 点击查看详情</summary>
+            <div v-for="t in [...p.archived].reverse()" :key="t.id" class="task">
+              <div class="t-main clickable" title="点击查看任务详情（只读）" @click="openTaskView(p.name, t.id)">
+                <NTag size="small" :color="{ color: PRI_COLOR[t.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ t.priority }}</NTag>
+                <span class="title">{{ t.title }}</span>
+                <NTag size="small" type="success" :bordered="false">已完成</NTag>
+              </div>
+              <div class="t-meta">{{ t.id }}</div>
             </div>
-            <div class="t-meta">{{ t.id }}</div>
-          </div>
-        </details>
-      </NCard>
+          </details>
+        </NCard>
+      </div>
+    <div v-else class="dash-empty">
+      <div style="font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px;">
+        ☕ 当前没有正在执行任务的项目 · 调度器空闲中
+      </div>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center;">
+        <span class="hint">全量项目与任务请在顶部「项目」页查看与管理</span>
+        <NButton size="small" secondary @click="store.view = 'projects'">前往「项目」页 →</NButton>
+      </div>
     </div>
 
     <details v-if="store.state" class="logsec" open>
@@ -506,9 +566,21 @@ async function quickAdd(p: ProjectT): Promise<void> {
 
 <style scoped>
 .dash { padding: 0 20px; }
+.dash-empty {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 32px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  text-align: center;
+  margin-bottom: 16px;
+}
 .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
-.phead { display: flex; gap: 6px; align-items: center; }
+.phead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .git-refresh { padding: 0 6px; font-size: 13px; }
 /* 路径与任务统计同行两端对齐：路径过长自行折行，统计钉在右上角不随路径折行漂移 */
 .pathline { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }

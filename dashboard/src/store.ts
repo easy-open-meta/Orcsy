@@ -55,6 +55,7 @@ export const ui = reactive({
   // taskDlg：id=null 新建；readonly=true 只读查看（归档/非待办任务）
   taskDlg: null as null | { project: string; id: string | null; readonly?: boolean },
   guideDlg: null as null | { project: string },
+  commitDlg: null as null | { project: string },
   skillDlg: null as null | { original: string | null },
   skillScanDlg: false,
   browserDlg: false,
@@ -105,7 +106,7 @@ export function beginRestartWait(target?: string): void {
 }
 
 export const anyModal = computed(() =>
-  !!(ui.projectDlg || ui.taskDlg || ui.guideDlg || ui.skillDlg || ui.skillScanDlg
+  !!(ui.projectDlg || ui.taskDlg || ui.guideDlg || ui.commitDlg || ui.skillDlg || ui.skillScanDlg
     || ui.browserDlg))
 
 export async function refresh(force = false): Promise<void> {
@@ -135,6 +136,9 @@ export function openSettingsSection(section?: string): void {
 }
 export function openGuide(project: string): void {
   ui.guideDlg = { project }
+}
+export function openCommitDlg(project: string): void {
+  ui.commitDlg = { project }
 }
 export function openSkillNew(): void {
   store.view = 'skills'

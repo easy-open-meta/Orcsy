@@ -69,6 +69,127 @@ class ProjectConfig:
     debug_allowed_hosts: list[str] | None = None
     # 代码提交与合并开关：任务完成后是否自动提交代码并合并回主分支（默认 None = 跟随全局 git.commit_and_merge）
     commit_and_merge: bool | None = None
+    # 项目小组编排配置：None 或 team.enabled=False 表示沿用传统单兵模式
+    team: "ProjectTeamConfig | None" = None
+
+
+# ---- 多模型 Agent 项目小组（Project Team）角色体系 ----
+
+VALID_AGENT_ROLES = ("pm", "backend", "frontend", "qa", "custom")
+VALID_TEAM_EXECUTION_MODES = ("parallel_worktree", "sequential")
+
+BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
+    "pm": {
+        "role": "pm",
+        "label": "项目经理 (PM)",
+        "icon": "👑",
+        "description": "负责对用户下发的需求进行深度分析、子任务拆分与前后端依赖编排",
+        "produces_code": False,
+        "default_max_turns": 20,
+        "default_tools": {
+            "write_file": False, "edit_file": False, "multi_edit": False,
+            "delete_file": False, "move_file": False, "run_command": False,
+            "create_tasks": True, "reassign_task": True,
+            "report_bug": False, "browser": False, "dev_server": False, "http_request": False,
+        },
+    },
+    "backend": {
+        "role": "backend",
+        "label": "后端开发工程师",
+        "icon": "⚙️",
+        "description": "负责后端服务架构、接口路由、数据库与业务逻辑编码及单元测试",
+        "produces_code": True,
+        "default_max_turns": 40,
+        "default_tools": {
+            "create_tasks": False, "reassign_task": False, "report_bug": False,
+        },
+    },
+    "frontend": {
+        "role": "frontend",
+        "label": "前端开发工程师",
+        "icon": "🎨",
+        "description": "负责前端页面组件、状态管理、接口联调与构建校验",
+        "produces_code": True,
+        "default_max_turns": 40,
+        "default_tools": {
+            "create_tasks": False, "reassign_task": False, "report_bug": False,
+        },
+    },
+    "qa": {
+        "role": "qa",
+        "label": "测试工程师 (QA)",
+        "icon": "🧪",
+        "description": "负责项目前后端联调验证与 E2E 测试，拥有新建 Bug 任务至项目列表权限",
+        "produces_code": False,
+        "default_max_turns": 35,
+        "default_tools": {
+            "write_file": False, "edit_file": False, "multi_edit": False,
+            "delete_file": False, "move_file": False,
+            "create_tasks": False, "reassign_task": False,
+            "report_bug": True,
+            "dev_server": True, "http_request": True, "browser": True,
+        },
+    },
+    "custom": {
+        "role": "custom",
+        "label": "自定义专职角色",
+        "icon": "🧩",
+        "description": "用户自定义扩展专职 Agent 角色（如架构师、运维、数据库工程师等）",
+        "produces_code": True,
+        "default_max_turns": 40,
+        "default_tools": {
+            "reassign_task": False, "report_bug": False,
+        },
+    },
+}
+
+
+@dataclass
+class AgentProfileConfig:
+    """全局可复用的 Agent 角色预设模板（进驻任意项目小组引用）。"""
+
+    id: str
+    name: str
+    role: str = "custom"
+    description: str = ""
+    llm: dict[str, Any] | None = None
+    tools: dict[str, bool] | None = None
+    max_turns: int | None = None
+    produces_code: bool | None = None
+    allow_test_scripts: bool = False
+    extra_prompt: str = ""
+
+
+@dataclass
+class TeamMemberConfig:
+    """项目小组内的一个角色成员配置（可引用全局预设并做项目级局部覆盖）。"""
+
+    id: str                            # 路由标识 / 任务 assignee 值（如 pm / backend / frontend / qa）
+    profile: str = ""                  # 绑定的全局 agent_profiles key
+    enabled: bool = True
+    name: str = ""
+    role: str = ""                     # 为空时从 profile 继承，或 id 本身属内置角色则推断
+    description: str = ""
+    llm: dict[str, Any] | None = None
+    tools: dict[str, bool] | None = None
+    max_turns: int | None = None
+    produces_code: bool | None = None
+    allow_test_scripts: bool | None = None
+    extra_prompt: str = ""
+
+
+@dataclass
+class ProjectTeamConfig:
+    """项目的多模型 Agent 小组编排配置。"""
+
+    enabled: bool = False
+    execution_mode: str = "parallel_worktree"  # parallel_worktree | sequential
+    max_qa_rounds: int = 3                     # QA 发现 Bug 后的最大回归轮次
+    max_split_depth: int = 1                   # PM 最大拆分深度
+    chain_within_cycle: bool = True            # 同调度周期内依赖解锁后立即链式推进
+    max_chain_steps_per_cycle: int = 10        # 单周期链式推进步数上限
+    fallback_role: str = ""                    # 无 PM 时未指派任务的兜底认领角色
+    members: list[TeamMemberConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -292,6 +413,13 @@ def resolve_commit_and_merge(global_git: GitConfig, project: ProjectConfig) -> b
     return bool(global_git.commit_and_merge)
 
 
+def resolve_worktree_isolation(global_git: GitConfig, project: ProjectConfig) -> bool:
+    """项目生效的 Worktree 沙盒隔离开关：项目小组模式下强制开启（不影响人工把关最终提交）。"""
+    if project.team is not None and project.team.enabled:
+        return True
+    return resolve_commit_and_merge(global_git, project)
+
+
 def validate_allowed_hosts(data: object, context: str = "allowed_hosts") -> list[str]:
     """校验主机白名单列表：拒绝通配符、CIDR、协议或端口，仅允许裸主机名或 IP。"""
     if data is None:
@@ -358,6 +486,7 @@ class AppConfig:
     review: ReviewConfig = field(default_factory=ReviewConfig)
     local_debug: LocalDebugConfig = field(default_factory=LocalDebugConfig)
     git: GitConfig = field(default_factory=GitConfig)
+    agent_profiles: dict[str, AgentProfileConfig] = field(default_factory=dict)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
 
@@ -586,6 +715,286 @@ def validate_web_security(host: str, auth_password: str,
             f"登录密码。请设置密码，或将 host 改回 127.0.0.1（仅本机访问）。")
 
 
+_SAFE_ID_RE = re.compile(r"^[\w][\w\-]{0,40}$")
+
+
+def validate_agent_profiles(
+    data: object,
+    global_llm: LLMConfig,
+    context: str = "agent_profiles",
+) -> dict[str, AgentProfileConfig]:
+    """解析并校验全局 Agent 角色预设池。"""
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} 必须是「预设 ID: 配置字典」的映射")
+
+    out: dict[str, AgentProfileConfig] = {}
+    for raw_id, item in data.items():
+        pid = str(raw_id).strip()
+        if not _SAFE_ID_RE.fullmatch(pid):
+            raise ValueError(f"{context} 含非法预设 ID：{pid!r}（仅允许字母/数字/下划线/连字符）")
+        if not isinstance(item, dict):
+            raise ValueError(f"{context}.{pid} 必须是字典")
+
+        role = str(item.get("role") or (pid if pid in VALID_AGENT_ROLES else "custom")).strip().lower()
+        if role not in VALID_AGENT_ROLES:
+            raise ValueError(
+                f"{context}.{pid}.role 只能是 {' / '.join(VALID_AGENT_ROLES)}（当前：{role}）"
+            )
+        name = str(item.get("name") or BUILT_IN_ROLES[role]["label"]).strip()
+        description = str(item.get("description") or BUILT_IN_ROLES[role]["description"]).strip()
+
+        llm_raw = item.get("llm")
+        if llm_raw is not None and not isinstance(llm_raw, dict):
+            raise ValueError(f"{context}.{pid}.llm 必须是字典或 null")
+        p_llm = normalize_llm_override(llm_raw) or None if isinstance(llm_raw, dict) else None
+        if p_llm:
+            resolve_llm(global_llm, p_llm, context=f"{context}.{pid}.llm")
+
+        tools_raw = item.get("tools")
+        p_tools = validate_tools_map(tools_raw, context=f"{context}.{pid}.tools") or None \
+            if tools_raw is not None else None
+
+        turns_raw = item.get("max_turns")
+        max_turns = None
+        if turns_raw is not None and turns_raw != "":
+            try:
+                max_turns = int(turns_raw)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"{context}.{pid}.max_turns 必须是整数：{e}") from e
+            if max_turns != -1 and not (5 <= max_turns <= 200):
+                raise ValueError(f"{context}.{pid}.max_turns 应为 5~200 或 -1（当前：{max_turns}）")
+
+        prod_raw = item.get("produces_code")
+        if prod_raw is not None and not isinstance(prod_raw, bool):
+            raise ValueError(f"{context}.{pid}.produces_code 必须是布尔值或 null")
+
+        out[pid] = AgentProfileConfig(
+            id=pid,
+            name=name,
+            role=role,
+            description=description,
+            llm=p_llm,
+            tools=p_tools,
+            max_turns=max_turns,
+            produces_code=prod_raw,
+            allow_test_scripts=bool(item.get("allow_test_scripts", False)),
+            extra_prompt=str(item.get("extra_prompt") or "").strip(),
+        )
+    return out
+
+
+def validate_project_team(
+    data: object,
+    profiles: dict[str, AgentProfileConfig],
+    global_llm: LLMConfig,
+    context: str = "team",
+) -> ProjectTeamConfig | None:
+    """解析并校验项目级小组编排配置。"""
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} 配置必须是字典")
+
+    enabled = bool(data.get("enabled", False))
+    exec_mode = str(data.get("execution_mode") or "parallel_worktree").strip().lower()
+    if exec_mode not in VALID_TEAM_EXECUTION_MODES:
+        raise ValueError(
+            f"{context}.execution_mode 只能是 {' / '.join(VALID_TEAM_EXECUTION_MODES)}（当前：{exec_mode}）"
+        )
+    try:
+        max_qa = int(data.get("max_qa_rounds", 3))
+        max_split = int(data.get("max_split_depth", 1))
+        max_chain = int(data.get("max_chain_steps_per_cycle", 10))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"{context} 数值字段有误：{e}") from e
+    if not (1 <= max_qa <= 10):
+        raise ValueError(f"{context}.max_qa_rounds 应为 1~10（当前：{max_qa}）")
+    if not (1 <= max_split <= 5):
+        raise ValueError(f"{context}.max_split_depth 应为 1~5（当前：{max_split}）")
+    if not (1 <= max_chain <= 50):
+        raise ValueError(f"{context}.max_chain_steps_per_cycle 应为 1~50（当前：{max_chain}）")
+
+    fallback_role = str(data.get("fallback_role") or "").strip()
+    members_raw = data.get("members") or []
+    if not isinstance(members_raw, list):
+        raise ValueError(f"{context}.members 必须是列表")
+
+    members: list[TeamMemberConfig] = []
+    seen_ids: set[str] = set()
+    for i, item in enumerate(members_raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"{context}.members[{i}] 必须是字典")
+        mid = str(item.get("id") or "").strip()
+        if not _SAFE_ID_RE.fullmatch(mid):
+            raise ValueError(f"{context}.members[{i}].id 不合法：{mid!r}")
+        if mid in seen_ids:
+            raise ValueError(f"{context}.members 存在重复成员 ID：{mid!r}")
+        seen_ids.add(mid)
+
+        prof_key = str(item.get("profile") or "").strip()
+        if prof_key and prof_key not in profiles:
+            raise ValueError(f"{context}.members.{mid} 引用了不存在的全局预设：{prof_key!r}")
+
+        m_role = str(item.get("role") or "").strip().lower()
+        if m_role and m_role not in VALID_AGENT_ROLES:
+            raise ValueError(
+                f"{context}.members.{mid}.role 只能是 {' / '.join(VALID_AGENT_ROLES)}（当前：{m_role}）"
+            )
+
+        llm_raw = item.get("llm")
+        if llm_raw is not None and not isinstance(llm_raw, dict):
+            raise ValueError(f"{context}.members.{mid}.llm 必须是字典或 null")
+        m_llm = normalize_llm_override(llm_raw) or None if isinstance(llm_raw, dict) else None
+        if m_llm:
+            resolve_llm(global_llm, m_llm, context=f"{context}.members.{mid}.llm")
+
+        tools_raw = item.get("tools")
+        m_tools = validate_tools_map(tools_raw, context=f"{context}.members.{mid}.tools") or None \
+            if tools_raw is not None else None
+
+        turns_raw = item.get("max_turns")
+        m_turns = None
+        if turns_raw is not None and turns_raw != "":
+            try:
+                m_turns = int(turns_raw)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"{context}.members.{mid}.max_turns 必须是整数：{e}") from e
+            if m_turns != -1 and not (5 <= m_turns <= 200):
+                raise ValueError(f"{context}.members.{mid}.max_turns 应为 5~200 或 -1")
+
+        prod_raw = item.get("produces_code")
+        if prod_raw is not None and not isinstance(prod_raw, bool):
+            raise ValueError(f"{context}.members.{mid}.produces_code 必须是布尔值或 null")
+
+        allow_ts_raw = item.get("allow_test_scripts")
+        if allow_ts_raw is not None and not isinstance(allow_ts_raw, bool):
+            raise ValueError(f"{context}.members.{mid}.allow_test_scripts 必须是布尔值或 null")
+
+        members.append(TeamMemberConfig(
+            id=mid,
+            profile=prof_key,
+            enabled=bool(item.get("enabled", True)),
+            name=str(item.get("name") or "").strip(),
+            role=m_role,
+            description=str(item.get("description") or "").strip(),
+            llm=m_llm,
+            tools=m_tools,
+            max_turns=m_turns,
+            produces_code=prod_raw,
+            allow_test_scripts=allow_ts_raw,
+            extra_prompt=str(item.get("extra_prompt") or "").strip(),
+        ))
+
+    if enabled and not any(m.enabled for m in members):
+        raise ValueError(f"{context} 已启用小组模式，但没有任何已启用的成员")
+
+    return ProjectTeamConfig(
+        enabled=enabled,
+        execution_mode=exec_mode,
+        max_qa_rounds=max_qa,
+        max_split_depth=max_split,
+        chain_within_cycle=bool(data.get("chain_within_cycle", True)),
+        max_chain_steps_per_cycle=max_chain,
+        fallback_role=fallback_role,
+        members=members,
+    )
+
+
+def resolve_team_member(
+    member: TeamMemberConfig,
+    profiles: dict[str, AgentProfileConfig],
+    global_llm: LLMConfig,
+    global_tools: ToolsConfig,
+    project: ProjectConfig,
+) -> dict[str, Any]:
+    """解析单个项目小组成员的生效配置（LLM / 工具集 / 角色类型 / 代码产出标识）。"""
+    prof = profiles.get(member.profile) if member.profile else None
+    eff_role = (
+        member.role
+        or (prof.role if prof else "")
+        or (member.id if member.id in VALID_AGENT_ROLES else "custom")
+    )
+    if eff_role not in BUILT_IN_ROLES:
+        eff_role = "custom"
+    role_meta = BUILT_IN_ROLES[eff_role]
+
+    name = member.name or (prof.name if prof else "") or role_meta["label"]
+    description = member.description or (prof.description if prof else "") or role_meta["description"]
+
+    # 模型继承链：全局 llm → 项目 llm → 预设 profile.llm → 成员 member.llm
+    proj_llm = resolve_llm(global_llm, project.llm, context=f"项目 {project.name} 的 llm")
+    prof_llm = resolve_llm(proj_llm, prof.llm, context=f"预设 {prof.id} 的 llm") if (prof and prof.llm) else proj_llm
+    eff_llm = resolve_llm(prof_llm, member.llm, context=f"成员 {member.id} 的 llm") if member.llm else prof_llm
+
+    allow_test_scripts = (
+        member.allow_test_scripts
+        if member.allow_test_scripts is not None
+        else (prof.allow_test_scripts if prof else False)
+    )
+
+    if member.produces_code is not None:
+        produces_code = bool(member.produces_code)
+    elif prof and prof.produces_code is not None:
+        produces_code = bool(prof.produces_code)
+    elif eff_role == "qa":
+        produces_code = bool(allow_test_scripts)
+    else:
+        produces_code = bool(role_meta["produces_code"])
+
+    # 工具集叠加：项目基底工具 → 角色默认工具 → QA 脚本写开关 → 预设覆盖 → 成员覆盖
+    eff_tools = dict(_expand_tools_map(resolve_tools(global_tools, project.tools)))
+    eff_tools.update(_expand_tools_map(role_meta.get("default_tools")))
+    if eff_role == "qa" and allow_test_scripts:
+        for tname in ("write_file", "edit_file", "multi_edit", "delete_file", "move_file"):
+            eff_tools[tname] = True
+    if prof and prof.tools:
+        eff_tools.update(_expand_tools_map(prof.tools))
+    if member.tools:
+        eff_tools.update(_expand_tools_map(member.tools))
+
+    max_turns = (
+        member.max_turns
+        or (prof.max_turns if prof else None)
+        or role_meta.get("default_max_turns")
+        or project.max_agent_turns
+    )
+    extra_parts = [p for p in ((prof.extra_prompt if prof else ""), member.extra_prompt) if p]
+    return {
+        "id": member.id,
+        "role": eff_role,
+        "name": name,
+        "icon": role_meta.get("icon", "🤖"),
+        "description": description,
+        "enabled": member.enabled,
+        "profile": member.profile,
+        "llm": eff_llm,
+        "tools": eff_tools,
+        "max_turns": int(max_turns),
+        "produces_code": produces_code,
+        "allow_test_scripts": bool(allow_test_scripts),
+        "extra_prompt": "\n".join(extra_parts),
+    }
+
+
+def resolve_project_team_members(
+    project: ProjectConfig,
+    profiles: dict[str, AgentProfileConfig],
+    global_llm: LLMConfig,
+    global_tools: ToolsConfig,
+) -> dict[str, dict[str, Any]]:
+    """返回项目已启用小组成员的 {member_id: resolved_dict}（未启用小组返回空）。"""
+    if not project.team or not project.team.enabled:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for m in project.team.members:
+        if not m.enabled:
+            continue
+        out[m.id] = resolve_team_member(m, profiles, global_llm, global_tools, project)
+    return out
+
+
 def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     """解析 YAML 配置文件为 AppConfig，缺失字段回退到默认值。
 
@@ -786,6 +1195,11 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         commit_and_merge=bool(git_raw.get("commit_and_merge", False)),
     )
 
+    # 全局 Agent 角色预设池（可选，未配置时单兵模式照常运行）
+    agent_profiles = validate_agent_profiles(
+        raw.get("agent_profiles"), llm, context="agent_profiles"
+    )
+
     projects: list[ProjectConfig] = []
     for i, item in enumerate(raw.get("projects") or []):
         p_path = Path(str(item.get("path", ""))).expanduser()
@@ -874,6 +1288,12 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     if item.get("commit_and_merge") is not None
                     else None
                 ),
+                team=validate_project_team(
+                    item.get("team"),
+                    agent_profiles,
+                    llm,
+                    context=f"项目 {p_name} 的 team",
+                ),
             )
         )
         # 项目级审查模型互斥校验（R4）：审查模型已配置且与该项目生效任务模型
@@ -889,5 +1309,6 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     update=update, tools=tools, commands=commands, env=env,
                     permissions=permissions, notify=notify, mirrors=mirrors,
                     review=review_cfg, local_debug=local_debug_cfg,
-                    git=git_cfg, projects=projects, source_path=path.resolve())
+                    git=git_cfg, agent_profiles=agent_profiles,
+                    projects=projects, source_path=path.resolve())
     return cfg

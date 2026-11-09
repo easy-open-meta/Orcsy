@@ -64,6 +64,10 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
         clauses.append("speedtest_mirrors 测镜像源延迟选最快的下载")
     if on("create_tasks"):
         clauses.append("create_tasks 在任务过大时自主拆分子任务")
+    if on("reassign_task"):
+        clauses.append("reassign_task 将单一小任务直接指派给具体角色")
+    if on("report_bug"):
+        clauses.append("report_bug 在联调发现缺陷时新建 Bug 修复任务")
     if on("dev_server_start"):
         clauses.append("dev_server_* 管理后台开发服务")
     if on("http_request"):
@@ -187,6 +191,7 @@ def build_system_prompt(
     tools: frozenset[str] | None = None,
     permission_mode: str | None = None,
     tool_map: dict | None = None,
+    in_worktree: bool | None = None,
 ) -> str:
     """组装系统提示词：角色 → 项目指引 → 技能索引 → 工作环境 → 输出协议。
 
@@ -194,17 +199,19 @@ def build_system_prompt(
     permission_mode：访问权限模式；非 full_access 时追加人工审批提示节。
     tool_map：任务启动扫描的本机工具地图（tools + extra_dirs），非空时追加
     「本机工具」节——模型无需浪费轮数自己探测命令在哪。
+    in_worktree：是否运行在隔离 worktree 内（默认跟随 is_git_repo；只读 PM/QA 为 False）。
     """
     guide = guide_content.strip()
     if len(guide) > guide_max_chars:
         log_safe = guide[:guide_max_chars]
         guide = log_safe + f"\n\n（指引过长，已截断至前 {guide_max_chars} 字符）"
 
-    if is_git_repo:
+    use_wt = is_git_repo if in_worktree is None else bool(in_worktree)
+    if use_wt:
         workspace = (
             f"## 工作环境\n\n"
-            f"你在一个独立的 git worktree 中工作（项目主工作区：{project.path}，"
-            f"对你是只读参考，不要修改）。\n"
+            f"你在一个独立的 git worktree 沙盒中工作（项目主工作区：{project.path}，"
+            f"对你是只读参考，不要直接修改主工作区）。\n"
             f"你的所有工具操作的相对路径都以当前 worktree 为根，不要触碰其他路径。\n"
         )
     else:
@@ -212,7 +219,8 @@ def build_system_prompt(
             f"## 工作环境\n\n"
             f"项目根目录：{project.path}\n"
             f"你的所有工具操作的相对路径都以该目录为根，不要触碰其他路径。\n"
-            f"该项目不是 git 仓库，不需要考虑版本控制。\n"
+            + ("当前为只读/工作区模式，不要自行执行 git commit / git push。\n" if is_git_repo
+               else "该项目不是 git 仓库，不需要考虑版本控制。\n")
         )
 
     return (
@@ -227,6 +235,70 @@ def build_system_prompt(
         f"{_permissions_section(permission_mode)}\n"
         f"{_output_contract(tools)}"
     )
+
+
+def build_role_prompt_extra(
+    role: str,
+    member_name: str,
+    team_roles: dict[str, dict] | None,
+    *,
+    allow_test_scripts: bool = False,
+    extra_prompt: str = "",
+) -> str:
+    """生成项目小组角色专属职责与协作契约补充提示词。"""
+    parts: list[str] = [f"## 项目小组角色职责：{member_name}（角色 ID：{role}）\n"]
+
+    if role == "pm":
+        roster_lines = []
+        if team_roles:
+            for mid, info in team_roles.items():
+                if info.get("role") == "pm":
+                    continue
+                roster_lines.append(
+                    f"- `{mid}`（{info.get('name', mid)}，角色={info.get('role', '')}）："
+                    f"{info.get('description', '')}"
+                )
+        roster_text = "\n".join(roster_lines) if roster_lines else "（暂无其他启用成员）"
+        parts.append(
+            "你在本项目中担任**项目经理（PM）**，**不直接编写或修改业务源码**。\n\n"
+            "### 本项目当前可用执行角色（派单必须严格从中选取 assignee）\n"
+            f"{roster_text}\n\n"
+            "### 工作流程与要求\n"
+            "1. 先用只读工具（`list_dir` / `find_files` / `read_file` / `grep`）快速摸清项目架构、目录与接口规范。\n"
+            "2. 若任务体量小且职责单一（如单一端小修复），直接调用 `reassign_task(assignee=..., note=...)` 转派给对应角色，再调用 `finish(action=\"split\", ...)` 交接。\n"
+            "3. 若任务涉及多端协作或体量较大，调用 `create_tasks` 拆分为 **2~6 个**职责清晰、可独立验收的子任务：\n"
+            "   - **每条子任务必须指定 `assignee`**（严格使用上述列表里的角色 ID）；\n"
+            "   - **使用 `depends_on_refs` 编排依赖顺序**（如前端 UI 依赖后端接口，QA 联调依赖前后端开发，填 0-based 数组下标即可）；\n"
+            "   - **写清接口契约**：在描述中明确 API 路径、字段格式与验收测试命令。\n"
+            "4. 调用完 `create_tasks` 后，立即调用 `finish(action=\"split\", summary=...)` 结束拆分交接。"
+        )
+    elif role == "qa":
+        write_rule = (
+            "你已获准在必要时编写/补充自动化测试脚本；若测试通过且无需新增脚本，可直接调用 `finish(action=\"completed\")`。"
+            if allow_test_scripts
+            else "你对业务源码保持**只读**（禁止直接修改前后端业务源码）。"
+        )
+        parts.append(
+            "你在本项目中担任**测试工程师（QA）**，负责前后端集成联调测试与质量验收。\n\n"
+            "### 联调闭环流程\n"
+            f"1. {write_rule}\n"
+            "2. 先结合任务描述与「上游前置任务交付摘要」了解已开发的功能与接口。\n"
+            "3. 运行测试与联调验证：可用 `dev_server_start`（命令带 `{PORT}`）后台拉起后端与前端服务，再用 `http_request` 校验接口返回，并用 `browser_navigate` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_console` / `browser_network` 验证页面交互与零报错。\n"
+            "4. **若发现缺陷**：整理清晰的复现步骤、期望结果、实际现象与调试证据，调用 `report_bug` 新建 Bug 任务并精确指派给 `backend` 或 `frontend`（或对应负责角色）；然后先关闭临时开发服务（`dev_server_stop`），再调用 `finish(action=\"wait_retest\", summary=\"发现 N 个 Bug 已派发修复，等待回归\")`。\n"
+            "5. **若全部验收通过且无 Bug**：清理临时开发服务后，调用 `finish(action=\"completed\", summary=...)`。"
+        )
+    else:
+        parts.append(
+            f"你在本项目中担任 **{member_name}（`{role}`）**，专注于本领域高质量编码与自测验证。\n\n"
+            "### 协作与交付要求\n"
+            "1. 若存在「上游前置任务交付摘要」，务必先对齐前置任务暴露的接口路径、数据结构与文件路径。\n"
+            "2. 在完成代码修改并跑通对应单元/构建检查后，调用 `finish(action=\"completed\", ...)`。\n"
+            "3. 请在 `finish.summary` 与 `finish.notes` 中清晰说明新增/修改的核心文件、接口路由或启动验证方式，方便下游开发与 QA 无缝联调。"
+        )
+
+    if extra_prompt and extra_prompt.strip():
+        parts.append(f"\n### 项目级角色附加要求\n{extra_prompt.strip()}")
+    return "\n".join(parts)
 
 
 # ---- 审查 Agent（Review Agent）提示词：独立模型、只读核查、通过/不通过 ----

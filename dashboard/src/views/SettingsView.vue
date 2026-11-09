@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NCollapse, NCollapseItem, NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
+import { NCollapse, NCollapseItem, NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import { api, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
@@ -11,6 +11,7 @@ const message = () => window.$message
 // key 与 settingsSection 联动（跨视图跳转定位，如看板「设置」按钮直达对应分区）
 const SECTIONS = [
   { key: 'llm', label: '🤖 大模型接入' },
+  { key: 'profiles', label: '👥 Agent 角色预设池' },
   { key: 'sched', label: '⏱ 调度与看板' },
   { key: 'notify', label: '🔔 提醒设置' },
   { key: 'review', label: '🔍 任务审查（Review Agent）' },
@@ -100,6 +101,224 @@ const devServerGroupEnabled = computed({
   set: (val: boolean) => {
     for (const k of devServerTools) toolsDraft[k] = val
   },
+})
+
+// ---- 三级页面导航与分组控制（Agent 工具与命令白名单） ----
+const toolsTab = ref<'tools' | 'commands' | 'debug' | 'perms'>('tools')
+const cmdSearch = ref('')
+const toolSearch = ref('')
+
+const defaultToolCategories = [
+  {
+    key: 'file_ops',
+    label: '文件操作与编辑',
+    icon: '📁',
+    description: '读取、创建、编辑、重命名及删除工作区代码和文本文件',
+    tools: ['read_file', 'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'list_dir'],
+  },
+  {
+    key: 'code_search',
+    label: '代码搜索与定位',
+    icon: '🔍',
+    description: '按通配符模式查找文件以及跨文件正则搜索内容',
+    tools: ['find_files', 'grep'],
+  },
+  {
+    key: 'command_exec',
+    label: '终端命令执行',
+    icon: '💻',
+    description: '在项目根目录执行白名单内的构建、测试、检查与系统命令',
+    tools: ['run_command'],
+  },
+  {
+    key: 'task_collab',
+    label: '任务管理与协议',
+    icon: '⚡',
+    description: '拆解多阶段子任务并在任务完成或受阻时给出结构化答复',
+    tools: ['create_tasks', 'finish'],
+  },
+  {
+    key: 'external_net',
+    label: '网络与外部知识',
+    icon: '🌐',
+    description: '查阅专业技能库文档、抓取公网页面正文与镜像源延迟测速',
+    tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
+  },
+]
+
+const defaultCommandCategories = [
+  {
+    key: 'python',
+    label: 'Python 生态',
+    icon: '🐍',
+    description: 'Python 解释器、包管理与测试/Lint 工具',
+    commands: ['python*', 'py', 'pip*', 'pytest', 'uv', 'uvx', 'poetry', 'tox', 'ruff', 'mypy', 'black', 'flake8'],
+  },
+  {
+    key: 'node',
+    label: 'Node / 前端',
+    icon: '📦',
+    description: 'Node 运行时、包管理器与前端构建/测试工具',
+    commands: ['node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'tsc', 'eslint', 'prettier', 'vitest', 'jest'],
+  },
+  {
+    key: 'compiled',
+    label: 'Rust / Go / .NET / Java',
+    icon: '⚙️',
+    description: '系统级与强类型后端编译型语言工具链',
+    commands: ['cargo', 'go', 'dotnet', 'gradle*', 'mvn', 'java', 'javac'],
+  },
+  {
+    key: 'cpp',
+    label: 'C / C++ 构建',
+    icon: '🔨',
+    description: 'C/C++ 编译器、构建工具与测试套件',
+    commands: ['make', 'cmake', 'ctest', 'ninja', 'gcc', 'g++', 'clang', 'clang++', 'msbuild'],
+  },
+  {
+    key: 'vcs',
+    label: '版本控制',
+    icon: '🌿',
+    description: 'Git 代码仓库与分支版本管理',
+    commands: ['git'],
+  },
+  {
+    key: 'package_managers',
+    label: '包管理器',
+    icon: '📥',
+    description: '系统级包管理器（缺工具链时按需环境引导，受审批约束）',
+    commands: ['winget*', 'choco', 'scoop', 'brew', 'apt*', 'apt-get', 'dnf', 'nvm'],
+  },
+  {
+    key: 'system_shell',
+    label: '系统 Shell / 实用工具',
+    icon: '💻',
+    description: '系统 Shell、网络下载与归档解压',
+    commands: ['powershell', 'pwsh', 'curl', 'tar', 'setx'],
+  },
+  {
+    key: 'windows_probe',
+    label: 'Windows 探测与排障',
+    icon: '🪟',
+    description: 'Windows 环境排障、进程查看与文件探测（只读/信息性）',
+    commands: ['where', 'cmd', 'dir', 'type', 'echo', 'set', 'tasklist', 'systeminfo', 'findstr', 'more', 'ver', 'hostname', 'whoami'],
+  },
+  {
+    key: 'posix_probe',
+    label: 'POSIX 只读探测与统计',
+    icon: '🐧',
+    description: '跨平台/Unix 常用只读与文本统计命令（只读无害）',
+    commands: ['ls', 'cat', 'wc', 'head', 'tail', 'grep', 'sort', 'uniq', 'cut', 'tr', 'diff', 'stat', 'du', 'df', 'pwd', 'printf', 'date', 'sleep', 'uname', 'which', 'id', 'basename', 'dirname', 'touch', 'md5sum', 'sha256sum', 'printenv'],
+  },
+]
+
+const toolCategories = computed(() => {
+  return store.state?.tool_categories?.filter(c => c.key !== 'local_debug' && c.key !== 'browser_auto') ?? defaultToolCategories
+})
+
+const commandCategories = computed(() => {
+  return store.state?.command_categories ?? defaultCommandCategories
+})
+
+const mutatingToolsSet = new Set([
+  'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'run_command',
+  'create_tasks', 'dev_server_start', 'browser_click', 'browser_type', 'browser_eval',
+])
+const riskyToolsSet = new Set(['delete_file', 'move_file', 'run_command', 'dev_server_start'])
+
+function getToolRiskTag(name: string): { label: string; type: 'success' | 'warning' | 'error' | 'info' } {
+  if (name === 'finish') return { label: '核心协议·恒可用', type: 'info' }
+  if (riskyToolsSet.has(name)) return { label: '高危·需审批', type: 'error' }
+  if (mutatingToolsSet.has(name)) return { label: '变更·需审批', type: 'warning' }
+  return { label: '只读安全', type: 'success' }
+}
+
+function getToolDesc(name: string): string {
+  const found = toolsCatalog.value.find(t => t.name === name)
+  return found ? found.description : ''
+}
+
+function toggleToolsGroup(tools: string[], enable: boolean): void {
+  for (const name of tools) {
+    if (name === 'finish') continue
+    toolsDraft[name] = enable
+  }
+}
+
+function toggleCommandsGroup(cmds: string[], enable: boolean): void {
+  for (const name of cmds) {
+    commandsDraft[name] = enable
+  }
+}
+
+function toggleAllCommands(enable: boolean): void {
+  for (const c of commandsCatalog.value) {
+    commandsDraft[c] = enable
+  }
+}
+
+function getGroupToolsCount(tools: string[]): { enabled: number; total: number } {
+  let enabled = 0
+  for (const t of tools) {
+    if (t === 'finish' || toolsDraft[t]) enabled++
+  }
+  return { enabled, total: tools.length }
+}
+
+function getGroupCommandsCount(cmds: string[]): { enabled: number; total: number } {
+  let enabled = 0
+  for (const c of cmds) {
+    if (commandsDraft[c] !== false) enabled++
+  }
+  return { enabled, total: cmds.length }
+}
+
+function getFilteredTools(toolNames: string[]) {
+  const q = toolSearch.value.trim().toLowerCase()
+  return toolsCatalog.value.filter(t => {
+    if (!toolNames.includes(t.name)) return false
+    if (!q) return true
+    return t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)
+  })
+}
+
+function getFilteredCommands(cmdNames: string[]) {
+  const q = cmdSearch.value.trim().toLowerCase()
+  if (!q) return cmdNames
+  return cmdNames.filter(c => c.toLowerCase().includes(q))
+}
+
+const filteredToolCategories = computed(() => {
+  const q = toolSearch.value.trim().toLowerCase()
+  if (!q) return toolCategories.value
+  return toolCategories.value.filter(cat => {
+    if (cat.label.toLowerCase().includes(q) || cat.description.toLowerCase().includes(q)) return true
+    return cat.tools.some(t => {
+      const toolObj = toolsCatalog.value.find(item => item.name === t)
+      return t.toLowerCase().includes(q) || (toolObj && toolObj.description.toLowerCase().includes(q))
+    })
+  })
+})
+
+const filteredCommandCategories = computed(() => {
+  const q = cmdSearch.value.trim().toLowerCase()
+  if (!q) return commandCategories.value
+  return commandCategories.value.filter(cat => {
+    if (cat.label.toLowerCase().includes(q) || cat.description.toLowerCase().includes(q)) return true
+    return cat.commands.some(c => c.toLowerCase().includes(q))
+  })
+})
+
+const toolsTotalCount = computed(() => toolsCatalog.value.filter(t => !t.group && t.name !== 'http_request').length)
+const toolsEnabledCount = computed(() => toolsCatalog.value.filter(t => !t.group && t.name !== 'http_request' && (t.name === 'finish' || toolsDraft[t.name])).length)
+const cmdsTotalCount = computed(() => commandsCatalog.value.length)
+const cmdsEnabledCount = computed(() => commandsCatalog.value.filter(c => commandsDraft[c] !== false).length)
+const debugActiveCount = computed(() => {
+  let count = 0
+  if (browserGroupEnabled.value) count += browserTools.filter(k => toolsDraft[k]).length
+  if (devServerGroupEnabled.value) count += devServerTools.filter(k => toolsDraft[k]).length
+  if (toolsDraft['http_request']) count += 1
+  return count
 })
 // ---- 命令白名单开关草稿（全局默认；只上报禁用项，未列出 = 放行） ----
 const commandsCatalog = ref<string[]>([])
@@ -240,7 +459,175 @@ watch(() => store.state, (s) => {
   draft.port = s.web_cfg.port
   draft.retention = s.logging?.retention_days ?? 7
   draft.max_total_mb = s.logging?.max_total_mb ?? 200
+  syncProfilesDraft(s.agent_profiles)
 })
+
+// ---- 全局 Agent 角色预设池草稿 ----
+const profilesDraft = ref<Record<string, any>>({})
+const profilesTouchedKeys = reactive<Record<string, boolean>>({})
+const profilesSaving = ref(false)
+const editingProfileId = ref<string | null>(null)
+const profileTestingId = ref<string | null>(null)
+
+const roleSelectOptions = [
+  { label: '👑 项目经理 (PM)', value: 'pm' },
+  { label: '⚙️ 后端开发工程师', value: 'backend' },
+  { label: '🎨 前端开发工程师', value: 'frontend' },
+  { label: '🧪 测试工程师 (QA)', value: 'qa' },
+  { label: '🧩 自定义专职角色', value: 'custom' },
+]
+
+function getRoleIcon(role: string): string {
+  const map: Record<string, string> = { pm: '👑', backend: '⚙️', frontend: '🎨', qa: '🧪', custom: '🧩' }
+  return map[role] || '🤖'
+}
+
+function syncProfilesDraft(profs: Record<string, any> | undefined): void {
+  const defaults: Record<string, any> = {
+    pm_default: {
+      id: 'pm_default', name: '架构师 PM', role: 'pm',
+      description: '负责需求分析、子任务拆分与前后端依赖编排',
+      max_turns: 20, produces_code: false, allow_test_scripts: false,
+      extra_prompt: '拆分子任务时写清接口契约与验收命令，使用 depends_on_refs 编排依赖。',
+      llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
+    },
+    backend_default: {
+      id: 'backend_default', name: '后端开发', role: 'backend',
+      description: '负责后端服务架构、接口路由与业务逻辑实现',
+      max_turns: 40, produces_code: true, allow_test_scripts: false,
+      extra_prompt: '',
+      llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
+    },
+    frontend_default: {
+      id: 'frontend_default', name: '前端开发', role: 'frontend',
+      description: '负责前端页面组件、状态管理与接口联调',
+      max_turns: 40, produces_code: true, allow_test_scripts: false,
+      extra_prompt: '',
+      llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
+    },
+    qa_default: {
+      id: 'qa_default', name: '测试工程师', role: 'qa',
+      description: '负责前后端联调测试、新建 Bug 任务与回归验收',
+      max_turns: 35, produces_code: false, allow_test_scripts: false,
+      extra_prompt: '',
+      llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
+    },
+  }
+  const source = (profs && Object.keys(profs).length > 0) ? profs : defaults
+  const nextDraft: Record<string, any> = {}
+  for (const [k, v] of Object.entries(source)) {
+    const vLlm = v.llm || {}
+    nextDraft[k] = {
+      id: k,
+      name: v.name || k,
+      role: v.role || (k in defaults ? defaults[k].role : 'custom'),
+      description: v.description || '',
+      max_turns: v.max_turns ?? null,
+      produces_code: v.produces_code ?? null,
+      allow_test_scripts: !!v.allow_test_scripts,
+      extra_prompt: v.extra_prompt || '',
+      llm: {
+        provider: vLlm.provider || '',
+        model: vLlm.model || '',
+        base_url: vLlm.base_url || '',
+        api_key: '',
+        api_key_masked: vLlm.api_key_masked || '',
+        api_key_configured: !!vLlm.api_key_configured,
+      },
+    }
+  }
+  profilesDraft.value = nextDraft
+  if (!editingProfileId.value && Object.keys(nextDraft).length > 0) {
+    editingProfileId.value = Object.keys(nextDraft)[0]
+  }
+}
+
+function addProfile(): void {
+  const base = 'custom_role'
+  let id = base
+  let n = 2
+  while (profilesDraft.value[id]) {
+    id = `${base}_${n}`
+    n++
+  }
+  profilesDraft.value[id] = {
+    id,
+    name: '新建专职 Agent',
+    role: 'custom',
+    description: '专职自定义能力 Agent',
+    max_turns: 40,
+    produces_code: true,
+    allow_test_scripts: false,
+    extra_prompt: '',
+    llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
+  }
+  editingProfileId.value = id
+}
+
+function removeProfile(id: string): void {
+  delete profilesDraft.value[id]
+  delete profilesTouchedKeys[id]
+  if (editingProfileId.value === id) {
+    editingProfileId.value = Object.keys(profilesDraft.value)[0] || null
+  }
+}
+
+async function testProfileModel(pid: string): Promise<void> {
+  const prof = profilesDraft.value[pid]
+  if (!prof) return
+  const eff = {
+    provider: prof.llm.provider || store.state?.llm.provider || 'openai',
+    base_url: prof.llm.base_url || store.state?.llm.base_url || '',
+    api_key: prof.llm.api_key || '',
+    model: prof.llm.model || store.state?.llm.model || '',
+  }
+  if (!eff.model) {
+    message()?.('该预设未指定模型名（将继承全局模型）', 'warning')
+  }
+  profileTestingId.value = pid
+  try {
+    const res = await api.testModel(eff)
+    message()?.(`[${prof.name}] ${res.message || '连接成功'}`, 'success')
+  } catch (e: any) {
+    message()?.(`[${prof.name}] 连接测试失败：${e.message}`, 'error')
+  } finally {
+    profileTestingId.value = null
+  }
+}
+
+async function saveProfiles(): Promise<void> {
+  profilesSaving.value = true
+  try {
+    const payload: Record<string, any> = {}
+    for (const [pid, p] of Object.entries(profilesDraft.value)) {
+      const pData: any = {
+        name: p.name.trim() || pid,
+        role: p.role,
+        description: p.description.trim(),
+        max_turns: p.max_turns ? Number(p.max_turns) : null,
+        produces_code: p.produces_code,
+        allow_test_scripts: !!p.allow_test_scripts,
+        extra_prompt: p.extra_prompt.trim(),
+      }
+      if (p.llm && (p.llm.model.trim() || p.llm.provider || p.llm.base_url.trim() || profilesTouchedKeys[pid])) {
+        const mObj: any = {}
+        if (p.llm.provider) mObj.provider = p.llm.provider
+        if (p.llm.model.trim()) mObj.model = p.llm.model.trim()
+        if (p.llm.base_url.trim()) mObj.base_url = p.llm.base_url.trim()
+        if (profilesTouchedKeys[pid]) mObj.api_key = p.llm.api_key || ''
+        pData.llm = mObj
+      }
+      payload[pid] = pData
+    }
+    await api.config({ agent_profiles: payload })
+    message()?.('Agent 角色预设池已保存并生效')
+    for (const k of Object.keys(profilesTouchedKeys)) delete profilesTouchedKeys[k]
+  } catch (e: any) {
+    message()?.(e.message, 'error')
+  } finally {
+    profilesSaving.value = false
+  }
+}
 
 async function saveLlm(): Promise<void> {
   try {
@@ -760,6 +1147,100 @@ const providerOptions = [
       </div>
           </NCard>
         </div>
+        <div v-if="settingsSection === 'profiles'">
+          <NCard title="👥 Agent 角色预设池（多模型项目小组使用）" size="small" class="scard">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
+              <span class="hint">配置不同专业职能角色的专属大模型与能力边界，进驻任意项目时可自由选用或局部微调。</span>
+              <NButton size="small" type="primary" secondary @click="addProfile">+ 新建角色预设</NButton>
+            </div>
+
+            <div class="profiles-container">
+              <div v-for="(prof, pid) in profilesDraft" :key="pid" class="group-card profile-card" :class="{ 'active-card': editingProfileId === pid }">
+                <div class="group-header" style="cursor: pointer" @click="editingProfileId = editingProfileId === pid ? null : pid">
+                  <div class="group-title-wrap">
+                    <span class="group-icon">{{ getRoleIcon(prof.role) }}</span>
+                    <span class="group-title">{{ prof.name }}</span>
+                    <NTag size="tiny" round type="info">{{ prof.role.toUpperCase() }}</NTag>
+                    <span class="hint" style="font-family:Consolas, monospace; font-size:11.5px">ID: {{ pid }}</span>
+                    <span class="hint" v-if="prof.llm?.model">· 模型: {{ prof.llm.model }}</span>
+                    <span class="hint" v-else>· 继承全局模型</span>
+                  </div>
+                  <div class="group-ops" @click.stop>
+                    <NButton size="tiny" secondary :loading="profileTestingId === pid" @click="testProfileModel(pid)">测试连接</NButton>
+                    <NButton size="tiny" quaternary type="error" @click="removeProfile(pid)">删除</NButton>
+                    <span style="font-size: 12px; color: var(--dim)">{{ editingProfileId === pid ? '▲ 收起' : '▼ 编辑' }}</span>
+                  </div>
+                </div>
+
+                <div v-if="editingProfileId === pid" style="padding: 12px; border-top: 1px solid var(--line); background: var(--card);">
+                  <div class="frow">
+                    <div class="f1">
+                      <label>预设名称</label>
+                      <NInput v-model:value="prof.name" placeholder="如 资深后端开发" />
+                    </div>
+                    <div class="f1">
+                      <label>职能角色</label>
+                      <NSelect v-model:value="prof.role" :options="roleSelectOptions" />
+                    </div>
+                    <div class="f14">
+                      <label>职责简介（将展示在团队名册）</label>
+                      <NInput v-model:value="prof.description" placeholder="负责接口与业务逻辑实现" />
+                    </div>
+                  </div>
+
+                  <div class="frow" style="margin-top: 8px">
+                    <div class="f1">
+                      <label>协议 provider（留空继承全局）</label>
+                      <NSelect v-model:value="prof.llm.provider" :options="[
+                        { label: '继承全局', value: '' },
+                        { label: 'openai（兼容协议）', value: 'openai' },
+                        { label: 'anthropic', value: 'anthropic' },
+                      ]" />
+                    </div>
+                    <div class="f1">
+                      <label>模型名 model（留空继承全局）</label>
+                      <NInput v-model:value="prof.llm.model" placeholder="如 deepseek-chat / o3-mini" />
+                    </div>
+                    <div class="f14">
+                      <label>接口 base_url（留空继承全局）</label>
+                      <NInput v-model:value="prof.llm.base_url" placeholder="https://api.deepseek.com/v1" />
+                    </div>
+                  </div>
+
+                  <div class="frow" style="margin-top: 8px">
+                    <div class="f2">
+                      <label>API Key（留空继承全局或保持已配置密钥）</label>
+                      <NInput v-model:value="prof.llm.api_key" type="password" show-password-on="click"
+                              :placeholder="prof.llm.api_key_configured ? `已配置（${prof.llm.api_key_masked}），留空保持` : 'sk-...'"
+                              @update:value="profilesTouchedKeys[pid] = true" />
+                    </div>
+                    <div class="f1">
+                      <label>单任务轮数上限（留空用默认）</label>
+                      <NInputNumber v-model:value="prof.max_turns" :min="-1" :max="200" placeholder="默认" />
+                    </div>
+                  </div>
+
+                  <div v-if="prof.role === 'qa'" style="margin-top: 6px;">
+                    <label class="checkline">
+                      <NSwitch size="small" v-model:value="prof.allow_test_scripts" />
+                      <span>允许测试工程师编写/补充自动化测试脚本（开启后允许 QA 新增测试目录脚本并纳入提交）</span>
+                    </label>
+                  </div>
+
+                  <div style="margin-top: 8px;">
+                    <label style="font-size: 12px; color: var(--dim); display: block; margin-bottom: 4px;">角色专属补充提示词（注入该角色系统提示词）</label>
+                    <NInput v-model:value="prof.extra_prompt" type="textarea" :rows="2"
+                            placeholder="如：要求使用 pytest 编写单测；涉及 API 时返回清晰的 JSON Schema 说明..." />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sfoot" style="margin-top: 14px;">
+              <NButton type="primary" :loading="profilesSaving" @click="saveProfiles">保存角色预设池</NButton>
+            </div>
+          </NCard>
+        </div>
         <div v-if="settingsSection === 'sched'">
           <NCard title="⏱ 调度与看板" size="small" class="scard">
       <div class="frow">
@@ -862,123 +1343,327 @@ const providerOptions = [
         </div>
         <div v-if="settingsSection === 'tools'">
           <NCard title="🛠 Agent 工具与访问权限" size="small" class="scard">
-      <div class="frow">
-        <div class="f2"><label>访问权限模式（敏感操作是否挂起等待看板批准）</label>
-          <NSelect v-model:value="permDraft.mode" :options="permOptions" /></div>
-        <div class="f1"><label>审批超时（分钟，1~1440，无人响应自动拒绝）</label>
-          <NInputNumber v-model:value="permDraft.timeout_minutes" :min="1" :max="1440" /></div>
-      </div>
-      <div class="hint pwd-hint">
-        询问 = 任务挂起，顶栏出现「🔔 待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。
-      </div>
+            <!-- 一级：四大核心分类 Tab -->
+            <div style="margin-bottom: 14px;">
+              <NTabs v-model:value="toolsTab" type="segment" size="small">
+                <NTabPane name="tools">
+                  <template #tab>
+                    <span>🛠 Agent 工具能力</span>
+                    <NTag size="tiny" round :type="toolsEnabledCount === toolsTotalCount ? 'success' : 'default'" style="margin-left: 6px;">
+                      {{ toolsEnabledCount }}/{{ toolsTotalCount }}
+                    </NTag>
+                  </template>
+                </NTabPane>
+                <NTabPane name="commands">
+                  <template #tab>
+                    <span>💻 终端命令白名单</span>
+                    <NTag size="tiny" round :type="cmdsEnabledCount === cmdsTotalCount ? 'success' : 'warning'" style="margin-left: 6px;">
+                      {{ cmdsEnabledCount }}/{{ cmdsTotalCount }}
+                    </NTag>
+                  </template>
+                </NTabPane>
+                <NTabPane name="debug">
+                  <template #tab>
+                    <span>🌐 本地调试与浏览器</span>
+                    <NTag size="tiny" round :type="debugActiveCount > 0 ? 'info' : 'default'" style="margin-left: 6px;">
+                      {{ debugActiveCount > 0 ? `${debugActiveCount} 项启用` : '默认关闭' }}
+                    </NTag>
+                  </template>
+                </NTabPane>
+                <NTabPane name="perms" tab="🔒 权限模式与环境" />
+              </NTabs>
+            </div>
 
-      <label class="checkline stack" style="margin: 10px 0 12px; padding: 8px 12px; background: rgba(128,128,128,0.06); border-radius: 6px; border: 1px solid rgba(128,128,128,0.15);">
-        <div style="display:flex;align-items:center;gap:8px">
-          <NSwitch v-model:value="gitCommitAndMergeDraft" />
-          <span style="font-weight: 600;">任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
-        </div>
-        <span class="hint">默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。</span>
-      </label>
-      <div class="tools-grid">
-        <label v-for="t in toolsCatalog" :key="t.name" class="checkline tool-line">
-          <!-- finish 为协议工具：常开且禁用的展示行，不可配置 -->
-          <NSwitch v-if="t.name === 'finish'" size="small" :value="true" disabled />
-          <NSwitch v-else size="small" v-model:value="toolsDraft[t.name]" />
-          <span class="tool-name">{{ t.name }}</span>
-          <span class="hint tool-desc">{{ t.description }}</span>
-        </label>
-      </div>
-      <div class="hint tool-foot">finish 为任务结束的协议工具，始终可用（开关仅为展示）。</div>
+            <!-- TAB 1: Agent 工具能力 (Core & Extended Tools) -->
+            <div v-show="toolsTab === 'tools'" class="tab-content">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
+                <span class="hint">控制 Agent 在任务中可调用的内置核心工具；关闭的工具不会下发给大模型提示词。</span>
+                <NInput v-model:value="toolSearch" size="small" placeholder="搜索工具名称或描述..." clearable style="width: 240px;" />
+              </div>
 
-      <label class="subhead">命令白名单（默认放行项，逐命令开关）</label>
-      <div class="cmds-flow">
-        <label v-for="c in commandsCatalog" :key="c" class="cmd-chip">
-          <NSwitch size="small" v-model:value="commandsDraft[c]" />
-          <span class="cmd-name">{{ c }}</span>
-        </label>
-      </div>
-      <div class="hint tool-foot">
-        关闭的命令从默认白名单移除（Agent 调 run_command 会被直接拒绝）；
-        项目对话框的「命令白名单」仍可整表替换默认。
-      </div>
+              <div class="tool-groups-container">
+                <div v-for="cat in filteredToolCategories" :key="cat.key" class="group-card">
+                  <div class="group-header">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">{{ cat.icon }}</span>
+                      <span class="group-title">{{ cat.label }}</span>
+                      <span class="group-desc">{{ cat.description }}</span>
+                    </div>
+                    <div class="group-ops">
+                      <NTag size="small" round :type="getGroupToolsCount(cat.tools).enabled === getGroupToolsCount(cat.tools).total ? 'success' : 'warning'">
+                        已启用 {{ getGroupToolsCount(cat.tools).enabled }} / {{ getGroupToolsCount(cat.tools).total }}
+                      </NTag>
+                      <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, true)">全选</NButton>
+                      <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, false)">全关</NButton>
+                    </div>
+                  </div>
+                  <div class="group-items-grid">
+                    <div v-for="t in getFilteredTools(cat.tools)" :key="t.name" class="tool-card-item">
+                      <div class="tool-card-left">
+                        <NSwitch v-if="t.name === 'finish'" size="small" :value="true" disabled />
+                        <NSwitch v-else size="small" v-model:value="toolsDraft[t.name]" />
+                        <span class="tool-name">{{ t.name }}</span>
+                        <NTag size="tiny" :bordered="false" :type="getToolRiskTag(t.name).type" class="risk-tag">
+                          {{ getToolRiskTag(t.name).label }}
+                        </NTag>
+                      </div>
+                      <div class="tool-card-right">
+                        <span class="tool-desc">{{ t.description }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-      <label class="subhead">Agent 子进程环境变量（代理 / 国内镜像）</label>
-      <NInput v-model:value="envDraft" type="textarea" :rows="3"
-              placeholder="每行一个 KEY=VALUE（也接受 KEY: VALUE），例如：&#10;GOPROXY=https://goproxy.cn,direct&#10;HTTP_PROXY=http://127.0.0.1:7890" />
-      <div class="hint tool-foot">
-        注入 run_command 子进程：国内网络拉依赖失败（unexpected EOF / 超时）时配 GOPROXY、
-        npm registry（HTTP_PROXY）、PIP_INDEX_URL 即可；不允许覆盖 PATH/SYSTEMROOT 等系统变量。
-      </div>
-      <label class="cmd-chip" title="写入前备份旧值到日志，只增不删，可手动改回">
-        <NSwitch size="small" v-model:value="pathAutofix" />
-        <span class="cmd-name">任务启动时自动把缺失的工具目录写入用户 PATH</span>
-      </label>
-      <div class="hint tool-foot">
-        启动任务时扫描 node/npm/go/java 等常用命令：不在 PATH 的自动注入 Agent
-        会话并写进提示词（模型无需自己找绝对路径）；开启后还会把缺失目录持久写入
-        用户 PATH（你自己的终端也能直接用）。
-      </div>
+                <!-- 本地调试工具引导卡片 -->
+                <div class="group-card guide-card" style="background: rgba(0, 128, 255, 0.04); border: 1px dashed rgba(0, 128, 255, 0.3);">
+                  <div class="group-header" style="border-bottom: none; padding: 10px 14px;">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">🧭</span>
+                      <span class="group-title">本地开发服务与浏览器自动化扩展</span>
+                      <span class="group-desc">包含 dev_server_* 服务管理（3工具）、http_request 接口调试（1工具）与 Chromium 浏览器自动化（10工具）</span>
+                    </div>
+                    <div class="group-ops">
+                      <NButton size="small" type="primary" secondary @click="toolsTab = 'debug'">
+                        进入本地调试配置 ({{ debugActiveCount }} 项启用) →
+                      </NButton>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="hint tool-foot" style="margin-top: 10px;">
+                * finish 为任务结束的协议工具，始终可用；各工具的「变更·需审批」与「高危·需审批」属性受「权限模式与环境」配置约束。
+              </div>
+            </div>
 
-      <label class="subhead">🌐 本地调试与浏览器配置（Web / API 测试支持）</label>
-      <div class="dbg-switches" style="margin: 8px 0 12px; padding: 10px 12px; background: rgba(0, 128, 255, 0.05); border: 1px solid rgba(0, 128, 255, 0.2); border-radius: 6px;">
-        <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--n-text-color)">调试工具组开关（默认关闭，按需激活后 Agent 即可获得对应能力）：</div>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <label class="checkline" style="display: flex; align-items: center; gap: 8px;">
-            <NSwitch size="small" v-model:value="browserGroupEnabled" />
-            <span style="font-weight: 500;">启用本地 Chromium 浏览器调试（browser_* 工具，共 10 个）</span>
-            <span class="hint">驱动本地 Chrome/Edge 浏览器，支持访问页面、点击输入、截图与监听控制台/网络</span>
-          </label>
-          <label class="checkline" style="display: flex; align-items: center; gap: 8px;">
-            <NSwitch size="small" v-model:value="devServerGroupEnabled" />
-            <span style="font-weight: 500;">启用后台开发服务管理（dev_server_* 工具，共 3 个）</span>
-            <span class="hint">支持任务中后台常驻启动 dev server（自动端口与就绪等待），任务结束自动清理</span>
-          </label>
-          <label class="checkline" style="display: flex; align-items: center; gap: 8px;">
-            <NSwitch size="small" v-model:value="toolsDraft['http_request']" />
-            <span style="font-weight: 500;">启用本地 HTTP API 调试（http_request 工具）</span>
-            <span class="hint">放行本地/局域网 API 调试（Cookie 会话保持，受下方白名单约束）</span>
-          </label>
-        </div>
-      </div>
-      <div class="frow">
-        <div class="f1"><label>浏览器引擎</label>
-          <NSelect v-model:value="localDebugDraft.browser" :options="[
-            { label: 'auto（优先 Chrome，无则回退 Edge）', value: 'auto' },
-            { label: 'Google Chrome', value: 'chrome' },
-            { label: 'Microsoft Edge', value: 'edge' },
-          ]" /></div>
-        <div class="f2"><label>自定义浏览器路径（留空则自动探测系统安装）</label>
-          <NInput v-model:value="localDebugDraft.browser_executable" placeholder="C:\...\chrome.exe" /></div>
-      </div>
-      <div class="frow" style="margin-top:6px;align-items:center">
-        <label class="cmd-chip">
-          <NSwitch size="small" v-model:value="localDebugDraft.headless" />
-          <span class="cmd-name">无头模式运行（关闭时在桌面弹出浏览器窗口，可直观围观操作）</span>
-        </label>
-        <NButton size="small" :loading="testingBrowser" @click="onTestBrowser">测试浏览器探测</NButton>
-      </div>
+            <!-- TAB 2: 终端命令白名单 (Terminal Commands Whitelist) -->
+            <div v-show="toolsTab === 'commands'" class="tab-content">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
+                <span class="hint">
+                  按语言和技术生态细分管理默认放行的命令。关闭的命令从默认白名单移除（Agent 调 run_command 会被直接拦截）。
+                </span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <NButton size="tiny" secondary @click="toggleAllCommands(true)">全部放行</NButton>
+                  <NButton size="tiny" secondary @click="toggleAllCommands(false)">全部禁用</NButton>
+                  <NInput v-model:value="cmdSearch" size="small" placeholder="过滤命令（如 pytest、npm）..." clearable style="width: 220px;" />
+                </div>
+              </div>
 
-      <div class="frow" style="margin-top:8px">
-        <div class="f2">
-          <label>允许访问的主机白名单（每行一个，防内网穿透；默认仅限回环）</label>
-          <NInput v-model:value="localDebugDraft.hosts_text" type="textarea" :rows="3"
-                  placeholder="localhost&#10;127.0.0.1&#10;::1" />
-        </div>
-        <div class="f1">
-          <label>导航超时 / 服务就绪超时（秒）</label>
-          <div style="display:flex;gap:8px">
-            <NInputNumber v-model:value="localDebugDraft.navigation_timeout_seconds" :min="5" :max="300" placeholder="导航" />
-            <NInputNumber v-model:value="localDebugDraft.service_ready_timeout_seconds" :min="5" :max="600" placeholder="就绪" />
-          </div>
-        </div>
-      </div>
-      <div class="hint tool-foot">
-        浏览器顶层导航与 http_request 仅放行上述白名单主机；云元数据等敏感网段强制拦截；项目级设置可额外追加局域网测试机。
-      </div>
+              <div class="cmd-groups-container">
+                <div v-for="cat in filteredCommandCategories" :key="cat.key" class="group-card">
+                  <div class="group-header">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">{{ cat.icon }}</span>
+                      <span class="group-title">{{ cat.label }}</span>
+                      <span class="group-desc">{{ cat.description }}</span>
+                    </div>
+                    <div class="group-ops">
+                      <NTag size="small" round :type="getGroupCommandsCount(cat.commands).enabled === getGroupCommandsCount(cat.commands).total ? 'success' : 'warning'">
+                        已放行 {{ getGroupCommandsCount(cat.commands).enabled }} / {{ getGroupCommandsCount(cat.commands).total }}
+                      </NTag>
+                      <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, true)">全选</NButton>
+                      <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, false)">全关</NButton>
+                    </div>
+                  </div>
+                  <div class="cmd-chips-grid">
+                    <label v-for="c in getFilteredCommands(cat.commands)" :key="c" class="cmd-chip-card" :class="{ 'disabled-chip': commandsDraft[c] === false }">
+                      <NSwitch size="small" v-model:value="commandsDraft[c]" />
+                      <span class="cmd-chip-name">{{ c }}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div class="hint tool-foot" style="margin-top: 10px;">
+                项目设置对话框中的「命令白名单」仍可输入指定命令列表整表替换全局默认白名单。
+              </div>
+            </div>
 
-      <div class="sfoot">
-        <NButton type="primary" :loading="toolsSaving" @click="saveTools">保存工具与权限</NButton>
-      </div>
+            <!-- TAB 3: 本地调试与浏览器 (Local Debug & Browser) -->
+            <div v-show="toolsTab === 'debug'" class="tab-content">
+              <div class="dbg-switches-box">
+                <div class="group-card" style="margin-bottom: 12px;">
+                  <div class="group-header">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">🚀</span>
+                      <span class="group-title">后台开发服务管理 (dev_server)</span>
+                      <span class="group-desc">支持任务中后台常驻启动 dev server（自动端口与就绪等待），任务结束自动清理</span>
+                    </div>
+                    <div class="group-ops">
+                      <label class="checkline" style="gap:6px">
+                        <span style="font-size:12px; font-weight:600">服务组主开关：</span>
+                        <NSwitch size="small" v-model:value="devServerGroupEnabled" />
+                      </label>
+                    </div>
+                  </div>
+                  <div class="group-items-grid">
+                    <div v-for="name in devServerTools" :key="name" class="tool-card-item">
+                      <div class="tool-card-left">
+                        <NSwitch size="small" v-model:value="toolsDraft[name]" />
+                        <span class="tool-name">{{ name }}</span>
+                        <NTag size="tiny" :bordered="false" :type="getToolRiskTag(name).type" class="risk-tag">
+                          {{ getToolRiskTag(name).label }}
+                        </NTag>
+                      </div>
+                      <div class="tool-card-right">
+                        <span class="tool-desc">{{ getToolDesc(name) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="group-card" style="margin-bottom: 12px;">
+                  <div class="group-header">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">🌐</span>
+                      <span class="group-title">本地 HTTP API 调试 (http_request)</span>
+                      <span class="group-desc">支持对本地或内网开发服务发起 HTTP 请求，调试 REST/GraphQL 接口（受下方主机白名单约束）</span>
+                    </div>
+                    <div class="group-ops">
+                      <NSwitch size="small" v-model:value="toolsDraft['http_request']" />
+                    </div>
+                  </div>
+                  <div class="tool-card-item" style="border: none;">
+                    <div class="tool-card-left">
+                      <span class="tool-name">http_request</span>
+                      <NTag size="tiny" :bordered="false" :type="getToolRiskTag('http_request').type" class="risk-tag">
+                        {{ getToolRiskTag('http_request').label }}
+                      </NTag>
+                    </div>
+                    <div class="tool-card-right">
+                      <span class="tool-desc">{{ getToolDesc('http_request') }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="group-card" style="margin-bottom: 12px;">
+                  <div class="group-header">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">🧭</span>
+                      <span class="group-title">本地 Chromium 浏览器调试 (browser)</span>
+                      <span class="group-desc">驱动本地 Chrome/Edge 浏览器，支持访问页面、点击输入、截图与监听控制台/网络日志</span>
+                    </div>
+                    <div class="group-ops">
+                      <label class="checkline" style="gap:6px">
+                        <span style="font-size:12px; font-weight:600">浏览器组主开关：</span>
+                        <NSwitch size="small" v-model:value="browserGroupEnabled" />
+                      </label>
+                    </div>
+                  </div>
+                  <div class="group-items-grid">
+                    <div v-for="name in browserTools" :key="name" class="tool-card-item">
+                      <div class="tool-card-left">
+                        <NSwitch size="small" v-model:value="toolsDraft[name]" />
+                        <span class="tool-name">{{ name }}</span>
+                        <NTag size="tiny" :bordered="false" :type="getToolRiskTag(name).type" class="risk-tag">
+                          {{ getToolRiskTag(name).label }}
+                        </NTag>
+                      </div>
+                      <div class="tool-card-right">
+                        <span class="tool-desc">{{ getToolDesc(name) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 浏览器运行时与网络安全配置卡片 -->
+                <div class="group-card">
+                  <div class="group-header">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">⚙️</span>
+                      <span class="group-title">调试环境运行参数与安全限制</span>
+                      <span class="group-desc">配置浏览器内核路径、窗口显示模式及内网穿透防护主机白名单</span>
+                    </div>
+                  </div>
+                  <div style="padding: 12px;">
+                    <div class="frow">
+                      <div class="f1"><label>浏览器引擎</label>
+                        <NSelect v-model:value="localDebugDraft.browser" :options="[
+                          { label: 'auto（优先 Chrome，无则回退 Edge）', value: 'auto' },
+                          { label: 'Google Chrome', value: 'chrome' },
+                          { label: 'Microsoft Edge', value: 'edge' },
+                        ]" /></div>
+                      <div class="f2"><label>自定义浏览器路径（留空则自动探测系统安装）</label>
+                        <NInput v-model:value="localDebugDraft.browser_executable" placeholder="C:\...\chrome.exe" /></div>
+                    </div>
+                    <div class="frow" style="margin-top:8px;align-items:center">
+                      <label class="cmd-chip">
+                        <NSwitch size="small" v-model:value="localDebugDraft.headless" />
+                        <span class="cmd-name">无头模式运行（关闭时在桌面弹出浏览器窗口，可直观围观操作）</span>
+                      </label>
+                      <NButton size="small" :loading="testingBrowser" @click="onTestBrowser">测试浏览器探测</NButton>
+                    </div>
+                    <div class="frow" style="margin-top:10px">
+                      <div class="f2">
+                        <label>允许访问的主机白名单（每行一个，防内网穿透；默认仅限回环）</label>
+                        <NInput v-model:value="localDebugDraft.hosts_text" type="textarea" :rows="3"
+                                placeholder="localhost&#10;127.0.0.1&#10;::1" />
+                      </div>
+                      <div class="f1">
+                        <label>导航超时 / 服务就绪超时（秒）</label>
+                        <div style="display:flex;gap:8px">
+                          <NInputNumber v-model:value="localDebugDraft.navigation_timeout_seconds" :min="5" :max="300" placeholder="导航" />
+                          <NInputNumber v-model:value="localDebugDraft.service_ready_timeout_seconds" :min="5" :max="600" placeholder="就绪" />
+                        </div>
+                      </div>
+                    </div>
+                    <div class="hint tool-foot" style="margin-top:8px; margin-bottom:0">
+                      浏览器顶层导航与 http_request 仅放行上述白名单主机；云元数据等敏感网段强制拦截；项目级设置可额外追加局域网测试机。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 4: 权限模式与环境 (Permissions & Environment) -->
+            <div v-show="toolsTab === 'perms'" class="tab-content">
+              <div class="group-card" style="margin-bottom: 12px; padding: 12px;">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text);">
+                  🛡 敏感操作访问权限模式
+                </div>
+                <div class="frow">
+                  <div class="f2"><label>访问权限模式（敏感操作是否挂起等待看板批准）</label>
+                    <NSelect v-model:value="permDraft.mode" :options="permOptions" /></div>
+                  <div class="f1"><label>审批超时（分钟，1~1440，无人响应自动拒绝）</label>
+                    <NInputNumber v-model:value="permDraft.timeout_minutes" :min="1" :max="1440" /></div>
+                </div>
+                <div class="hint pwd-hint" style="margin-top: 6px;">
+                  询问 = 任务挂起，顶栏出现「🔔 待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。
+                </div>
+              </div>
+
+              <div class="group-card" style="margin-bottom: 12px; padding: 12px;">
+                <label class="checkline stack" style="margin: 0; padding: 0; border: none; background: none;">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <NSwitch v-model:value="gitCommitAndMergeDraft" />
+                    <span style="font-weight: 600; font-size: 13px; color: var(--text);">🌿 任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
+                  </div>
+                  <span class="hint" style="margin-top: 6px;">默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。</span>
+                </label>
+              </div>
+
+              <div class="group-card" style="padding: 12px;">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text);">
+                  💻 Agent 子进程环境变量与 PATH 引导
+                </div>
+                <label style="font-size: 12px; color: var(--dim); margin-bottom: 4px; display: block;">自定义环境变量（代理 / 国内镜像，每行 KEY=VALUE）</label>
+                <NInput v-model:value="envDraft" type="textarea" :rows="3"
+                        placeholder="每行一个 KEY=VALUE（也接受 KEY: VALUE），例如：&#10;GOPROXY=https://goproxy.cn,direct&#10;HTTP_PROXY=http://127.0.0.1:7890" />
+                <div class="hint tool-foot" style="margin-top: 6px;">
+                  注入 run_command 子进程：国内网络拉依赖失败时配 GOPROXY、npm registry（HTTP_PROXY）、PIP_INDEX_URL 即可；不允许覆盖 PATH/SYSTEMROOT 等系统变量。
+                </div>
+                <label class="cmd-chip" style="margin-top: 6px;" title="写入前备份旧值到日志，只增不删，可手动改回">
+                  <NSwitch size="small" v-model:value="pathAutofix" />
+                  <span class="cmd-name">任务启动时自动把缺失的工具目录写入用户 PATH</span>
+                </label>
+                <div class="hint tool-foot" style="margin-top: 6px;">
+                  启动任务时扫描 node/npm/go/java 等常用命令：不在 PATH 的自动注入 Agent 会话并写进提示词；开启后还会把缺失目录持久写入用户 PATH。
+                </div>
+              </div>
+            </div>
+
+            <!-- 统一底栏保存按钮 -->
+            <div class="sfoot" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);">
+              <NButton type="primary" :loading="toolsSaving" @click="saveTools">保存工具与权限</NButton>
+            </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'mirrors'">
@@ -1145,4 +1830,113 @@ const providerOptions = [
 .madd { display: flex; gap: 8px; align-items: center; margin: 4px 0 8px; }
 .madd-cat { width: 190px; flex: none; }
 .madd-url { flex: 1; }
+
+/* ---- Agent 工具与命令白名单三级分组样式 ---- */
+.tab-content { padding-top: 4px; }
+.group-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(128, 128, 128, 0.05);
+  border-bottom: 1px solid var(--line);
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.group-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.group-icon {
+  font-size: 15px;
+}
+.group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.group-desc {
+  font-size: 12px;
+  color: var(--dim);
+}
+.group-ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.group-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+.tool-card-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--card);
+}
+.tool-card-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.tool-card-right {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+}
+.risk-tag {
+  font-size: 11px;
+  padding: 0 4px;
+}
+.cmd-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.cmd-chip-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 10px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.cmd-chip-card:hover {
+  border-color: rgba(0, 128, 255, 0.4);
+}
+.cmd-chip-card.disabled-chip {
+  opacity: 0.6;
+  background: rgba(128, 128, 128, 0.05);
+}
+.cmd-chip-name {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+@media (max-width: 900px) {
+  .group-items-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

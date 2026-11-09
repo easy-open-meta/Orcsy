@@ -64,11 +64,13 @@ class UsageStore:
 
     def record(self, project: str, task_id: str, outcome: str, turns: int,
                prompt_tokens: int, completion_tokens: int,
-               model: str = "", kind: str = "task") -> dict:
+               model: str = "", kind: str = "task",
+               role: str = "", agent_name: str = "") -> dict:
         """追加一条用量记录；写盘失败只记日志，绝不影响任务本身。
 
         kind：task（执行 Agent，默认）/ review（审查 Agent）——审查的 token
         消耗单列可核算；聚合视图对缺省 kind 兼容（旧记录视为 task）。
+        role / agent_name：项目小组模式下记录执行成员角色（pm/backend/frontend/qa）。
         """
         entry = {
             "ts": time.time(),
@@ -81,6 +83,8 @@ class UsageStore:
             "completion_tokens": int(completion_tokens or 0),
             "model": str(model or ""),
             "kind": str(kind or "task"),
+            "role": str(role or ""),
+            "agent_name": str(agent_name or ""),
         }
         with self._lock:
             self._entries.append(entry)
@@ -121,6 +125,7 @@ class UsageStore:
 
         total = blank()
         projects: dict[str, dict] = {}
+        roles: dict[str, dict] = {}
         for e in entries:
             total["tasks"] += 1
             total["turns"] += int(e.get("turns") or 0)
@@ -134,10 +139,22 @@ class UsageStore:
             at = e.get("at") or ""
             if at > p.get("last_at", ""):
                 p["last_at"] = at
+            # 按角色聚合同步统计（review 记为 review，无角色记为 solo）
+            role_key = str(e.get("role") or "").strip() or (
+                "review" if e.get("kind") == "review" else "solo"
+            )
+            r = roles.setdefault(role_key, blank())
+            r["tasks"] += 1
+            r["turns"] += int(e.get("turns") or 0)
+            r["prompt_tokens"] += int(e.get("prompt_tokens") or 0)
+            r["completion_tokens"] += int(e.get("completion_tokens") or 0)
 
         proj_list = [{"name": name, **agg} for name, agg in projects.items()]
         # 按总 tokens 降序，用量大户排前面
         proj_list.sort(key=lambda x: x["prompt_tokens"] + x["completion_tokens"],
+                       reverse=True)
+        role_list = [{"role": rkey, **agg} for rkey, agg in roles.items()]
+        role_list.sort(key=lambda x: x["prompt_tokens"] + x["completion_tokens"],
                        reverse=True)
 
         # 近 N 天逐日（含零值天，趋势图横轴稳定）
@@ -159,6 +176,7 @@ class UsageStore:
         return {
             "total": total,
             "projects": proj_list,
+            "roles": role_list,
             "days": list(day_map.values()),
             "recent": list(reversed(entries[-20:])),
         }

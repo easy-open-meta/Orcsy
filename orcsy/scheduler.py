@@ -57,7 +57,9 @@ class Scheduler:
                          path_autofix=config.env.path_autofix,
                          review_cfg=config.review,
                          local_debug=config.local_debug,
-                         commit_and_merge=resolve_commit_and_merge(config.git, p))
+                         commit_and_merge=resolve_commit_and_merge(config.git, p),
+                         agent_profiles=config.agent_profiles,
+                         global_tools=config.tools)
             for p in config.projects
             if p.enabled
         ]
@@ -133,7 +135,9 @@ class Scheduler:
                              path_autofix=new_config.env.path_autofix,
                              review_cfg=new_config.review,
                              local_debug=new_config.local_debug,
-                             commit_and_merge=resolve_commit_and_merge(new_config.git, p))
+                             commit_and_merge=resolve_commit_and_merge(new_config.git, p),
+                             agent_profiles=new_config.agent_profiles,
+                             global_tools=new_config.tools)
                 for p in new_config.projects
                 if p.enabled
             ]

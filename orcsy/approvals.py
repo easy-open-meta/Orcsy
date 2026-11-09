@@ -38,6 +38,8 @@ MUTATING_TOOLS = frozenset({
     "write_file", "edit_file", "multi_edit",
     "delete_file", "move_file", "run_command",
     "create_tasks",   # 拆分任务会写任务文件并关闭原任务，按写操作对待
+    "report_bug",     # 测试工程师新建 Bug 任务至项目任务队列
+    "reassign_task",  # 项目经理直接指派任务责任角色
     "dev_server_start",
     "browser_click", "browser_type", "browser_eval",
 })

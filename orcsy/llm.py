@@ -303,7 +303,7 @@ def finish_response(payload: dict) -> AgentResponse:
     """把 finish 参数转成 AgentResponse，协议不完整时返回 blocked 兜底。"""
     action = str(payload.get("action", "")).strip().lower()
     summary = str(payload.get("summary", "")).strip()
-    if action not in ("completed", "blocked", "cannot_do", "split") or not summary:
+    if action not in ("completed", "blocked", "cannot_do", "split", "wait_retest") or not summary:
         return AgentResponse.fallback(f"finish 参数不完整：action={action!r}")
     files = payload.get("files_changed") or []
     return AgentResponse(

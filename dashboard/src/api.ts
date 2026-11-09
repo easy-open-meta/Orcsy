@@ -3,6 +3,69 @@
 export type ThemeName = 'dark' | 'light'
 export type TaskStatus = 'open' | 'in_progress' | 'done' | 'blocked' | 'cancelled'
 
+export type AgentRoleType = 'pm' | 'backend' | 'frontend' | 'qa' | 'custom'
+
+export interface BuiltInRoleInfoT {
+  role: AgentRoleType
+  label: string
+  icon: string
+  description: string
+  produces_code: boolean
+  default_max_turns: number
+  default_tools: Record<string, boolean>
+}
+
+export interface AgentProfileT {
+  id: string
+  name: string
+  role: AgentRoleType
+  description: string
+  llm?: (Record<string, string> & {
+    api_key_masked?: string
+    api_key_configured?: boolean
+  }) | null
+  tools?: Record<string, boolean> | null
+  max_turns?: number | null
+  produces_code?: boolean | null
+  allow_test_scripts?: boolean
+  extra_prompt?: string
+}
+
+export interface TeamMemberT {
+  id: string
+  profile: string
+  enabled: boolean
+  name: string
+  role: string
+  description: string
+  llm?: (Record<string, string> & {
+    api_key_masked?: string
+    api_key_configured?: boolean
+  }) | null
+  tools?: Record<string, boolean> | null
+  max_turns?: number | null
+  produces_code?: boolean | null
+  allow_test_scripts?: boolean | null
+  extra_prompt?: string
+}
+
+export interface ProjectTeamT {
+  enabled: boolean
+  execution_mode: 'parallel_worktree' | 'sequential'
+  max_qa_rounds: number
+  max_split_depth: number
+  chain_within_cycle: boolean
+  max_chain_steps_per_cycle: number
+  fallback_role?: string
+  members: TeamMemberT[]
+}
+
+export interface ProjectPendingChangesT {
+  is_git: boolean
+  count: number
+  files: string[]
+}
+
 export interface TaskT {
   id: string
   title: string
@@ -20,6 +83,16 @@ export interface TaskT {
   review_round?: number
   /** 看板拖拽排序的手动序号；null = 未手动排过（显示回退 状态→优先级→id） */
   order: number | null
+  /** 前置依赖任务 ID 列表 */
+  depends_on?: string[]
+  parent_id?: string
+  split_depth?: number
+  qa_round?: number
+  created_by?: string
+  dep_state?: 'ready' | 'waiting' | 'upstream_blocked'
+  blocking_deps?: { id: string; status: string }[]
+  dep_done_count?: number
+  dep_total_count?: number
 }
 
 export interface ProjectT {
@@ -32,6 +105,24 @@ export interface ProjectT {
   max_agent_turns: number
   allowed_branch: string | null
   allowed_commands: string[] | null
+  /** 多模型 Agent 项目小组编排配置 */
+  team?: ProjectTeamT | null
+  team_enabled?: boolean
+  team_members_effective?: {
+    id: string
+    role: string
+    name: string
+    icon: string
+    description: string
+    model: string
+    provider: string
+    produces_code: boolean
+    allow_test_scripts: boolean
+    max_turns: number
+  }[]
+  active_roles?: Record<string, string>
+  worktree_isolation_effective?: boolean
+  pending_git_changes?: ProjectPendingChangesT
   /** 项目级审查开关；null/缺省 = 跟随全局 review_cfg.enabled */
   review_enabled?: boolean | null
   /** 项目级审查模型绑定（部分覆盖全局 review_cfg 的 llm）；null = 未绑定；
@@ -141,10 +232,11 @@ export interface UsageAggT {
   prompt_tokens: number
   completion_tokens: number
 }
-/** 模型用量聚合：总体 + 各项目 + 近 14 天逐日 + 最近记录 */
+/** 模型用量聚合：总体 + 各项目 + 按角色 + 近 14 天逐日 + 最近记录 */
 export interface UsageT {
   total: UsageAggT
   projects: (UsageAggT & { name: string; last_at?: string })[]
+  roles?: (UsageAggT & { role: string })[]
   days: (UsageAggT & { date: string })[]
   recent: UsageEntryT[]
 }
@@ -205,9 +297,25 @@ export interface AppStateT {
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
   /** 可开关工具目录（名称+中文描述+所属组；finish 为协议工具不在其中） */
-  tools_catalog: { name: string; description: string; group?: string | null }[]
+  tools_catalog: {
+    name: string
+    description: string
+    group?: string | null
+    category?: string | null
+    is_mutating?: boolean
+    is_risky?: boolean
+    default_off?: boolean
+  }[]
   /** 工具组映射字典 */
   tool_groups?: Record<string, string[]>
+  /** 工具业务功能分类定义 */
+  tool_categories?: {
+    key: string
+    label: string
+    icon: string
+    description: string
+    tools: string[]
+  }[]
   /** 默认关闭的工具清单（如本地调试相关工具） */
   default_off_tools?: string[]
   /** 本地调试配置（Chrome/Edge 与后台服务） */
@@ -233,6 +341,18 @@ export interface AppStateT {
   commands_cfg: Record<string, boolean>
   /** 默认命令白名单目录（逐命令开关用，含通配符模式如 gradle*） */
   commands_catalog: string[]
+  /** 命令生态分类定义列表 */
+  command_categories?: {
+    key: string
+    label: string
+    icon: string
+    description: string
+    commands: string[]
+  }[]
+  /** 全局 Agent 角色预设池（多模型项目小组自由引用） */
+  agent_profiles?: Record<string, AgentProfileT>
+  /** 内置角色元数据 */
+  built_in_roles?: Record<string, BuiltInRoleInfoT>
   /** Agent 子进程自定义环境变量（代理 / 国内镜像，注入 run_command） */
   env_cfg: Record<string, string>
   /** 镜像源管理：类别表（kind=proxy 的类别参与「应用最快源」写 env.vars） */
@@ -353,8 +473,14 @@ export const api = {
     get(`/api/task?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`),
   taskSave: (p: {
     project: string; id: string; title: string; priority: string; status: string
-    labels: string[]; assignee: string; description: string
+    labels: string[]; assignee: string; description: string; depends_on?: string[]
   }) => post('/api/task', p),
+  commitProject: (p: { name: string; message: string; push?: boolean }) =>
+    post('/api/project/commit', p) as Promise<{
+      ok: boolean; committed: boolean; commit: string; pushed: boolean; message: string
+    }>,
+  gitInitProject: (p: { name: string }) =>
+    post('/api/project/git-init', p) as Promise<{ ok: boolean; message: string }>,
   taskStatus: (project: string, id: string, status: string) =>
     post('/api/task/status', { project, id, status }),
   /** 拖拽排序落盘：ids 为拖拽后该项目的完整任务顺序 */

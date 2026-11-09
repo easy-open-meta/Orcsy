@@ -1478,6 +1478,25 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 <p><strong>成本提示：</strong>
 审查每次约消耗 3~8 轮只读调用的 token，在设置页「用量统计」里按审查类单独记录，可与执行消耗分开核算。</p>
 <hr />
+<h3 id="1012-多模型-agent-项目小组project-team协同">10.12 多模型 Agent 项目小组（Project Team）协同</h3>
+<p>Orcsy 0.21.0 引入了<strong>多模型 Agent 项目小组（Project Team）</strong>。用户可以自由组合多个不同专长大模型的 Agent 组成研发团队进驻任意项目，完成复杂需求的分工协作：</p>
+<ul>
+<li><strong>👑 项目经理（PM）</strong>：只读摸底项目代码库与架构，将需求拆解为职责明确的子任务并使用 <code>depends_on_refs</code> 编排 DAG 有向无环依赖图；或对简单单端任务直接调用 <code>reassign_task</code> 转派下游。</li>
+<li><strong>⚙️ 后端 / 🎨 前端开发工程师</strong>：在按任务隔离的 Git Worktree 沙盒中专注本端编码与单测，Prompt 自动透传前置依赖任务的交付物摘要（接口契约）。</li>
+<li><strong>🧪 测试工程师（QA）</strong>：拉起本地服务与无头/桌面浏览器进行端到端联调测试；发现缺陷调用 <code>report_bug</code> 派发 Bug 修复任务，原测试任务自动挂靠依赖并进入等待回归状态，待前后端修复后自动唤醒 QA 开展多轮回归测试。</li>
+<li><strong>🛡️ 强制 Worktree 沙盒隔离 + 人工把关最终提交</strong>：所有写代码角色按任务在独立 <code>.worktree-arranger/&lt;task_id&gt;</code> 沙盒中编码，通过审查后仅增量合入主分支工作区（未提交状态），<strong>默认绝不自动执行 git commit 与 git push</strong>，最终提交权 100% 留给人把关！</li>
+<li><strong>⚡ 同周期链式推进（chain_within_cycle）</strong>：依赖解锁后毫秒级连续接棒推进下一阶段，单个需求无需跨越多个 300 秒调度周期即可完整闭环。</li>
+<li><strong>👥 双层配置复用</strong>：全局设置页「👥 Agent 角色预设池」一次配置各角色专属模型 + 项目设置弹窗自由引用与局部技术栈微调。</li>
+</ul>
+<hr />
+<h3 id="1013-本地调试与-chromium-浏览器自动化local-debug">10.13 本地调试与 Chromium 浏览器自动化（Local Debug）</h3>
+<p>针对 Web 与 API 项目，Orcsy 内置了基于 CDP 协议的本地调试工具链（测试工程师 QA 默认开启，开发角色按需可选）：</p>
+<ul>
+<li><strong>Chromium 浏览器自动化（<code>browser_*</code>）</strong>：通过纯 Python CDP 直连本地安装的 Google Chrome 或 Microsoft Edge（零外部 driver 依赖），支持元素结构化文本快照、按 ref 寻址点击与输入、页面等待、截图落盘及 Console/Network 日志监听；</li>
+<li><strong>开发服务管理（<code>dev_server_*</code>）</strong>：任务中后台常驻启动 dev server（自动分配空闲端口并等待就绪），任务结束自动清理释放子进程；</li>
+<li><strong>本地接口调试（<code>http_request</code>）</strong>：受控放行本地/局域网 HTTP API 调试（Cookie 会话保持，受主机白名单严格约束，杜绝内网穿透）。</li>
+</ul>
+<hr />
 <h2 id="11-数据备份与迁移">11. 数据、备份与迁移</h2>
 <h3 id="111-数据都存在哪">11.1 数据都存在哪</h3>
 <table>

@@ -136,6 +136,36 @@ notify:
 #   max_services: 3                   # 单任务最大后台并发服务数（1~10）
 #   artifacts_retention_days: 7       # 截图工件保留天数（0=不清理）
 
+# git:                         # Git 自动化工作流配置：
+#   commit_and_merge: false    # 任务完成后是否自动提交代码并合并回主分支（默认关闭：
+#                              # 改动直接留在工作区，方便人工检查与自由提交；
+#                              # 开启后在独立 worktree 分支完成开发并自动提交合并）
+
+# agent_profiles:              # 全局 Agent 角色预设池（多模型项目小组使用，可选）：
+#   pm_default:                #   预设 ID
+#     name: "架构师 PM"        #   显示名称
+#     role: pm                 #   角色类型：pm | backend | frontend | qa | custom
+#     llm:                     #   独立模型绑定（缺省字段继承全局 llm）
+#       model: claude-3-7-sonnet-20250219
+#     max_turns: 20            #   工具循环轮数上限
+#     extra_prompt: "拆分子任务时写清接口契约与验收命令"
+#   backend_default:
+#     name: "后端开发"
+#     role: backend
+#     llm:
+#       model: deepseek-chat
+#   frontend_default:
+#     name: "前端开发"
+#     role: frontend
+#     llm:
+#       model: claude-3-7-sonnet-20250219
+#   qa_default:
+#     name: "测试工程师"
+#     role: qa
+#     llm:
+#       model: gpt-4o
+#     allow_test_scripts: false # 是否允许编写自动化测试脚本（默认只读不改源码）
+
 # 受管项目列表：每个项目由一个独立 Agent 负责。
 # 推荐直接在看板「项目与设置」页可视化新建（会自动创建任务目录与 AGENT.md）；
 # 也可手动添加，格式如下：
@@ -174,6 +204,24 @@ projects: []
 #    #   http_request: true            # 开启本地 API 请求调试工具（默认关闭）
 #    # permission_mode: autonomous     # 项目级访问权限覆盖（ask_on_change / autonomous /
 #    #                                 # full_access）；缺省 = 跟随全局 permissions.mode
+#    # commit_and_merge: true          # 项目级覆盖：任务完成后自动提交并合并代码（缺省 = 跟随全局 git.commit_and_merge 关闭）
+#    # team:                           # 多模型 Agent 项目小组编排（自由组合角色）：
+#    #   enabled: true                 #   开启小组模式（强制开启按任务 Worktree 沙盒隔离）
+#    #   execution_mode: parallel_worktree # 并发策略：parallel_worktree（安全并发）/ sequential（串行）
+#    #   chain_within_cycle: true      #   同周期内依赖解锁后是否链式推进下游任务（默认开）
+#    #   max_qa_rounds: 3              #   QA 发现 Bug 后的最大回归测试轮数（熔断防死循环）
+#    #   fallback_role: backend        #   无 PM 时的未指派任务兜底认领角色
+#    #   members:                      #   小组成员列表：
+#    #     - id: pm
+#    #       profile: pm_default       #   引用全局预设
+#    #     - id: backend
+#    #       profile: backend_default
+#    #       llm:                       #   项目内可单独覆盖特定成员的模型
+#    #         model: deepseek-reasoner
+#    #     - id: frontend
+#    #       profile: frontend_default
+#    #     - id: qa
+#    #       profile: qa_default
 
 """
 
