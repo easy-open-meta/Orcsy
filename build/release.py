@@ -55,16 +55,23 @@ def read_version() -> tuple[int, int, int]:
 
 def expected_artifacts(ver: tuple[int, int, int],
                       setup_dir: Path | str | None = None) -> list[Path]:
-    """本次发布应上传的附件：首次安装包 + 自更新包 + 哈希校验文件（缺一不可）。
+    """本次发布应上传的附件：Windows 安装包/更新包 + Linux amd64/arm64 发布包与校验文件。
 
-    .sha256 是在线更新的完整性依据（安全审计 2026-11-04 M2）：缺了它新版
-    在线更新会被直接拒绝，所以发布检查把它当成必需附件。
+    .sha256 是在线更新与发布的完整性依据；存在即一并发布上传。
     """
     v = ".".join(map(str, ver))
     d = Path(setup_dir) if setup_dir else ROOT / "build" / "Setup"
-    return [d / f"orcsy-setup-{v}.exe",
+    base = [d / f"orcsy-setup-{v}.exe",
             d / f"orcsy-update-{v}.zip",
             d / f"orcsy-update-{v}.zip.sha256"]
+    linux = [
+        d / f"orcsy-{v}-linux-amd64.tar.gz",
+        d / f"orcsy-{v}-linux-amd64.tar.gz.sha256",
+        d / f"orcsy-{v}-linux-arm64.tar.gz",
+        d / f"orcsy-{v}-linux-arm64.tar.gz.sha256",
+    ]
+    # 若构建产物目录中生成了 Linux 产物，自动加入发布清单
+    return base + [f for f in linux if f.is_file()]
 
 
 def check_artifacts(ver: tuple[int, int, int],

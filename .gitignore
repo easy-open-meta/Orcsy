@@ -9,6 +9,7 @@ uv.lock
 ZCode/
 
 *.exe
+*.tar.gz
 build/task-arranger
 
 # 前端工程（Vue3 + Vite）
