@@ -232,14 +232,15 @@ web:
   auth_password: "your-strong-password"   # non-empty enables auth; empty = off
 ```
 
-You can also set/change/clear the password while logged in, under "Projects & Settings → Scheduling & Dashboard" (takes effect on save).
+You can also set/change/clear the password while logged in, under "Settings → Application" (takes effect on save).
 
 Behavior:
 
 - When enabled, every page and API except the login screen requires a session; wrong passwords incur a delay penalty (brute-force mitigation).
 - Successful login issues an HttpOnly session cookie valid for 7 days; sessions live in memory, so **a program restart requires logging in again**.
 - Changing the password invalidates all existing sessions immediately; clearing it disables auth.
-- The password is stored in plaintext in `config.yaml` (treat it like `llm.api_key`: never commit it, mind file permissions).
+- The password is stored securely as a **PBKDF2-HMAC-SHA256 (100,000 iterations)** ciphertext in `config.yaml` (plaintext is never persisted).
+- **Password recovery**: administrators can run `orcsy reset-password` (or `orcsy passwd`) on the server to reset or clear it (`--clear`).
 - Auth is not a substitute for TLS: over plain HTTP the password and session can be sniffed. For public deployments, put a reverse proxy (nginx/caddy) with HTTPS in front.
 
 ## 🧩 Core Concepts

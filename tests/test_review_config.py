@@ -47,9 +47,12 @@ def check_resolve_rounds_and_enabled() -> None:
     # 返工次数：项目覆盖优先，None 跟随全局
     proj = ProjectConfig(name="a", path=Path("."), review_max_rounds=3)
     default_proj = ProjectConfig(name="b", path=Path("."))
+    unlimited_proj = ProjectConfig(name="u", path=Path("."), review_max_rounds=-1)
     assert resolve_review_rounds(GLOBAL_REVIEW, proj) == 3
     assert resolve_review_rounds(GLOBAL_REVIEW, default_proj) == 2
     assert resolve_review_rounds(ReviewConfig(max_review_rounds=5), default_proj) == 5
+    assert resolve_review_rounds(GLOBAL_REVIEW, unlimited_proj) == -1
+    assert resolve_review_rounds(ReviewConfig(max_review_rounds=-1), default_proj) == -1
 
     # 审查开关：项目覆盖优先，None 跟随全局
     assert review_enabled_for(GLOBAL_REVIEW, default_proj) is True
@@ -222,8 +225,10 @@ def check_load_rejects_bad_values() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         for bad, needle in (
             ("review:\n  max_review_rounds: 0\n", "max_review_rounds"),
+            ("review:\n  max_review_rounds: -2\n", "max_review_rounds"),
             ("review:\n  max_review_rounds: 11\n", "max_review_rounds"),
             ("review:\n  max_turns: 0\n", "max_turns"),
+            ("review:\n  max_turns: -2\n", "max_turns"),
             ("review:\n  llm: oops\n", "review.llm"),
             ("projects:\n  - name: a\n    path: .\n    review_max_rounds: 99\n",
              "review_max_rounds"),
@@ -236,6 +241,24 @@ def check_load_rejects_bad_values() -> None:
                 raise AssertionError(f"{bad!r} 应报错")
             except ValueError as e:
                 assert needle in str(e), f"错误信息应含 {needle}：{e}"
+
+        # -1（不设上限）合法放行
+        p_unlimited = _write_config(Path(tmp) / "unlimited.yaml", """
+llm:
+  api_key: k
+  model: m
+review:
+  max_review_rounds: -1
+  max_turns: -1
+projects:
+  - name: a
+    path: .
+    review_max_rounds: -1
+""")
+        cfg_unlimited = load_config(p_unlimited, require_api_key=False)
+        assert cfg_unlimited.review.max_review_rounds == -1
+        assert cfg_unlimited.review.max_turns == -1
+        assert cfg_unlimited.projects[0].review_max_rounds == -1
     print("load_config 非法值校验 ✅")
 
 

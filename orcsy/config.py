@@ -78,6 +78,14 @@ class ProjectConfig:
 VALID_AGENT_ROLES = ("pm", "backend", "frontend", "qa", "custom")
 VALID_TEAM_EXECUTION_MODES = ("parallel_worktree", "sequential")
 
+
+def _get_role_templates() -> dict[str, str]:
+    from .templates import load_role_template
+    return {r: load_role_template(r) for r in VALID_AGENT_ROLES}
+
+
+ROLE_PROMPT_TEMPLATES: dict[str, str] = _get_role_templates()
+
 BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
     "pm": {
         "role": "pm",
@@ -92,6 +100,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
             "create_tasks": True, "reassign_task": True,
             "report_bug": False, "browser": False, "dev_server": False, "http_request": False,
         },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("pm", ""),
     },
     "backend": {
         "role": "backend",
@@ -103,6 +112,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
         "default_tools": {
             "create_tasks": False, "reassign_task": False, "report_bug": False,
         },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("backend", ""),
     },
     "frontend": {
         "role": "frontend",
@@ -114,6 +124,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
         "default_tools": {
             "create_tasks": False, "reassign_task": False, "report_bug": False,
         },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("frontend", ""),
     },
     "qa": {
         "role": "qa",
@@ -129,6 +140,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
             "report_bug": True,
             "dev_server": True, "http_request": True, "browser": True,
         },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("qa", ""),
     },
     "custom": {
         "role": "custom",
@@ -140,6 +152,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
         "default_tools": {
             "reassign_task": False, "report_bug": False,
         },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("custom", ""),
     },
 }
 
@@ -1100,10 +1113,10 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         rev_turns = int(rev_raw.get("max_turns", 10))
     except (TypeError, ValueError) as e:
         raise ValueError(f"review 数值字段有误：{e}") from e
-    if not (1 <= rev_rounds <= 10):
-        raise ValueError(f"review.max_review_rounds 应为 1~10（当前：{rev_rounds}）")
-    if not (1 <= rev_turns <= 100):
-        raise ValueError(f"review.max_turns 应为 1~100（当前：{rev_turns}）")
+    if not (rev_rounds == -1 or 1 <= rev_rounds <= 10):
+        raise ValueError(f"review.max_review_rounds 应为 -1（不设上限）或 1~10（当前：{rev_rounds}）")
+    if not (rev_turns == -1 or 1 <= rev_turns <= 100):
+        raise ValueError(f"review.max_turns 应为 -1（不设上限）或 1~100（当前：{rev_turns}）")
     review_cfg = ReviewConfig(
         enabled=bool(rev_raw.get("enabled", True)),
         llm=rev_llm,
@@ -1251,9 +1264,9 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 p_review_rounds = int(p_review_rounds_raw)
             except (TypeError, ValueError) as e:
                 raise ValueError(f"项目 {p_name} 的 review_max_rounds 必须是整数：{e}") from e
-            if not (1 <= p_review_rounds <= 10):
+            if not (p_review_rounds == -1 or 1 <= p_review_rounds <= 10):
                 raise ValueError(
-                    f"项目 {p_name} 的 review_max_rounds 应为 1~10（当前：{p_review_rounds}）")
+                    f"项目 {p_name} 的 review_max_rounds 应为 -1（不设上限）或 1~10（当前：{p_review_rounds}）")
         projects.append(
             ProjectConfig(
                 name=p_name,

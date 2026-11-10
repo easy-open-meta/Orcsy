@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type DirListing, type ModelInfo, type PermissionMode } from '../api'
-import { refresh, ui, store } from '../store'
+import { navigateTo, refresh, ui, store } from '../store'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
 // bridge 兼容两种用法：message('文本') 默认 info；message.success('文本') 等——
@@ -53,7 +53,7 @@ const pDraft = reactive({
 })
 
 const teamMemberKeyTouched = reactive<Record<string, boolean>>({})
-const gitIniting = ref(false)
+const gitIniting = shallowRef(false)
 
 const roleSelectOptions = [
   { label: '👑 项目经理 (PM)', value: 'pm' },
@@ -224,10 +224,10 @@ function pGetToolDesc(name: string): string {
 
 // 密钥类字段三态（H2）：看板只回显掩码，不回填明文。未触碰的字段保存时不带
 // 对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除
-const llKeyTouched = ref(false)
-const repoTokenTouched = ref(false)
-const repoPassTouched = ref(false)
-const reviewKeyTouched = ref(false)
+const llKeyTouched = shallowRef(false)
+const repoTokenTouched = shallowRef(false)
+const repoPassTouched = shallowRef(false)
+const reviewKeyTouched = shallowRef(false)
 // 正在编辑的项目（占位符展示已配置掩码用；新建时为空）
 const editingProject = computed(() =>
   ui.projectDlg?.original
@@ -270,7 +270,7 @@ const approvalVisible = computed({
 })
 const approvals = computed(() => store.state?.approvals ?? [])
 const alwaysAllow = reactive<Record<string, boolean>>({})  // 审批 id → 「始终允许」勾选
-const responding = ref('')
+const responding = shallowRef('')
 
 function fmtWaited(s: number): string {
   if (s < 60) return `${s} 秒`
@@ -395,8 +395,8 @@ watch(() => ui.projectDlg, (dlg) => {
 
 // ---- 专属模型绑定：拉取列表 / 测试连接（未填字段回退全局 llm 配置） ----
 const pModels = ref<ModelInfo[]>([])
-const pFetching = ref(false)
-const pTesting = ref(false)
+const pFetching = shallowRef(false)
+const pTesting = shallowRef(false)
 const pModelOptions = computed(() => pModels.value.map(m => ({ label: m.id, value: m.id })))
 const llProviderOptions = [
   { label: '继承全局', value: '' },
@@ -462,8 +462,89 @@ async function testProjectModel(): Promise<void> {
 
 // ---- 审查 Agent：模型列表拉取 / 与任务模型的互斥校验 ----
 const rModels = ref<ModelInfo[]>([])
-const rFetching = ref(false)
+const rFetching = shallowRef(false)
 const rModelOptions = computed(() => rModels.value.map(m => ({ label: m.id, value: m.id })))
+
+// ---- Team 成员可用模型候选池（仅动态整合全局大模型、项目模型、预设池模型、审查模型与在线拉取列表，不写死任何硬编码预设） ----
+const availableTeamModelOptions = computed(() => {
+  const set = new Set<string>()
+  if (store.state?.llm?.model) set.add(store.state.llm.model)
+  if (pDraft.ll_model?.trim()) set.add(pDraft.ll_model.trim())
+  for (const m of pModels.value) {
+    if (m.id) set.add(m.id)
+  }
+  for (const p of Object.values(store.state?.agent_profiles || {})) {
+    if (p.llm?.model) set.add(p.llm.model)
+  }
+  if (store.state?.review_cfg?.model) set.add(store.state.review_cfg.model)
+  if (pDraft.review_ll_model?.trim()) set.add(pDraft.review_ll_model.trim())
+  for (const m of rModels.value) {
+    if (m.id) set.add(m.id)
+  }
+  return Array.from(set).map(id => ({ label: id, value: id }))
+})
+
+function getMemberModelPlaceholder(m: any): string {
+  if (m.profile && store.state?.agent_profiles?.[m.profile]?.llm?.model) {
+    return `继承预设（${store.state.agent_profiles[m.profile].llm.model}）`
+  }
+  if (pDraft.use_llm && pDraft.ll_model?.trim()) {
+    return `继承项目（${pDraft.ll_model.trim()}）`
+  }
+  if (store.state?.llm?.model) {
+    return `继承全局（${store.state.llm.model}）`
+  }
+  return '留空继承预设/全局'
+}
+
+const memberFetchingId = shallowRef<string | null>(null)
+
+async function fetchMemberModels(m: any): Promise<void> {
+  memberFetchingId.value = m.id
+  try {
+    const prof = m.profile ? store.state?.agent_profiles?.[m.profile] : null
+    const provider = prof?.llm?.provider || pDraft.ll_provider || store.state?.llm.provider || 'openai'
+    const baseUrl = (prof?.llm?.base_url || '').trim() || pDraft.ll_base.trim() || store.state?.llm.base_url || ''
+    const apiKey = (m.ll_key || '').trim() || (prof?.llm?.api_key || '').trim() || pDraft.ll_key.trim()
+    const r = await api.models({
+      provider,
+      base_url: baseUrl,
+      api_key: apiKey,
+      model: m.ll_model || prof?.llm?.model || pDraft.ll_model || store.state?.llm.model || '',
+    })
+    for (const item of r.models) {
+      if (item.id && !pModels.value.some(existing => existing.id === item.id)) {
+        pModels.value.push(item)
+      }
+    }
+    message.success(`已为角色「${m.name || m.role || m.id}」获取 ${r.models.length} 个模型，可在专属模型下拉框选择`)
+  } catch (e: any) {
+    message.error(e.message || '获取模型列表失败')
+  } finally {
+    memberFetchingId.value = null
+  }
+}
+
+function getMemberRoleTemplate(role: string): string {
+  if (store.state?.role_prompt_templates?.[role]) {
+    return store.state.role_prompt_templates[role]
+  }
+  const builtIn = store.state?.built_in_roles?.[role]
+  if (builtIn?.default_prompt_template) {
+    return builtIn.default_prompt_template
+  }
+  return ''
+}
+
+function loadMemberTemplate(m: any): void {
+  const tpl = getMemberRoleTemplate(m.role || m.id)
+  if (!tpl) {
+    message.warning('未找到该角色的内置模版')
+    return
+  }
+  m.extra_prompt = tpl
+  message.success(`已为角色「${m.name || m.role || m.id}」载入内置模版`)
+}
 // 生效任务模型（项目绑定优先，回退全局）：审查模型与之同名即「自审自批」禁止
 const effTaskModel = computed(() => {
   if (pDraft.use_llm && pDraft.ll_model.trim()) return pDraft.ll_model.trim()
@@ -633,7 +714,7 @@ async function saveProject(): Promise<void> {
     })
     message.success(ui.projectDlg.original ? '已修改项目' : '已新建项目')
     ui.projectDlg = null
-    store.view = 'projects'
+    navigateTo('projects')
   } catch (e: any) { pDraft.err = e.message }
   void refresh(true)
 }
@@ -645,8 +726,8 @@ const tVisible = computed({
 })
 // 关闭时 ui.taskDlg 被置 null，computed 会立刻翻回非只读态，导致收起动画期间
 // 按钮/提示/标题闪变——打开时快照到 ref，动画期间保持最后状态
-const tReadonly = ref(false)
-const tTitle = ref('任务')
+const tReadonly = shallowRef(false)
+const tTitle = shallowRef('任务')
 const tDraft = reactive({
   id: '', idLocked: false, title: '', priority: 'P2',
   labels: '', assignee: '', description: '', err: '',
@@ -886,9 +967,9 @@ const scanVisible = computed({
 })
 const scanSources = ref<ScanSource[]>([])
 const scanChecked = ref<Record<string, boolean>>({})
-const scanning = ref(false)
-const importing = ref(false)
-const scanErr = ref('')
+const scanning = shallowRef(false)
+const importing = shallowRef(false)
+const scanErr = shallowRef('')
 
 const allScanSkills = computed(() => scanSources.value.flatMap(s => s.skills))
 const checkedPaths = computed(() =>
@@ -942,9 +1023,9 @@ const bVisible = computed({
   set: (v: boolean) => { ui.browserDlg = v },
 })
 const bStack = ref<DirListing | null>(null)
-const bManual = ref('')
-const bNewFolder = ref('')
-const bErr = ref('')
+const bManual = shallowRef('')
+const bNewFolder = shallowRef('')
+const bErr = shallowRef('')
 
 async function browseTo(path: string): Promise<void> {
   try {
@@ -1067,11 +1148,12 @@ async function newFolder(): Promise<void> {
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div style="display:flex; align-items:center; gap:6px;">
                   <NSwitch size="small" v-model:value="m.enabled" />
-                  <span style="font-weight:600; font-size:12px;">{{ getMemberRoleIcon(m.role || m.id) }} {{ m.name || m.id }}</span>
+                  <span style="font-weight:600; font-size:12px; display:inline-flex; align-items:center;">{{ getMemberRoleIcon(m.role || m.id) }} {{ m.name || m.id }}</span>
                   <NTag size="tiny" round type="info">{{ (m.role || m.id).toUpperCase() }}</NTag>
-                  <span class="hint" style="font-family:Consolas, monospace; font-size:11px">id: {{ m.id }}</span>
+                  <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">id: {{ m.id }}</NTag>
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
+                  <NButton size="tiny" secondary :loading="memberFetchingId === m.id" @click="fetchMemberModels(m)">获取模型列表</NButton>
                   <NButton size="tiny" quaternary type="error" @click="removeTeamMember(mIdx)">删除</NButton>
                 </div>
               </div>
@@ -1086,8 +1168,15 @@ async function newFolder(): Promise<void> {
                   <NSelect size="small" v-model:value="m.role" :options="roleSelectOptions" />
                 </div>
                 <div>
-                  <label style="font-size:11px">专属模型覆盖 (留空继承预设/全局)</label>
-                  <NInput size="small" v-model:value="m.ll_model" placeholder="如 deepseek-reasoner" />
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                    <label style="font-size:11px; margin:0">专属模型覆盖 (留空继承预设/全局)</label>
+                    <NButton size="tiny" quaternary type="primary" :loading="memberFetchingId === m.id" @click="fetchMemberModels(m)" style="font-size:10px; padding:0 2px">获取模型列表</NButton>
+                  </div>
+                  <NSelect size="small" v-model:value="m.ll_model"
+                           :options="availableTeamModelOptions"
+                           filterable tag clearable
+                           :placeholder="getMemberModelPlaceholder(m)"
+                           @update:value="(v: string | null) => { m.ll_model = v || '' }" />
                 </div>
                 <div>
                   <label style="font-size:11px">API Key 覆盖</label>
@@ -1095,6 +1184,15 @@ async function newFolder(): Promise<void> {
                           :placeholder="m.ll_key_masked ? `已配置(${m.ll_key_masked})` : '留空继承'"
                           @update:value="teamMemberKeyTouched[m.id] = true" />
                 </div>
+              </div>
+
+              <div v-if="m.enabled" style="margin-top:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                  <label style="font-size:11px; margin:0; color:var(--dim)">角色专属提示词覆盖 (选填)</label>
+                  <NButton size="tiny" quaternary type="primary" @click="loadMemberTemplate(m)" style="font-size:10px; padding:0 2px">📋 载入内置模版</NButton>
+                </div>
+                <NInput size="small" v-model:value="m.extra_prompt" type="textarea" :rows="2" :autosize="{ minRows: 2, maxRows: 6 }"
+                        placeholder="留空继承全局预设提示词；亦可载入内置模版或填入本项目特定规范" />
               </div>
 
               <div v-if="m.enabled && (m.role === 'qa' || m.id === 'qa')" style="margin-top:6px;">
@@ -1159,15 +1257,15 @@ async function newFolder(): Promise<void> {
                   :placeholder="reviewKeyPlaceholder" @update:value="reviewKeyTouched = true" /></div>
       </div>
       <div class="duo">
-        <div class="f1"><label>返工次数（审查不通过上限）</label>
-          <NInputNumber v-model:value="pDraft.review_rounds" :min="1" :max="10"
-                        placeholder="跟随全局" clearable /></div>
+        <div class="f1"><label>返工审查轮数上限（-1 表示不上限）</label>
+          <NInputNumber v-model:value="pDraft.review_rounds" :min="-1" :max="10"
+                        placeholder="留空跟随全局（输入 -1 不设上限）" clearable /></div>
         <div class="f1 btnrow" style="align-items:flex-end">
           <NButton size="small" :loading="rFetching" @click="fetchReviewModels" style="margin-bottom:2px">获取模型列表</NButton>
         </div>
       </div>
       <div class="hint" v-if="reviewModelConflict" style="color:#d03050">⚠ {{ reviewModelConflict }}</div>
-      <div class="hint" v-else>审查模型必须与任务模型不同；返工次数留空 = 跟随全局（当前 {{ store.state?.review_cfg?.max_review_rounds ?? 2 }} 次）。全局未配置审查模型时本项目审查不执行。</div>
+      <div class="hint" v-else>审查模型必须与任务模型不同；返工轮数留空 = 跟随全局（当前 {{ store.state?.review_cfg?.max_review_rounds === -1 ? '不上限' : (store.state?.review_cfg?.max_review_rounds ?? 2) + ' 次' }}）。输入 -1 表示不设上限持续返工。</div>
     </template>
     <label style="margin-top:12px">访问权限（人工审批模式）</label>
     <NSelect v-model:value="pDraft.perm_mode" :options="permOptions" />

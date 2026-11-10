@@ -54,7 +54,7 @@ def req(port: int, path: str, body: dict | None = None,
                 return resp.status, resp.headers, json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             return e.code, e.headers, json.loads(e.read().decode())
-        except ConnectionResetError as e:
+        except (ConnectionResetError, TimeoutError, OSError) as e:
             last_err = e
     raise last_err  # type: ignore[misc]
 
@@ -205,8 +205,9 @@ def main() -> int:
         assert code == 200 and body["ok"] is True, body
         code, _, _ = req(PORT, "/api/state", cookie=ck)
         assert code == 200, "不带 auth_password 键应保持原密码且不动会话"
-        assert "auth_password: new-pass" in cfg_file.read_text(encoding="utf-8"), \
-            "新密码应持久化到 config.yaml"
+        saved_cfg_text = cfg_file.read_text(encoding="utf-8")
+        assert "pbkdf2:sha256:" in saved_cfg_text, "新密码应以 PBKDF2 密文持久化到 config.yaml"
+        assert "new-pass" not in saved_cfg_text, "明文密码绝不应出现在 config.yaml"
         code, _, body = req(PORT, "/api/config", {"web": {"auth_password": ""}}, cookie=ck)
         assert code == 200 and body["ok"] is True, body
         code, _, body = req(PORT, "/api/auth")

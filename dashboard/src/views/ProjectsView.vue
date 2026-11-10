@@ -3,14 +3,14 @@
 // 卡片交互（启停/任务列表/拖拽/批量操作/归档查看）与看板页同款，此处不重复
 // 看板顶部的调度状态条与运行日志。
 import { NButton, NCard, NCheckbox, NEmpty, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, shallowRef } from 'vue'
 import { api, type ProjectT, type TaskT } from '../api'
 import { openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 
 // ---- 项目分页懒加载：翻到哪页渲染哪页（数据全量在 store，渲染按页切片） ----
 const PAGE_SIZE = 6
-const page = ref(1)
+const page = shallowRef(1)
 const projects = computed<ProjectT[]>(() => store.state?.projects ?? [])
 const total = computed(() => projects.value.length)
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
@@ -60,8 +60,8 @@ function waitingApproval(project: string, taskId: string): boolean {
 }
 
 // ---- 拖拽排序：行内 HTML5 DnD，与看板页同语义（同状态+优先级分组内生效） ----
-const dragId = ref<string | null>(null)
-const dropAt = ref<{ id: string; before: boolean } | null>(null)
+const dragId = shallowRef<string | null>(null)
+const dropAt = shallowRef<{ id: string; before: boolean } | null>(null)
 
 function onDragStart(e: DragEvent, t: TaskT): void {
   dragId.value = t.id
@@ -208,7 +208,7 @@ async function delProject(p: ProjectT): Promise<void> {
   })
 }
 
-const syncing = ref('')
+const syncing = shallowRef('')
 async function syncIssues(p: { name: string }): Promise<void> {
   syncing.value = p.name
   try {
@@ -219,7 +219,7 @@ async function syncIssues(p: { name: string }): Promise<void> {
   void import('../store').then(m => m.refresh(true))
 }
 
-const gitRefreshing = ref('')
+const gitRefreshing = shallowRef('')
 async function refreshGit(p: { name: string }): Promise<void> {
   gitRefreshing.value = p.name
   try {
@@ -233,7 +233,7 @@ async function refreshGit(p: { name: string }): Promise<void> {
 
 // ---- 批量删除任务（选择跨页保留） ----
 const checked = reactive<Record<string, string[]>>({})
-const batchDeleting = ref('')
+const batchDeleting = shallowRef('')
 const checkedIds = (name: string): string[] => checked[name] ?? []
 function isTaskChecked(name: string, id: string): boolean {
   return checkedIds(name).includes(id)
@@ -280,7 +280,7 @@ async function batchDel(p: ProjectT): Promise<void> {
   })
 }
 
-const clearing = ref('')
+const clearing = shallowRef('')
 async function clearTasks(p: ProjectT): Promise<void> {
   window.$dialog?.warning({
     title: '清空任务',
@@ -317,7 +317,7 @@ async function setStatus(p: ProjectT, t: TaskT, st: string): Promise<void> {
 const quick = reactive<Record<string, { title: string; pri: string }>>({})
 const q = (name: string) => quick[name] ?? (quick[name] = reactive({ title: '', pri: 'P2' }))
 const priOptions = ['P0', 'P1', 'P2', 'P3', 'P4'].map(v => ({ label: v, value: v }))
-const adding = ref(false)
+const adding = shallowRef(false)
 
 async function quickAdd(p: ProjectT): Promise<void> {
   const st = q(p.name)
@@ -390,13 +390,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
           </div>
         </template>
         <template #footer>
-          <div class="ops-row">
+          <div class="card-footer-ops">
             <NButton size="tiny" @click="openFolder(p)">打开文件夹</NButton>
             <NButton size="tiny" @click="openTaskNew(p.name)">新建任务</NButton>
             <NButton size="tiny" @click="openGuide(p.name)">AGENT.md</NButton>
             <NButton size="tiny" :loading="syncing === p.name" @click="syncIssues(p)">拉取 Issues</NButton>
             <NButton size="tiny" @click="openProjectEdit(p.name)">设置</NButton>
-            <NButton size="tiny" quaternary type="error" @click="delProject(p)">移除</NButton>
+            <NButton size="tiny" quaternary type="error" class="del-btn" @click="delProject(p)">移除</NButton>
           </div>
         </template>
 
@@ -536,7 +536,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .head { margin-bottom: 12px; }
 .hint { font-size: 12px; color: var(--faint); }
 .empty { color: var(--faint); font-size: 13px; text-align: center; padding: 40px 0; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 14px; }
 .phead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .git-refresh { padding: 0 6px; font-size: 13px; }
 /* 路径与任务统计同行两端对齐：路径过长自行折行，统计钉在右上角不随路径折行漂移 */
@@ -563,6 +563,8 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .tdesc summary { cursor: pointer; color: var(--dim); }
 .tdesc pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font: inherit; opacity: 0.85; }
 .ops-row { display: flex; gap: 6px; margin-top: 6px; }
+.card-footer-ops { display: flex; gap: 6px 8px; margin-top: 6px; flex-wrap: wrap; padding-right: 14px; align-items: center; }
+.card-footer-ops .del-btn { margin-right: 4px; }
 .arch { margin-top: 10px; font-size: 13px; }
 .arch summary { cursor: pointer; color: var(--dim); }
 .pager { display: flex; justify-content: center; margin-top: 18px; }

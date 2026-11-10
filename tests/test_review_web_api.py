@@ -76,6 +76,9 @@ def check_project_payload_roundtrip() -> None:
             "name": "p1", "path": root, "review_llm": None,
         }, original_name="p1")
         assert cleared.review_llm is None
+        # -1（不上限）合法保存
+        unlimited_p = state._project_payload({"name": "p1", "path": root, "review_max_rounds": -1}, original_name="p1")
+        assert unlimited_p.review_max_rounds == -1
         # rounds 越界拒绝
         try:
             state._project_payload({"name": "p1", "path": root, "review_max_rounds": 11})

@@ -195,10 +195,11 @@ def check_full_pipeline_and_no_auto_commit() -> None:
             assert g.rev_parse("HEAD") == c0, "主分支 HEAD 绝不能自动提交移动"
             assert (proj_dir / "server.py").is_file() and (proj_dir / "login.vue").is_file()
             done_stems = {p.stem for p in (td / "done").glob("*.md")}
+            assert "P1-login" in done_stems, "PM 拆分完成的原任务应已归档至 done/"
             assert "P1-后端登录接口" in done_stems
             assert "P1-前端登录页面" in done_stems
             assert "P1-登录全链路联调测试" in done_stems
-            assert parse_task_file(td / "P1-login.md").status == "cancelled"
+            assert parse_task_file(td / "done" / "P1-login.md").status == "done"
             print("ok: 剧本1（4角色单周期链式完成 + 强制Worktree隔离 + 主分支零自动commit）")
         finally:
             ex_mod.LLMClient = orig

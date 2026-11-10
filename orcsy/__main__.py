@@ -53,7 +53,8 @@ web:
   open_browser: true         # 启动时自动打开浏览器
   auth_password: ""          # 看板登录密码：非空则所有页面/API 需先登录；
                              # host 非回环（0.0.0.0 / 局域网 IP）时必须设置，否则拒绝启动；
-                             # 留空 = 关闭鉴权，仅限 127.0.0.1 本机使用（零打扰）
+                             # 留空 = 关闭鉴权，仅限 127.0.0.1 本机使用（零打扰）；
+                             # 密码以 PBKDF2 密文存储，忘记时运行 orcsy reset-password 快捷重置
 
 # tools:                     # Agent 工具开关（全局默认）：未列出的常规工具默认启用。
 #   browser: true            # 可一键按组开关：browser（10个浏览器工具）/ dev_server（3个后台服务工具）；
@@ -143,7 +144,7 @@ notify:
 
 # agent_profiles:              # 全局 Agent 角色预设池（多模型项目小组使用，可选）：
 #   pm_default:                #   预设 ID
-#     name: "架构师 PM"        #   显示名称
+#     name: "项目经理 PM"        #   显示名称
 #     role: pm                 #   角色类型：pm | backend | frontend | qa | custom
 #     llm:                     #   独立模型绑定（缺省字段继承全局 llm）
 #       model: claude-3-7-sonnet-20250219
@@ -701,6 +702,72 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reset_password(args: argparse.Namespace) -> int:
+    """重置看板访问密码为管理员输入的密码（PBKDF2-SHA256 密文写入 config.yaml）。"""
+    import getpass
+    from .auth import update_config_auth_password
+    from .config import load_config, validate_web_security
+
+    try:
+        cfg_path = find_config(args.config)
+    except FileNotFoundError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+
+    # 1. 判定新密码
+    if args.clear:
+        new_pwd = ""
+    elif args.password is not None:
+        new_pwd = str(args.password)
+    elif args.flag_password is not None:
+        new_pwd = str(args.flag_password)
+    else:
+        # 未传参数时：交互式隐藏输入
+        if sys.stdin.isatty():
+            print(f"目标配置文件: {cfg_path.resolve()}")
+            try:
+                p1 = getpass.getpass("请输入新的看板访问密码: ")
+                if not p1:
+                    print("提示: 输入为空。如需关闭密码鉴权，请执行 orcsy reset-password --clear；本次未做任何修改。")
+                    return 0
+                p2 = getpass.getpass("请再次输入以确认新密码: ")
+            except (KeyboardInterrupt, EOFError):
+                print("\n操作已取消。")
+                return 1
+            if p1 != p2:
+                print("错误: 两次输入的密码不一致，未做修改。", file=sys.stderr)
+                return 1
+            new_pwd = p1
+        else:
+            line = sys.stdin.readline().rstrip("\r\n")
+            new_pwd = line
+
+    # 2. 安全合规检查：若清空密码，检查当前 host 是否为非回环地址（非回环地址严禁免密）
+    try:
+        cur_cfg = load_config(cfg_path, require_api_key=False)
+        validate_web_security(cur_cfg.web.host, new_pwd, context="重置密码安全检查")
+    except ValueError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+
+    # 3. 密文写入 config.yaml
+    try:
+        update_config_auth_password(cfg_path, new_pwd)
+        load_config(cfg_path, require_api_key=False)
+    except Exception as e:
+        print(f"错误: 写入配置文件失败: {e}", file=sys.stderr)
+        return 1
+
+    if new_pwd:
+        print(f"[OK] 看板访问密码已成功重置为安全密文并保存至：\n     {cfg_path.resolve()}")
+        print("     存储方式: PBKDF2-HMAC-SHA256 (100,000 次加盐哈希，明文不入库)")
+        print("     请使用新设置的密码登录看板。")
+    else:
+        print(f"[OK] 已成功清除看板访问密码（配置文件：{cfg_path.resolve()}）。")
+        print("     看板已切换回本机免密访问模式。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -749,7 +816,21 @@ def main(argv: list[str] | None = None) -> int:
                        help=argparse.SUPPRESS)  # 安装器专用：写自启注册表后退出
     p_web.set_defaults(func=cmd_web)
 
+    p_pwd = sub.add_parser("reset-password", aliases=["passwd"],
+                           help="重置看板访问密码为管理员输入的密码（密文存储至 config.yaml）")
+    p_pwd.add_argument("password", nargs="?", default=None,
+                       help="新密码（未提供时进入交互式隐藏输入）")
+    p_pwd.add_argument("--password", dest="flag_password", default=None,
+                       help="新密码（命令行参数形式，与直接传参等价）")
+    p_pwd.add_argument("--clear", action="store_true",
+                       help="清除访问密码（关闭登录鉴权，切回本地免密模式）")
+    p_pwd.add_argument("--config", default=None, help="配置文件路径（默认自动发现）")
+    p_pwd.set_defaults(func=cmd_reset_password)
+
     args = parser.parse_args(argv)
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 0
     return args.func(args)
 
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NCard, NCheckbox, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
-import { computed, reactive, ref } from 'vue'
-import { openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
+import { computed, reactive, ref, shallowRef } from 'vue'
+import { navigateTo, openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { parseLogEntries, relTime } from '../utils'
 import type { ProjectT, TaskT } from '../api'
@@ -58,8 +58,8 @@ const sorted = (p: ProjectT) =>
   })
 
 // ---- 拖拽排序：行内 HTML5 DnD，落点画指示线，drop 后整项目顺序落盘 ----
-const dragId = ref<string | null>(null)
-const dropAt = ref<{ id: string; before: boolean } | null>(null)
+const dragId = shallowRef<string | null>(null)
+const dropAt = shallowRef<{ id: string; before: boolean } | null>(null)
 
 function onDragStart(e: DragEvent, t: TaskT): void {
   dragId.value = t.id
@@ -214,7 +214,7 @@ async function delProject(p: ProjectT): Promise<void> {
 }
 
 // ---- 拉取 Issues：项目绑定远程仓库后，把 open Issue 导入任务队列 ----
-const syncing = ref('')
+const syncing = shallowRef('')
 async function syncIssues(p: { name: string }): Promise<void> {
   syncing.value = p.name
   try {
@@ -226,7 +226,7 @@ async function syncIssues(p: { name: string }): Promise<void> {
 }
 
 // ---- 刷新仓库信息：手动 init git 后点这里立即重取 git 状态 ----
-const gitRefreshing = ref('')
+const gitRefreshing = shallowRef('')
 async function refreshGit(p: { name: string }): Promise<void> {
   gitRefreshing.value = p.name
   try {
@@ -240,7 +240,7 @@ async function refreshGit(p: { name: string }): Promise<void> {
 
 // ---- 批量删除任务：勾选行 → 批量操作条 → 确认删除；选择跨页保留 ----
 const checked = reactive<Record<string, string[]>>({})
-const batchDeleting = ref('')
+const batchDeleting = shallowRef('')
 const checkedIds = (name: string): string[] => checked[name] ?? []
 function isTaskChecked(name: string, id: string): boolean {
   return checkedIds(name).includes(id)
@@ -288,7 +288,7 @@ async function batchDel(p: ProjectT): Promise<void> {
 }
 
 // ---- 一键清空：删除全部活动任务（不含已归档） ----
-const clearing = ref('')
+const clearing = shallowRef('')
 async function clearTasks(p: ProjectT): Promise<void> {
   window.$dialog?.warning({
     title: '清空任务',
@@ -404,13 +404,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
           </div>
         </template>
         <template #footer>
-          <div class="ops-row">
+          <div class="card-footer-ops">
             <NButton size="tiny" @click="openFolder(p)">打开文件夹</NButton>
             <NButton size="tiny" @click="openTaskNew(p.name)">新建任务</NButton>
             <NButton size="tiny" @click="openGuide(p.name)">AGENT.md</NButton>
             <NButton size="tiny" :loading="syncing === p.name" @click="syncIssues(p)">拉取 Issues</NButton>
             <NButton size="tiny" @click="openProjectEdit(p.name)">设置</NButton>
-            <NButton size="tiny" quaternary type="error" @click="delProject(p)">移除</NButton>
+            <NButton size="tiny" quaternary type="error" class="del-btn" @click="delProject(p)">移除</NButton>
           </div>
         </template>
 
@@ -543,7 +543,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
       </div>
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center;">
         <span class="hint">全量项目与任务请在顶部「项目」页查看与管理</span>
-        <NButton size="small" secondary @click="store.view = 'projects'">前往「项目」页 →</NButton>
+        <NButton size="small" secondary @click="navigateTo('projects')">前往「项目」页 →</NButton>
       </div>
     </div>
 
@@ -579,7 +579,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
   margin-bottom: 16px;
 }
 .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 14px; }
 .phead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .git-refresh { padding: 0 6px; font-size: 13px; }
 /* 路径与任务统计同行两端对齐：路径过长自行折行，统计钉在右上角不随路径折行漂移 */
@@ -607,6 +607,8 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .tdesc summary { cursor: pointer; color: var(--dim); }
 .tdesc pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font: inherit; opacity: 0.85; }
 .ops-row { display: flex; gap: 6px; margin-top: 6px; }
+.card-footer-ops { display: flex; gap: 6px 8px; margin-top: 6px; flex-wrap: wrap; padding-right: 14px; align-items: center; }
+.card-footer-ops .del-btn { margin-right: 4px; }
 .empty { color: var(--faint); font-size: 13px; text-align: center; padding: 18px 0; }
 .arch { margin-top: 10px; font-size: 13px; }
 .arch summary { cursor: pointer; color: var(--dim); }

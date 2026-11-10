@@ -54,3 +54,11 @@ def default_guide(project_name: str, project_path: Path | None = None,
         if value:
             text = text.replace(placeholder, f"{placeholder} {value}", 1)
     return text
+
+
+def load_role_template(role: str) -> str:
+    """读取指定角色的内置职责与规范模板（roles/<role>.md）。"""
+    try:
+        return load_text(f"roles/{role}.md")
+    except RuntimeError:
+        return ""

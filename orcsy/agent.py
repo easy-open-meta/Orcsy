@@ -667,16 +667,16 @@ class ProjectAgent:
         max_rounds = resolve_review_rounds(self.review_cfg, self.project)
         new_round = increment_task_file_review_round(task.path)
         self._write_review_section(task, review)
-        append_progress(task.path,
-                        f"⚠ 独立审查不通过（第 {new_round}/{max_rounds} 轮）：{review.summary}")
-        if new_round < max_rounds:
+        if max_rounds == -1 or new_round < max_rounds:
             # 返工：回 open 重新入队（requeue_seq 自动插队），任务正文已含
             # 审查意见节，_build_task_prompt 会把它带给下一轮执行 Agent
+            round_str = f"第 {new_round} 轮（不设上限）" if max_rounds == -1 else f"第 {new_round}/{max_rounds} 轮"
+            append_progress(task.path,
+                            f"⚠ 独立审查不通过（{round_str}）：{review.summary}")
             set_task_file_status(task.path, "open")
-            self.log.info("任务 %s 审查不通过（%d/%d），转返工：%s",
-                          task.id, new_round, max_rounds, review.summary[:80])
+            self.log.info("任务 %s 审查不通过（%s），转返工：%s",
+                          task.id, round_str, review.summary[:80])
             return
-        set_task_file_status(task.path, "blocked")
         append_progress(task.path,
                         f"⛔ 连续 {new_round} 次审查不通过，转受阻等人工裁决；"
                         f"成果保留在 arranger/{self.project.name} 分支")
@@ -692,13 +692,14 @@ class ProjectAgent:
         max_rounds = resolve_review_rounds(self.review_cfg, self.project)
         new_round = increment_task_file_review_round(task.path)
         self._write_review_section(task, review)
-        if new_round < max_rounds:
+        if max_rounds == -1 or new_round < max_rounds:
             set_task_file_review_pending(task.path, True)
+            round_str = f"第 {new_round} 次（不设上限）" if max_rounds == -1 else f"第 {new_round}/{max_rounds} 次"
             append_progress(task.path,
-                            f"⚠ 审查失败（第 {new_round}/{max_rounds} 次）：{review.error}；"
+                            f"⚠ 审查失败（{round_str}）：{review.error}；"
                             "任务保持待审，下轮自动补审")
-            self.log.warning("任务 %s 审查失败（%d/%d），保持 pending：%s",
-                             task.id, new_round, max_rounds, review.error[:80])
+            self.log.warning("任务 %s 审查失败（%s），保持 pending：%s",
+                             task.id, round_str, review.error[:80])
             return
         set_task_file_review_pending(task.path, False)
         set_task_file_status(task.path, "blocked")

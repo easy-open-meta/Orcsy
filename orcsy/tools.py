@@ -1229,13 +1229,12 @@ def tool_create_tasks(ctx: ToolContext, args: dict) -> str:
     lines = [f"已创建 {len(created)} 个子任务（status=open，按优先级与手动序领取）："
              + "、".join(created)]
     if bool(args.get("close_current", True)):
-        set_task_file_status(Path(task.path), "cancelled")
+        set_task_file_status(Path(task.path), "done")
         append_progress(Path(task.path),
-                        f"✂ 已拆分为 {len(created)} 个子任务：{'、'.join(created)}"
-                        "（原任务关闭，由子任务接力）")
-        lines.append("当前任务已标记为已取消（因拆分关闭）。"
-                     "请立即 finish(action=split, summary=一句话拆分说明)，"
-                     "不要再继续当前任务的实现。")
+                        f"✂ 已成功拆分为 {len(created)} 个子任务：{'、'.join(created)}"
+                        "（原任务拆分完成并归档，由子任务接力推进）")
+        lines.append(f"已创建 {len(created)} 个子任务并指派。原任务已圆满完成拆分，"
+                     "请立即调用 finish(action=\"split\", summary=一句话拆分总结) 进行归档交接。")
     else:
         lines.append("当前任务保持原状态。")
     log.info("create_tasks：%s（当前任务 %s）", created, task.id)
@@ -1676,7 +1675,7 @@ TOOLS: dict[str, tuple[str, dict, object]] = {
                     "description": "1~10 个子任务，按建议执行顺序排列",
                 },
                 "close_current": {"type": "boolean",
-                                  "description": "拆分后关闭当前任务（默认 true）"},
+                                  "description": "拆分后完成并归档当前任务（默认 true）"},
             },
             "required": ["tasks"],
         },

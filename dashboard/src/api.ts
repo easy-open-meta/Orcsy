@@ -13,6 +13,7 @@ export interface BuiltInRoleInfoT {
   produces_code: boolean
   default_max_turns: number
   default_tools: Record<string, boolean>
+  default_prompt_template?: string
 }
 
 export interface AgentProfileT {
@@ -131,7 +132,7 @@ export interface ProjectT {
     api_key_masked?: string
     api_key_configured?: boolean
   }) | null
-  /** 项目级返工次数覆盖（1~10）；null = 跟随全局 review_cfg.max_review_rounds */
+  /** 项目级返工次数覆盖（1~10，-1 为不上限）；null = 跟随全局 review_cfg.max_review_rounds */
   review_max_rounds?: number | null
   /** 项目级调试主机白名单追加；null = 仅用全局 allowed_hosts */
   debug_allowed_hosts?: string[] | null
@@ -353,6 +354,8 @@ export interface AppStateT {
   agent_profiles?: Record<string, AgentProfileT>
   /** 内置角色元数据 */
   built_in_roles?: Record<string, BuiltInRoleInfoT>
+  /** 各角色内置标准职责规范提示词模版 (类似 AGENT.md) */
+  role_prompt_templates?: Record<string, string>
   /** Agent 子进程自定义环境变量（代理 / 国内镜像，注入 run_command） */
   env_cfg: Record<string, string>
   /** 镜像源管理：类别表（kind=proxy 的类别参与「应用最快源」写 env.vars） */

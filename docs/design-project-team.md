@@ -170,7 +170,7 @@ created_by: pm                  # 创建者标识（user / issue / pm / qa）
 # config.yaml 新增全局 Agent 角色预设池（可选，未配置时单兵模式照常工作）
 agent_profiles:
   pm_default:
-    name: "架构师 PM"
+    name: "项目经理 PM"
     role: pm                         # pm | backend | frontend | qa | custom
     llm:                             # 独立模型绑定（缺省字段继承全局 llm）
       provider: anthropic

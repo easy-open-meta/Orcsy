@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NCollapse, NCollapseItem, NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
 import { cmpVersion, fmtTokens } from '../utils'
@@ -11,7 +11,7 @@ const message = () => window.$message
 // key 与 settingsSection 联动（跨视图跳转定位，如看板「设置」按钮直达对应分区）
 const SECTIONS = [
   { key: 'llm', label: '🤖 大模型接入' },
-  { key: 'profiles', label: '👥 Agent 角色预设池' },
+  { key: 'profiles', label: '👥 多模型项目小组 (Team)' },
   { key: 'sched', label: '⏱ 调度与看板' },
   { key: 'notify', label: '🔔 提醒设置' },
   { key: 'review', label: '🔍 任务审查（Review Agent）' },
@@ -45,20 +45,20 @@ const reviewDraft = reactive({
   max_turns: 10, max_review_rounds: 2,
   allow_test_commands: true, squash_merge: true,
 })
-const reviewKeyMasked = ref('')
-const reviewKeyConfigured = ref(false)
-const reviewKeyTouched = ref(false)
-const reviewSaving = ref(false)
+const reviewKeyMasked = shallowRef('')
+const reviewKeyConfigured = shallowRef(false)
+const reviewKeyTouched = shallowRef(false)
+const reviewSaving = shallowRef(false)
 const reviewModelOptions = ref<ModelInfo[]>([])
-const reviewFetching = ref(false)
+const reviewFetching = shallowRef(false)
 // ---- 密钥/令牌三态（H2）：后端只回掩码，不回填明文。未触碰的字段保存时不带
 //      对应的键（后端保持原值）；触碰过（含又清空）才上报，空串 = 显式清除 ----
-const apiKeyMasked = ref('')
-const apiKeyConfigured = ref(false)
-const apiKeyTouched = ref(false)
-const updTokenMasked = ref('')
-const updTokenConfigured = ref(false)
-const updTokenTouched = ref(false)
+const apiKeyMasked = shallowRef('')
+const apiKeyConfigured = shallowRef(false)
+const apiKeyTouched = shallowRef(false)
+const updTokenMasked = shallowRef('')
+const updTokenConfigured = shallowRef(false)
+const updTokenTouched = shallowRef(false)
 // ---- 软件更新配置草稿 ----
 const updDraft = reactive({ repo: '', token: '', auto_check: true })
 // 掩码占位跟随轮询刷新（保存新密钥/令牌后不用刷新页面就能看到新掩码；
@@ -104,9 +104,9 @@ const devServerGroupEnabled = computed({
 })
 
 // ---- 三级页面导航与分组控制（Agent 工具与命令白名单） ----
-const toolsTab = ref<'tools' | 'commands' | 'debug' | 'perms'>('tools')
-const cmdSearch = ref('')
-const toolSearch = ref('')
+const toolsTab = shallowRef<'tools' | 'commands' | 'debug' | 'perms'>('tools')
+const cmdSearch = shallowRef('')
+const toolSearch = shallowRef('')
 
 const defaultToolCategories = [
   {
@@ -324,10 +324,10 @@ const debugActiveCount = computed(() => {
 const commandsCatalog = ref<string[]>([])
 const commandsDraft = reactive<Record<string, boolean>>({})
 // ---- Agent 子进程环境变量草稿（多行 KEY=VALUE，代理/国内镜像） ----
-const envDraft = ref('')
+const envDraft = shallowRef('')
 // PATH 自动修复开关：任务启动时把扫描到的缺失工具目录持久写入用户 PATH
-const pathAutofix = ref(false)
-const toolsSaving = ref(false)
+const pathAutofix = shallowRef(false)
+const toolsSaving = shallowRef(false)
 // ---- 本地调试工具与浏览器配置草稿 ----
 const localDebugDraft = reactive({
   browser: 'auto' as 'auto' | 'chrome' | 'edge',
@@ -339,7 +339,7 @@ const localDebugDraft = reactive({
   max_services: 3,
   artifacts_retention_days: 7,
 })
-const testingBrowser = ref(false)
+const testingBrowser = shallowRef(false)
 async function onTestBrowser(): Promise<void> {
   testingBrowser.value = true
   try {
@@ -366,24 +366,24 @@ const permOptions = [
 ]
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
 // ---- Git 提交与合并开关（默认关闭：改动直接保留在工作区） ----
-const gitCommitAndMergeDraft = ref(false)
+const gitCommitAndMergeDraft = shallowRef(false)
 // ---- 任务结束提醒草稿（完成/受阻时提示音 + 系统通知；cancelled 不提醒） ----
 const notifyDraft = reactive({ sound: true, system: true })
-const notifySaving = ref(false)
+const notifySaving = shallowRef(false)
 // ---- 镜像源管理与测速选源（草稿态：自定义源可增删、内置/自定义皆可禁用；
 //      测速结果是服务端数据，随轮询即时刷新——Agent 自测后看板也能看到） ----
-const mirrorTesting = ref(false)
-const mirrorTestingCat = ref<string | null>(null)
-const mirrorApplying = ref(false)
-const mirrorsSaving = ref(false)
+const mirrorTesting = shallowRef(false)
+const mirrorTestingCat = shallowRef<string | null>(null)
+const mirrorApplying = shallowRef(false)
+const mirrorsSaving = shallowRef(false)
 const mirrorCustom = ref<Record<string, string[]>>({})   // 草稿：类别 → 用户添加 URL
 const mirrorDisabled = ref<string[]>([])                 // 草稿：禁用的源 URL
 const mirrorSpeeds = ref<Record<string, number | null>>({})
-const mirrorTestedAt = ref('')
+const mirrorTestedAt = shallowRef('')
 // 后端存 ISO 形态（2026-11-04T03:11:27），展示转成标准时间（T 换空格）
 const mirrorTestedAtText = computed(() => mirrorTestedAt.value.replace('T', ' '))
-const addCat = ref('goproxy')
-const addUrl = ref('')
+const addCat = shallowRef('goproxy')
+const addUrl = shallowRef('')
 let inited = false
 watch(() => store.state, (s) => {
   if (!s || inited) return
@@ -465,9 +465,9 @@ watch(() => store.state, (s) => {
 // ---- 全局 Agent 角色预设池草稿 ----
 const profilesDraft = ref<Record<string, any>>({})
 const profilesTouchedKeys = reactive<Record<string, boolean>>({})
-const profilesSaving = ref(false)
-const editingProfileId = ref<string | null>(null)
-const profileTestingId = ref<string | null>(null)
+const profilesSaving = shallowRef(false)
+const editingProfileId = shallowRef<string | null>(null)
+const profileTestingId = shallowRef<string | null>(null)
 
 const roleSelectOptions = [
   { label: '👑 项目经理 (PM)', value: 'pm' },
@@ -482,34 +482,55 @@ function getRoleIcon(role: string): string {
   return map[role] || '🤖'
 }
 
+function getRoleTemplate(role: string): string {
+  if (store.state?.role_prompt_templates?.[role]) {
+    return store.state.role_prompt_templates[role]
+  }
+  const builtIn = store.state?.built_in_roles?.[role]
+  if (builtIn?.default_prompt_template) {
+    return builtIn.default_prompt_template
+  }
+  return ''
+}
+
+function loadRolePromptTemplate(prof: any): void {
+  const tpl = getRoleTemplate(prof.role)
+  if (!tpl) {
+    message()?.('未找到该角色的内置模版', 'warning')
+    return
+  }
+  prof.extra_prompt = tpl
+  message()?.(`已为「${prof.name || prof.role}」载入内置职责规范模版`, 'success')
+}
+
 function syncProfilesDraft(profs: Record<string, any> | undefined): void {
   const defaults: Record<string, any> = {
     pm_default: {
-      id: 'pm_default', name: '架构师 PM', role: 'pm',
+      id: 'pm_default', name: '项目经理 PM', role: 'pm',
       description: '负责需求分析、子任务拆分与前后端依赖编排',
       max_turns: 20, produces_code: false, allow_test_scripts: false,
-      extra_prompt: '拆分子任务时写清接口契约与验收命令，使用 depends_on_refs 编排依赖。',
+      extra_prompt: getRoleTemplate('pm'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
     },
     backend_default: {
       id: 'backend_default', name: '后端开发', role: 'backend',
       description: '负责后端服务架构、接口路由与业务逻辑实现',
       max_turns: 40, produces_code: true, allow_test_scripts: false,
-      extra_prompt: '',
+      extra_prompt: getRoleTemplate('backend'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
     },
     frontend_default: {
       id: 'frontend_default', name: '前端开发', role: 'frontend',
       description: '负责前端页面组件、状态管理与接口联调',
       max_turns: 40, produces_code: true, allow_test_scripts: false,
-      extra_prompt: '',
+      extra_prompt: getRoleTemplate('frontend'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
     },
     qa_default: {
       id: 'qa_default', name: '测试工程师', role: 'qa',
       description: '负责前后端联调测试、新建 Bug 任务与回归验收',
       max_turns: 35, produces_code: false, allow_test_scripts: false,
-      extra_prompt: '',
+      extra_prompt: getRoleTemplate('qa'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
     },
   }
@@ -558,7 +579,7 @@ function addProfile(): void {
     max_turns: 40,
     produces_code: true,
     allow_test_scripts: false,
-    extra_prompt: '',
+    extra_prompt: getRoleTemplate('custom'),
     llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
   }
   editingProfileId.value = id
@@ -569,6 +590,33 @@ function removeProfile(id: string): void {
   delete profilesTouchedKeys[id]
   if (editingProfileId.value === id) {
     editingProfileId.value = Object.keys(profilesDraft.value)[0] || null
+  }
+}
+
+const profileFetchingId = shallowRef<string | null>(null)
+
+async function fetchProfileModelList(pid: string): Promise<void> {
+  const prof = profilesDraft.value[pid]
+  if (!prof) return
+  const eff = {
+    provider: prof.llm.provider || draft.provider || store.state?.llm.provider || 'openai',
+    base_url: (prof.llm.base_url || '').trim() || draft.base_url.trim() || store.state?.llm.base_url || '',
+    api_key: (prof.llm.api_key || '').trim() || draft.api_key.trim(),
+    model: (prof.llm.model || '').trim() || draft.model.trim() || store.state?.llm.model || '',
+  }
+  profileFetchingId.value = pid
+  try {
+    const r = await api.models(eff)
+    for (const m of r.models) {
+      if (m.id && !modelSpecs.value.some(existing => existing.id === m.id)) {
+        modelSpecs.value.push(m)
+      }
+    }
+    message()?.(`[${prof.name}] 已获取 ${r.models.length} 个模型，可在下拉框中选择`, 'success')
+  } catch (e: any) {
+    message()?.(`[${prof.name}] 获取模型列表失败：${e.message}`, 'error')
+  } finally {
+    profileFetchingId.value = null
   }
 }
 
@@ -735,9 +783,9 @@ async function saveSched(): Promise<void> {
 }
 
 // ---- 看板登录密码（web.auth_password）：留空保持不变 / 输入即改 / 清除即关鉴权 ----
-const authPwd = ref('')
-const authPwdTouched = ref(false)
-const authPwdClear = ref(false)
+const authPwd = shallowRef('')
+const authPwdTouched = shallowRef(false)
+const authPwdClear = shallowRef(false)
 function onPwdInput(v: string): void {
   authPwd.value = v
   authPwdTouched.value = v.length > 0
@@ -941,7 +989,7 @@ watch(() => store.state?.mirror_speeds, (sp) => {
 })
 
 // ---- 软件更新：保存更新源 / 手动检查 / 手动导入本地安装包 ----
-const updSaving = ref(false)
+const updSaving = shallowRef(false)
 async function saveUpdate(): Promise<void> {
   updSaving.value = true
   try {
@@ -958,7 +1006,7 @@ async function saveUpdate(): Promise<void> {
   finally { updSaving.value = false }
 }
 
-const updChecking = ref(false)
+const updChecking = shallowRef(false)
 async function checkUpdateNow(): Promise<void> {
   updChecking.value = true
   try {
@@ -970,8 +1018,8 @@ async function checkUpdateNow(): Promise<void> {
 }
 
 // ---- 手动导入本地安装包：选 zip → 版本对照（同/异版本均允许） → 零 UAC 静默安装 ----
-const localPkg = ref('')
-const pkgInstalling = ref(false)
+const localPkg = shallowRef('')
+const pkgInstalling = shallowRef(false)
 function pickPackage(): void {
   openDirBrowser('', (p) => { localPkg.value = p }, 'file')
 }
@@ -1016,13 +1064,31 @@ function installPackage(): void {
 
 
 // ---- 模型列表与规格自动填充 ----
-const fetching = ref(false)
-const testing = ref(false)
+const fetching = shallowRef(false)
+const testing = shallowRef(false)
 const modelSpecs = ref<ModelInfo[]>([])
 // label 必须与 value 一致：naive 选中后按 label 回填输入框，带标注的 label
 // 会被当成模型名存进配置（曾导致「step-5-preview（977K）」404）
 const modelOptions = computed(() =>
   modelSpecs.value.map(m => ({ label: m.id, value: m.id })))
+
+// 全局预设池各角色可用模型选项（仅动态聚合实际配置与在线拉取的真实模型，不硬编码任何预设）
+const profileModelOptions = computed(() => {
+  const set = new Set<string>()
+  if (draft.model?.trim()) set.add(draft.model.trim())
+  if (store.state?.llm?.model) set.add(store.state.llm.model)
+  for (const m of modelSpecs.value) {
+    if (m.id) set.add(m.id)
+  }
+  if (reviewDraft.model?.trim()) set.add(reviewDraft.model.trim())
+  for (const m of reviewModelOptions.value) {
+    if (m.id) set.add(m.id)
+  }
+  for (const p of Object.values(profilesDraft.value || {})) {
+    if (p.llm?.model?.trim()) set.add(p.llm.model.trim())
+  }
+  return Array.from(set).map(id => ({ label: id, value: id }))
+})
 // 选中模型的规格摘要（厂商风格单位显示，如「上下文 1M · 最大输出 32K」）
 const selectedSpec = computed(() =>
   modelSpecs.value.find(m => m.id.toLowerCase() === draft.model.trim().toLowerCase()))
@@ -1077,6 +1143,9 @@ const providerOptions = [
         <NCollapse :expanded-names="activeSection" :accordion="true" @update:expanded-names="onSectionChange">
           <NCollapseItem name="llm" :title="'🤖 大模型接入'">
             <div class="menu-desc" v-if="activeSection === 'llm'">OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。</div>
+          </NCollapseItem>
+          <NCollapseItem name="profiles" :title="'👥 多模型项目小组 (Team)'">
+            <div class="menu-desc" v-if="activeSection === 'profiles'">配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。</div>
           </NCollapseItem>
           <NCollapseItem name="sched" :title="'⏱ 调度与看板'">
             <div class="menu-desc" v-if="activeSection === 'sched'">扫描间隔、并行数保存后立即生效；看板端口下次启动生效。</div>
@@ -1148,7 +1217,17 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'profiles'">
-          <NCard title="👥 Agent 角色预设池（多模型项目小组使用）" size="small" class="scard">
+          <NCard title="👥 多模型 Agent 项目小组与角色预设池 (Team Profiles)" size="small" class="scard">
+            <div class="team-banner" style="background: rgba(91, 140, 255, 0.08); border: 1px solid rgba(91, 140, 255, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text);">
+              <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;">💡 多模型 Agent 项目小组模式 (Team) 配置说明</div>
+              <div>
+                系统采用<b>「全局角色预设池 + 项目小队自由进驻」</b>的双层架构：
+                <ul style="margin: 4px 0 0 16px; padding: 0;">
+                  <li><b>全局层（此处）</b>：统一配置 <b>项目经理 (PM)</b>、<b>后端工程师</b>、<b>前端工程师</b>、<b>测试工程师 (QA)</b> 各自绑定的专属大模型（如 DeepSeek-R1、Claude 3.7、GPT-4o）与独立 API 密钥，一次配置后全系统共享；</li>
+                  <li><b>项目层进驻</b>：每个项目可独立决定是否启用小组模式。在「项目」页或「看板」卡片点击<b>「设置」→「👥 多模型 Agent 项目小组模式 (Team)」</b>即可一键勾选启用小队进驻并自由调整成员名单。</li>
+                </ul>
+              </div>
+            </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
               <span class="hint">配置不同专业职能角色的专属大模型与能力边界，进驻任意项目时可自由选用或局部微调。</span>
               <NButton size="small" type="primary" secondary @click="addProfile">+ 新建角色预设</NButton>
@@ -1157,15 +1236,16 @@ const providerOptions = [
             <div class="profiles-container">
               <div v-for="(prof, pid) in profilesDraft" :key="pid" class="group-card profile-card" :class="{ 'active-card': editingProfileId === pid }">
                 <div class="group-header" style="cursor: pointer" @click="editingProfileId = editingProfileId === pid ? null : pid">
-                  <div class="group-title-wrap">
+                  <div class="group-title-wrap" style="display:flex; align-items:center; gap:6px;">
                     <span class="group-icon">{{ getRoleIcon(prof.role) }}</span>
                     <span class="group-title">{{ prof.name }}</span>
                     <NTag size="tiny" round type="info">{{ prof.role.toUpperCase() }}</NTag>
-                    <span class="hint" style="font-family:Consolas, monospace; font-size:11.5px">ID: {{ pid }}</span>
-                    <span class="hint" v-if="prof.llm?.model">· 模型: {{ prof.llm.model }}</span>
-                    <span class="hint" v-else>· 继承全局模型</span>
+                    <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">ID: {{ pid }}</NTag>
+                    <span class="hint" v-if="prof.llm?.model" style="display:inline-flex; align-items:center;">· 模型: {{ prof.llm.model }}</span>
+                    <span class="hint" v-else style="display:inline-flex; align-items:center;">· 继承全局模型</span>
                   </div>
                   <div class="group-ops" @click.stop>
+                    <NButton size="tiny" secondary :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)">获取模型列表</NButton>
                     <NButton size="tiny" secondary :loading="profileTestingId === pid" @click="testProfileModel(pid)">测试连接</NButton>
                     <NButton size="tiny" quaternary type="error" @click="removeProfile(pid)">删除</NButton>
                     <span style="font-size: 12px; color: var(--dim)">{{ editingProfileId === pid ? '▲ 收起' : '▼ 编辑' }}</span>
@@ -1198,8 +1278,19 @@ const providerOptions = [
                       ]" />
                     </div>
                     <div class="f1">
-                      <label>模型名 model（留空继承全局）</label>
-                      <NInput v-model:value="prof.llm.model" placeholder="如 deepseek-chat / o3-mini" />
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <label style="margin:0">模型名 model（留空继承全局）</label>
+                        <NButton size="tiny" quaternary type="primary" :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)" style="font-size:11px; padding:0 4px">获取模型列表</NButton>
+                      </div>
+                      <NSelect
+                        v-model:value="prof.llm.model"
+                        :options="profileModelOptions"
+                        filterable
+                        tag
+                        clearable
+                        :placeholder="'留空继承全局（当前 ' + (draft.model || store.state?.llm?.model || '-') + '）'"
+                        @update:value="(v: string | null) => { prof.llm.model = v || '' }"
+                      />
                     </div>
                     <div class="f14">
                       <label>接口 base_url（留空继承全局）</label>
@@ -1228,9 +1319,12 @@ const providerOptions = [
                   </div>
 
                   <div style="margin-top: 8px;">
-                    <label style="font-size: 12px; color: var(--dim); display: block; margin-bottom: 4px;">角色专属补充提示词（注入该角色系统提示词）</label>
-                    <NInput v-model:value="prof.extra_prompt" type="textarea" :rows="2"
-                            placeholder="如：要求使用 pytest 编写单测；涉及 API 时返回清晰的 JSON Schema 说明..." />
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                      <label style="font-size: 12px; color: var(--dim); margin: 0;">角色专属补充提示词（注入该角色系统提示词）</label>
+                      <NButton size="tiny" quaternary type="primary" @click="loadRolePromptTemplate(prof)" style="font-size: 11.5px; padding: 0 4px;">📋 载入内置角色模版（类似 AGENT.md）</NButton>
+                    </div>
+                    <NInput v-model:value="prof.extra_prompt" type="textarea" :rows="4" :autosize="{ minRows: 3, maxRows: 14 }"
+                            placeholder="如：工作流与协作规范、测试要求、编码风格与交付验收标准..." />
                   </div>
                 </div>
               </div>
@@ -1318,10 +1412,12 @@ const providerOptions = [
                     @update:value="reviewKeyTouched = true" /></div>
         </div>
         <div class="frow">
-          <div class="f1"><label>审查轮数上限</label>
-            <NInputNumber v-model:value="reviewDraft.max_turns" :min="1" :max="100" /></div>
-          <div class="f1"><label>返工次数（全局默认，项目可覆盖）</label>
-            <NInputNumber v-model:value="reviewDraft.max_review_rounds" :min="1" :max="10" /></div>
+          <div class="f1"><label>单次审查轮数上限（max_turns）</label>
+            <NInputNumber v-model:value="reviewDraft.max_turns" :min="-1" :max="100" placeholder="-1 为不限" />
+            <div class="hint" style="margin-top:2px">单次审查工具交互轮次上限（-1 为不限，默认 10）</div></div>
+          <div class="f1"><label>返工审查轮数上限（全局默认，-1 为不上限）</label>
+            <NInputNumber v-model:value="reviewDraft.max_review_rounds" :min="-1" :max="10" placeholder="-1 为不限" />
+            <div class="hint" style="margin-top:2px">不通过累计达到上限转受阻（-1 表示不上限持续返工）</div></div>
         </div>
         <label class="checkline stack">
           <NSwitch v-model:value="reviewDraft.allow_test_commands" />

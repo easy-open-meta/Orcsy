@@ -580,7 +580,17 @@ class LLMClient:
                                fn.get("name", ""), fn.get("arguments") or "{}"))
         if not content and not tool_calls and not reasoning:
             raise LLMError("大模型返回了空内容")
-        return {"role": "assistant", "content": content or None}, tool_calls, reasoning
+        assistant_dict: dict = {"role": "assistant", "content": content or None}
+        if tool_calls:
+            assistant_dict["tool_calls"] = [
+                {
+                    "id": cid,
+                    "type": "function",
+                    "function": {"name": name, "arguments": args},
+                }
+                for cid, name, args in tool_calls
+            ]
+        return assistant_dict, tool_calls, reasoning
 
     # ---- Anthropic 协议 ----
 
@@ -656,7 +666,17 @@ class LLMClient:
         ]
         if not text and not tool_calls and not reasoning:
             raise LLMError("大模型返回了空内容")
-        return {"role": "assistant", "content": text or None}, tool_calls, reasoning
+        assistant_dict: dict = {"role": "assistant", "content": text or None}
+        if tool_calls:
+            assistant_dict["tool_calls"] = [
+                {
+                    "id": cid,
+                    "type": "function",
+                    "function": {"name": name, "arguments": args},
+                }
+                for cid, name, args in tool_calls
+            ]
+        return assistant_dict, tool_calls, reasoning
 
     # ---- HTTP ----
 
@@ -714,7 +734,8 @@ class LLMClient:
                         raise LLMError(
                             f"大模型返回非 JSON：{resp.text[:500]}") from e
                 if resp.status_code in _RETRYABLE_STATUS and not is_last:
-                    reason = f"HTTP {resp.status_code}"
+                    err_msg = resp.text[:200].strip().replace("\n", " ")
+                    reason = f"HTTP {resp.status_code}: {err_msg}" if err_msg else f"HTTP {resp.status_code}"
                 else:
                     suffix = (f"（已自动重试 {attempt - 1} 次）"
                               if attempt > 1 else "")

@@ -1,5 +1,5 @@
 // 全局共享状态：/api/state 数据 + 当前视图 + 弹窗开关（任一弹窗打开时轮询暂停）
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, shallowRef } from 'vue'
 import { api, setUnauthorizedHandler, type AppStateT } from './api'
 
 export const store = reactive({
@@ -8,7 +8,7 @@ export const store = reactive({
 })
 
 // 设置页当前展开的功能分区（手风琴 key）；跨视图跳转定位用（openSettingsSection）
-export const settingsSection = ref('llm')
+export const settingsSection = shallowRef('llm')
 
 // ---- 登录鉴权状态：enabled=配置了登录密码；authed=当前会话有效 ----
 // checked=false（启动探测未回）时不渲染登录层，避免闪屏
@@ -115,9 +115,20 @@ export async function refresh(force = false): Promise<void> {
   try { store.state = await api.state() } catch { /* 服务瞬时不可达时保持旧数据 */ }
 }
 
+let _navigateHandler: ((name: typeof store.view, query?: Record<string, string>) => void) | null = null
+
+export function setNavigateHandler(fn: (name: typeof store.view, query?: Record<string, string>) => void): void {
+  _navigateHandler = fn
+}
+
+export function navigateTo(name: typeof store.view, query?: Record<string, string>): void {
+  store.view = name
+  _navigateHandler?.(name, query)
+}
+
 // 弹窗辅助开启函数（组件任意处调用）
 export function openProjectNew(): void {
-  store.view = 'projects'
+  navigateTo('projects')
   ui.projectDlg = { original: null }
 }
 export function openProjectEdit(name: string): void {
@@ -131,8 +142,8 @@ export function openTaskView(project: string, id: string): void {
 }
 // 打开设置页并定位到指定功能分区（手风琴展开 + 右侧渲染）；缺省定位到第一个分区
 export function openSettingsSection(section?: string): void {
-  store.view = 'settings'
-  settingsSection.value = section || 'llm'
+  if (section) settingsSection.value = section
+  navigateTo('settings', section ? { section } : undefined)
 }
 export function openGuide(project: string): void {
   ui.guideDlg = { project }
@@ -141,7 +152,7 @@ export function openCommitDlg(project: string): void {
   ui.commitDlg = { project }
 }
 export function openSkillNew(): void {
-  store.view = 'skills'
+  navigateTo('skills')
   ui.skillDlg = { original: null }
 }
 export function openSkillEdit(name: string): void {

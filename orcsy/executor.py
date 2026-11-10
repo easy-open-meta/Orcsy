@@ -221,7 +221,7 @@ class TaskExecutor:
     def _task_branch(self, task: Task | None = None) -> str:
         """返回本任务应使用的临时沙盒分支名。"""
         if self.per_task_worktree and task is not None:
-            return f"arranger/{self.project.name}/{self._safe_wt_name(task.id)}"
+            return f"orcsy/task/{self.project.name}/{self._safe_wt_name(task.id)}"
         return f"arranger/{self.project.name}"
 
     def _stage_branch(self) -> str:
@@ -308,6 +308,12 @@ class TaskExecutor:
                     outcome, review = self._review_non_git(task, response, result)
                     result.outcome = outcome
                     result.review = review
+            elif response.action == "split":
+                # 需求拆分完成：原任务已圆满拆解交接，标记为 done 并进入 tasks/done/ 归档
+                if use_worktree:
+                    self._cleanup_worktree_changes(wt_path)
+                result.outcome = "done"
+                result.review = self._skipped_review("需求拆分完成，免代码审查直接归档")
             else:
                 if use_worktree:
                     self._cleanup_worktree_changes(wt_path)
@@ -523,6 +529,10 @@ class TaskExecutor:
         if wt_path.exists():
             shutil.rmtree(wt_path, ignore_errors=True)
         wt_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.git.run("worktree", "prune")
+        except Exception:
+            pass
 
         if self.per_task_worktree:
             if is_rework and self._branch_exists(branch):
@@ -630,7 +640,7 @@ class TaskExecutor:
                 guide_content=self._load_guide(), skill_bodies=skills,
                 allowed_commands=self.allowed_commands,
                 approval_gate=gate,
-                max_turns=max(1, self.review_cfg.max_turns),
+                max_turns=(-1 if self.review_cfg.max_turns == -1 else max(1, self.review_cfg.max_turns)),
                 allow_test_commands=self.review_cfg.allow_test_commands,
                 extra_env=self.extra_env)
         finally:
@@ -823,7 +833,7 @@ class TaskExecutor:
             guide_content=self._load_guide(), skill_bodies=skills,
             allowed_commands=self.allowed_commands,
             approval_gate=self._make_approval_gate(task),
-            max_turns=max(1, self.review_cfg.max_turns),
+            max_turns=(-1 if self.review_cfg.max_turns == -1 else max(1, self.review_cfg.max_turns)),
             allow_test_commands=self.review_cfg.allow_test_commands,
             extra_env=self.extra_env)
 

@@ -840,10 +840,16 @@ You **must set a password** if you:
 
 With a non-loopback address and an empty password, the program refuses to start. If that protection were bypassed and the port exposed, anyone who can reach it could operate the dashboard, change configuration, and start/stop tasks (keys are shown only as masks, but they can still be replaced).
 
-Where to set it:
+Where to set and reset it:
 
-- Settings → **⏱ Scheduler & dashboard** → **Dashboard login password**;
-- or edit `web.auth_password` in `config.yaml`.
+- Settings → **⚙️ Application** → **Dashboard login password**;
+- Passwords in `config.yaml` are stored securely using **PBKDF2-HMAC-SHA256 (100,000 iterations)** ciphertext; plaintext is never persisted;
+- **Forgotten password recovery**: an administrator can log into the server and run `orcsy reset-password` (or `orcsy passwd`) to securely reset the password, or use `--clear` to return to local passwordless mode:
+  ```bash
+  orcsy reset-password                    # Interactive hidden input with confirmation
+  orcsy reset-password <new_password>     # Specify new password directly
+  orcsy reset-password --clear            # Clear password to return to local passwordless mode
+  ```
 
 After it is set, opening the dashboard shows a login page: enter the password and click **Log in**. A **Log out** button appears at the top right.
 

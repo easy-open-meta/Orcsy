@@ -62,12 +62,12 @@ def check_create_tasks() -> None:
         assert t2.order is not None, "拆分子任务应有手动序"
         t1 = parse_task_file(d / "P1-1-model-层补全.md")
         assert t1.order == t2.order - 1, (t1.order, t2.order)
-        # close_current 默认 true：原任务已 cancelled（磁盘为准）+ 进度留痕
-        assert parse_task_file(task.path).status == "cancelled", task.status
+        # close_current 默认 true：原任务已完成拆分置为 done（磁盘为准）+ 进度留痕
+        assert parse_task_file(task.path).status == "done", task.status
         text = task.path.read_text(encoding="utf-8")
-        assert "已拆分为 3 个子任务" in text
-        assert "finish(action=split" in r
-        print("ok: create_tasks（建文件/重名避让/优先级继承/order 接尾/原任务关闭留痕）")
+        assert "已成功拆分为 3 个子任务" in text
+        assert "finish(action=\"split\"" in r
+        print("ok: create_tasks（建文件/重名避让/优先级继承/order 接尾/原任务完成留痕）")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -160,14 +160,17 @@ def check_split_end_to_end() -> None:
         finally:
             LLMClient._post = orig
 
-        assert result is not None and result.outcome == "cancelled", \
+        assert result is not None and result.outcome == "done", \
             (result and result.outcome, result and result.notes)
         assert "拆分" in result.summary, result.summary
-        # 原任务：cancelled + 结果节含 summary（模型自述结论要写回）
-        text = f.read_text(encoding="utf-8")
-        assert "status: cancelled" in text
+        # 原任务：done 且自动归档进 tasks/done/，结果节含 summary
+        assert not f.exists(), "原任务应已从 tasks/ 根目录移走归档"
+        done_f = tf / "done" / f.name
+        assert done_f.exists(), "原任务应已归档进 tasks/done/"
+        text = done_f.read_text(encoding="utf-8")
+        assert "status: done" in text
         assert "## Agent 处理结果" in text and "已拆分为 2 个子任务" in text
-        assert "✂ 已拆分为 2 个子任务" in text
+        assert "✂ 已成功拆分为 2 个子任务" in text
         # 子任务文件真实存在、open、order 排好
         kids = sorted(p.stem for p in tf.glob("*.md") if p.stem != f.stem)
         assert kids == ["P1-1-model-层", "P1-2-authsetting"], kids
@@ -176,7 +179,7 @@ def check_split_end_to_end() -> None:
         # 子任务描述里带着验收命令（后续任务可执行）
         assert "go build ./internal/model" in (tf / "P1-1-model-层.md").read_text(
             encoding="utf-8")
-        print("ok: 真实循环拆分接力（create_tasks → finish(split) → 原任务 cancelled、子任务 open）")
+        print("ok: 真实循环拆分接力（create_tasks → finish(split) → 原任务 done 归档、子任务 open）")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

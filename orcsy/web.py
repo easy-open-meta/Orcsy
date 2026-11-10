@@ -97,7 +97,8 @@ from . import __version__
 from . import skills as skills_lib
 from .agent import ProjectAgent
 from .approvals import get_manager, MUTATING_TOOLS, RISKY_TOOLS
-from .config import (BUILT_IN_ROLES, AgentProfileConfig, AppConfig, CommandsConfig,
+from .auth import hash_password, is_password_hashed, verify_password
+from .config import (BUILT_IN_ROLES, ROLE_PROMPT_TEMPLATES, AgentProfileConfig, AppConfig, CommandsConfig,
                      EnvConfig, GitConfig, LLMConfig,
                      LOCAL_DEBUG_BROWSERS, LocalDebugConfig,
                      MirrorsConfig, NotifyConfig, PermissionsConfig,
@@ -286,7 +287,7 @@ class AppState:
             time.sleep(self.LOGIN_FAIL_DELAY)  # 与失败延迟一致：锁定期间也抬高探测成本
             return {"ok": False,
                     "message": "尝试次数过多，账号已临时锁定，请 15 分钟后再试"}
-        if not hmac.compare_digest(str(password or ""), self.config.web.auth_password):
+        if not verify_password(str(password or ""), self.config.web.auth_password):
             time.sleep(self.LOGIN_FAIL_DELAY)  # 失败延迟：抬高暴力破解成本
             with self._auth_lock:
                 self._login_failures.setdefault(client_ip, []).append(now)
@@ -601,6 +602,7 @@ class AppState:
             "usage": get_usage_store().summary(days=84),
             # 项目小组：全局内置角色元信息 + 用户自定义预设池（api_key 仅出掩码）
             "built_in_roles": BUILT_IN_ROLES,
+            "role_prompt_templates": ROLE_PROMPT_TEMPLATES,
             "agent_profiles": {
                 pid: self._profile_public(prof)
                 for pid, prof in self.config.agent_profiles.items()
@@ -1327,8 +1329,8 @@ class AppState:
                 review_rounds = int(review_rounds_raw)
             except (TypeError, ValueError) as e:
                 raise ValueError(f"review_max_rounds 必须是整数：{e}") from e
-            if not (1 <= review_rounds <= 10):
-                raise ValueError(f"review_max_rounds 应为 1~10（当前：{review_rounds}）")
+            if not (review_rounds == -1 or 1 <= review_rounds <= 10):
+                raise ValueError(f"review_max_rounds 应为 -1（不设上限）或 1~10（当前：{review_rounds}）")
         debug_hosts_raw = data.get("debug_allowed_hosts")
         debug_hosts = (
             validate_allowed_hosts(debug_hosts_raw, context=f"项目 {name} 的 debug_allowed_hosts")
@@ -2291,13 +2293,19 @@ class AppState:
             run_once=self.config.scheduler.run_once,
         )
         # host/port 变更需重启生效，其余立即生效
-        # auth_password 三态：键缺失=保持原值；空字符串=清除（关闭鉴权）；非空=设置新密码
+        # auth_password 三态：键缺失=保持原值；空字符串=清除（关闭鉴权）；非空=设置新密码（密文存储）
         auth_password = self.config.web.auth_password
         if "auth_password" in web:
-            new_pwd = str(web.get("auth_password") or "")
-            if new_pwd != auth_password:
-                auth_password = new_pwd
+            new_pwd = str(web.get("auth_password") or "").strip()
+            if not new_pwd:
+                if auth_password:
+                    auth_password = ""
+                    self._invalidate_sessions()
+            elif not verify_password(new_pwd, auth_password):
+                auth_password = hash_password(new_pwd)
                 self._invalidate_sessions()  # 密码变更后旧会话全部作废
+        elif auth_password and not is_password_hashed(auth_password):
+            auth_password = hash_password(auth_password)
         cfg_host = str(web.get("host") or self.config.web.host)
         # 非回环绑定必须带登录密码（M1）：host 与密码都已定案后校验，
         # 不合规抛 ValueError → 400 透传看板，配置不落盘
@@ -2414,12 +2422,12 @@ class AppState:
                 rev_llm = _coerce_llm_cfg(rev_data, require_api_key=False,
                                           context="review.llm")
             rev_turns = int(rev.get("max_turns", self.config.review.max_turns))
-            if not (1 <= rev_turns <= 100):
-                raise ValueError(f"review.max_turns 应为 1~100（当前：{rev_turns}）")
+            if not (rev_turns == -1 or 1 <= rev_turns <= 100):
+                raise ValueError(f"review.max_turns 应为 -1（不设上限）或 1~100（当前：{rev_turns}）")
             rev_rounds = int(rev.get("max_review_rounds",
                                      self.config.review.max_review_rounds))
-            if not (1 <= rev_rounds <= 10):
-                raise ValueError(f"review.max_review_rounds 应为 1~10（当前：{rev_rounds}）")
+            if not (rev_rounds == -1 or 1 <= rev_rounds <= 10):
+                raise ValueError(f"review.max_review_rounds 应为 -1（不设上限）或 1~10（当前：{rev_rounds}）")
             new_review = ReviewConfig(
                 enabled=bool(rev.get("enabled", self.config.review.enabled)),
                 llm=rev_llm,

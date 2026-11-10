@@ -1,24 +1,25 @@
 <script setup lang="ts">
 import { NButton, NConfigProvider, NDialogProvider, NInput, NMessageProvider, NTab, NTabs, NTag, dateZhCN, zhCN } from 'naive-ui'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { useRouter, RouterView } from 'vue-router'
 import { api } from './api'
 import Dialogs from './components/Dialogs.vue'
-import DashboardView from './views/DashboardView.vue'
-import ProjectsView from './views/ProjectsView.vue'
-import SettingsView from './views/SettingsView.vue'
-import UsageView from './views/UsageView.vue'
 import { auth, beginRestartWait, clearPendingUpdate, doLogin, doLogout, getPendingUpdate, initAuth, needLogin, openProjectNew, refresh, store, ui } from './store'
-import SkillsView from './views/SkillsView.vue'
 import { cmpVersion } from './utils'
 import { naiveTheme, theme, themeOverrides, toggleTheme } from './theme'
 
-const scanning = ref(false)
+const router = useRouter()
+function onTabChange(v: any): void {
+  void router.push({ name: String(v) })
+}
+
+const scanning = shallowRef(false)
 
 // ---- 登录层：鉴权开启且会话无效时全屏接管（App 壳与轮询全部静默） ----
 const showLogin = computed(() => needLogin())
-const loginPwd = ref('')
-const loginBusy = ref(false)
-const loginErr = ref('')
+const loginPwd = shallowRef('')
+const loginBusy = shallowRef(false)
+const loginErr = shallowRef('')
 
 async function submitLogin(): Promise<void> {
   if (!loginPwd.value || loginBusy.value) return
@@ -72,7 +73,7 @@ const updLabel = computed(() => {
     default: return '检查更新'
   }
 })
-const updating = ref(false)
+const updating = shallowRef(false)
 
 async function checkUpdate(): Promise<void> {
   updating.value = true
@@ -101,7 +102,7 @@ function askApply(latest: string, notes: string): void {
 
 // ---- 手动重启：右上角重启按钮。同一套「重启等待」UI：遮罩 + 应用回归自动 reload。
 // reload 后版本号不变（无版本核对），靠挂单超时（10 分钟）自动失效收尾。
-const restartingNow = ref(false)
+const restartingNow = shallowRef(false)
 
 function askRestart(): void {
   window.$dialog?.warning({
@@ -190,7 +191,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           </div>
         </div>
         <div class="actions">
-          <NTabs type="segment" :value="store.view" @update:value="(v: any) => store.view = v" class="navseg">
+          <NTabs type="segment" :value="store.view" @update:value="onTabChange" class="navseg">
             <NTab name="dash">看板</NTab>
             <NTab name="projects">项目</NTab>
             <NTab name="settings">设置</NTab>
@@ -220,11 +221,11 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
                    title="退出登录" @click="onLogout">退出</NButton>
         </div>
       </header>
-      <DashboardView v-show="store.view === 'dash'" />
-      <ProjectsView v-show="store.view === 'projects'" />
-      <SettingsView v-show="store.view === 'settings'" />
-      <SkillsView v-show="store.view === 'skills'" />
-      <UsageView v-show="store.view === 'usage'" />
+      <RouterView v-slot="{ Component }">
+        <KeepAlive>
+          <component :is="Component" />
+        </KeepAlive>
+      </RouterView>
       <Dialogs />
       <!-- 自更新进行中：全屏状态提示（禁止点击；应用重启后本页自动 reload 加载新版页面） -->
       <div v-if="updateOverlayVisible" class="upd-overlay">
