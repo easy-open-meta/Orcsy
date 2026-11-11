@@ -22,8 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from .logging_setup import get_logger
-from .tools import (_NO_WINDOW, _augmented_env, _kill_process_tree,
-                    _resolve_new_install, _windows_startupinfo, check_command_allowed,
+from .tools import (_NO_WINDOW, _augmented_env, _decode_proc_output,
+                    _kill_process_tree, _resolve_new_install,
+                    _windows_startupinfo, check_command_allowed,
                     register_child_proc, unregister_child_proc)
 
 log = get_logger("devserver")
@@ -135,15 +136,15 @@ class DevServerManager:
         log.info("启动后台服务 [%s] (port=%d, cwd=%s): %s", name, port, resolved_cwd, final_cmd)
 
         try:
+            # 输出按字节捕获：服务进程可能是原生命令（GBK 输出中文路径）也可能是
+            # Node/Python（utf-8 输出），日志线程逐行自适应解码（utf-8 → ANSI 回退）
             proc = subprocess.Popen(
                 final_cmd,
                 cwd=str(resolved_cwd),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                text=False,
                 shell=False,
                 env=sub_env,
                 startupinfo=_windows_startupinfo(),
@@ -166,8 +167,8 @@ class DevServerManager:
         def _read_logs() -> None:
             try:
                 assert proc.stdout is not None
-                for line in proc.stdout:
-                    instance.logs.append(line.rstrip("\r\n"))
+                for raw in proc.stdout:
+                    instance.logs.append(_decode_proc_output(raw).rstrip("\r\n"))
             except Exception:
                 pass
 

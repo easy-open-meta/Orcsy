@@ -406,12 +406,24 @@ class ToolContext:
     team_roles: dict[str, dict] | None = None
     # 当前执行者的角色 ID（如 "pm" / "backend" / "frontend" / "qa"）
     current_role: str = ""
+    # 本任务执行者是否产出代码（单兵/后端/前端/自定义=True；PM/QA=False）。
+    # 由执行器显式传入（默认 True）——不能靠 current_role 推断：单兵模式
+    # current_role 为空串，会被误判为 False 导致「连续只读熔断」失效。
+    produces_code: bool = True
     # PM 最大拆分深度上限（防无限套娃拆分）
     max_split_depth: int = 1
     # QA 在当前任务中新建的 Bug 任务 ID 列表（供 finish(action="wait_retest") 绑定回归依赖）
     created_bugs: list[str] = field(default_factory=list)
     # PM 调用 reassign_task 直接指派的目标角色（防止 finish(action="split") 关闭原任务）
     reassigned_to: str = ""
+    # 是否为子代理运行态（如果是子代理，严禁再次调用 delegate_explore，深度锁死为 1）
+    is_subagent: bool = False
+    # 当前任务内已派生子代理的批次数（单任务最多允许调用 2 批次，防止失控）
+    subagent_call_count: int = 0
+    # 子代理累积消耗的用量：{"turns": int, "prompt_tokens": int, "completion_tokens": int}
+    subagent_usage: dict[str, int] = field(default_factory=lambda: {"turns": 0, "prompt_tokens": 0, "completion_tokens": 0})
+    # 执行当前任务所使用的 LLM 配置（供 subagent 派生时继承调用）
+    llm_config: object | None = None
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()
@@ -699,6 +711,32 @@ def check_command_allowed(command: list[str],
     return True, ""
 
 
+# 子进程输出乱码自愈：utf-8 优先，疑似乱码过多时回退系统 ANSI 代码页。
+# 背景：Windows 原生命令（cmd/findstr/dir）按 ANSI 代码页输出（简中系统为
+# cp936/GBK），用 utf-8 强解会把中文路径打成「���»ʵ��」。改为拿原始字节
+# 自适应解码——utf-8 解出过多 U+FFFD 时按 ANSI 重解，两边都保真。
+_ANSI_CP = "mbcs" if os.name == "nt" else "utf-8"
+
+
+def _decode_proc_output(raw: bytes) -> str:
+    """自适应解码子进程输出：utf-8 优先，U+FFFD 过多（>2%）回退 ANSI 代码页。"""
+    if not raw:
+        return ""
+    text = raw.decode("utf-8", errors="replace")
+    if os.name != "nt":
+        return text
+    bad = text.count("\ufffd")
+    if bad and bad / max(1, len(text)) > 0.02:
+        try:
+            alt = raw.decode(_ANSI_CP, errors="replace")
+            # 回退解码的乱码比例更低才算改善（避免把真 utf-8 输出解坏）
+            if alt.count("\ufffd") < bad:
+                return alt
+        except (LookupError, UnicodeDecodeError):
+            pass
+    return text
+
+
 def tool_run_command(ctx: ToolContext, args: dict) -> str:
     command = [str(c) for c in args.get("command", [])]
     ok, err = check_command_allowed(command, ctx.allowed_commands)
@@ -710,12 +748,14 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
     log.debug("run_command: %s (cwd=%s)", command, ctx.root)
     try:
         # Windows 上用任务对象/进程树终止：start_new_session 让整组进程可一并 kill；
-        # env 带上扩充 PATH：go 等工具派生子进程（编译器/链接器）时也能找到兄弟工具
+        # env 带上扩充 PATH：go 等工具派生子进程（编译器/链接器）时也能找到兄弟工具。
+        # 输出按字节捕获后自适应解码（utf-8 → ANSI 回退）：原生命令（cmd/findstr）
+        # 按 ANSI 代码页输出中文路径，utf-8 强解会打成乱码
         proc = subprocess.Popen(
             command, cwd=str(ctx.root),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", shell=False,
+            text=False, shell=False,
             env=_augmented_env(ctx),
             startupinfo=_windows_startupinfo(),
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | _NO_WINDOW,
@@ -736,7 +776,9 @@ def tool_run_command(ctx: ToolContext, args: dict) -> str:
         return f"错误：命令超时（>{timeout}s）\n{e.out[:MAX_OUTPUT_CHARS]}"
     finally:
         unregister_child_proc(proc)
-    out = (stdout or "") + (("\n[stderr]\n" + stderr) if stderr else "")
+    stdout_text = _decode_proc_output(stdout)
+    stderr_text = _decode_proc_output(stderr)
+    out = (stdout_text or "") + (("\n[stderr]\n" + stderr_text) if stderr_text else "")
     if len(out) > MAX_OUTPUT_CHARS:
         # 头尾保留：命令回显/进度在头部，报错摘要多在尾部
         out = out[:4000] + "\n…（中间输出过长，已省略）\n" + out[-2000:] + \
@@ -764,14 +806,16 @@ class _CommandTimeout(Exception):
 
 
 def _wait_with_stop(ctx: ToolContext, proc: "subprocess.Popen",
-                    timeout: int) -> tuple[str, str]:
+                    timeout: int) -> tuple[bytes, bytes]:
     """等待子进程结束，期间按 0.2s 切片检查强制停止信号。
 
     置位即整树杀进程并抛 TaskStopped（让工具循环立刻收尾，而不是等命令
-    跑完）；超时仍返回 ("", "") 并让调用方按超时错误回报——回滚语义与
+    跑完）；超时仍返回 (b"", b"") 并让调用方按超时错误回报——回滚语义与
     旧版一致。两处收尾都必须用带超时的 communicate：杀进程树后若仍有
     句柄遗留（如孙进程未被 taskkill 覆盖的边角情况），无界 communicate
     会把执行线程永久挂住，停止信号也就再无人检查。
+    输出按原始字节返回，由调用方 _decode_proc_output 自适应解码
+    （utf-8 → ANSI 回退），兼顾跨平台编码差异。
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -786,17 +830,18 @@ def _wait_with_stop(ctx: ToolContext, proc: "subprocess.Popen",
             if time.monotonic() >= deadline:
                 _kill_process_tree(proc)
                 stdout, stderr = _drain_after_kill(proc)
-                out = (stdout or "") + (("\n[stderr]\n" + stderr) if stderr else "")
+                out = _decode_proc_output(stdout) + \
+                    (("\n[stderr]\n" + _decode_proc_output(stderr)) if stderr else "")
                 raise _CommandTimeout(out, timeout)
 
 
 def _drain_after_kill(proc: "subprocess.Popen",
-                      grace: float = 5.0) -> tuple[str, str]:
+                      grace: float = 5.0) -> tuple[bytes, bytes]:
     """杀掉进程树后回收管道内容；EOF 仍不来的话到点放弃并返回空。"""
     try:
         return proc.communicate(timeout=grace)
     except subprocess.TimeoutExpired:
-        return "", ""
+        return b"", b""
 
 
 def tool_grep(ctx: ToolContext, args: dict) -> str:
@@ -1452,10 +1497,73 @@ class TaskStopped(Exception):
     """
 
 
+def tool_delegate_explore(ctx: ToolContext, args: dict) -> str:
+    """并发派生多个轻量只读子代理，执行并行代码检索与架构摸底。"""
+    # 1. 递归深度熔断：子代理禁止再次派生
+    if ctx.is_subagent:
+        return (
+            "错误：当前已处于子代理执行环境中，严禁递归派生更多子代理（深度上限=1）。"
+            "请使用基础只读工具（list_dir / grep / read_file）完成本次调研并 finish。"
+        )
+
+    # 2. 调用频次熔断：单任务最多允许调用 2 批次
+    if ctx.subagent_call_count >= 2:
+        return "错误：当前任务内子代理并发探索已达上限（已调用 2 批次）。请基于已有探索报告推进后续开发或拆单决策。"
+
+    subagents_data = args.get("subagents")
+    if not isinstance(subagents_data, list) or not subagents_data:
+        return "错误：必须通过 subagents 数组指定 1~4 个子代理任务（每项包含 name 和 focus）。"
+
+    if len(subagents_data) > 4:
+        return f"错误：单次最多允许派生 4 个子代理（当前：{len(subagents_data)} 项）。请合并精简后重试。"
+
+    llm_cfg = getattr(ctx, "llm_config", None)
+    if not llm_cfg:
+        return "错误：当前执行环境未绑定大模型配置，无法派生子代理。"
+
+    from .subagent import run_subagents_fan_out
+    ctx.subagent_call_count += 1
+    report, usage = run_subagents_fan_out(
+        parent_ctx=ctx,
+        subagents_data=subagents_data,
+        llm_cfg=llm_cfg,  # type: ignore[arg-type]
+    )
+
+    if ctx.subagent_usage is not None:
+        ctx.subagent_usage["turns"] += usage["turns"]
+        ctx.subagent_usage["prompt_tokens"] += usage["prompt_tokens"]
+        ctx.subagent_usage["completion_tokens"] += usage["completion_tokens"]
+
+    return report
+
+
 # ---- 工具注册表 ----
 
 # name -> (描述, 参数 JSON Schema, 实现)
 TOOLS: dict[str, tuple[str, dict, object]] = {
+    "delegate_explore": (
+        "并发派生 2~4 个轻量只读子代理替自己去探索项目的不同模块或排查问题。子代理并行完成代码检索后，系统自动将调查结论汇总返回给你。适合大范围代码摸底、跨端架构调研或对比排查，大幅压缩单兵逐轮阅读的轮数与耗时。",
+        {
+            "type": "object",
+            "properties": {
+                "subagents": {
+                    "type": "array",
+                    "description": "子代理任务清单（建议 2~4 个，最多 4 个）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "子任务简短标题（如「调研后端用户数据模型」）"},
+                            "focus": {"type": "string", "description": "子代理需要调研的核心关注点与需要回答的问题"},
+                            "paths": {"type": "array", "items": {"type": "string"}, "description": "建议重点关注的相对文件或目录路径（可选）"},
+                        },
+                        "required": ["name", "focus"],
+                    },
+                },
+            },
+            "required": ["subagents"],
+        },
+        tool_delegate_explore,
+    ),
     "list_dir": (
         "列出项目内的文件与目录（递归），用于了解项目结构。",
         {

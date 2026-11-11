@@ -272,9 +272,10 @@ class TaskExecutor:
                 stop_event=stop_event,
                 created_bugs_out=created_bugs,
                 on_progress=lambda line: append_progress(task.path, line))
-            result.turns = int(usage.get("turns", 0))
-            result.prompt_tokens = int(usage.get("prompt_tokens", 0))
-            result.completion_tokens = int(usage.get("completion_tokens", 0))
+            sub_u = usage.pop("_subagent_usage", {})
+            result.turns = int(usage.get("turns", 0)) + int(sub_u.get("turns", 0))
+            result.prompt_tokens = int(usage.get("prompt_tokens", 0)) + int(sub_u.get("prompt_tokens", 0))
+            result.completion_tokens = int(usage.get("completion_tokens", 0)) + int(sub_u.get("completion_tokens", 0))
             result.summary = response.summary
             result.notes = response.notes
             result.files_changed = response.files_changed
@@ -440,7 +441,9 @@ class TaskExecutor:
                           session=session,
                           team_roles=self.team_roles,
                           current_role=self.team_role,
-                          max_split_depth=self.max_split_depth)
+                          produces_code=self.produces_code,
+                          max_split_depth=self.max_split_depth,
+                          llm_config=self.llm)
         client = LLMClient(self.llm)
         sys_prompt = build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,
@@ -463,6 +466,8 @@ class TaskExecutor:
                 created_bugs_out.extend(ctx.created_bugs)
             if usage_out is not None and ctx.reassigned_to:
                 usage_out["_reassigned_to"] = ctx.reassigned_to
+            if usage_out is not None and ctx.subagent_usage:
+                usage_out["_subagent_usage"] = ctx.subagent_usage
             if session is not None:
                 try:
                     session.close()
@@ -688,9 +693,35 @@ class TaskExecutor:
         branch = self._task_branch(task)
         base_branch = self._base_branch()
         message = response.commit_message or f"fix: {task.title}"
+
+        def _finish_merge() -> bool:
+            lock = self.merge_lock or contextlib.nullcontext()
+            with lock:
+                if self.commit_and_merge:
+                    return self._merge_and_push(task, result, branch, wt_path=wt_path)
+                return self._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
+
         # 第一步提交（提交仅落在该任务的沙盒 worktree 分支内，绝不触碰主分支历史）
         committed = wt_git.commit(message)
         if not committed:
+            # 无新增改动：可能是审查服务故障后的恢复性重跑——成果早已提交在
+            # 沙盒分支上，只差审查/合并收尾。此时直接补走审查门，而不是误判
+            # blocked 打断（审查 verdict=error 分支本身不清 worktree，WIP 提交
+            # 都还在）。分支上没有领先提交的「真无改动」才按旧行为 blocked。
+            is_rework = bool(task and (task.review_round > 0 or task.review_pending))
+            if is_rework and wt_git.branch_exists(base_branch):
+                ahead = wt_git.run("rev-list", "--count", f"{base_branch}..HEAD")
+                try:
+                    ahead_n = int((ahead or "0").strip() or "0")
+                except ValueError:
+                    ahead_n = 0
+                if ahead_n > 0:
+                    self.log.info(
+                        "任务 %s 为返工/补审恢复重跑（无新改动，但分支领先基线 %d 个提交），"
+                        "直接进入审查门补审", task.id, ahead_n)
+                    result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
+                    return self._run_review_gate(task, result, branch, wt_path,
+                                                 base_branch, _finish_merge)
             if self.team_role == "qa":
                 # QA 开启 allow_test_scripts 但当轮验证通过无需新增脚本时，不应误判 blocked
                 return "done", self._skipped_review("QA 联调验证通过，无代码或脚本文件改动")
@@ -701,13 +732,12 @@ class TaskExecutor:
             return "blocked", None
         result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
 
-        def _finish_merge() -> bool:
-            lock = self.merge_lock or contextlib.nullcontext()
-            with lock:
-                if self.commit_and_merge:
-                    return self._merge_and_push(task, result, branch, wt_path=wt_path)
-                return self._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
+        return self._run_review_gate(task, result, branch, wt_path,
+                                     base_branch, _finish_merge)
 
+    def _run_review_gate(self, task: Task, result: "TaskResult", branch: str,
+                         wt_path: Path, base_branch: str, _finish_merge) -> tuple[str, object]:
+        """审查门统一执行体：跳过判断 → 补审 → pass 合入 / fail·error blocked。"""
         active, skip_reason = self._review_active()
         if not active:
             self.log.info("审查门跳过（%s），安全合入", skip_reason)

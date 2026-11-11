@@ -108,8 +108,10 @@ def check_pass_merges_and_archives() -> None:
             llm=LLMConfig(api_key="fake-r", base_url="http://localhost:9",
                           model="reviewer-x"))
         task_llm = LLMConfig(api_key="fake", base_url="http://localhost:9", model="worker-y")
+        # worktree_isolation=True：本用例断言 WIP 提交（沙盒分支）与 worktree 清理，
+        # 依赖「git 项目 + 隔离」完整链路；未开隔离走 _review_non_git（无 WIP 提交）
         ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg,
-                          review_llm=review_cfg.llm)
+                          review_llm=review_cfg.llm, worktree_isolation=True)
         ScriptedLLM.scripts = {
             "task": TASK_SCRIPT,
             "review": [("finish", {"action": "completed", "summary": "实现正确，测试通过",
@@ -145,7 +147,8 @@ def check_fail_rework_then_blocked() -> None:
         review_cfg = ReviewConfig(
             llm=LLMConfig(api_key="f", base_url="http://localhost:9", model="reviewer-x"))
         task_llm = LLMConfig(api_key="f", base_url="http://localhost:9", model="worker-y")
-        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm)
+        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm,
+                          worktree_isolation=True)
         ScriptedLLM.scripts = {
             "task": TASK_SCRIPT,
             "review": [("finish", {
@@ -204,7 +207,8 @@ def check_fail_project_rounds_override() -> None:
         review_cfg = ReviewConfig(
             llm=LLMConfig(api_key="f", base_url="http://localhost:9", model="reviewer-x"))
         task_llm = LLMConfig(api_key="f", base_url="http://localhost:9", model="worker-y")
-        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm)
+        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm,
+                          worktree_isolation=True)
         ScriptedLLM.scripts = {"task": TASK_SCRIPT, "review": [_FAIL_REVIEW]}
         _inject(ex, task_llm, review_cfg.llm)
         result = ex.run_task(task, guide_content="指南")
@@ -225,7 +229,8 @@ def check_error_keeps_pending_for_rescan() -> None:
         review_cfg = ReviewConfig(
             llm=LLMConfig(api_key="f", base_url="http://localhost:9", model="reviewer-x"))
         task_llm = LLMConfig(api_key="f", base_url="http://localhost:9", model="worker-y")
-        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm)
+        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm,
+                          worktree_isolation=True)
         from orcsy.agent import ProjectAgent
         agent = ProjectAgent(proj, task_llm, review_cfg=review_cfg)
         # 审查脚本非法（cannot_do）→ verdict=error
@@ -259,6 +264,53 @@ def check_error_keeps_pending_for_rescan() -> None:
     print("④ 审查 error → pending 保持 → 补审只跑审查并合并归档 ✅")
 
 
+def check_recovery_rerun_goes_to_review() -> None:
+    """恢复性重跑：审查 error 后重跑，Agent 无新改动直接 completed →
+    必须补走审查门（而非误判「无改动 blocked」或抛 UnboundLocalError）。
+
+    回归背景：修复该场景时曾把恢复路径的提前 return 放在 _finish_merge
+    闭包定义之前，触发 UnboundLocalError 让任务误标 blocked——本用例锁定。
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        proj = make_git_project(Path(tmp))
+        task = make_task(proj)
+        review_cfg = ReviewConfig(
+            llm=LLMConfig(api_key="f", base_url="http://localhost:9", model="reviewer-x"))
+        task_llm = LLMConfig(api_key="f", base_url="http://localhost:9", model="worker-y")
+        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm,
+                          worktree_isolation=True)
+        # 第一轮：审查失败（verdict=error）→ pending 保持，分支 WIP 保留
+        ScriptedLLM.scripts = {"task": TASK_SCRIPT, "review": [_FAIL_REVIEW]}
+        _inject(ex, task_llm, review_cfg.llm)
+        r1 = ex.run_task(task, guide_content="指南")
+        assert r1.outcome == "blocked" and r1.review.verdict == "fail", \
+            (r1.outcome, r1.review.verdict)
+        from orcsy.agent import ProjectAgent
+        ProjectAgent(proj, task_llm, review_cfg=review_cfg)._write_back_result(task, r1)
+        t = parse_task_file(task.path)
+        assert t.review_round == 1, t.review_round
+
+        # 第二轮（恢复性重跑）：Agent 不改任何文件，验收后直接 completed；
+        # 审查这次通过 → 应补审合入并归档，绝不允许 blocked 或异常。
+        # 生产链路 scan_and_work 每轮从磁盘重扫任务（review_round 落盘后重新
+        # parse），此处同样重扫以保证 task.review_round 反映真实返工轮数
+        ScriptedLLM.scripts = {"task": _RECOVERY_SCRIPT, "review": [_PASS_REVIEW]}
+        task2 = parse_task_file(task.path)
+        assert task2.review_round == 1, task2.review_round
+        r2 = ex.run_task(task2, guide_content="指南")
+        assert "UnboundLocalError" not in (r2.notes or ""), r2.notes
+        assert r2.outcome == "done", f"恢复性重跑应补审通过归档：{r2.notes} / {r2.review}"
+        assert r2.review.verdict == "pass", r2.review
+        assert r2.wip_commit, "应保留分支 WIP 提交作为合入来源"
+        # agent 回写后归档
+        ProjectAgent(proj, task_llm, review_cfg=review_cfg)._write_back_result(task, r2)
+        assert (proj.path / "tasks" / "done" / task.path.name).exists(), "应归档"
+        # 主工作区含成果
+        assert "stranger" in (proj.path / "app.py").read_text(encoding="utf-8"), \
+            "审查通过后成果应落地主工作区"
+    print("④b 恢复性重跑（无新改动）→ 补走审查门 → pass 合入归档 ✅")
+
+
 def check_kill_recovery() -> None:
     """模拟审查中被强杀：WIP 提交 + pending 在；recover 不重置；补审接续。"""
     with tempfile.TemporaryDirectory() as tmp:
@@ -267,7 +319,8 @@ def check_kill_recovery() -> None:
         review_cfg = ReviewConfig(
             llm=LLMConfig(api_key="f", base_url="http://localhost:9", model="reviewer-x"))
         task_llm = LLMConfig(api_key="f", base_url="http://localhost:9", model="worker-y")
-        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm)
+        ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg, review_llm=review_cfg.llm,
+                          worktree_isolation=True)
         # 审查脚本抛 TaskStopped（模拟强杀在审查阶段）
         class _Stop:
             def __init__(self, cfg):
@@ -337,8 +390,12 @@ def check_squash_merge() -> None:
                 llm=LLMConfig(api_key="f", base_url="http://localhost:9",
                               model="reviewer-x"), squash_merge=squash)
             task_llm = LLMConfig(api_key="f", base_url="http://localhost:9", model="worker-y")
+            # commit_and_merge=True + worktree_isolation=True：本用例断言主分支
+            # HEAD 是 squash/--no-ff 合并形态（_merge_and_push 直合主分支）；
+            # 默认（不自动 commit）走 stage 落地工作区，不产生主分支提交
             ex = TaskExecutor(proj, task_llm, review_cfg=review_cfg,
-                              review_llm=review_cfg.llm)
+                              review_llm=review_cfg.llm, worktree_isolation=True,
+                              commit_and_merge=True)
             # 第一轮 fail（产生返工），第二轮 pass（返工脚本补一笔真实修复）
             # 生产链路含 agent 回写（review_round 落盘）——squash 判定读文件
             ScriptedLLM.scripts = {"task": TASK_SCRIPT, "review": [_FAIL_REVIEW]}
@@ -448,6 +505,14 @@ _REWORK_SCRIPT = [
                 "notes": ""}),
 ]
 
+# 恢复性重跑脚本：成果已在分支上，验收通过后直接 completed（无新改动、无 files_changed）
+_RECOVERY_SCRIPT = [
+    ("read_file", {"path": "app.py"}),
+    ("finish", {"action": "completed",
+                "summary": "成果已完整提交在分支，恢复性重跑验收全部通过",
+                "files_changed": [], "commit_message": "", "notes": ""}),
+]
+
 
 def _inject(executor: TaskExecutor, task_llm, review_llm) -> None:
     """把替身注入 executor 的任务循环与审查循环。
@@ -495,6 +560,7 @@ def main() -> int:
     check_fail_rework_then_blocked()
     check_fail_project_rounds_override()
     check_error_keeps_pending_for_rescan()
+    check_recovery_rerun_goes_to_review()
     check_kill_recovery()
     check_skip_and_agent_blocked()
     check_squash_merge()

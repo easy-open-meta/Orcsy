@@ -530,7 +530,7 @@ StartupNotify=true
 def build_linux_deb(ver: tuple[int, int, int], arch: str) -> Path:
     """构建 Debian / Ubuntu / 统信 UOS / 深度 Deepin / 麒麟桌面安装包 (.deb)。
 
-    包名规范：orcsy_{ver}_{arch}.deb（如 orcsy_0.21.0_amd64.deb）
+    包名规范：orcsy_{ver}_{arch}.deb（如 orcsy_0.22.0_amd64.deb）
     包含：
     - /opt/orcsy/... 程序文件与代码
     - /usr/local/bin/orcsy 命令行快捷方式

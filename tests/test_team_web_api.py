@@ -209,6 +209,31 @@ def check_manual_commit_and_git_init() -> None:
         pending = state.full_state()["projects"][0]["pending_git_changes"]
         assert pending["count"] >= 1 and "feature.py" in pending["files"]
 
+        # 人工把关提交弹窗：查看单个文件未提交改动 diff
+        # 已跟踪文件的修改 → git diff；未跟踪的新文件 → 内容预览
+        (proj_dir / "README.md").write_text("# Test\n\nnew line added\n", encoding="utf-8")
+        res_diff_tracked = state.project_file_diff({
+            "name": "my_project", "file": "README.md"})
+        assert res_diff_tracked["ok"] and "new line added" in res_diff_tracked["diff"]
+        res_diff_untracked = state.project_file_diff({
+            "name": "my_project", "file": "feature.py"})
+        assert res_diff_untracked["ok"] and "print('feat')" in res_diff_untracked["diff"]
+        assert "新增文件" in res_diff_untracked["diff"]
+        # 非法路径拒绝（GitError 与 ValueError 在端点层同样转 400）
+        from orcsy.git_ops import GitError
+        for bad_path in ("../escape.yaml", "..\\escape.yaml", "/abs/path"):
+            try:
+                state.project_file_diff({"name": "my_project", "file": bad_path})
+                raise AssertionError(f"非法路径应被拒绝：{bad_path}")
+            except (ValueError, GitError):
+                pass  # 预期拒绝
+        # 未知项目拒绝
+        try:
+            state.project_file_diff({"name": "no_such", "file": "x.py"})
+            raise AssertionError("未知项目应报错")
+        except ValueError as e:
+            assert "未知项目" in str(e)
+
         # 人工把关提交端点
         res_commit = state.manual_commit_project({
             "name": "my_project",
@@ -228,6 +253,7 @@ def check_manual_commit_and_git_init() -> None:
         res_init = state.git_init_project({"name": "non_git_proj"})
         assert res_init["ok"]
         assert Git(non_git_dir).is_repo()
+        print("ok: /api/project/diff 单文件 diff 预览（跟踪/未跟踪/穿越拒绝）")
         print("ok: /api/project/commit 人工提交把关 / /api/project/git-init 一键初始化 Git")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

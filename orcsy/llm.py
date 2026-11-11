@@ -197,10 +197,10 @@ def list_models(provider: str, base_url: str, api_key: str,
 # 早期工具结果被裁剪后的占位文本
 _TRIM_PLACEHOLDER = "（早期工具结果已省略）"
 # 滚动压缩参数：最近 N 条消息保持原文；其前的长工具结果占位化
-_KEEP_RECENT_MSGS = 12
-_TOOL_KEEP_CHARS = 600
+_KEEP_RECENT_MSGS = 30
+_TOOL_KEEP_CHARS = 2500
 # 历史估算 token 软预算：超过即压缩旧工具结果（与模型窗口无关的常驻成本控制）
-_SOFT_BUDGET_TOKENS = 24000
+_SOFT_BUDGET_TOKENS = 64000
 
 
 def _est_tokens_msg(m: dict) -> int:
@@ -389,11 +389,17 @@ class LLMClient:
         use_tools = True
 
         turn = 0
-        # max_turns <= 0（如 -1）= 不设轮数上限：只有 finish / 停止信号 / 异常能结束循环
+        # max_turns <= 0（如 -1）= 不设轮数上限：只有 finish / 停止信号 /
+        # 具体防死循环护栏（同文件重读、连续只读、连续无工具）能结束循环。
+        # 绝不额外加「整体轮数硬上限」——用户显式写 -1 就是要不限轮数，
+        # 长任务的 QA 全流程 E2E 合理需要数百轮，硬墙会误杀正常推进。
         unlimited = max_turns is None or max_turns <= 0
         no_tool_turns = 0        # 连续未调用工具的轮数（连续过多升级强制收尾）
         repeat_calls: Counter[tuple[str, str]] = Counter()  # (工具, 参数) → 次数
+        file_read_counts: Counter[str] = Counter()         # path -> 累计读取次数（防死循环）
+        consecutive_read_turns = 0                         # 连续只读未动笔轮次
         forced_reason = ""       # 非空 = 因卡住/轮数耗尽强制收尾（而非 finish）
+
         while unlimited or turn < max_turns:
             turn += 1
             # 强制停止（看板置位）：在模型请求之前先看一眼，避免多跑一轮
@@ -444,29 +450,81 @@ class LLMClient:
                                     f"{(args_json or '')[:60].strip()}".replace("\n", " "))
                     except Exception:  # noqa: BLE001 进度回调失败不影响执行
                         pass
-                result = dispatch_tool(ctx, name, args_json)
-                # 完全相同参数的重复调用检测：给打转的模型一个止损信号
-                # （实测会 100+ 轮重读同一批文件）。计数仅存内存，任务结束即弃；
-                # 轮询类调试工具豁免
-                repeat_calls[(name, args_json or "")] += 1
-                repeats = repeat_calls[(name, args_json or "")]
-                if name not in _POLLING_EXEMPT_TOOLS and repeats >= _REPEAT_CALL_WARN:
-                    if repeats == _REPEAT_CALL_WARN:
-                        log.warning("工具调用 [%d] %s 已 %d 次以完全相同的"
-                                    "参数重复执行", turn, name, repeats)
-                    result += (
-                        f"\n\n⚠️ 提醒：这是第 {repeats} 次以完全相同的参数调用 "
-                        f"{name}，重复执行不会产生新信息。请基于已有结果推进"
-                        "（写入/修改/下一步操作）；若在等待外部变化，请换一种"
-                        "验证方式；若已无法推进，请调用 finish（action=blocked）"
-                        "说明原因。")
-                log.debug("工具结果 [%d] %s：%s", turn, name, result[:200].replace("\n", " "))
-                self.messages.append(self._tool_result(call_id, result))
+
+                # 先统一算只读/写标记与连读计数（护栏 1、2 共用）。
+                # 关键：护栏 1 的拦截分支不能 continue 跳过计数——否则「永远
+                # 重读同一文件」的模型连读轮数永远停在拦截前的值，护栏 2 的
+                # 熔断阈值再也达不到，`-1` 不限轮数时就会无限空转。
+                produces_code = bool(getattr(ctx, "produces_code", True))
+                is_read_op = name in ("read_file", "list_dir", "find_files", "grep", "read_skill")
+                is_write_op = name in ("write_file", "edit_file", "multi_edit", "delete_file", "move_file", "run_command")
+                if is_write_op:
+                    consecutive_read_turns = 0
+                elif is_read_op:
+                    consecutive_read_turns += 1
+
+                # 防死循环 1：同一文件重复读取硬拦截（超过 5 次直接拒绝，迫使模型基于已知上下文开工）
+                intercepted: str | None = None
+                if name == "read_file":
+                    p_target = ""
+                    try:
+                        p_args = json.loads(args_json) if isinstance(args_json, str) else (args_json or {})
+                        p_target = str(p_args.get("path") or "").strip()
+                    except Exception:
+                        pass
+                    if p_target:
+                        file_read_counts[p_target] += 1
+                        if file_read_counts[p_target] > 5:
+                            intercepted = (
+                                f"错误：文件 {p_target} 已在当前任务中累计读取过 {file_read_counts[p_target] - 1} 次！"
+                                "系统已拦截本次重复读取。你已经完全掌握了该文件内容，严禁继续只读打转。"
+                                "请立即调用 edit_file / write_file 开始编写代码，或调用 finish 汇报结果。"
+                            )
+                            log.warning("拦截重复读取文件 [%s]（第 %d 次）", p_target, file_read_counts[p_target])
+
+                if intercepted is not None:
+                    # 被拦截的重读同样计作一次只读轮（已在上面计入），这里只回
+                    # 错误结果给模型；tool_call/tool_result 配对保持完整
+                    log.debug("工具结果 [%d] %s（拦截）：%s", turn, name, intercepted[:120])
+                    self.messages.append(self._tool_result(call_id, intercepted))
+                else:
+                    result = dispatch_tool(ctx, name, args_json)
+
+                    if produces_code and consecutive_read_turns == 10:
+                        result += (
+                            f"\n\n🚨 警告：你已连续 {consecutive_read_turns} 轮只读文件而未动笔写代码！"
+                            "已收集的信息足够推进。请立即停止调研，使用 edit_file 或 write_file 编写实现！"
+                        )
+
+                    # 完全相同参数的重复调用检测：给打转的模型一个止损信号
+                    repeat_calls[(name, args_json or "")] += 1
+                    repeats = repeat_calls[(name, args_json or "")]
+                    if name not in _POLLING_EXEMPT_TOOLS and repeats >= _REPEAT_CALL_WARN:
+                        if repeats == _REPEAT_CALL_WARN:
+                            log.warning("工具调用 [%d] %s 已 %d 次以完全相同的参数重复执行", turn, name, repeats)
+                        result += (
+                            f"\n\n⚠️ 提醒：这是第 {repeats} 次以完全相同的参数调用 {name}，"
+                            "重复执行不会产生新信息。请基于已有结果推进（写入/修改/下一步操作）；"
+                            "若已无法推进，请调用 finish（action=blocked）说明原因。"
+                        )
+                    log.debug("工具结果 [%d] %s：%s", turn, name, result[:200].replace("\n", " "))
+                    self.messages.append(self._tool_result(call_id, result))
+
+                # 防死循环 2：代码生产类角色连续只读未动笔（含被拦截的重读）
+                # 累计达上限 → 强制熔断收尾。用 ctx.produces_code 判定，单兵
+                # （current_role 为空串）也覆盖，PM/QA（False）不误伤。
+                if produces_code and consecutive_read_turns >= 20:
+                    forced_reason = (
+                        f"检测到只读死循环：已连续 {consecutive_read_turns} 轮仅读取文件"
+                        "而未做任何改动，强制熔断收尾")
+                    break
+
+            if forced_reason:
+                break
 
             self._trim_context()
 
-        # 强制收尾：轮数耗尽，或连续多轮无工具调用（不设上限时循环本只能被
-        # finish/停止/异常离开；轮数有限时到不了 while 出口的只有这两种）
+        # 强制收尾：轮数耗尽（仅有限轮数模式），或命中具体防死循环护栏
         forced_reason = forced_reason or f"已达到最大工作轮数 {max_turns}"
         log.warning("%s，要求强制收尾", forced_reason)
         if ctx.stop_event is not None and ctx.stop_event.is_set():
@@ -493,7 +551,7 @@ class LLMClient:
                     return self._finish_response(self._parse_finish_args(args_json))
         except LLMError:
             pass
-        return AgentResponse.fallback(f"超过最大轮数 {max_turns} 仍未给出结论")
+        return AgentResponse.fallback(f"{forced_reason}，模型未给出结论")
 
     @staticmethod
     def _parse_finish_args(args_json: str | dict) -> dict:

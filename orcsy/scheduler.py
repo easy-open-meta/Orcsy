@@ -66,6 +66,10 @@ class Scheduler:
         if not self.agents:
             log.warning("配置中没有启用的项目")
         self._cycle_lock = threading.Lock()
+        # Agent 列表重建标记锁：reload_config 快速切换 config 并标记 stale，
+        # 实际重建由后台线程 / run_cycle 开头消费（绝不阻塞 HTTP 保存请求）
+        self._agents_lock = threading.Lock()
+        self._agents_stale = False
         self._stop_event = threading.Event()
         # 定时拉取 Issues：独立后台线程（拉取是网络 I/O，不占用调度周期锁）。
         # _issue_timers：项目名 → 下次应拉取的 time.monotonic() 时刻；
@@ -115,33 +119,70 @@ class Scheduler:
     # ---- 配置热重载（Web 修改配置/项目后调用） ----
 
     def reload_config(self, new_config: AppConfig) -> None:
-        """用新配置重建 Agent 列表。正在执行的一轮跑完前不重建（锁保护）。"""
-        with self._cycle_lock:
+        """用新配置重建 Agent 列表。正在执行的一轮跑完前不重建（后台兜底）。
+
+        锁语义：本方法绝不能阻塞 HTTP 保存请求——任务可能一跑数小时，若与
+        run_cycle 抢同一把 _cycle_lock，看板「保存设置」会一直 loading。
+        因此 config/mirror_runtime 先行原子切换（保存即时生效的新值供
+        下轮读取），Agent 列表重建交给后台线程拿锁执行；拿不到锁（一轮
+        执行中）也无需重试——run_cycle 每轮结束后的下一次 reload（或
+        _sync_agents_if_stale 兜底）都会用 self.config 最新值重建。
+        """
+        with self._agents_lock:
             self.config = new_config
             self.skills_dir = skills_base(new_config)
-            ensure_builtin_skills(self.skills_dir)
-            # 镜像源运行时随配置重建（custom/disabled 可能变了；测速边车路径不变）
             self.mirror_runtime = mirror_runtime_for(new_config)
-            self.agents = [
-                ProjectAgent(p, resolve_llm(new_config.llm, p.llm,
-                                            context=f"项目 {p.name} 的 llm"),
-                             skills_base=self.skills_dir,
-                             tools=resolve_tools(new_config.tools, p.tools),
-                             permission_mode=resolve_permission_mode(new_config.permissions, p),
-                             permission_timeout_minutes=new_config.permissions.timeout_minutes,
-                             allowed_commands=resolve_commands(new_config.commands, p),
-                             extra_env=new_config.env.vars or None,
-                             mirror_runtime=self.mirror_runtime,
-                             path_autofix=new_config.env.path_autofix,
-                             review_cfg=new_config.review,
-                             local_debug=new_config.local_debug,
-                             commit_and_merge=resolve_commit_and_merge(new_config.git, p),
-                             agent_profiles=new_config.agent_profiles,
-                             global_tools=new_config.tools)
-                for p in new_config.projects
-                if p.enabled
-            ]
+            self._agents_stale = True
+        t = threading.Thread(target=self._rebuild_agents_background,
+                             name="reload-agents", daemon=True)
+        t.start()
+        log.info("配置已接收，Agent 列表后台重建中")
+
+    def _rebuild_agents_background(self) -> None:
+        """后台重建 Agent 列表：只在空闲（无执行轮）时拿锁换名单。"""
+        if not self._cycle_lock.acquire(blocking=False):
+            return  # 一轮执行中：等下轮触发前由 _sync_agents_if_stale 补建
+        try:
+            self._rebuild_agents_locked()
+        finally:
+            self._cycle_lock.release()
+
+    def _rebuild_agents_locked(self) -> None:
+        """持有 _cycle_lock 的实际重建逻辑（run_cycle 结束前也调用以消费最新配置）。"""
+        cfg = self.config
+        ensure_builtin_skills(self.skills_dir)
+        self.agents = [
+            ProjectAgent(p, resolve_llm(cfg.llm, p.llm,
+                                        context=f"项目 {p.name} 的 llm"),
+                         skills_base=self.skills_dir,
+                         tools=resolve_tools(cfg.tools, p.tools),
+                         permission_mode=resolve_permission_mode(cfg.permissions, p),
+                         permission_timeout_minutes=cfg.permissions.timeout_minutes,
+                         allowed_commands=resolve_commands(cfg.commands, p),
+                         extra_env=cfg.env.vars or None,
+                         mirror_runtime=self.mirror_runtime,
+                         path_autofix=cfg.env.path_autofix,
+                         review_cfg=cfg.review,
+                         local_debug=cfg.local_debug,
+                         commit_and_merge=resolve_commit_and_merge(cfg.git, p),
+                         agent_profiles=cfg.agent_profiles,
+                         global_tools=cfg.tools)
+            for p in cfg.projects
+            if p.enabled
+        ]
+        with self._agents_lock:
+            self._agents_stale = False
         log.info("配置已热重载：%d 个启用项目", len(self.agents))
+
+    def _sync_agents_if_stale(self) -> None:
+        """run_cycle 每轮开始前调用：配置有变更且未重建时，先重建再扫描。"""
+        with self._agents_lock:
+            stale = self._agents_stale
+        if stale and self._cycle_lock.acquire(blocking=False):
+            try:
+                self._rebuild_agents_locked()
+            finally:
+                self._cycle_lock.release()
 
     # ---- 单轮 ----
 
@@ -150,6 +191,8 @@ class Scheduler:
 
         已有一轮在执行时直接返回空结果（不排队，避免任务重复领取）。
         """
+        # 配置有变更时先在本轮开始前重建 Agent 名单（此刻必无执行轮，锁必可得）
+        self._sync_agents_if_stale()
         if not self._cycle_lock.acquire(blocking=False):
             log.warning("上一轮扫描尚未结束，跳过本轮触发")
             return {}

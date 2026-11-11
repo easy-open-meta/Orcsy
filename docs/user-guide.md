@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.21.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.22.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 > ℹ️ The dashboard is currently Chinese-only. This guide uses English names for buttons and cards; a Chinese-label reference is in [section 9.1](#91-top-toolbar).
 
@@ -153,7 +153,7 @@ When it works, it:
 
 #### Steps
 
-1. Download `orcsy-setup-0.21.0-windows-amd64.exe` from the release page:
+1. Download `orcsy-setup-0.22.0-windows-amd64.exe` from the release page:
    - Gitee: <https://gitee.com/java-and-net/Orcsy/releases>
    - GitHub: <https://github.com/easy-open-meta/Orcsy/releases>
 2. Double-click it. If Windows SmartScreen appears, click **More info** → **Run anyway**.
@@ -916,7 +916,7 @@ After a task finishes and before its changes are merged and archived, Orcsy can 
 
 ### 10.12 Multi-Model Agent Project Team
 
-Orcsy 0.21.0 introduces **Multi-Model Agent Project Teams**. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:
+Orcsy 0.22.0 introduces **Multi-Model Agent Project Teams**. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:
 
 - **👑 Project Manager (PM)**: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using `depends_on_refs`, or dispatches single-component tasks directly via `reassign_task`.
 - **⚙️ Backend / 🎨 Frontend Developers**: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries automatically injected into prompts.

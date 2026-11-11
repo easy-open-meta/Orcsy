@@ -482,6 +482,9 @@ export const api = {
     post('/api/project/commit', p) as Promise<{
       ok: boolean; committed: boolean; commit: string; pushed: boolean; message: string
     }>,
+  /** 人工把关提交弹窗：查看单个文件在主工作区的未提交改动 diff（新文件返回内容预览） */
+  projectFileDiff: (p: { name: string; file: string }) =>
+    post('/api/project/diff', p) as Promise<{ ok: boolean; file: string; diff: string }>,
   gitInitProject: (p: { name: string }) =>
     post('/api/project/git-init', p) as Promise<{ ok: boolean; message: string }>,
   taskStatus: (project: string, id: string, status: string) =>

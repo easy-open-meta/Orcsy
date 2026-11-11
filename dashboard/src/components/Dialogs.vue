@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type DirListing, type ModelInfo, type PermissionMode } from '../api'
 import { navigateTo, refresh, ui, store } from '../store'
@@ -854,12 +854,40 @@ const commitDraft = reactive({
 const committingProject = computed(() =>
   ui.commitDlg ? store.state?.projects.find(x => x.name === ui.commitDlg?.project) ?? null : null)
 
+// ---- diff 预览：点击文件名加载该文件未提交改动 diff（带缓存，切回不重复请求） ----
+const diffOpenFile = shallowRef<string | null>(null)
+const diffCache = reactive<Record<string, string>>({})
+const diffLoading = shallowRef<string | null>(null)
+const diffErr = shallowRef<string | null>(null)
+
+async function toggleFileDiff(file: string): Promise<void> {
+  if (diffOpenFile.value === file) { diffOpenFile.value = null; return }
+  diffOpenFile.value = file
+  diffErr.value = null
+  if (diffCache[file] !== undefined) return  // 已缓存直接展示
+  diffLoading.value = file
+  try {
+    const res = await api.projectFileDiff({ name: ui.commitDlg!.project, file })
+    diffCache[file] = res.diff || '（无改动内容）'
+  } catch (e: any) {
+    diffErr.value = `加载 diff 失败：${e.message}`
+    diffOpenFile.value = null
+  } finally {
+    diffLoading.value = null
+  }
+}
+
 watch(() => ui.commitDlg, (dlg) => {
   if (!dlg) return
   commitDraft.message = ''
   commitDraft.push = false
   commitDraft.submitting = false
   commitDraft.err = ''
+  // 弹窗重开：清空 diff 预览状态与缓存（文件改动可能已更新，需重新拉取）
+  diffOpenFile.value = null
+  diffErr.value = null
+  diffLoading.value = null
+  for (const k of Object.keys(diffCache)) delete diffCache[k]
 })
 
 async function submitManualCommit(): Promise<void> {
@@ -1584,15 +1612,25 @@ async function newFolder(): Promise<void> {
 
   <!-- 人工确认主分支提交与推送对话框 -->
   <NModal v-model:show="commitVisible" preset="card" :title="`人工把关提交 · ${ui.commitDlg?.project}`"
-          style="width: min(560px, 92vw)">
+          style="width: min(820px, 94vw)">
     <div style="font-size: 13px; color: var(--text); line-height: 1.6; margin-bottom: 10px;">
       主分支工作区目前有 <b>{{ committingProject?.pending_git_changes?.count || 0 }}</b> 个已通过测试联调但未提交的文件。
-      确认后将由系统以规范的 commit message 提交至当前主分支（可选推送到远程仓库）。
+      <b style="color: #5b8cff;">点击文件名可快速查看该文件的改动 diff</b>，确认无误后再提交至当前主分支（可选推送到远程仓库）。
     </div>
-    <div v-if="committingProject?.pending_git_changes?.files?.length" style="max-height: 140px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 10px;">
-      <div v-for="f in committingProject.pending_git_changes.files" :key="f" style="font-family: Consolas, monospace; font-size: 11.5px; color: var(--dim); padding: 2px 0;">
-        {{ f }}
+    <div v-if="committingProject?.pending_git_changes?.files?.length" style="max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 10px;">
+      <div v-for="f in committingProject.pending_git_changes.files" :key="f"
+           class="diff-file-line" :class="{ 'diff-file-active': diffOpenFile === f }"
+           :title="diffOpenFile === f ? '点击收起 diff' : '点击查看该文件改动 diff'"
+           @click="toggleFileDiff(f)">
+        <span class="diff-caret">{{ diffOpenFile === f ? '▾' : '▸' }}</span>
+        <span class="diff-fname">{{ f }}</span>
+        <NSpin v-if="diffLoading === f" size="small" style="margin-left: auto" />
       </div>
+      <!-- 点击展开的 diff 预览面板 -->
+      <div v-if="diffOpenFile && diffCache[diffOpenFile] !== undefined" class="diff-viewer">
+        <pre class="diff-pre">{{ diffCache[diffOpenFile] }}</pre>
+      </div>
+      <div v-if="diffErr" class="err" style="margin: 6px 0 2px;">{{ diffErr }}</div>
     </div>
     <div style="margin-bottom: 10px;">
       <label style="font-size: 12px; font-weight: 600; margin-bottom: 4px; display: block;">提交说明 Commit Message</label>
@@ -1614,6 +1652,25 @@ async function newFolder(): Promise<void> {
 
 <style scoped>
 .err { color: var(--n-error-color); font-size: 12.5px; margin-bottom: 6px; }
+.diff-file-line {
+  display: flex; align-items: center; gap: 6px;
+  font-family: Consolas, monospace; font-size: 11.5px;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer; user-select: none;
+}
+.diff-file-line:hover { background: rgba(91, 140, 255, 0.10); color: var(--text); }
+.diff-file-active { background: rgba(91, 140, 255, 0.16); color: var(--text); }
+.diff-caret { flex: none; font-size: 10px; color: var(--faint); }
+.diff-fname { word-break: break-all; }
+.diff-viewer {
+  margin: 4px 0 6px 18px; border: 1px solid var(--line2);
+  border-radius: 6px; background: rgba(128, 128, 160, 0.06);
+  max-height: 320px; overflow: auto;
+}
+.diff-pre {
+  margin: 0; padding: 8px 10px;
+  font: 11px/1.55 Consolas, "Cascadia Mono", monospace;
+  white-space: pre; color: var(--text); tab-size: 4;
+}
 .hint { font-size: 12px; color: var(--faint); margin-bottom: 8px; }
 .duo { display: flex; gap: 10px; }
 .duo > div { flex: 1; display: flex; flex-direction: column; gap: 4px; }

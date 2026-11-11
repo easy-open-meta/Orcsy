@@ -308,6 +308,50 @@ class Git:
                 files.append(parts[1].strip())
         return {"is_git": True, "count": len(files), "files": files[:50]}
 
+    def file_diff(self, file_path: str) -> str:
+        """单个文件在主工作区的未提交改动 diff（人工把关提交弹窗预览用）。
+
+        file_path 为相对仓库根的路径（与 pending_changes_summary 的 files
+        同源）。未跟踪文件展示新增文件全文摘要；其余走 git diff -- <path>。
+        路径穿越/绝对路径拒绝；diff 输出截断到 60K 字符防超长打爆看板。
+        """
+        if not self.is_repo():
+            raise GitError("项目不是 git 仓库，无法查看 diff")
+        rel = str(file_path or "").strip()
+        if not rel or rel.startswith(("/", "\\")) or ".." in Path(rel).parts:
+            raise GitError(f"非法的文件路径：{rel}")
+        # porcelain 输出的文件名可能带引号（含空格/中文时），先去引号
+        rel_clean = rel.strip('"')
+        if not (self.repo / rel_clean).exists():
+            raise GitError(f"文件不存在：{rel_clean}")
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "diff", "--", rel_clean],
+            capture_output=True, startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        diff_text = proc.stdout.decode("utf-8", errors="replace")
+        if not diff_text.strip():
+            # 无 diff 说明是未跟踪的新文件：给出「新增文件」形态预览（前 200 行）
+            status = subprocess.run(
+                ["git", "-C", str(self.repo), "status", "--porcelain", "--", rel_clean],
+                capture_output=True, startupinfo=_windows_startupinfo(),
+                creationflags=_SUBPROCESS_FLAGS,
+            )
+            if status.stdout.strip():
+                try:
+                    content = (self.repo / rel_clean).read_text(encoding="utf-8",
+                                                                errors="replace")
+                except OSError as e:
+                    return f"（无法读取新文件内容：{e}）"
+                lines = content.splitlines()
+                head = "\n".join(lines[:200])
+                more = f"\n…（共 {len(lines)} 行，已截断）" if len(lines) > 200 else ""
+                return f"（新增文件 · 前 {min(200, len(lines))} 行预览）\n{head}{more}"
+            return "（该文件当前无未提交改动，可能已被其他流程提交）"
+        if len(diff_text) > 60000:
+            diff_text = diff_text[:60000] + "\n…（diff 过长，已截断至 60K 字符）"
+        return diff_text
+
     def commit_and_push_manual(self, message: str, *, push: bool = False,
                                branch: str | None = None) -> dict:
         """人工确认把关后执行的最终主分支提交（可选推送）。"""

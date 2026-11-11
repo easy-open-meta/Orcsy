@@ -680,6 +680,7 @@ class ProjectAgent:
         append_progress(task.path,
                         f"⛔ 连续 {new_round} 次审查不通过，转受阻等人工裁决；"
                         f"成果保留在 arranger/{self.project.name} 分支")
+        self._set_status(task.path, "blocked")
         self.log.warning("任务 %s 连续 %d 次审查不通过，转 blocked", task.id, new_round)
 
     def _handle_review_error(self, task: Task, result: TaskResult, review) -> None:

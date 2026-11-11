@@ -1754,6 +1754,23 @@ class AppState:
             msg += f"（推送警告：{res.get('push_note')}）"
         return {"ok": True, **res, "message": msg}
 
+    def project_file_diff(self, data: dict) -> dict:
+        """人工把关提交弹窗：查看单个文件在主工作区的未提交改动 diff。
+
+        新文件（未跟踪）返回内容预览；已修改文件返回 git diff 文本。
+        """
+        name = str(data.get("name") or data.get("project") or "").strip()
+        file_path = str(data.get("file") or "").strip()
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"未知项目：{name}")
+        p = agent.project
+        if not agent.executor.probe_git_repo():
+            raise ValueError(f"项目 {name} 不是 Git 仓库，无法查看 diff")
+        g = Git(p.path)
+        diff = g.file_diff(file_path)
+        return {"ok": True, "file": file_path, "diff": diff}
+
     def git_init_project(self, data: dict) -> dict:
         """为非 Git 目录一键初始化 Git 仓库并创建基础提交与忽略规则（开启小组 Worktree 必备）。"""
         name = str(data.get("name") or data.get("project") or "").strip()
@@ -2745,6 +2762,11 @@ class WebHandler(BaseHTTPRequestHandler):
             elif path == "/api/project/commit":
                 try:
                     self._json(self.state.manual_commit_project(body))
+                except (ValueError, GitError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/project/diff":
+                try:
+                    self._json(self.state.project_file_diff(body))
                 except (ValueError, GitError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/project/git-init":

@@ -347,7 +347,7 @@ GLM、Kimi、OpenAI、通义千问等）；</li>
 </ul>
 <h4 id="安装步骤">安装步骤</h4>
 <ol type="1">
-<li>打开项目发布页，下载 <code>orcsy-setup-0.21.0-windows-amd64.exe</code>。
+<li>打开项目发布页，下载 <code>orcsy-setup-0.22.0-windows-amd64.exe</code>。
 <ul>
 <li>Gitee：<a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -1479,7 +1479,7 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 审查每次约消耗 3~8 轮只读调用的 token，在设置页「用量统计」里按审查类单独记录，可与执行消耗分开核算。</p>
 <hr />
 <h3 id="1012-多模型-agent-项目小组project-team协同">10.12 多模型 Agent 项目小组（Project Team）协同</h3>
-<p>Orcsy 0.21.0 引入了<strong>多模型 Agent 项目小组（Project Team）</strong>。用户可以自由组合多个不同专长大模型的 Agent 组成研发团队进驻任意项目，完成复杂需求的分工协作：</p>
+<p>Orcsy 0.22.0 引入了<strong>多模型 Agent 项目小组（Project Team）</strong>。用户可以自由组合多个不同专长大模型的 Agent 组成研发团队进驻任意项目，完成复杂需求的分工协作：</p>
 <ul>
 <li><strong>👑 项目经理（PM）</strong>：只读摸底项目代码库与架构，将需求拆解为职责明确的子任务并使用 <code>depends_on_refs</code> 编排 DAG 有向无环依赖图；或对简单单端任务直接调用 <code>reassign_task</code> 转派下游。</li>
 <li><strong>⚙️ 后端 / 🎨 前端开发工程师</strong>：在按任务隔离的 Git Worktree 沙盒中专注本端编码与单测，Prompt 自动透传前置依赖任务的交付物摘要（接口契约）。</li>

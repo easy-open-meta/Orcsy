@@ -264,7 +264,7 @@ def build_role_prompt_extra(
             "### 本项目当前可用执行角色（派单必须严格从中选取 assignee）\n"
             f"{roster_text}\n\n"
             "### 工作流程与要求\n"
-            "1. 先用只读工具（`list_dir` / `find_files` / `read_file` / `grep`）快速摸清项目架构、目录与接口规范。\n"
+            "1. 先摸清项目架构与代码现状：对于跨模块或中大型需求，**优先调用 `delegate_explore` 派生 2~4 个只读子代理并发摸底**（如分别并行调研后端数据层、前端页面结构、现有测试规范），单轮内即可拿到完整报告；局部细节亦可用 `list_dir` / `find_files` / `read_file` / `grep` 核验。\n"
             "2. 若任务体量小且职责单一（如单一端小修复），直接调用 `reassign_task(assignee=..., note=...)` 转派给对应角色，再调用 `finish(action=\"split\", ...)` 交接。\n"
             "3. 若任务涉及多端协作或体量较大，调用 `create_tasks` 拆分为 **2~6 个**职责清晰、可独立验收的子任务：\n"
             "   - **每条子任务必须指定 `assignee`**（严格使用上述列表里的角色 ID）；\n"
@@ -291,9 +291,10 @@ def build_role_prompt_extra(
         parts.append(
             f"你在本项目中担任 **{member_name}（`{role}`）**，专注于本领域高质量编码与自测验证。\n\n"
             "### 协作与交付要求\n"
-            "1. 若存在「上游前置任务交付摘要」，务必先对齐前置任务暴露的接口路径、数据结构与文件路径。\n"
-            "2. 在完成代码修改并跑通对应单元/构建检查后，调用 `finish(action=\"completed\", ...)`。\n"
-            "3. 请在 `finish.summary` 与 `finish.notes` 中清晰说明新增/修改的核心文件、接口路由或启动验证方式，方便下游开发与 QA 无缝联调。"
+            "1. 若存在「上游前置任务交付摘要」，务必先对齐前置任务暴露的接口路径、数据结构与文件路径。需要排查多个模块或检索全局定义时，可调用 `delegate_explore` 派生只读子代理并发探索。\n"
+            "2. **严禁只读打转**：探索阅读不应超过 3~5 轮。一旦确认了接口定义或数据表结构，**必须立即调用 `edit_file` 或 `write_file` 落地代码**，严禁在不同文件之间反复重读打转！\n"
+            "3. 在完成代码修改并跑通对应单元/构建检查后，调用 `finish(action=\"completed\", ...)`。\n"
+            "4. 请在 `finish.summary` 与 `finish.notes` 中清晰说明新增/修改的核心文件、接口路由或启动验证方式，方便下游开发与 QA 无缝联调。"
         )
 
     if extra_prompt and extra_prompt.strip():
