@@ -232,8 +232,26 @@ def build_system_prompt(
         f"{_skills_section(skills, tools)}"
         f"{workspace}\n"
         f"{_tools_section(tool_map)}"
+        f"{_subagent_section(tools)}"
         f"{_permissions_section(permission_mode)}\n"
         f"{_output_contract(tools)}"
+    )
+
+
+def _subagent_section(tools: frozenset[str] | None) -> str:
+    """并发子代理使用指引：仅在 delegate_explore 可用时注入（单兵模式同样受益）。
+
+    单兵 Agent 没有角色补充提示词（build_role_prompt_extra 只用于项目小组），
+    因此在通用系统提示词里也说明并发委托能力，避免只读摸底一路串行。
+    """
+    if tools is not None and "delegate_explore" not in tools:
+        return ""
+    return (
+        "## 并发子代理委托（delegate_explore）\n\n"
+        "当需要同时摸清多个模块/目录（如数据层、路由、鉴权、既有测试等多处现状）时，"
+        "优先调用 `delegate_explore` 一次派生 2~4 个只读子代理并行调研，单轮即可拿到"
+        "汇总报告，避免自己一轮轮串行翻阅文件。子代理只读、无副作用；拿到报告后立即"
+        "基于结论推进编码或决策，不要在报告之外反复重读同一批文件。\n\n"
     )
 
 
@@ -291,7 +309,7 @@ def build_role_prompt_extra(
         parts.append(
             f"你在本项目中担任 **{member_name}（`{role}`）**，专注于本领域高质量编码与自测验证。\n\n"
             "### 协作与交付要求\n"
-            "1. 若存在「上游前置任务交付摘要」，务必先对齐前置任务暴露的接口路径、数据结构与文件路径。需要排查多个模块或检索全局定义时，可调用 `delegate_explore` 派生只读子代理并发探索。\n"
+            "1. 若存在「上游前置任务交付摘要」，务必先对齐前置任务暴露的接口路径、数据结构与文件路径。**需要同时摸清多个模块/目录时优先调用 `delegate_explore` 派生 2~4 个只读子代理并发探索**，单轮拿到汇总报告，避免串行翻阅。\n"
             "2. **严禁只读打转**：探索阅读不应超过 3~5 轮。一旦确认了接口定义或数据表结构，**必须立即调用 `edit_file` 或 `write_file` 落地代码**，严禁在不同文件之间反复重读打转！\n"
             "3. 在完成代码修改并跑通对应单元/构建检查后，调用 `finish(action=\"completed\", ...)`。\n"
             "4. 请在 `finish.summary` 与 `finish.notes` 中清晰说明新增/修改的核心文件、接口路由或启动验证方式，方便下游开发与 QA 无缝联调。"

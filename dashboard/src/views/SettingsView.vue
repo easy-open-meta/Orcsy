@@ -138,6 +138,13 @@ const defaultToolCategories = [
     tools: ['create_tasks', 'finish'],
   },
   {
+    key: 'subagent',
+    label: '子代理并发协同',
+    icon: '👥',
+    description: '派生只读子代理并行探索多个模块/目录，单轮拿到汇总结论',
+    tools: ['delegate_explore'],
+  },
+  {
     key: 'external_net',
     label: '网络与外部知识',
     icon: '🌐',
