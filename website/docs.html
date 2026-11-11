@@ -327,6 +327,7 @@ depends_on: [P1-api]    <span class="c"># 前置依赖任务 ID 列表（全部�
         <tr><td>projects[]</td><td>name / path / enabled / tasks_dir / guide_file / 每轮任务数 / 轮数上限（<b>-1 不设上限</b>）/ allowed_branch / allowed_commands，以及 llm、team（多模型项目小组自由编排）、review_llm、repo（Issues）、tools、permission_mode 按项目覆盖项</td></tr>
         <tr><td>update.*</td><td>Gitee 自更新源仓库 / 私有令牌 / 启动自动检查</td></tr>
         <tr><td>notify.*</td><td>任务结束提醒：完成/受阻时提示音 + 托盘气泡系统通知（默认全开，手动停止不提醒），看板设置页「🔔 提醒设置」可视化编辑</td></tr>
+        <tr><td>masking.*</td><td>数据脱敏：发送模型厂商前本地掩除密码/密钥（enabled 默认开 + 高置信规则；enhanced_rules 键值对增强规则默认关；custom_patterns 自定义正则 ≤20 条），看板设置页「🛡 数据脱敏」可视化编辑</td></tr>
         <tr><td>logging.*</td><td>级别、文件路径、保留天数（写满 N 天自动归档清理）</td></tr>
       </table>
 

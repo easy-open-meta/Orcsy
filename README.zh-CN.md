@@ -4,11 +4,9 @@
 
 📖 **[用户指南（Wiki）](docs/用户指南.md)** —— 面向普通使用者的安装部署、功能说明与逐步操作教程。
 
-> Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：定时扫描各项目 `tasks/` 目录下的 Markdown 任务，按优先级自动派发给专属 Agent 完成开发与修复，并自动提交 Git、回写任务状态，让整个研发流程无人值守闭环运转。
+> Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：把任务写成 Markdown，定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态——全程 Web 看板可视化掌控，无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.22.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
-
-把任务写成 Markdown，剩下的交给 Orcsy：定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态，全程提供 Web 可视化看板与运行日志。
+![version](https://img.shields.io/badge/version-0.23.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 ```
 ┌────────────────────────────────── Orcsy ────────────────────────────────┐
@@ -31,31 +29,19 @@
 
 ## ✨ 特性
 
-- **多模型 Agent 项目小组（Project Team）** —— 支持自由组合多个不同专长的大模型 Agent 进驻任意项目组建研发小组：
-  - **👑 项目经理（PM）**：只读探索项目代码库与架构，拆解前后端/联调子任务并使用 `depends_on_refs` 编排有向无环图（DAG）依赖，或调用 `reassign_task` 将小任务免拆分直接转派下游；
-  - **⚙️ 后端 / 🎨 前端专职开发**：在按任务隔离的 Git Worktree 沙盒中专注本端代码编写与单测，Prompt 自动透传前置依赖任务的交付摘要（接口路由/数据契约）；
-  - **🧪 测试工程师（QA）**：拉起本地后台服务与浏览器进行端到端联调测试；发现缺陷调用 `report_bug` 派发 Bug 任务，原测试任务自动挂靠依赖并进入等待回归状态，待前后端修复后自动唤醒 QA 开展多轮回归测试（配熔断保护）；
-  - **🛡️ 强制沙盒隔离 + 人工把关最终提交**：写代码任务在独立 Worktree 沙盒中安全开发，通过审查后仅增量落地主分支工作区（未提交状态），**绝不自动执行 git commit 与 git push**，最终代码提交与推送 100% 留由人工把关确认；
-  - **⚡ 同周期链式推进（chain_within_cycle）**：依赖解锁后毫秒级连续接棒推进下一阶段，单个需求无需跨越多个调度周期即可完整闭环；
-  - **👥 双层配置复用**：全局「Agent 角色预设池」一次配置各角色专属模型 + 项目小组自由引用与局部技术栈微调。
-- **🔍 独立审查 Agent（Review Agent，合并前把关）** —— 任务完成先在工作分支落 WIP 提交，由**另一个不同模型**只读审查：对照验收标准抽查实现，可实际运行测试/构建命令实测验证；通过才放行合并主分支并归档，不通过带着结构化问题清单（blocker/major/minor 严重度）自动返工（次数可调，返工通过后可选 `--squash` 收敛提交），两个模型交叉验证，杜绝「自己审自己」。
-- **🌐 本地调试与 Chromium 浏览器自动化（Local Debug）** —— 内置强大的 Web / API 前后端联调工具链：
-  - **浏览器自动化（browser_*）**：纯 Python CDP 协议直连系统 Chromium 系浏览器（Google Chrome / Microsoft Edge，零外部 driver 依赖），支持元素结构化快照、按 ref 寻址点击与输入、页面等待、截图落盘及 Console/Network 日志监听；
-  - **开发服务管理（dev_server_*）**：任务中后台常驻启动 dev server（支持 `{PORT}` 动态分配端口与健康检查 URL 探测），任务结束自动清理子进程；
-  - **本地接口调试（http_request）**：受控放行本地/局域网 HTTP API 调试（Cookie 会话保持，受主机白名单严格约束，杜绝内网穿透与敏感元数据泄露）。
-- **🛠️ 工具能力与命令白名单三级分组** —— 设置页按四项子标签页（Agent 工具能力 / 终端命令白名单 / 本地调试与浏览器 / 权限与环境）分级呈现；按 9 大技术生态（Python、Node、编译语言、C/C++ 构建、版本控制、包管理器、系统 Shell、Windows/POSIX 探测等）结构化管理 90+ 默认白名单命令，支持一键批量「全选/全关」与即时过滤搜索；工具明确标注「只读安全」、「变更·需审批」与「高危·需审批」风险标签。
-- **任意大模型** —— OpenAI 兼容协议（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）与 Anthropic 协议均原生 function calling，改 `base_url` + `model` 即可切换；可选开启模型思考内容查看。
-- **Markdown 即任务** —— 每个任务一个 `.md` 文件，frontmatter 写元信息、正文写需求与验收标准，纯文本可版本化、可人工编辑。
-- **每项目一个专属 Agent / 小组** —— 独立的 `AGENT.md` 行为准则、任务清单、git worktree 与对话历史；支持多 Agent 并行；支持单兵专属模型绑定或多角色项目小组。
-- **仓库 Issues 集成** —— 项目可绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），看板一键把 open Issue 拉取为任务：优先级默认 P2，Issue 带 P0~P4 标签则按标签；带来源标注，含归档去重；单向导入，Issue 状态不回写。
-- **程序自更新** —— 从 Gitee Release 检查/下载新版本（启动自动检查可关），一键静默安装并自动重启（Windows 安装版；Docker/Linux 按各自方式升级）。装在用户可写目录时全程零 UAC；装在 Program Files 等系统目录时更新中会弹一次 UAC 授权（点「是」继续，取消则不更新、程序照常运行）。
-- **任务结束提醒** —— 任务完成/受阻时播程序内置提示音（完成「叮咚」/ 受阻警示音）并弹托盘气泡系统通知，看板没开也能收到；手动停止（cancelled）不打扰，提示音/系统通知可在设置页独立开关。
-- **真实执行，安全禁锢** —— 文件工具锁定在项目 worktree 内、命令白名单、轮数上限（填 `-1` 即不限轮数，仍有防死循环护栏兜底）；项目小组/沙盒模式下 Agent 成果只落入主工作区**未提交态**，最终 `git commit` / `push` 始终由人工把关。
-- **并发子代理探索（`delegate_explore`）** —— 项目经理与各开发角色可在开工时一次派生 2~4 个**只读子代理**，并行摸底数据层/路由/鉴权/既有测试等不同模块，单轮拿到汇总报告（严格只读、有扇出与轮数上限、支持强制停止），串行探索耗时成倍压缩。
-- **开箱即用的项目接入** —— 新建/导入现有项目只新增 `tasks/` 与 `AGENT.md`，不动项目其它文件；自动探测技术栈（Node/Python/Rust/Go/.NET/Java/C++…）预填运行与测试命令，也可手动指定。
-- **技能库（Skill）** —— 支持导入本地技能目录（含 SKILL.md）、看板新建技能，或一键扫描常见 AI 工具（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等）的用户级技能并批量勾选导入（同名去重）；技能可全局生效或绑定单个项目；删除技能只清技能库中的副本——外部导入的原样本仍在各工具目录里，重新扫描即可找回（自建技能删除后不可恢复）；技能统一存放在 Orcsy 数据目录（`%APPDATA%\Orcsy\skills\`），**绝不写入项目目录**；Agent 系统提示词只注入「名称+描述」索引，执行时按需经 `read_skill` 工具读取全文，技能再多也不撑爆上下文。内置 **`env-setup` 环境引导技能**（首次启动自动播种；用户没改过的副本在模板修订后随程序升级自动刷新）：Agent 遇到缺失的语言/工具链时按技能用 winget / scoop / choco / brew / apt / dnf 静默安装并验证后继续；**国内无代理网络下包管理器失败时自动切换镜像直下**（3 秒探测官方源 → golang.google.cn / npmmirror / 清华 TUNA 等国内镜像下载 zip → 解压到用户目录 `%LOCALAPPDATA%\Programs` 零管理员权限 → 立即注册用户级 PATH），并预置 Go / Node / Python / JDK 的镜像源速查表——安装/下载命令在自主模式/变更前询问下都会挂起等人工批准。
-- **Web 可视化看板** —— 状态总览、任务增删改（支持角色分派与前置依赖多选）、任务拖拽排序、活动项目动态过滤、**独立的人工把关提交页**（左侧改动文件清单 + 右侧 diff 对比；自动换行、补丁下载、可排除/删除临时测试产物后再一键确认 commit/push）、模型列表拉取与一键连通性测试、运行日志从新到旧展示（模型思考内容可折叠展开）；托盘常驻、开机自启、Windows 安装包开箱即用。
-- **用量台账与热力图** —— 统计总体、各项目及**按 Agent 角色（PM / 后端 / 前端 / 测试 / 审查）**的详细任务数/轮数/输入输出 tokens，近 12 周 GitHub 风格用量热力图（色深=当日 tokens），任务级台账持久化在 `usage.jsonl`，重启不丢。
+- **多模型 Agent 项目小组（Project Team）** —— 自由编排 **👑 项目经理 / ⚙️ 后端 / 🎨 前端 / 🧪 测试 QA** 进驻项目：PM 只读摸底、拆解 DAG 子任务（`depends_on_refs`）或直接转派；前后端在任务隔离的 Worktree 沙盒中专端开发，Prompt 自动透传上游接口契约；QA 拉起本地服务与浏览器做端到端联调，缺陷经 `report_bug` 派发修复任务并自动回归；依赖解锁后同周期链式接棒（`chain_within_cycle`），单个需求一个周期完整闭环。
+- **🔍 独立审查 Agent（合并前把关）** —— 任务完成先落 WIP 提交，由**另一个不同模型**只读审查（对照验收标准抽查、可实际跑测试），通过才合并归档；不通过带结构化问题清单自动返工（次数可调），杜绝「自己审自己」。
+- **🛡️ 数据脱敏（密钥不出本地）** —— Agent 读到的 API 密钥、数据库密码**发送模型厂商前在本地掩除**：处理只在内存进行（不写磁盘、不进日志、任务结束即清除）；高置信规则开箱即用（sk-/ghp_/JWT/PEM 私钥块/Bearer/URL token/连接串密码段），模型只见 `[REDACTED:api_key:…]` 占位符，写回文件自动还原原文；键值对增强规则与自定义正则按需开启。
+- **🌐 本地调试与浏览器自动化** —— 纯 Python CDP 直连本地 Chrome / Edge（零 driver 依赖）：页面结构化快照、按 ref 点击输入、截图与 Console/Network 监听；配合 `dev_server_*` 后台服务起停与 `http_request` 本地接口调试（主机白名单约束），构成 Web/API 联调闭环。
+- **任意大模型** —— OpenAI 兼容协议（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）与 Anthropic 协议均原生 function calling，改 `base_url` + `model` 即可切换。
+- **Markdown 即任务** —— 每个任务一个 `.md` 文件：frontmatter 写元信息、正文写需求与验收标准，纯文本可版本化、可人工编辑。
+- **每项目一个专属 Agent / 小组** —— 独立的 `AGENT.md` 行为准则、任务清单、worktree 与对话历史；多 Agent 并行；支持项目级专属模型绑定。
+- **🛠️ 工具能力与三级审批** —— 文件工具禁锢在项目 worktree 内、90+ 默认命令白名单（9 大生态分组，看板可视化开关）、三档访问权限（变更前询问 / 自主模式 / 完全访问，敏感操作挂起等看板审批）；缺工具链时按内置 `env-setup` 技能静默安装（国内无代理网络自动切镜像直下）。
+- **并发子代理探索** —— PM 与开发角色可一次派生 2~4 个**只读子代理**并行摸底不同模块，单轮拿汇总报告，串行探索耗时成倍压缩。
+- **技能库（Skill）** —— 导入本地目录 / 看板新建 / 一键扫描 ZCode / Claude Code / Codex 等工具的用户级技能批量导入；提示词只注入「名称+描述」索引，全文按需 `read_skill`，不撑爆上下文。
+- **仓库 Issues 集成** —— 绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），open Issue 一键转任务（标签映射优先级、归档去重、单向导入）。
+- **Web 可视化看板** —— 状态总览、任务增删改与拖拽排序、**人工把关提交页**（文件清单 + diff 对比，一键确认 commit/push）、模型连通测试、运行日志与模型思考查看；托盘常驻、开机自启、自更新（零 UAC / 系统目录一次提权）、任务结束提醒、按角色用量台账与 12 周热力图。
+- **开箱即用的项目接入** —— 新建/导入项目只新增 `tasks/` 与 `AGENT.md`；自动探测技术栈预填运行与测试命令。
 
 ## 🚀 快速开始
 
@@ -235,12 +221,13 @@ web:
 
 行为说明：
 
-- 开启后除登录页外，所有页面与 API 均需先登录；密码错误会有延迟惩罚（防爆破）。
-- 登录成功下发 HttpOnly 会话 Cookie，有效期 7 天；会话存于内存，**程序重启后需重新登录**。
-- 修改密码后所有旧会话立即失效；清除密码即关闭鉴权。
-- 密码采用 **PBKDF2-HMAC-SHA256 (100,000 次加盐哈希)** 密文存于 `config.yaml`（明文不入库）。
-- **忘记密码时**：管理员登录服务器执行 `orcsy reset-password`（或 `orcsy passwd`）即可快捷重置密码或 `--clear` 清空。
-- 鉴权不替代 TLS：纯 HTTP 下密码与会话可被嗅探，公网部署请再套一层反向代理（nginx/caddy）上 HTTPS。
+- 开启后除登录页外均需登录；密码错误延迟惩罚防爆破；会话 Cookie（HttpOnly，7 天）存于内存，重启需重新登录；改密即踢全部旧会话。
+- 密码以 **PBKDF2-HMAC-SHA256 (100,000 次加盐哈希)** 密文存储；忘记密码时在服务器执行 `orcsy reset-password` 快捷重置（`--clear` 清空）。
+- 鉴权不替代 TLS：公网部署请再套一层反向代理（nginx/caddy）上 HTTPS。
+
+### 数据脱敏（敏感信息不出本地）
+
+Agent 干活时会读工作区文件、执行命令——里面的 API 密钥、数据库密码默认**发送模型厂商前在本地掩除**：处理只在内存中进行（不写磁盘、不进日志、任务结束即清除）；高置信规则默认生效（sk-/ghp_/JWT/PEM 私钥块/Bearer/URL token/连接串密码段等），模型看到 `[REDACTED:api_key:xxxx]` 占位符，写回文件时自动还原原文，finish 结论保持脱敏形态（密钥不落任务文件）。键值对增强规则（`api_key=xxx`）与自定义正则可在设置页「🛡 数据脱敏」或 config.yaml `masking` 节调整。
 
 ## 🧩 核心概念
 
@@ -298,174 +285,75 @@ Agent 执行任务时通过一组**禁锢在项目内的工具**真实地工作�
 
 | 工具 | 作用 |
 |---|---|
-| `list_dir` | 列出项目文件结构（自动忽略 .git/node_modules 等） |
-| `read_file` | 读文件（超长自动截断） |
-| `write_file` | 创建/整体重写文件 |
-| `edit_file` | 精确文本替换（old_string 须唯一匹配） |
-| `multi_edit` | 同一文件一次多处替换（全有或全无，任一条失败文件不变） |
-| `delete_file` | 删除文件；删目录须显式 `recursive: true` |
-| `move_file` | 移动/重命名（目标已存在须 `overwrite: true`） |
-| `grep` | 正则搜索代码 |
-| `find_files` | 按文件名 glob 查找（如 `*.py`） |
-| `run_command` | 执行白名单内的命令（python/pytest/node/cargo/go/dotnet/git/uv、winget/scoop/choco/brew/apt/dnf 包管理器、powershell/curl/tar/setx 等镜像直下与 PATH 注册工具、where/cmd/dir、ls/cat/wc/head/tail/grep 等只读探测/统计命令），用于跑测试与构建；**缺语言环境时 Agent 按 `env-setup` 内置技能走「预检 → 幂等安装（包管理器优先，无代理时国内镜像直下兜底）→ 会话内修复 → 验证」闭环**（安装需人工批准的场景同上）；新装工具**立即可用**——每条命令执行前现读注册表最新用户 PATH（`setx`/`SetEnvironmentVariable(…,"User")` 注册后无需重启看板）并自动到常见安装目录解析（Program Files / WinGet Links / scoop shims / Eclipse Adoptium 等），也支持绝对路径调用（白名单按文件名匹配，`go.exe` ≡ `go`） |
-| `web_fetch` | 抓取公网 URL 正文（HTML 剥标签；仅限公网地址，内网/回环一律拒绝） |
-| `read_skill` | 读取技能库中某个技能的全文 |
-| `finish` | 给出结构化结论（completed / blocked / cannot_do + 摘要 + 提交信息） |
+| `list_dir` / `find_files` / `grep` | 列结构 / 按名查找 / 正则搜索（自动忽略 .git/node_modules 等） |
+| `read_file` / `write_file` / `edit_file` / `multi_edit` | 读（超长截断）/ 写 / 精确替换（old_string 须唯一）/ 同文件多处替换（全有或全无） |
+| `delete_file` / `move_file` | 删除（删目录须 `recursive: true`）/ 移动重命名（已存在须 `overwrite: true`） |
+| `run_command` | 执行白名单内命令（python/node/git/包管理器等，用于跑测试与构建）；缺工具链时按 `env-setup` 技能静默安装；新装工具立即可用（现读用户 PATH + 常见安装目录解析） |
+| `web_fetch` | 抓取公网 URL 正文（仅公网地址，内网/回环/云元数据一律拒绝） |
+| `browser_*` / `dev_server_*` / `http_request` | 本地调试三件套（见上文特性），默认关闭按需开启 |
+| `read_skill` | 读取技能库全文 |
+| `finish` | 结构化结论（completed / blocked / cannot_do + 摘要 + 提交信息） |
 
 安全边界：
 
-- 文件工具被禁锢在项目根（worktree）内，绝对路径与 `../` 穿越一律拒绝；
-- 命令工具有白名单（`projects[].allowed_commands` 可自定义），非白名单命令直接拒绝；
-- `web_fetch` 是唯一联网的工具：仅 http/https，目标解析到回环/私网/链路本地/保留地址（含云元数据 169.254.169.254）一律拒绝，只回文本类内容；
-- 工具循环有轮数上限（`projects[].max_agent_turns`，默认 40），超时强制收尾；
+- 文件工具禁锢在项目根（worktree）内，绝对路径与 `../` 穿越一律拒绝；
+- 命令白名单（`projects[].allowed_commands` 可整表替换），非白名单命令直接拒绝；
+- `web_fetch` 是唯一联网工具，仅 http/https 且拒绝一切内网目标；
+- 工具循环有轮数上限（`projects[].max_agent_turns`，默认 40，-1 不限轮数但仍有防死循环护栏）；
 - git 提交/合并/推送由系统执行，Agent 无权操作版本控制。
 
-### 工具能力开关（全局 + 每项目）
-
-除 `finish`（任务结束的协议工具，恒可用）外，所有工具均可按名或按组开关。本地调试工具组（`browser`、`dev_server`、`http_request`）默认关闭，按需激活：
-
-```yaml
-tools:                     # 全局默认：未列出的常规工具默认启用
-  web_fetch: false         # 例：全局关闭联网抓取
-  browser: true            # 一键开启本地浏览器相关工具（browser_* 10 个）
-  dev_server: true         # 一键开启后台开发服务管理工具（dev_server_* 3 个）
-  http_request: true       # 开启本地 API 调试工具
-projects:
-  - name: my-app
-    path: D:/Repos/my-app
-    tools:                 # 项目级覆盖：按工具名/组名逐项覆盖全局；删除本节 = 跟随全局
-      browser: true        # 例：仅该项目开启浏览器调试
-      run_command: false   # 例：该项目只许改代码不许跑命令（只读审查类项目）
-```
-
-看板等价操作：设置页「🛠 Agent 工具能力」卡片（全局），项目编辑对话框「覆盖 Agent 工具开关」（项目级），保存后立即生效。开关是双层强制：被禁工具既不会出现在下发给模型的 schema 里，`dispatch` 层也会兜底拦截；系统提示词与任务提示词同步不再提及被禁工具。
-
-### 本地调试工具（浏览器 / 开发服务 / 本地 API）
-
-支持驱动本地 Chrome / Edge 浏览器及后台开发服务进行真实的 Web 与 API 交互调试（零外部 Driver 依赖，直连系统 Chromium CDP）：
-
-```yaml
-local_debug:
-  browser: auto            # 浏览器引擎：auto（优先 Chrome，无则回退 Edge）/ chrome / edge
-  browser_executable: ""   # 自定义浏览器绝对路径（留空自动探测）
-  headless: true           # true=无头静默；false=桌面弹窗（直观围观 Agent 操作页面）
-  allowed_hosts:           # 全局白名单（防内网渗透；云元数据等硬禁区强制拦截）
-    - localhost
-    - 127.0.0.1
-    - "::1"
-  navigation_timeout_seconds: 30    # 页面导航及等待超时（秒）
-  service_ready_timeout_seconds: 60 # 后台开发服务就绪探针超时（秒）
-  max_services: 3                   # 单任务最大后台并发服务数
-  artifacts_retention_days: 7       # 截图工件保留天数
-
-projects:
-  - name: my-web
-    debug_allowed_hosts:   # 项目级追加调试白名单（只增不减）：局域网测试机/内部域名
-      - 192.168.1.50
-      - dev.local
-```
+所有工具（`finish` 恒可用除外）均可按名或按组开关，全局默认 + 项目级覆盖，看板可视化编辑，保存立即生效（schema 下发与 dispatch 层双层拦截）。本地调试组（browser / dev_server / http_request）默认关闭。
 
 ### 访问权限模式（人工审批）
 
-三档访问权限控制 Agent 敏感操作是否需要人工确认，全局默认 + 每项目覆盖：
+| 模式 | 语义 |
+|---|---|
+| `ask_on_change` | 变更前询问：一切写/改/删/移/执行命令操作挂起等批准 |
+| `autonomous` | 自主模式：仅高风险操作（删/移/执行命令）询问 |
+| `full_access` | 完全访问（默认，不询问） |
 
-| 模式 | 语义 | 挂起等待批准的操作 |
-|---|---|---|
-| `ask_on_change` | 变更前询问 | write_file / edit_file / multi_edit / delete_file / move_file / run_command / dev_server_start / browser_click / browser_type / browser_eval / http_request(非 GET/HEAD) |
-| `autonomous` | 自主模式（有风险时询问） | delete_file / move_file / run_command / dev_server_start |
-| `full_access` | 完全访问（减少确认次数） | 无（默认，与历史行为一致） |
-
-只读类工具（list_dir / read_file / grep / find_files / read_skill / web_fetch）与 finish 永不询问。
-
-```yaml
-permissions:
-  mode: autonomous           # 全局默认模式
-  timeout_minutes: 30        # 审批超时（分钟）：无人响应自动拒绝，任务不会永久挂起
-projects:
-  - name: my-app
-    path: D:/Repos/my-app
-    permission_mode: ask_on_change   # 项目级覆盖；缺省 = 跟随全局
-```
-
-工作方式：命中审批的操作会把任务线程挂起（操作**不执行**，零副作用），看板顶栏出现「🔔 待审批 N」入口，任务行同时标注「⏸ 待审批」；面板里逐条显示项目/任务/工具/参数预览与等待时长，可**批准**、**拒绝**，或勾选「本任务内始终允许该工具」减少重复确认（仅当前任务内有效）。拒绝与超时都会以错误文本反馈给模型（提示词已告知它不要原样重试，应调整方案或以 blocked 收尾），审批全程在任务的「执行进度」里留痕。看板等价操作：设置页「🛠 Agent 工具与访问权限」卡片（全局），项目对话框「访问权限」下拉（项目级）。
+只读工具与 finish 永不询问；审批挂起零副作用，看板顶栏「🔔 待审批」逐条批准/拒绝（可勾选本任务内始终允许），超时自动拒绝并以错误文本反馈给模型。全局默认 + `projects[].permission_mode` 项目级覆盖，`permissions.timeout_minutes` 控制审批超时。
 
 ### Git 集成
 
-受管项目需要是 git 仓库。执行任务时：
-
-1. 在项目下创建独立 worktree（`.worktree-arranger/`，分支 `arranger/<项目名>`），Agent 的全部改动都发生在 worktree 里，不污染主工作区；
-2. Agent 报告 `completed` 后，系统在 worktree 内按 Agent 给的 commit message 提交，再 `--no-ff` 合并回主分支；配置了 `origin` 远端则自动推送；
-3. Agent 报告 `blocked` / `cannot_do` 时丢弃 worktree 改动，任务状态置 `blocked`，等人工处理；
-4. 合并失败（冲突等）时保留 `arranger/<项目名>` 分支供人工介入，任务标 `blocked`。
+受管项目需是 git 仓库。任务执行时：Agent 全部改动发生在独立 worktree（`.worktree-arranger/`，分支 `arranger/<项目名>`）；报告 `completed` 后系统按其 commit message 提交并 `--no-ff` 合并回主分支（配置 `origin` 则自动推送）；报告 `blocked` / `cannot_do` 或合并冲突时丢弃/保留分支、任务标 `blocked` 等人工处理。
 
 ## 🖥 Web 看板
 
-`orcsy web` 启动后访问 [http://127.0.0.1:5116](http://127.0.0.1:5116)：
+`orcsy web` 启动后访问 [http://127.0.0.1:5116](http://127.0.0.1:5116)：状态总览、项目卡片、任务增删改与拖拽排序、手动触发扫描、执行中任务强制停止、用量台账与热力图、运行日志（模型思考可折叠），页面 5 秒自动刷新。
 
-- **总览**：模型接入信息、调度状态（空闲/执行中、已完成周期、上次扫描、各项目本轮处理数）；
-- **项目卡片**：git 状态、AGENT.md 是否就位、任务列表（优先级色标、状态、描述）、格式错误标注、已归档任务；一键打开项目文件夹、移除项目（仅移出配置，不删文件）；
-- **任务管理**：新建/编辑/删除任务（写入 `tasks/*.md`）、重新入队 blocked 任务、标记完成；执行中的任务可**强制停止**（中止 Agent 循环与正在跑的命令，丢弃 worktree 未提交改动，任务标为已取消，可重新入队）；任务行可**拖拽排序**（落盘为 frontmatter 的 `order` 字段，与 Agent 领取顺序一致：**优先级 P0~P4 始终优先，同一优先级内按 order**，未排序的排在同 P 已排序任务之后）；
-- **手动触发**：点「立即扫描一轮」后台执行一轮调度（与定时调度互斥，不会重复领取）；
-- **用量**：「用量」页签查看模型消耗——总体与**各项目**的任务数/轮数/输入/输出 tokens，git 提交热力图风格的近 12 周用量图（色深=当日 tokens，悬停看单日明细），以及最近 20 条任务级记录（时间/项目/任务/结果/模型）；台账持久化在配置目录 `logs/usage.jsonl`（任务结束即追加，含受阻/取消的任务，重启不丢）；
-- **运行日志**：按从新到旧展示，模型思考内容默认折叠、可展开查看；页面每 5 秒自动刷新。
-
-配置项 `[web] host / port / open_browser` 可改监听地址、端口与是否自动开浏览器。
-
-**自定义端口**（优先级从高到低）：命令行 `--port 8080`（监听地址同理 `--host`）> `config.yaml` 的 `web.port`。端口冲突时：
-
-- 占用者是**另一个本系统实例**（`/api/state` 可访问）：提示已有看板在运行后退出，避免误开两个；
-- 占用者是**其它程序**且用配置端口启动：自动换一个空闲端口并在控制台提示；
-- **显式指定** `--port` 而它被其它程序占用：报错退出（尊重显式选择，不悄悄换口）。
+自定义端口/地址：命令行 `--port / --host` > `config.yaml` 的 `web.port / web.host`。端口被其它程序占用且未显式指定时自动换口并提示；显式指定被占用则报错退出。
 
 ```bash
 orcsy web --port 8080          # 冲突时换这个端口
-orcsy web --host 0.0.0.0       # 允许局域网访问（注意自行加鉴权）
+orcsy web --host 0.0.0.0       # 允许局域网访问（注意设置登录密码）
 ```
 
 ## ⚙️ 配置参考
 
-见仓库根目录的 `config.example.yaml`（与 `orcsy/__main__.py` 中的 `CONFIG_EXAMPLE` 常量保持一致，`init` 命令即由它生成 `config.yaml`；改动常量后需同步模板文件，`tests/test_config_example.py` 会校验）。安装版数据目录默认 `%APPDATA%\Orcsy`，可用环境变量 `ORCSY_DATA_DIR` 整体改址。关键项：
+完整配置见仓库根目录的 `config.example.yaml`（每项带中文注释；与 `orcsy/__main__.py` 的 `CONFIG_EXAMPLE` 常量保持一致）。安装版数据目录默认 `%APPDATA%\Orcsy`，环境变量 `ORCSY_DATA_DIR` 整体改址。关键项：
 
 | 配置 | 说明 |
 |---|---|
-| `llm.provider` | `openai`（兼容协议）或 `anthropic` |
-| `llm.base_url` / `llm.model` / `llm.api_key` | 模型服务地址、模型名、密钥 |
-| `llm.enable_thinking` | 请求侧开启模型思考（Anthropic 必须；多数兼容服务默认返回） |
-| `scheduler.interval_seconds` | 扫描间隔，默认 300 秒 |
-| `scheduler.max_parallel_agents` | 并行 Agent 数 |
-| `web.host / web.port / web.open_browser` | Web 看板监听地址 / 端口（默认 5116）/ 自动开浏览器 |
-| `logging.retention_days` | 日志保留天数（默认 7，0 关闭）：活动日志写满 N 天归档进 `logs/archive/`，归档与大小滚动的旧日志超过 N 天自动清理；看板「调度与看板」页可改，保存立即执行 |
-| `logging.max_total_mb` | 日志总占用上限（默认 200，0 不限制）：活动日志 + 滚动备份 + 归档合计超限时从最旧的备份/归档删起（活动日志不可删，另有 5MB 滚动兜底）；与保留天数相互独立，任一命中即清 |
-| `tools` | 全局 Agent 工具开关：`{工具名: bool}`，未列出的默认启用；`finish` 不可禁用。看板设置页「🛠 Agent 工具与访问权限」可视化编辑 |
-| `commands` | 全局命令白名单开关：`{命令: bool}`（键为默认白名单成员，如 `git` / `msbuild`），置 false 的命令从默认白名单移除；未列出默认放行。看板设置页可视化编辑 |
-| `env.vars` | 注入 Agent 子进程（`run_command`）的环境变量：**国内网络拉依赖失败（unexpected EOF / 超时）时配镜像或代理**——`GOPROXY: https://goproxy.cn,direct`、`HTTP_PROXY`、`PIP_INDEX_URL` 等；不允许覆盖 PATH/SYSTEMROOT/COMSPEC/WINDIR。看板设置页可视化编辑（每行一个 `KEY=VALUE`） |
-| `permissions.mode` | 全局访问权限模式：`ask_on_change` 变更前询问 / `autonomous` 自主模式（仅高风险询问）/ `full_access` 完全访问（默认，不询问）；敏感操作挂起等待看板「🔔 待审批」批准 |
-| `permissions.timeout_minutes` | 审批超时（分钟，默认 30）：无人响应自动拒绝 |
-| `notify.sound` / `notify.system` | 任务结束提醒：完成/受阻时播程序内置提示音（完成「叮咚」/ 受阻警示音；音频缺失回退 Windows 系统音）/ 弹托盘气泡系统通知，均默认开启；手动停止（cancelled）不提醒。看板设置页「🔔 提醒设置」可视化编辑 |
-| `review.enabled` | 任务审查（Review Agent）全局开关（默认 true）：审查模型已配置时任务完成先经**独立审查 Agent** 合并前审查（对照验收标准抽查 + 可选跑测试），通过才合并主分支归档；不通过自动返工（默认 2 次，超限转受阻等人工）。**默认未配置审查模型 = 审查未启用**（行为与旧版一致）；配置 `review.llm` 即对全部项目生效，看板设置页「🔍 任务审查」可视化编辑 |
-| `review.llm` | 审查模型绑定（provider / api_key / base_url / model 等，同 `llm` 字段；默认 `~` = 审查未启用）。**硬性约束：审查模型必须与各项目的生效任务模型不同**——同名配置拒绝启动/保存（防「自审自批」），可配便宜小模型交叉验证 |
-| `review.max_turns` | 审查工具循环轮数上限（1~100，默认 10，含跑测试的轮次） |
-| `review.max_review_rounds` | 返工次数全局默认（1~10，默认 2）：累计审查不通过达到上限转 blocked 等人工；项目级 `review_max_rounds` 可覆盖 |
-| `review.allow_test_commands` | 审查 agent 可用 `run_command` 跑测试/构建实测验证（默认 true；受项目命令白名单与访问权限审批门约束）；false = 纯只读审查 |
-| `review.squash_merge` | 返工任务通过审查后 `merge --squash` 收敛 WIP 提交为单提交（默认 true）；false = 一律 `--no-ff` |
-| `projects[].review_enabled` | 项目级审查开关（true/false/缺省 = 跟随全局 `review.enabled`）；某个项目不想审查时单独关闭。看板项目对话框「审查 Agent」可视化编辑 |
-| `projects[].review_llm` | 项目级审查模型绑定：部分覆盖全局 `review.llm`（未写字段继承全局审查模型）；缺省 = 跟随全局 |
-| `projects[].review_max_rounds` | 项目级返工次数覆盖（1~10）；缺省 = 跟随全局 `review.max_review_rounds` |
-| `projects[].path` | 项目根目录（建议绝对路径） |
-| `projects[].tasks_dir` | 任务清单目录，默认 `tasks` |
-| `projects[].guide_file` | 开发指引文件，默认 `AGENT.md` |
-| `projects[].max_tasks_per_cycle` | 每轮最多执行的任务数，默认 1 |
-| `projects[].max_agent_turns` | 单个任务工具循环轮数上限，默认 40；**-1 = 不设上限**（靠 finish / 强制停止 / 人工审批兜底） |
-| frontmatter `order` | 看板拖拽排序落盘的手动序号：**优先级内决定看板显示与 Agent 领取顺序**（P0~P4 跨级始终优先，同 P 内按 order，未排序的排在同 P 已排序任务之后）；删除该行即回到自动排序 |
-| frontmatter `requeue_seq` | 受阻任务重新入队时的递增轮次戳（自动维护，无需手填）：**重入队的任务下一轮扫描最优先领取**（越过新任务——后端失败重跑应接着上次的上下文继续，前端任务等它完成才有意义）；任务开工后自动清除 |
-| frontmatter `review_pending` / `review_round` | 审查门状态（自动维护，无需手填）：`review_pending: true` = 已完成待审查（WIP 提交在分支上，补审扫描接续，崩溃安全）；`review_round: N` = 累计审查不通过轮数（达到生效返工上限转 blocked）。已归档任务永不追溯 |
-| `projects[].allowed_commands` | Agent 命令白名单：显式列表**整表替换**默认（不受全局 `commands` 开关影响），缺省跟随全局（默认白名单剔除禁用项） |
-| `projects[].allowed_branch` | 只在该分支上工作，缺省用当前分支 |
-| `projects[].llm` | 项目专属模型绑定：部分覆盖全局 `llm`（provider / base_url / api_key / model / temperature 等任意字段，未写字段继承全局）；只有绑定的模型处理该项目的任务，看板项目对话框可可视化编辑 |
-| `projects[].repo` | 远程仓库绑定：`{url, token?, provider?, api_base?}`（GitHub / Gitee / GitLab / Gitea，token 公开仓库可省）；绑定后看板项目卡片「拉取 Issues」把 open Issue 导入任务队列 |
-| `projects[].tools` | 项目级工具开关覆盖：`{工具名: bool}` 按工具名逐项覆盖全局 `tools`；缺省/删除本节 = 跟随全局。看板项目对话框「覆盖 Agent 工具开关」可视化编辑 |
-| `projects[].permission_mode` | 项目级访问权限覆盖（`ask_on_change` / `autonomous` / `full_access`）；缺省 = 跟随全局。看板项目对话框「访问权限」下拉可视化编辑 |
-| `update.repo` / `update.token` / `update.auto_check` | 程序自更新：Gitee 更新源仓库 URL（**默认官方源 `https://gitee.com/java-and-net/Orcsy`**，可改成自己的镜像；Release 附件含首次安装的 `orcsy-setup-*.exe` 与更新用的 `orcsy-update-*.zip`）、私有仓库令牌、启动自动检查（默认开）；看板头部一键检查/更新，或设置页手动导入安装包（Windows 安装版）。安装目录用户可写 = 零 UAC 静默升级；不可写（如 Program Files）= 更新时弹一次 UAC 提权复制，托盘仍以普通权限重启 |
+| `llm.*` | provider（`openai` 兼容 / `anthropic`）、base_url / model / api_key、enable_thinking（请求侧开启模型思考） |
+| `scheduler.interval_seconds` / `max_parallel_agents` | 扫描间隔（默认 300 秒）/ 并行 Agent 数 |
+| `web.host / port / open_browser` | 看板监听地址 / 端口（默认 5116）/ 自动开浏览器 |
+| `logging.retention_days` / `max_total_mb` | 日志保留天数（默认 7）/ 总占用上限 MB（默认 200），任一命中即从最旧清理 |
+| `tools` / `commands` | 全局工具开关与命令白名单开关（`{名: bool}`，未列出默认启用/放行；`finish` 不可禁用） |
+| `env.vars` | 注入 Agent 子进程的环境变量：国内拉依赖失败时配 `GOPROXY` / `HTTP_PROXY` / `PIP_INDEX_URL` 等（不允许覆盖 PATH 等系统变量） |
+| `permissions.mode` / `timeout_minutes` | 访问权限模式（ask_on_change / autonomous / full_access）/ 审批超时分钟（默认 30） |
+| `review.*` | 任务审查（Review Agent）：`llm` 绑定审查模型（**必须与任务模型不同**，默认 `~` = 审查未启用）、`max_turns` 审查轮数、`max_review_rounds` 返工次数（默认 2）、`allow_test_commands` 跑测试验证、`squash_merge` 返工通过后收敛提交；项目级 `review_enabled` / `review_llm` / `review_max_rounds` 可覆盖 |
+| `masking.*` | 数据脱敏：`enabled`（默认开）/ `enhanced_rules` 键值对增强规则（默认关）/ `custom_patterns` 自定义正则，详见「看板登录鉴权」章节的数据脱敏小节 |
+| `notify.sound` / `system` | 任务结束提醒：内置提示音 / 托盘气泡通知（默认全开，手动停止不提醒） |
+| `projects[].path` / `tasks_dir` / `guide_file` | 项目根目录（建议绝对路径）/ 任务目录（默认 `tasks`）/ 指引文件（默认 `AGENT.md`） |
+| `projects[].max_tasks_per_cycle` / `max_agent_turns` | 每轮任务数（默认 1）/ 单任务轮数上限（默认 40，**-1 不设上限**） |
+| `projects[].llm` | 项目专属模型：部分覆盖全局 `llm`（未写字段继承），只有绑定模型处理该项目任务 |
+| `projects[].repo` | 远程仓库绑定 `{url, token?, provider?, api_base?}`；绑定后可拉取 Issues 转任务 |
+| `projects[].tools` / `allowed_commands` / `permission_mode` | 项目级工具开关 / 命令白名单（显式列表整表替换默认）/ 权限模式覆盖；缺省跟随全局 |
+| `projects[].allowed_branch` / `team` | 指定工作分支 / 多模型项目小组编排（引用全局 `agent_profiles` 预设池） |
+| `update.*` | 自更新源仓库（默认官方 Gitee 源）/ 私有令牌 / 启动自动检查 |
+| frontmatter `order` | 拖拽排序序号（优先级内决定看板显示与领取顺序；删除该行回到自动排序） |
+| frontmatter `requeue_seq` / `review_pending` / `review_round` | 系统自动维护，无需手填：重入队优先领取 / 待审查状态 / 累计返工轮数 |
 
 ## 📊 日志与观测
 
@@ -532,10 +420,11 @@ deploy/linux/      Linux 原生部署（systemd unit 与安装/卸载脚本）
 
 ## 🔒 安全与边界
 
-- 含 `api_key` 的 `config.yaml` 已在 `.gitignore`，不要提交或分享；安装版数据目录为 `%APPDATA%\Orcsy`（配置、技能库、日志都在这里，本地实体不受 OneDrive 干扰），不在程序目录；0.8.x 及更早版本放在「文档」目录的配置会在新版首次启动时自动迁移过来（原文件保留作备份）；
-- Web 看板默认只监听 `127.0.0.1`，不对局域网开放；如需远程访问自行改 `web.host` 并自行加鉴权（当前版本无登录功能）；
-- Agent 的改动范围限定在受管项目内；合并冲突会转为 blocked 而不是强推；
-- `blocked` / `cannot_do` 的任务会写明原因，等人工确认后在看板点「重新入队」（或把 status 改回 open）即可重新进入队列；
+- 含 `api_key` 的 `config.yaml` 已在 `.gitignore`，不要提交或分享；安装版数据目录为 `%APPDATA%\Orcsy`（配置、技能库、日志都在这里），不在程序目录；
+- 看板默认只监听 `127.0.0.1`；对外暴露必须设置登录密码（见「看板登录鉴权」章节），密钥类信息在 API 中只返回掩码；
+- 敏感信息出站前本地脱敏（见「数据脱敏」小节）；文件工具禁锢在项目内、命令白名单、`web_fetch` 拒绝内网目标；
+- Agent 改动限定在受管项目内，合并冲突转 blocked 不强推；最终 `git commit` / `push` 由人工把关；
+- `blocked` / `cannot_do` 任务写明原因，看板「重新入队」即可重新进队列；
 - 默认指引要求：涉及依赖、CI、密钥的变更一律 blocked 等人工确认（可在 AGENT.md 调整）。
 
 ## 📄 许可证

@@ -16,15 +16,20 @@ Agent 循环（run_task_loop）：
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from collections import Counter
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 
-from . import USER_AGENT
+from . import USER_AGENT, masking
+from .concurrency import get_budget
 from .config import LLMConfig
 from .logging_setup import get_logger
+from .masking import MaskingSession
 from .tools import (
     FinishSignal,
     TaskStopped,
@@ -230,8 +235,67 @@ class LLMError(RuntimeError):
 # 实测（2026-11-03）：后端任务单请求 timed out 一次即整任务 blocked，
 # 只能等下一调度周期重跑。对可重试错误自动退避重试，最终失败才抛 LLMError。
 _RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+# 真·配额限流（其它 5xx 是网关抖动，不该收缩并发预算）
+_RATE_LIMIT_STATUS = frozenset({429, 529})
 _LLM_MAX_ATTEMPTS = 4            # 首次 + 3 次重试
 _LLM_RETRY_BACKOFF = (2, 4, 8)   # 每次重试前的退避秒数
+# 厂商建议等待时长的响应头：Retry-After（秒或 HTTP 日期）优先；部分 OpenAI
+# 兼容网关与 Anthropic 用 *-reset-* 给「距配额重置还有多久」（形如 6m0s）
+_RETRY_HINT_HEADERS = (
+    "retry-after",
+    "x-ratelimit-reset-requests",
+    "anthropic-ratelimit-requests-reset",
+    "x-ratelimit-reset-tokens",
+)
+# 厂商建议值上限：超过就不等了（4 次重试的窗口内等一小时等于挂死）
+_RETRY_HINT_CAP_SECONDS = 120.0
+_DURATION_RE = re.compile(r"([\d.]+)\s*(ms|s|m|h)", re.IGNORECASE)
+
+
+def _parse_wait_value(raw: str) -> float | None:
+    """解析一个等待时长值：纯秒数 / HTTP 日期 / 1s·100ms·6m0s 时长串。"""
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:  # Retry-After 也可以是一个 HTTP 日期
+        dt = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        dt = None
+    if dt is not None:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+    total = 0.0
+    matched = False
+    for num, unit in _DURATION_RE.findall(text):
+        total += float(num) * {"ms": 0.001, "s": 1.0,
+                               "m": 60.0, "h": 3600.0}[unit.lower()]
+        matched = True
+    return total if matched else None
+
+
+def _parse_server_delay(resp) -> float | None:
+    """从响应头取厂商建议的等待秒数；拿不到返回 None。
+
+    不是所有厂商都给：OpenAI 兼容网关常见 ``x-ratelimit-reset-requests``，
+    Anthropic 用 ``anthropic-ratelimit-requests-reset``（+``retry-after``），
+    Gemini / DeepSeek 多数只回 429 不带窗口——那种情况交给 AIMD 自己收敛。
+    """
+    headers = getattr(resp, "headers", None)
+    if not headers:
+        return None
+    for name in _RETRY_HINT_HEADERS:
+        raw = headers.get(name)
+        if not raw:
+            continue
+        value = _parse_wait_value(str(raw))
+        if value is not None:
+            return min(_RETRY_HINT_CAP_SECONDS, max(0.5, value))
+    return None
 # 连续 N 轮未调用任何工具（只输出纯文本）视为卡住，升级强制收尾；
 # 否则「提醒」会无限循环（轮数不限的任务永不结束）
 _NO_TOOL_FORCE_TURNS = 3
@@ -333,6 +397,10 @@ class LLMClient:
         # 瞬时故障重试参数（测试可覆盖以退避归零加速）
         self.retry_attempts = _LLM_MAX_ATTEMPTS
         self.retry_backoff: tuple[float, ...] = _LLM_RETRY_BACKOFF
+        # 数据脱敏会话（任务级）：出站 payload 掩除敏感信息，模型写回占位符
+        # 时还原原文；映射仅存内存，任务循环结束即清除（masking.configure
+        # 关闭总开关时 mask_payload 内部零开销透传）
+        self._masking = MaskingSession()
 
     def _acc_usage(self, data: dict, provider: str) -> None:
         u = data.get("usage") or {}
@@ -381,6 +449,16 @@ class LLMClient:
         on_progress(line) 在每次工具调用后触发（finish 除外），供执行器把
         进度落盘到任务文件——进程被强杀时进度不丢。
         """
+        try:
+            return self._run_task_loop(task_prompt, ctx, max_turns, on_progress)
+        finally:
+            # 数据脱敏映射处理完即清除：任务结束（含异常/停止/熔断）不留任何
+            # 原文↔占位符对应关系在内存
+            self._masking.clear()
+
+    def _run_task_loop(self, task_prompt: str, ctx: ToolContext,
+                       max_turns: int = DEFAULT_MAX_TURNS,
+                       on_progress=None) -> AgentResponse:
         self.messages.append(self._user(task_prompt))
         # 工具开关：schema 按启用集过滤下发（dispatch_tool 里还有兜底拦截）
         self._enabled_tools = ctx.enabled_tools
@@ -443,7 +521,13 @@ class LLMClient:
                 log.info("工具调用 [%d] %s %s", turn, name,
                          (args_json or "")[:120].replace("\n", " "))
                 if name == "finish":
+                    # finish 不还原：结论（summary/notes）会写进任务文件落盘，
+                    # 占位符保持脱敏形态正是需求效果（密钥不落盘）
                     raise FinishSignal(self._parse_finish_args(args_json))
+                # 写回还原（返回侧闭环）：模型把占位符当真实值引用时（复制密钥、
+                # 整文件回写等），dispatch 前还原原文——还原在参数日志之后，
+                # 日志里只有占位符形态不泄露
+                args_json = self._masking.restore(args_json)
                 if on_progress is not None:
                     try:
                         on_progress(f"第{turn}轮 · {name} · "
@@ -754,6 +838,13 @@ class LLMClient:
             "（已完成的进度不受影响）。")
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
+        # 出站脱敏（数据脱敏唯一网络出口）：只动 payload 副本不碰 self.messages
+        # ——本地历史保留原文（护栏计数、上下文裁剪依赖原文），重发历史幂等；
+        # 关闭总开关时零开销透传。日志只记命中次数，绝不记脱敏内容
+        if masking.enabled():
+            payload, hits = self._masking.mask_payload(payload)
+            if hits:
+                log.debug("数据脱敏：本次请求掩除 %d 处敏感信息", hits)
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req_headers = {"User-Agent": USER_AGENT, **headers,
                        "Content-Type": "application/json"}
@@ -763,45 +854,74 @@ class LLMClient:
         stop = self._stop_event
         max_attempts = self.retry_attempts
         backoff = self.retry_backoff
+        # 厂商配额池（进程级共享）：许可只在「HTTP 请求在途」期间持有。主 Agent
+        # 派子代理时手上没有许可（工具执行阶段已 release），因此父/子共用一个
+        # 池不会死锁；多个项目并行时也共享同一预算，不会各限各的
+        budget = get_budget(self.cfg.base_url, self.cfg.api_key, self.cfg.model)
         for attempt in range(1, max_attempts + 1):
             is_last = attempt == max_attempts
+            server_delay: float | None = None
+            # 池满/静默期在这里排队（可被强制停止秒级打断），而不是直接失败
+            if not budget.acquire(stop):
+                raise TaskStopped()
             try:
-                if stop is not None:
-                    resp = self._post_stop_aware(url, body, req_headers,
-                                                 timeout, stop)
-                else:
-                    resp = httpx.post(url, content=body, headers=req_headers,
-                                      timeout=timeout)
-            except httpx.TimeoutException as e:
-                if is_last:
-                    raise self._timeout_error(e, attempt) from e
-                reason = f"请求超时（timeout={timeout}）"
-            except httpx.TransportError as e:
-                if is_last:
-                    raise LLMError(
-                        f"请求大模型失败：{e}（已自动重试 {attempt - 1} 次）") from e
-                reason = f"网络传输错误：{e}"
-            except httpx.HTTPError as e:
-                # 非传输类 HTTP 层异常（重定向过多等）：重试无意义，保持旧行为
-                raise LLMError(f"请求大模型失败：{e}") from e
-            else:
-                if resp.status_code == 200:
-                    try:
-                        return resp.json()
-                    except ValueError as e:
+                try:
+                    if stop is not None:
+                        resp = self._post_stop_aware(url, body, req_headers,
+                                                     timeout, stop)
+                    else:
+                        resp = httpx.post(url, content=body, headers=req_headers,
+                                          timeout=timeout)
+                except httpx.TimeoutException as e:
+                    if is_last:
+                        raise self._timeout_error(e, attempt) from e
+                    reason = f"请求超时（timeout={timeout}）"
+                except httpx.TransportError as e:
+                    if is_last:
                         raise LLMError(
-                            f"大模型返回非 JSON：{resp.text[:500]}") from e
-                if resp.status_code in _RETRYABLE_STATUS and not is_last:
-                    err_msg = resp.text[:200].strip().replace("\n", " ")
-                    reason = f"HTTP {resp.status_code}: {err_msg}" if err_msg else f"HTTP {resp.status_code}"
+                            f"请求大模型失败：{e}（已自动重试 {attempt - 1} 次）") from e
+                    reason = f"网络传输错误：{e}"
+                except httpx.HTTPError as e:
+                    # 非传输类 HTTP 层异常（重定向过多等）：重试无意义，保持旧行为
+                    raise LLMError(f"请求大模型失败：{e}") from e
                 else:
-                    suffix = (f"（已自动重试 {attempt - 1} 次）"
-                              if attempt > 1 else "")
-                    raise LLMError(f"大模型返回 HTTP {resp.status_code}："
-                                   f"{resp.text[:500]}{suffix}")
+                    if resp.status_code == 200:
+                        budget.on_success()
+                        try:
+                            return resp.json()
+                        except ValueError as e:
+                            raise LLMError(
+                                f"大模型返回非 JSON：{resp.text[:500]}") from e
+                    # 厂商建议等待时长（Retry-After / *-reset-*），没有则 None
+                    server_delay = _parse_server_delay(resp)
+                    if resp.status_code in _RETRYABLE_STATUS:
+                        if resp.status_code in _RATE_LIMIT_STATUS:
+                            # 真限流：收缩并发预算 + 全池静默，避免几个子代理
+                            # 同时醒来再撞一次
+                            budget.on_rate_limited(server_delay)
+                        if is_last:
+                            suffix = (f"（已自动重试 {attempt - 1} 次）"
+                                      if attempt > 1 else "")
+                            raise LLMError(
+                                f"大模型返回 HTTP {resp.status_code}："
+                                f"{resp.text[:500]}{suffix}")
+                        err_msg = resp.text[:200].strip().replace("\n", " ")
+                        reason = (f"HTTP {resp.status_code}: {err_msg}"
+                                  if err_msg else f"HTTP {resp.status_code}")
+                    else:
+                        suffix = (f"（已自动重试 {attempt - 1} 次）"
+                                  if attempt > 1 else "")
+                        raise LLMError(f"大模型返回 HTTP {resp.status_code}："
+                                       f"{resp.text[:500]}{suffix}")
+            finally:
+                # 先释放再退避：撞墙的请求不该占着名额干等
+                budget.release()
             delay = backoff[min(attempt - 1, len(backoff) - 1)]
-            log.warning("LLM 请求第 %d/%d 次失败（%s），%.0f 秒后重试",
-                        attempt, max_attempts, reason, delay)
+            if server_delay is not None:
+                # 厂商给了窗口就按它来（至少不早于本地退避），避免白撞
+                delay = max(delay, server_delay)
+            log.warning("LLM 请求第 %d/%d 次失败（%s），%.0f 秒后重试（并发上限 %d）",
+                        attempt, max_attempts, reason, delay, budget.limit)
             self._sleep_stop_aware(delay, stop)
         raise LLMError("unreachable")  # pragma: no cover — 循环必经 return/raise
 

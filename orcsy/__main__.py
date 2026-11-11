@@ -110,6 +110,17 @@ notify:
   sound: true                  # 任务结束提示音：完成/受阻时播程序内置提示音（cancelled 不提醒）
   system: true                 # 系统通知：完成/受阻时弹托盘气泡（看板没开也能收到；--no-tray 启动则无渠道）
 
+masking:
+  enabled: true                # 数据脱敏：密码/密钥等敏感信息发送模型厂商前在本地掩除
+                               # （只运行在内存中不写磁盘，任务结束即清除映射）。
+                               # 高置信规则默认生效：sk-/ghp_/glpat-/AKIA/AIza/xox-/
+                               # JWT/PEM 私钥块/Bearer/URL token 参数/连接串密码段
+  enhanced_rules: false        # 键值对增强规则（api_key=xxx、"password": "xxx" 等，
+                               # key 保留 value 掩除）：误伤面大（文档示例/测试夹具
+                               # 里的假密钥也会被替换），默认关闭，按需开启
+  custom_patterns: []          # 自定义脱敏正则列表（整段匹配替换；≤20 条、每条
+                               # ≤500 字符、须可编译），例：["PROJECT_SECRET_[A-Za-z0-9]{16,}"]
+
 # review:                    # 任务审查（Review Agent）：任务完成合并前由独立审查
 #   enabled: true            #   agent 检查任务成果，通过才合并主分支并归档。
 #   llm: ~                   #   审查模型绑定（provider/api_key/base_url/model 等，同 llm
@@ -123,6 +134,12 @@ notify:
 #                            #   命令白名单与访问权限审批门约束）；false = 纯只读审查
 #   squash_merge: true       #   返工任务通过审查后 merge --squash 收敛 WIP 提交为
 #                            #   单提交；false = 一律 --no-ff
+
+# subagent:                  # 子代理并发预算（delegate_explore 打给厂商的并发请求数）：
+#   max_parallel: 4          #   同一配额池（base_url + api_key + model）的在途请求上限 1~16。
+#                            #   与「单次最多派 4 个子代理」的熔断值无关；低配额套餐可调小
+#   adaptive: true           #   按厂商 429 / Retry-After 自动对半降并发、成功后逐步爬回。
+#                            #   false = 始终固定为 max_parallel（厂商不返回限流头时建议保持 true）
 
 # local_debug:               # 本地调试配置（驱动 Chrome/Edge 浏览器与管理后台服务）：
 #   browser: auto            #   浏览器引擎：auto（优先 Chrome，无则回退 Edge）/ chrome / edge

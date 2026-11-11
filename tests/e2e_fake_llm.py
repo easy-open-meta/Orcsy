@@ -131,18 +131,22 @@ def main() -> int:
         print("commit:", result.commit)
 
         assert result.outcome == "done", f"期望 done，实际 {result.outcome}: {result.notes}"
-        assert result.commit, "应有 commit"
-
-        # 验证主分支已合并修复
+        # 人工把关提交（用户红线）：只合入主工作区，绝不自动 commit
+        assert result.commit == "", f"不应自动提交，实际 commit={result.commit!r}"
         g = Git(proj_cfg.path)
+        assert g.run("rev-list", "--count", "HEAD").strip() == "2", "不应产生新提交"
+
+        # 验证主分支已合并修复（未提交状态，等待人工把关）
         merged = (proj_cfg.path / "app.py").read_text(encoding="utf-8")
         assert "stranger" in merged, "主分支未包含修复内容"
-        # tasks/ 内的任务文件允许有变更（进度/状态回写是设计行为），其余必须干净
+        # tasks/ 内的任务文件允许有变更（进度/状态回写是设计行为）；修复本身必须
+        # 以「未提交改动」形式留在工作区，等人工在审查页确认
         def _in_tasks(ln: str) -> bool:
             p = ln.split(maxsplit=1)[-1].strip('"')
             return p.startswith("tasks/") or p.startswith("tasks\\")
         dirty_outside_tasks = [ln for ln in g.status_porcelain() if not _in_tasks(ln)]
-        assert not dirty_outside_tasks, f"主工作区（tasks 外）应干净：{dirty_outside_tasks}"
+        assert any("app.py" in ln for ln in dirty_outside_tasks), (
+            f"修复应作为待人工提交的改动留在工作区：{dirty_outside_tasks}")
 
         # worktree 已清理
         wt = proj_cfg.path / ".worktree-arranger"

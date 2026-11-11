@@ -84,7 +84,8 @@ def main() -> int:
             executor2 = TaskExecutor(proj, llm_cfg)
             result2 = executor2.run_task(task, guide_content="# 项目指引\n- 小步修改\n")
             assert result2.outcome == "blocked", result2.outcome
-            assert "超过最大轮数" in (result2.notes or ""), result2.notes
+            # 文案随「强制收尾」重构为「已达到最大工作轮数 N，模型未给出结论」
+            assert "最大工作轮数 2" in (result2.notes or ""), result2.notes
             assert state2["calls"] == 3, state2["calls"]  # 2 轮 + 1 次强制收尾请求
             print("ok: max_turns=2 有限上限——耗尽后强制收尾为 blocked")
         finally:

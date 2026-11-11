@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.22.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.23.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 > ℹ️ The dashboard is currently Chinese-only. This guide uses English names for buttons and cards; a Chinese-label reference is in [section 9.1](#91-top-toolbar).
 
@@ -683,10 +683,11 @@ An accordion menu of sections on the left (click to expand; the right side shows
 2. **👥 Multi-Model Team**: dedicated models and presets for PM / Backend / Frontend / QA roles, plus each role's responsibility prompt template (referenced by project teams);
 3. **⏱ Scheduler & dashboard**: interval, parallelism, port, log retention, login password;
 4. **🔔 Notifications**: sound, system notification;
-5. **🔍 Task review (Review Agent)**: review model binding, rework limit, test-command and squash-commit switches;
-6. **🛠 Agent tools & permissions**: approval mode, timeout, tool switches, command whitelist, environment variables, PATH auto-fix;
-7. **🪞 Mirror management & speed test**: test, apply fastest, add/disable mirrors;
-8. **⚙️ App**: autostart, auto-update check, update source, manual package import.
+5. **🛡 Data masking**: mask passwords/keys locally before sending them to the model provider (high-confidence rules on by default, key-value enhanced rules, custom regex);
+6. **🔍 Task review (Review Agent)**: review model binding, rework limit, test-command and squash-commit switches;
+7. **🛠 Agent tools & permissions**: approval mode, timeout, tool switches, command whitelist, environment variables, PATH auto-fix;
+8. **🪞 Mirror management & speed test**: test, apply fastest, add/disable mirrors;
+9. **⚙️ App**: autostart, auto-update check, update source, manual package import.
 
 ### 9.5 Skills tab
 
@@ -822,7 +823,21 @@ Settings → **🔔 Notifications**:
 - Manual stops (cancelled) stay silent;
 - With `--no-tray`, there is no tray and therefore no system-notification channel.
 
-### 10.8 Auto-update and restart
+### 10.8 Data masking (secrets never leave the machine)
+
+When an Agent works, it reads workspace files, runs commands, and receives task descriptions — if any of them contain API keys or database passwords, the raw text would be sent to your configured model provider. Data masking removes such content locally **before sending**:
+
+- **Processing happens only in memory**: no temp files, never logged, mapping cleared as soon as the task ends — no masking data ever touches disk;
+- **High-confidence rules on by default**: only tokens whose format proves they are sensitive — `sk-`-style API keys, GitHub/GitLab tokens, AWS/Google/Slack keys, JWTs, PEM private-key blocks, `Bearer` headers, `token=` URL parameters, database-connection-string passwords;
+- **Readable placeholders**: the model sees `[REDACTED:api_key:{{API_KEY_6mnvbp6t}}]` — distinct placeholders let it tell multiple keys apart;
+- **Write-back restores the original**: when the model writes a placeholder into a file ("copy the key into the CI script", "rewrite .env"), the real value is restored before it hits disk — key-copying tasks still work;
+- **finish summaries stay masked**: task summaries contain placeholders, so keys never land in task files;
+- **Key-value enhanced rules off by default**: rules like `api_key=xxx` / `"password": "xxx"` are broad but also replace the fake keys in docs and test fixtures (the model then reads placeholders instead of the original text) — enable only when your workspace has no such content;
+- **Custom regex**: for tokens in in-house formats (e.g. `PROJECT_SECRET_xxx`), add one regex per line; changes take effect immediately after saving.
+
+Configure it in the dashboard under **Settings → 🛡 Data masking**, or in the `masking` section of config.yaml (`enabled` / `enhanced_rules` / `custom_patterns`).
+
+### 10.9 Auto-update and restart
 
 - Auto-check for updates on startup (can be turned off);
 - Top bar **Check for updates** → when a new version exists, click **Update to x.y.z**;
@@ -831,7 +846,7 @@ Settings → **🔔 Notifications**:
 - A failed update rolls back automatically and opens the install log;
 - You can also **import a local package**: choose `orcsy-update-*.zip`; same-version reinstall, upgrade, and downgrade are supported.
 
-### 10.9 Dashboard login password
+### 10.10 Dashboard login password
 
 By default the dashboard only listens on `127.0.0.1`, so only this machine can reach it and no password is needed.
 
@@ -863,7 +878,7 @@ Behavior:
 - Changing the password invalidates all old sessions immediately;
 - Authentication is not a substitute for TLS. For internet exposure, put a reverse proxy (nginx / caddy) with HTTPS in front.
 
-### 10.10 Logs, autostart, and port
+### 10.11 Logs, autostart, and port
 
 **Logs**
 
@@ -889,7 +904,7 @@ Behavior:
 
 ---
 
-### 10.11 Task review (Review Agent): a second model as gatekeeper
+### 10.12 Task review (Review Agent): a second model as gatekeeper
 
 After a task finishes and before its changes are merged and archived, Orcsy can have an **independent review Agent** (**a different model** from the one that executed the task) inspect the result: it checks the implementation against the requirements and acceptance criteria, optionally running tests for real verification. Only a passed review gets merged into the main branch and archived; a failed review sends the task back for automatic rework with the issue list attached.
 
@@ -922,7 +937,7 @@ After a task finishes and before its changes are merged and archived, Orcsy can 
 
 ---
 
-### 10.12 Multi-Model Agent Project Team
+### 10.13 Multi-Model Agent Project Team
 
 Orcsy 0.22.0 introduces **Multi-Model Agent Project Teams**. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:
 
@@ -931,13 +946,14 @@ Orcsy 0.22.0 introduces **Multi-Model Agent Project Teams**. You can assemble sp
 - **🧪 Test Engineer (QA)**: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using `report_bug`, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.
 - **🛡️ Sandboxed Worktree + Human-Gated Final Commit**: all coding runs inside a per-task worktree (`.worktree-arranger/<task-id>`, branch `orcsy/task/<project>/<task-id>`) and merges into the main working tree unstaged/uncommitted — **Orcsy never auto-commits or auto-pushes to main branch by default**, leaving 100% of final commit and push authority to the human reviewer (see [10.14 Human-gated commit](#1014-human-gated-commit-pending-commit--dedicated-review-page))!
 - **🧠 Concurrent sub-agent exploration (`delegate_explore`)**: the Project Manager and every developer role can spawn 2–4 **read-only sub-agents** in one call to explore different modules (data layer, routing, auth, existing tests) in parallel and get a consolidated report in one round, dramatically cutting serial file reading. Sub-agents are strictly read-only, capped in fan-out and rounds, and honour **Force stop**.
+- **⚡ Quota-aware adaptive concurrency (`subagent.max_parallel` / `adaptive`)**: in-flight requests actually sent to the provider are capped by the sub-agent concurrency budget (default 4 — independent of the 4-sub-agent fan-out fuse). Providers never publish their concurrency ceiling, so adaptation is on by default: an HTTP 429 immediately halves the limit and puts the whole quota pool into a quiet period (honouring `Retry-After` when present), then gradually climbs back after consecutive successes. **On low-tier plans this degrades to "slower", never "some sub-agents failed"**. Pools are shared per `base_url + api_key + model`, so parallel projects don't throttle separately.
 - **📦 Split parent task is archived**: once the PM finishes decomposing a requirement, the parent task is marked **done** and archived into `tasks/done/`, so the active list only shows the hand-off subtasks.
 - **⚡ Intra-Cycle Chaining (`chain_within_cycle`)**: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.
 - **👥 Two-Tier Configuration**: the global **Multi-Model Team** section configures each role's dedicated model once, and project settings reference it with local overrides; every role ships with a built-in responsibility prompt template you can load with one click or customise.
 
 ---
 
-### 10.13 Local Debugging & Chromium CDP Automation
+### 10.14 Local Debugging & Chromium CDP Automation
 
 For Web and API projects, Orcsy ships built-in tools for end-to-end verification:
 - **Chromium Browser Automation (`browser_*`)**: native Python CDP client connected to local Google Chrome or Microsoft Edge (zero external drivers required), providing element snapshots with `ref` addressing, clicking, typing, waiting, screenshots, and console/network log listening.
@@ -946,7 +962,7 @@ For Web and API projects, Orcsy ships built-in tools for end-to-end verification
 
 ---
 
-### 10.14 Human-gated commit (Pending commit → dedicated review page)
+### 10.15 Human-gated commit (Pending commit → dedicated review page)
 
 When the Project Team or Worktree isolation is enabled, agent output is only **applied incrementally to the main working tree** — it never auto-commits or auto-pushes. A red **"Pending commit (N)"** button on the project card opens the **dedicated commit-review page** (`#/commit?project=<name>`, a full tab rather than a dialog):
 

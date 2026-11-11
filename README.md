@@ -4,11 +4,9 @@ English | [简体中文](README.zh-CN.md)
 
 📖 **[User Guide (Wiki)](docs/user-guide.md)** — installation, features, and step-by-step usage for non-technical users.
 
-> Orcsy is an Agent task-orchestration system that plugs into any LLM API: it periodically scans each project's `tasks/` directory for Markdown tasks, dispatches them by priority to a dedicated Agent that does the development and fixes, then automatically commits to Git and writes the task status back — an unattended, closed-loop development pipeline.
+> Orcsy is an Agent task-orchestration system that plugs into any LLM API. Write tasks as Markdown, and a scheduler scans each managed project's `tasks/` directory, dispatches them by priority (P0 → P4) to that project's dedicated Agent, the Agent reads and writes real code and runs tests inside an isolated git worktree, and on completion Orcsy commits, merges and writes the status back — an unattended, closed-loop development pipeline with a web dashboard throughout.
 
-![version](https://img.shields.io/badge/version-0.22.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
-
-Write tasks as Markdown and let Orcsy handle the rest: a scheduler scans each managed project's `tasks/` directory, dispatches tasks by priority (P0 → P4) to that project's dedicated Agent, the Agent reads and writes real code and runs tests inside an isolated git worktree, and on completion Orcsy commits, merges and writes the status back — with a web dashboard and run logs throughout.
+![version](https://img.shields.io/badge/version-0.23.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 ```
 ┌────────────────────────────────── Orcsy ────────────────────────────────┐
@@ -31,31 +29,19 @@ Write tasks as Markdown and let Orcsy handle the rest: a scheduler scans each ma
 
 ## ✨ Features
 
-- **Multi-Model Agent Project Team** — assemble specialized AI Agent crews (Project Manager, Backend Engineer, Frontend Engineer, QA Test Engineer, and Custom Roles) for any project:
-  - **👑 Project Manager (PM)**: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using `depends_on_refs`, or dispatches single-component tasks directly via `reassign_task`.
-  - **⚙️ Backend / 🎨 Frontend Developers**: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries (API endpoints, schemas, routes) automatically injected into prompts.
-  - **🧪 Test Engineer (QA)**: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using `report_bug`, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.
-  - **🛡️ Sandboxed Worktree + Human-Gated Final Commit**: all coding runs safely inside isolated worktrees and merges into the main working tree unstaged/uncommitted — **Orcsy never auto-commits or auto-pushes to main branch by default**, leaving 100% of final commit and push authority to the human reviewer!
-  - **⚡ Intra-Cycle Chaining (`chain_within_cycle`)**: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing end-to-end multi-phase requirements in minutes.
-  - **👥 Two-Tier Configuration**: global `agent_profiles` pool reusable across projects, with project-level team customization and fallback routing.
-- **🔍 Independent Review Agent (Pre-Merge Quality Gate)** — commits WIP changes to a temporary branch and runs an independent second model to audit results against acceptance criteria and optional test commands; only merges when verified, otherwise returns structured issues for automated rework without self-review.
-- **🌐 Local Debugging & Chromium CDP Automation** — built-in tools for end-to-end web & API verification:
-  - **Browser Automation (`browser_*`)**: native Python CDP client connected to local Google Chrome or Microsoft Edge (zero external drivers required), providing element snapshots with `ref` addressing, clicking, typing, waiting, screenshots, and console/network log listening.
-  - **Dev Server Management (`dev_server_*`)**: runs background services with dynamic `{PORT}` allocation and readiness probing, terminating child processes cleanly on task end.
-  - **Local HTTP API Client (`http_request`)**: tests local/LAN REST and GraphQL endpoints with cookie jars and host allowlist enforcement to block intranet penetration.
-- **🛠️ 3-Tier Grouped Tools & Command Whitelist Management** — Settings page organized across 4 modular tabs (Agent Tools, Command Whitelist, Local Debug & Browser, Permissions & Env); 9 technical ecosystems (Python, Node, Compiled, C/C++ Build, VCS, Package Managers, Shell, Windows/POSIX Probes) categorizing 90+ default commands with batch toggle controls and instant search.
-- **Any LLM** — OpenAI-compatible protocol (DeepSeek / GLM / Kimi / Qwen / Ollama / vLLM…) and the Anthropic protocol, both with native function calling; switch providers by changing `base_url` + `model`. Optional model-thinking display.
+- **Multi-Model Agent Project Team** — assemble **👑 Project Manager / ⚙️ Backend / 🎨 Frontend / 🧪 QA** crews for any project: the PM explores code read-only, decomposes DAG subtasks (`depends_on_refs`) or dispatches directly; developers code inside task-isolated Worktree sandboxes with upstream API contracts auto-injected into prompts; QA spins up local servers and browsers for end-to-end testing, files defects via `report_bug` and auto-regresses after fixes; downstream tasks chain within the same cycle (`chain_within_cycle`) — a full requirement closes out in one cycle.
+- **🔍 Independent Review Agent (pre-merge gate)** — finished tasks land a WIP commit and are audited by a **different second model** (acceptance-criteria spot checks, optional test runs); only a pass merges and archives, failures return structured issues for automatic rework (round cap adjustable) — no "grading your own work".
+- **🛡️ Data masking (secrets never leave the machine)** — API keys and database passwords the Agent reads are masked locally **before being sent to the model provider**: processing happens only in memory (no disk writes, never logged, mapping cleared when the task ends); high-confidence rules work out of the box (sk-/ghp_/JWT/PEM private keys/Bearer/URL tokens/connection-string passwords), the model sees `[REDACTED:api_key:…]` placeholders, written-back files are restored to the original values; key-value enhanced rules and custom regex are opt-in.
+- **🌐 Local debugging & browser automation** — native Python CDP client for local Chrome / Edge (zero drivers): element snapshots, ref-addressed clicking/typing, screenshots, console/network listening; plus `dev_server_*` background services and `http_request` local API debugging (host allowlist enforced) — a complete web/API verification loop.
+- **Any LLM** — OpenAI-compatible protocol (DeepSeek / GLM / Kimi / Qwen / Ollama / vLLM…) and the Anthropic protocol, both with native function calling; switch providers by changing `base_url` + `model`.
 - **Markdown as tasks** — one `.md` file per task: frontmatter for metadata, body for requirements and acceptance criteria. Plain text, versionable, human-editable.
-- **One dedicated Agent / Team per project** — its own `AGENT.md` guidelines, task list, git worktree and conversation history; multi-Agent parallelism supported; each project can bind a dedicated model or a multi-model project team.
-- **Repo Issues integration** — bind a GitHub / Gitee / GitLab / Gitea repo (self-hosted included) to a project and pull its open Issues into the task queue with one click: priority defaults to P2, P0~P4 labels override; tasks carry source annotations with archive-aware dedup; one-way import, Issue status is not written back.
-- **Self-update** — check/download new versions from a Gitee Release (auto-check on startup, toggleable), one-click silent install with automatic restart (Windows installed edition; Docker/Linux upgrade via their own means). Fully zero-UAC when installed in a user-writable directory; when installed under Program Files (or other system dirs), the update asks for UAC once mid-install (accept to continue; cancel leaves the app running untouched).
-- **Task-end alerts** — a sound (Windows system sounds) plus a tray-balloon system notification when a task finishes or gets blocked, even with the dashboard closed; manual stops stay silent; sound and notification can be toggled independently in Settings.
-- **Real execution, safely sandboxed** — file tools locked inside the project worktree, command whitelist, turn limits (`-1` = unlimited, with built-in loop guards); in team/worktree mode agent output lands in the main working tree **uncommitted** and the final `git commit` / `push` is always left to a human.
-- **Concurrent sub-agents (`delegate_explore`)** — the Project Manager and every developer role can spawn 2–4 **read-only sub-agents** in one call to explore different modules in parallel and get a consolidated report in a single round (with strict read-only sandbox, fan-out/round caps and force-stop support), cutting serial exploration time by several times.
-- **Zero-friction project onboarding** — creating/importing a project only adds `tasks/` and `AGENT.md`, nothing else in the repo is touched; tech stack auto-detection (Node/Python/Rust/Go/.NET/Java/C++…) pre-fills run and test commands, or set them manually.
-- **Skill library** — import local skill directories (with SKILL.md), create skills in the dashboard, or one-click scan user-level skills from common AI tools (ZCode / generic Agents / Claude Code / Codex / OpenCode etc.) and batch-import with dedup; skills can be global or bound to a single project; deleting a skill only removes the copy in the library — externally imported originals stay in their tool directories and can be re-scanned (custom-built skills are unrecoverable once deleted); skills live in the Orcsy data directory (`%APPDATA%\Orcsy\skills\`) and are **never written into project directories**; the Agent system prompt only receives a "name + description" index, full content is read on demand via the `read_skill` tool, so the skill count never bloats the context. A built-in **`env-setup` skill** (auto-seeded on first start; unmodified copies auto-refresh when the template is revised) guides the Agent to install missing toolchains silently via winget / scoop / choco / brew / apt / dnf and verify before continuing; **when package managers fail on proxy-less China networks it automatically switches to direct mirror downloads** (3s reachability probe → domestic mirrors like golang.google.cn / npmmirror / Tsinghua TUNA → unzip into the user-writable `%LOCALAPPDATA%\Programs`, zero admin → register user-level PATH immediately), with a ready mirror table for Go / Node / Python / JDK — install/download commands require human approval in autonomous / ask-on-change modes.
-- **Web dashboard** — status overview, task CRUD (with role assignments and dependency multi-select), drag-and-drop task sorting, active running project filtering, a **dedicated human-gated commit page** (left: changed files with per-file diff on the right; wrap toggle, patch download, exclude / delete temporary test artifacts, then confirm commit/push), model list fetching and one-click connectivity test, run logs newest-first (model thinking content is collapsible); tray icon, autostart on boot, Windows installer out of the box.
-- **Usage ledger & heatmap** — token accounting across overall totals, per-project, and **per-Agent role (PM / Backend / Frontend / QA / Review)** metrics, alongside a 12-week GitHub-style usage heatmap.
+- **One dedicated Agent / Team per project** — its own `AGENT.md` guidelines, task list, worktree and conversation history; multi-Agent parallelism; per-project dedicated model binding.
+- **🛠️ Sandboxed tools & 3-tier approvals** — file tools confined to the project worktree, 90+ default command whitelist (9 ecosystems, visual toggles in the dashboard), three permission modes (ask-on-change / autonomous / full-access with a pending-approval queue); missing toolchains are silently installed per the built-in `env-setup` skill (automatic mirror direct-download on proxy-less China networks).
+- **Concurrent sub-agents (`delegate_explore`)** — PM and developer roles can spawn 2–4 **read-only sub-agents** in one call to explore different modules in parallel and get a consolidated report in a single round.
+- **Skill library** — import local directories, create in the dashboard, or one-click scan user-level skills from ZCode / Claude Code / Codex etc. with batch import; prompts only receive a "name + description" index, full content is read on demand via `read_skill`, never bloating the context.
+- **Repo Issues integration** — bind a GitHub / Gitee / GitLab / Gitea repo (self-hosted included) and pull open Issues into the task queue in one click (label-mapped priorities, archive-aware dedup, one-way import).
+- **Web dashboard** — status overview, task CRUD and drag-and-drop sorting, a **dedicated human-gated commit page** (file list + diff, confirm commit/push), model connectivity test, run logs with collapsible model thinking; tray icon, autostart, self-update (zero-UAC / one prompt under system dirs), task-end alerts, per-role usage ledger with a 12-week heatmap.
+- **Zero-friction project onboarding** — creating/importing a project only adds `tasks/` and `AGENT.md`; tech stack auto-detection pre-fills run and test commands.
 
 ## 🚀 Quick Start
 
@@ -237,12 +223,13 @@ You can also set/change/clear the password while logged in, under "Settings → 
 
 Behavior:
 
-- When enabled, every page and API except the login screen requires a session; wrong passwords incur a delay penalty (brute-force mitigation).
-- Successful login issues an HttpOnly session cookie valid for 7 days; sessions live in memory, so **a program restart requires logging in again**.
-- Changing the password invalidates all existing sessions immediately; clearing it disables auth.
-- The password is stored securely as a **PBKDF2-HMAC-SHA256 (100,000 iterations)** ciphertext in `config.yaml` (plaintext is never persisted).
-- **Password recovery**: administrators can run `orcsy reset-password` (or `orcsy passwd`) on the server to reset or clear it (`--clear`).
+- When enabled, every page and API except the login screen requires a session; wrong passwords incur a delay penalty (brute-force mitigation); the session cookie (HttpOnly, 7 days) lives in memory, so a program restart requires logging in again; changing the password invalidates all existing sessions immediately.
+- The password is stored securely as a **PBKDF2-HMAC-SHA256 (100,000 iterations)** ciphertext; if forgotten, run `orcsy reset-password` on the server (or `--clear` to remove).
 - Auth is not a substitute for TLS: over plain HTTP the password and session can be sniffed. For public deployments, put a reverse proxy (nginx/caddy) with HTTPS in front.
+
+### Data masking (secrets never leave the machine)
+
+Agents read workspace files and run commands — API keys and database passwords found there are masked locally **before being sent to the model provider**: processing happens only in memory (no disk writes, never logged, mapping cleared when the task ends); high-confidence rules are on by default (sk-/ghp_/JWT/PEM private keys/Bearer/URL tokens/connection-string passwords, etc.), the model sees `[REDACTED:api_key:xxxx]` placeholders, written-back files are restored to the original values before hitting disk, and finish summaries stay masked (keys never land in task files). Key-value enhanced rules (`api_key=xxx`) and custom regex are configurable in Settings → 🛡 Data masking or the `masking` section of config.yaml.
 
 ## 🧩 Core Concepts
 
@@ -300,146 +287,75 @@ While executing a task the Agent works through a set of tools **confined to the 
 
 | Tool | Purpose |
 |---|---|
-| `list_dir` | List project file structure (auto-ignores .git/node_modules etc.) |
-| `read_file` | Read a file (over-long content is truncated) |
-| `write_file` | Create / wholesale-rewrite a file |
-| `edit_file` | Exact text replacement (old_string must match uniquely) |
-| `multi_edit` | Multiple replacements in one file, all-or-nothing (any failed edit leaves the file untouched) |
-| `delete_file` | Delete a file; directories require explicit `recursive: true` |
-| `move_file` | Move/rename (existing destination requires `overwrite: true`) |
-| `grep` | Regex code search |
-| `find_files` | Find files by name glob (e.g. `*.py`) |
-| `run_command` | Run whitelisted commands (python/pytest/node/cargo/go/dotnet/git/uv, package managers winget/scoop/choco/brew/apt/dnf, mirror-download & PATH-registration tools powershell/curl/tar/setx, read-only probe & counting commands where/cmd/dir, ls/cat/wc/head/tail/grep etc.) for tests and builds; **when a toolchain is missing the Agent follows the built-in `env-setup` skill's "preflight → idempotent install (package managers first, domestic mirror direct-download fallback without proxy) → in-session repair → verify" loop** (installs require human approval as above); freshly installed tools are **usable immediately** — every command re-reads the latest user PATH from the registry (no dashboard restart after `setx`/`SetEnvironmentVariable(…,"User")`) and resolves tools in common install locations (Program Files / WinGet Links / scoop shims / Eclipse Adoptium etc.), and absolute-path calls work too (whitelist matches by filename, `go.exe` ≡ `go`) |
-| `web_fetch` | Fetch the text content of a public URL (HTML stripped; public addresses only, intranet/loopback always rejected) |
-| `read_skill` | Read the full body of one skill from the skill library |
+| `list_dir` / `find_files` / `grep` | List structure / find by glob / regex search (auto-ignores .git/node_modules etc.) |
+| `read_file` / `write_file` / `edit_file` / `multi_edit` | Read (truncated when over-long) / write / exact replacement (unique `old_string`) / multi-replacement in one file (all-or-nothing) |
+| `delete_file` / `move_file` | Delete (directories require `recursive: true`) / move-rename (existing target requires `overwrite: true`) |
+| `run_command` | Run whitelisted commands (python/node/git/package managers etc.) for tests and builds; missing toolchains are installed per the `env-setup` skill; freshly installed tools are usable immediately |
+| `web_fetch` | Fetch the text content of a public URL (intranet/loopback/cloud-metadata targets always rejected) |
+| `browser_*` / `dev_server_*` / `http_request` | Local debugging trio (see Features), off by default, opt-in |
+| `read_skill` | Read the full body of one skill |
 | `finish` | Structured conclusion (completed / blocked / cannot_do + summary + commit message) |
 
 Safety boundaries:
 
 - File tools are confined to the project root (worktree); absolute paths and `../` traversal are always rejected;
-- The command tool is whitelisted (customizable via `projects[].allowed_commands`); non-whitelisted commands are rejected outright;
-- `web_fetch` is the only networked tool: http/https only, targets resolving to loopback/private/link-local/reserved addresses (including the cloud metadata IP 169.254.169.254) are always rejected, and only text-like content is returned;
-- The tool loop has a turn limit (`projects[].max_agent_turns`, default 40) and is force-wrapped up on timeout;
+- The command tool is whitelisted (`projects[].allowed_commands` fully replaces the default); non-whitelisted commands are rejected outright;
+- `web_fetch` is the only networked tool: http/https only, intranet targets always rejected;
+- The tool loop has a turn limit (`projects[].max_agent_turns`, default 40; `-1` = unlimited with loop guards still active);
 - git commit/merge/push is executed by the system, the Agent cannot operate version control.
 
-### Tool capability toggles (global + per project)
-
-Every tool except `finish` (the task-ending protocol tool, always available) can be toggled by name:
-
-```yaml
-tools:                     # global defaults: tools not listed stay enabled
-  web_fetch: false         # e.g. disable network access globally
-projects:
-  - name: my-app
-    path: D:/Repos/my-app
-    tools:                 # per-project override, merged per tool name; remove the section to follow global
-      web_fetch: true      # e.g. allow network for this project only
-      run_command: false   # e.g. code-edit only, no command execution (read-only review projects)
-```
-
-Dashboard equivalents: the "🛠 Agent Tool Capabilities" card on the settings page (global), and the "Override Agent tool toggles" switch in the project edit dialog (per project); both take effect on save. Enforcement is two-layered: disabled tools are removed from the schemas sent to the model, and the dispatch layer blocks them as a backstop; the system and task prompts stop mentioning disabled tools as well.
+Every tool except `finish` can be toggled by name or group — global defaults plus per-project overrides, visually editable in the dashboard, effective on save (two-layer enforcement: schema filtering + dispatch backstop). The local-debug group (browser / dev_server / http_request) is off by default.
 
 ### Permission modes (human approval)
 
-Three access-permission modes control whether sensitive Agent operations need human confirmation — global default plus per-project override:
+| Mode | Semantics |
+|---|---|
+| `ask_on_change` | Ask before changes: all write/edit/delete/move/run operations pause for approval |
+| `autonomous` | Autonomous: only high-risk operations (delete/move/run commands) ask |
+| `full_access` | Full access (default, never asks) |
 
-| Mode | Semantics | Operations paused for approval |
-|---|---|---|
-| `ask_on_change` | Ask before changes | write_file / edit_file / multi_edit / delete_file / move_file / run_command |
-| `autonomous` | Autonomous (ask on risk) | delete_file / move_file / run_command |
-| `full_access` | Full access (fewer confirmations) | none (default, identical to historical behavior) |
-
-Read-only tools (list_dir / read_file / grep / find_files / read_skill / web_fetch) and finish never ask.
-
-```yaml
-permissions:
-  mode: autonomous           # global default mode
-  timeout_minutes: 30        # approval timeout: auto-reject when nobody responds, tasks never hang forever
-projects:
-  - name: my-app
-    path: D:/Repos/my-app
-    permission_mode: ask_on_change   # per-project override; omit to follow global
-```
-
-How it works: an operation that hits the policy pauses the task thread (the operation is **not executed** — zero side effects); the dashboard header shows a "🔔 Pending approval N" entry and the task row gets a "⏸ awaiting approval" tag. The panel lists project / task / tool / argument preview / waited time per request, with **Approve**, **Reject**, and an "always allow this tool within the task" checkbox to cut repeat confirmations (current task only). Rejections and timeouts are fed back to the model as error text (the prompt tells it not to retry verbatim — adjust the plan or wrap up as blocked), and the whole approval trail is recorded in the task's progress log. Dashboard equivalents: the "🛠 Agent Tools & Permissions" card in settings (global), and the "Access permission" dropdown in the project dialog (per project).
+Read-only tools and finish never ask; paused operations have zero side effects, and the dashboard's "🔔 Pending approval" queue approves/rejects each request (with an "always allow within this task" checkbox); timeouts auto-reject and feed back to the model as error text. Global default plus `projects[].permission_mode` per-project override; `permissions.timeout_minutes` controls the approval timeout.
 
 ### Git integration
 
-Managed projects must be git repositories. When executing a task:
-
-1. A dedicated worktree is created (`.worktree-arranger/`, branch `arranger/<project name>`); all Agent changes happen inside the worktree, never polluting the main checkout;
-2. After the Agent reports `completed`, the system commits in the worktree with the Agent's commit message, then merges back to the main branch with `--no-ff`; if an `origin` remote is configured it also pushes automatically;
-3. If the Agent reports `blocked` / `cannot_do`, worktree changes are discarded, the task is marked `blocked` and awaits human handling;
-4. On merge failure (conflicts etc.) the `arranger/<project name>` branch is kept for manual intervention and the task is marked `blocked`.
+Managed projects must be git repositories. All Agent changes happen inside a dedicated worktree (`.worktree-arranger/`, branch `arranger/<project name>`); after the Agent reports `completed`, the system commits with its message and merges back with `--no-ff` (auto-push if `origin` is configured); on `blocked` / `cannot_do` or merge conflicts, the task is marked `blocked` for human handling.
 
 ## 🖥 Web Dashboard
 
-Start with `orcsy web`, then open [http://127.0.0.1:5116](http://127.0.0.1:5116):
+Start with `orcsy web`, then open [http://127.0.0.1:5116](http://127.0.0.1:5116): status overview, project cards, task CRUD and drag-and-drop sorting, manual "scan now" trigger, force-stopping running tasks, the usage ledger and heatmap, and run logs (model thinking collapsible); the page auto-refreshes every 5 seconds.
 
-- **Overview**: LLM connection info, scheduler status (idle/running, completed cycles, last scan, per-project counts this round);
-- **Project cards**: git status, AGENT.md presence, task list (priority colors, status, description), format-error annotations, archived tasks; one-click open-project-folder and project removal (removes from config only, no files deleted);
-- **Task management**: create/edit/delete tasks (written to `tasks/*.md`), requeue blocked tasks, mark done; **force-stop** running tasks (aborts the Agent loop and any running command, discards uncommitted worktree changes, marks the task cancelled, requeueable); task rows support **drag-and-drop reordering** (persisted as an `order` frontmatter field, matching the Agent's claiming order: **priority P0~P4 always comes first, and `order` only breaks ties within the same priority**; unordered tasks follow ordered ones of the same priority);
-- **Manual trigger**: "Scan now" runs one scheduling round in the background (mutually exclusive with scheduled rounds, no double-claiming);
-- **Usage**: the "Usage" tab shows model consumption — totals and **per-project** task/turn/input/output token counts, a git-contribution-style heatmap for the last 12 weeks (shade = tokens that day, hover for the daily detail), and the 20 most recent task-level records (time/project/task/outcome/model); the ledger persists at `<config dir>/logs/usage.jsonl` (appended when each task ends, blocked/cancelled included, survives restarts);
-- **Run logs**: newest-first display, model thinking content collapsed by default and expandable; the page auto-refreshes every 5 seconds.
-
-`[web] host / port / open_browser` options control the listen address, port and browser auto-open.
-
-**Custom port** (highest to lowest priority): CLI `--port 8080` (address likewise `--host`) > `web.port` in `config.yaml`. On port conflicts:
-
-- If the occupier is **another instance of this system** (`/api/state` reachable): prints that a dashboard is already running and exits, avoiding accidental duplicates;
-- If the occupier is **another program** and the configured port was used: picks a free port automatically and says so on the console;
-- **Explicit** `--port` occupied by another program: exits with an error (explicit choice is respected, never silently switched).
+Custom port/address: CLI `--port / --host` > `web.port / web.host` in `config.yaml`. When the configured port is taken by another program and not explicitly set, a free port is picked automatically with a console notice; an explicitly set port that is occupied exits with an error.
 
 ```bash
 orcsy web --port 8080          # switch to this port on conflict
-orcsy web --host 0.0.0.0       # allow LAN access (add auth yourself)
+orcsy web --host 0.0.0.0       # allow LAN access (set a login password)
 ```
 
 ## ⚙️ Configuration Reference
 
-See `config.example.yaml` at the repo root (kept identical to the `CONFIG_EXAMPLE` constant in `orcsy/__main__.py`, which the `init` command uses to generate `config.yaml`; after changing the constant, sync the template file — `tests/test_config_example.py` enforces this). For the installed edition the data directory defaults to `%APPDATA%\Orcsy`; the `ORCSY_DATA_DIR` env var relocates it entirely. Key options:
+See `config.example.yaml` at the repo root for the full annotated config (kept identical to the `CONFIG_EXAMPLE` constant in `orcsy/__main__.py`). The installed edition's data directory defaults to `%APPDATA%\Orcsy`; the `ORCSY_DATA_DIR` env var relocates it entirely. Key options:
 
 | Option | Description |
 |---|---|
-| `llm.provider` | `openai` (compatible protocol) or `anthropic` |
-| `llm.base_url` / `llm.model` / `llm.api_key` | Model service URL, model name, API key |
-| `llm.enable_thinking` | Request thinking on the API side (required for Anthropic; most compatible services return it by default) |
-| `scheduler.interval_seconds` | Scan interval, default 300 s |
-| `scheduler.max_parallel_agents` | Number of parallel Agents |
-| `web.host / web.port / web.open_browser` | Dashboard listen address / port (default 5116) / auto-open browser |
-| `logging.retention_days` | Log retention days (default 7, 0 disables): the active log is archived into `logs/archive/` after N days, and archived/size-rotated old logs beyond N days are cleaned; editable on the dashboard's "Scheduler & Dashboard" page, effective on save |
-| `logging.max_total_mb` | Total log size cap in MB (default 200, 0 unlimited): when active log + rotated backups + archives exceed the limit, the oldest backups/archives are deleted first (the active log is never deleted; a 5MB rotation backstop applies); independent of retention days — either limit triggers cleanup |
-| `tools` | Global Agent tool toggles: `{tool_name: bool}`, tools not listed stay enabled; `finish` cannot be disabled. Editable via the "🛠 Agent Tools & Permissions" card in dashboard settings |
-| `commands` | Global command-whitelist toggles: `{command: bool}` (keys are default-whitelist members, e.g. `git` / `msbuild`); entries set to false are removed from the default whitelist; unlisted stay allowed. Editable in dashboard settings |
-| `env.vars` | Environment variables injected into Agent subprocesses (`run_command`): **configure mirrors/proxies when dependency downloads fail (unexpected EOF / timeouts) in mainland China** — `GOPROXY: https://goproxy.cn,direct`, `HTTP_PROXY`, `PIP_INDEX_URL`, etc.; overriding PATH/SYSTEMROOT/COMSPEC/WINDIR is rejected. Editable in dashboard settings (one `KEY=VALUE` per line) |
-| `permissions.mode` | Global permission mode: `ask_on_change` (ask before changes) / `autonomous` (ask on risky ops only) / `full_access` (never ask; default). Sensitive operations pause until approved via the dashboard's "🔔 Pending approval" entry |
-| `permissions.timeout_minutes` | Approval timeout in minutes (default 30): auto-reject when nobody responds |
-| `review.enabled` | Global switch for task review (Review Agent, default true): when a review model is configured, a finished task is inspected **pre-merge** by an **independent review Agent** (acceptance-criteria spot checks + optional test runs); only a pass merges into the main branch and archives. Failures trigger automatic rework (2 rounds by default; beyond the limit the task is blocked for human judgment). **No review model configured = review off** (same behavior as before); set `review.llm` and it applies to all projects. Editable via the "🔍 Task review" card in dashboard settings |
-| `review.llm` | Review model binding (provider / api_key / base_url / model etc., same fields as `llm`; default `~` = review off). **Hard constraint: the review model must differ from each project's effective task model** — same-name configs are rejected at startup/save (prevents "grading your own work"); a cheap second model works fine for cross-checking |
-| `review.max_turns` | Review tool-loop round cap (1–100, default 10, including test runs) |
-| `review.max_review_rounds` | Global default rework limit (1–10, default 2): after this many cumulative failed reviews the task is blocked for human judgment; overridable per project via `review_max_rounds` |
-| `review.allow_test_commands` | Let the review agent run tests/builds via `run_command` for real verification (default true; bounded by the project command whitelist and the approval gate); false = read-only review |
-| `review.squash_merge` | After a reworked task passes review, `merge --squash` collapses its WIP commits into one (default true); false = always `--no-ff` |
-| `projects[].review_enabled` | Per-project review switch (true/false; unset = follow global `review.enabled`); turn a project's review off individually. Editable via "Review Agent" in the project dialog |
-| `projects[].review_llm` | Per-project review model binding: partially overrides global `review.llm` (unset fields inherit the global review model); unset = follow global |
-| `projects[].review_max_rounds` | Per-project rework limit override (1–10); unset = follow global `review.max_review_rounds` |
-| `projects[].path` | Project root directory (absolute path recommended) |
-| `projects[].tasks_dir` | Task list directory, default `tasks` |
-| `projects[].guide_file` | Development guide file, default `AGENT.md` |
-| `projects[].max_tasks_per_cycle` | Max tasks executed per round, default 1 |
-| `projects[].max_agent_turns` | Tool-loop turn limit per task, default 40; **-1 = unlimited** (bounded by finish / force-stop / human approval) |
-| frontmatter `order` | Manual sequence persisted by dashboard drag-and-drop: **breaks ties within a priority** for both dashboard display and the Agent's claiming order (priority P0~P4 always wins across levels; within the same priority, ordered tasks come first by `order`, unordered follow); delete the line to return to automatic ordering |
-| frontmatter `requeue_seq` | Auto-maintained increasing stamp written when a blocked task is requeued: **requeued tasks are claimed first in the next scan** (ahead of brand-new tasks — a failed backend task should resume where it left off, and frontend tasks are pointless until it lands); cleared automatically once the task starts running |
-| frontmatter `review_pending` / `review_round` | Review-gate state (auto-maintained, never hand-edited): `review_pending: true` = finished and awaiting review (WIP commit sits on the working branch; the re-review scan resumes it, crash-safe); `review_round: N` = cumulative failed-review rounds (reaching the effective rework limit blocks the task). Archived tasks are never retro-reviewed |
-| `projects[].allowed_commands` | Agent command whitelist: an explicit list **fully replaces** the default (unaffected by global `commands` toggles); omit to follow global (default whitelist minus disabled entries) |
-| `projects[].allowed_branch` | Work only on this branch; defaults to the current branch |
-| `projects[].llm` | Per-project dedicated model binding: partial override of the global `llm` config (any of provider / base_url / api_key / model / temperature etc.; unset fields inherit) — only the bound model handles that project's tasks; editable on the dashboard's project dialog |
-| `projects[].repo` | Remote repo binding: `{url, token?, provider?, api_base?}` (GitHub / Gitee / GitLab / Gitea; token optional for public repos); once bound, "Pull Issues" on the project card imports open Issues into the task queue |
-| `projects[].tools` | Per-project tool toggle override: `{tool_name: bool}` merged over the global `tools` per tool name; omit/remove the section to follow global. Editable via "Override Agent tool toggles" in the dashboard's project dialog |
-| `projects[].permission_mode` | Per-project permission mode override (`ask_on_change` / `autonomous` / `full_access`); omit to follow global. Editable via the "Access permission" dropdown in the dashboard's project dialog |
-| `update.repo` / `update.token` / `update.auto_check` | Self-update: Gitee source repo URL (**defaults to the official source `https://gitee.com/java-and-net/Orcsy`**, changeable to your own mirror; Release assets carry both `orcsy-setup-*.exe` for first install and `orcsy-update-*.zip` for updates), private-repo token, auto-check on startup (default on); one-click check/update from the dashboard header, or manual package import in Settings (Windows installed edition). User-writable install dir = fully zero-UAC silent upgrade; non-writable (e.g. Program Files) = one UAC prompt for the elevated copy, and the tray still relaunches at normal privileges |
-| `notify.sound` / `notify.system` | Task-end alerts: play the program's bundled sound (a "ding-dong" for done / a warning tone for blocked; falls back to the Windows system sound if the bundled audio is missing) and show a tray-balloon system notification on task done/blocked, both on by default; manual stops (cancelled) stay silent. Editable in the dashboard's "🔔 提醒设置" card |
+| `llm.*` | provider (`openai` compatible / `anthropic`), base_url / model / api_key, enable_thinking (request-side model thinking) |
+| `scheduler.interval_seconds` / `max_parallel_agents` | Scan interval (default 300 s) / number of parallel Agents |
+| `web.host / port / open_browser` | Dashboard listen address / port (default 5116) / auto-open browser |
+| `logging.retention_days` / `max_total_mb` | Log retention days (default 7) / total size cap MB (default 200); whichever hits first cleans from the oldest |
+| `tools` / `commands` | Global tool toggles and command-whitelist toggles (`{name: bool}`; unlisted stay enabled/allowed; `finish` cannot be disabled) |
+| `env.vars` | Env vars injected into Agent subprocesses: configure `GOPROXY` / `HTTP_PROXY` / `PIP_INDEX_URL` etc. when dependency downloads fail in mainland China (overriding PATH and other system vars is rejected) |
+| `permissions.mode` / `timeout_minutes` | Permission mode (ask_on_change / autonomous / full_access) / approval timeout in minutes (default 30) |
+| `review.*` | Task review (Review Agent): `llm` binds the review model (**must differ from the task model**, default `~` = review off), `max_turns` review rounds, `max_review_rounds` rework limit (default 2), `allow_test_commands` real test runs, `squash_merge` collapse rework commits; per-project `review_enabled` / `review_llm` / `review_max_rounds` override |
+| `masking.*` | Data masking: `enabled` (default on) / `enhanced_rules` key-value rules (default off) / `custom_patterns` custom regex — see the data-masking section under Dashboard Login Auth |
+| `notify.sound` / `system` | Task-end alerts: bundled sound / tray-balloon notification (both on by default; manual stops stay silent) |
+| `projects[].path` / `tasks_dir` / `guide_file` | Project root (absolute recommended) / task dir (default `tasks`) / guide file (default `AGENT.md`) |
+| `projects[].max_tasks_per_cycle` / `max_agent_turns` | Tasks per round (default 1) / per-task turn cap (default 40; **-1 = unlimited**) |
+| `projects[].llm` | Per-project dedicated model: partial override of the global `llm` (unset fields inherit) — only the bound model handles that project's tasks |
+| `projects[].repo` | Remote repo binding `{url, token?, provider?, api_base?}`; enables one-click Issue import |
+| `projects[].tools` / `allowed_commands` / `permission_mode` | Per-project tool toggles / command whitelist (explicit list fully replaces the default) / permission mode; unset = follow global |
+| `projects[].allowed_branch` / `team` | Work only on this branch / multi-model team composition (referencing the global `agent_profiles` pool) |
+| `update.*` | Self-update source repo (official Gitee source by default) / private token / auto-check on startup |
+| frontmatter `order` | Drag-and-drop sequence (breaks ties within a priority for display and claiming; delete the line to return to automatic ordering) |
+| frontmatter `requeue_seq` / `review_pending` / `review_round` | Auto-maintained, never hand-edited: requeue priority / pending-review state / cumulative rework rounds |
 
 ## 📊 Logging & Observability
 
@@ -505,10 +421,11 @@ deploy/linux/      Native Linux deployment (systemd unit + install/uninstall scr
 
 ## 🔒 Security & Boundaries
 
-- `config.yaml` contains `api_key` and is already in `.gitignore` — never commit or share it; the installed edition keeps its data directory at `%APPDATA%\Orcsy` (config, skill library and logs all live here, local files unaffected by OneDrive), not in the program directory; configs from 0.8.x and earlier kept in the "Documents" folder are migrated automatically on first launch of a newer version (originals kept as backup);
-- The web dashboard listens on `127.0.0.1` only by default and is not exposed to the LAN; for remote access change `web.host` yourself and add authentication yourself (no login feature in the current version);
-- Agent changes are confined to managed projects; merge conflicts turn into blocked instead of force-pushing;
-- Tasks marked `blocked` / `cannot_do` state their reason; after human confirmation, click "Requeue" on the dashboard (or set status back to open) to re-enter the queue;
+- `config.yaml` contains `api_key` and is already in `.gitignore` — never commit or share it; the installed edition keeps its data directory at `%APPDATA%\Orcsy` (config, skill library and logs all live here), not in the program directory;
+- The dashboard listens on `127.0.0.1` only by default; exposing it externally **requires** a login password (see Dashboard Login Auth), and secrets are only ever returned masked by the API;
+- Sensitive data is masked locally before leaving the machine (see Data masking); file tools are confined to the project, commands are whitelisted, and `web_fetch` rejects intranet targets;
+- Agent changes are confined to managed projects; merge conflicts turn into blocked instead of force-pushing; the final `git commit` / `push` is always human-gated;
+- Tasks marked `blocked` / `cannot_do` state their reason; after human confirmation, click "Requeue" on the dashboard to re-enter the queue;
 - The default guidelines require: any change involving dependencies, CI or secrets must be blocked for human confirmation (adjustable in AGENT.md).
 
 ## 📄 License

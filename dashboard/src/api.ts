@@ -284,6 +284,19 @@ export interface AppStateT {
     last_cycle_stats: Record<string, number>
   }
   scheduler_cfg: { interval_seconds: number; max_parallel_agents: number }
+  /** 子代理并发预算：max_parallel/adaptive 为配置值，pools 为运行时实际生效值 */
+  subagent_cfg?: {
+    max_parallel: number
+    adaptive: boolean
+    pools?: {
+      key: string
+      limit: number
+      max_limit: number
+      in_flight: number
+      adaptive: boolean
+      shrink_count: number
+    }[]
+  }
   web_cfg: { host: string; port: number; open_browser: boolean; auth_enabled: boolean }
   update_cfg: {
     repo: string
@@ -294,6 +307,14 @@ export interface AppStateT {
   }
   /** 任务结束提醒开关（完成/受阻时提示音 + 系统通知；cancelled 不提醒） */
   notify_cfg: { sound: boolean; system: boolean }
+  /** 数据脱敏设置（发送模型厂商前本地掩除敏感信息；处理只在内存、任务结束即清除） */
+  masking_cfg: {
+    enabled: boolean
+    /** 键值对增强规则（api_key=xxx 等）：误伤面大，默认关 */
+    enhanced_rules: boolean
+    /** 自定义脱敏正则列表（整段匹配替换） */
+    custom_patterns: string[]
+  }
   logging: { retention_days: number; max_total_mb: number }
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>

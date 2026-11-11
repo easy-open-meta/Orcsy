@@ -172,7 +172,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <p>For first-time, non-technical users: install Orcsy, connect a
 project, create tasks, and understand every part of the dashboard —
 without needing to write code.</p>
-<p>Version: <strong>0.22.0</strong>　|　Default dashboard: <strong><a
+<p>Version: <strong>0.23.0</strong>　|　Default dashboard: <strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
 <p>ℹ️ The dashboard is currently Chinese-only. This guide uses English
 names for buttons and cards; a Chinese-label reference is in <a
@@ -387,7 +387,7 @@ required, but then you lose automatic commit/merge).</li>
 </ul>
 <h4 id="steps">Steps</h4>
 <ol type="1">
-<li>Download <code>orcsy-setup-0.22.0-windows-amd64.exe</code> from the release page:
+<li>Download <code>orcsy-setup-0.23.0-windows-amd64.exe</code> from the release page:
 <ul>
 <li>Gitee: <a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -744,7 +744,7 @@ change.</strong></li>
 <h3 id="55-save">5.5 Save</h3>
 <p>Click <strong>Save model settings</strong>. The top bar will show the
 current model, for example:</p>
-<pre><code>v0.22.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.23.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>If it says <strong>api_key not configured</strong>, the key was not
 saved. Go back and check.</p>
 <hr />
@@ -1432,6 +1432,7 @@ template (referenced by project teams);</li>
 <li><strong>⏱ Scheduler &amp; dashboard</strong>: interval, parallelism,
 port, log retention, login password;</li>
 <li><strong>🔔 Notifications</strong>: sound, system notification;</li>
+<li><strong>🛡 Data masking</strong>: mask passwords/keys locally before sending them to the model provider (high-confidence rules on by default, key-value enhanced rules, custom regex);</li>
 <li><strong>🔍 Task review (Review Agent)</strong>: review model
 binding, rework limit, test-command and squash-commit switches;</li>
 <li><strong>🛠 Agent tools &amp; permissions</strong>: approval mode,
@@ -1646,6 +1647,18 @@ the dashboard is closed;</li>
 <li>With <code>--no-tray</code>, there is no tray and therefore no
 system-notification channel.</li>
 </ul>
+<h3 id="108-data-masking-secrets-never-leave-the-machine">10.8 Data masking (secrets never leave the machine)</h3>
+<p>When an Agent works, it reads workspace files, runs commands, and receives task descriptions — if any of them contain API keys or database passwords, the raw text would be sent to your configured model provider. Data masking removes such content locally <strong>before sending</strong>:</p>
+<ul>
+<li><strong>Processing happens only in memory</strong>: no temp files, never logged, mapping cleared as soon as the task ends — no masking data ever touches disk;</li>
+<li><strong>High-confidence rules on by default</strong>: only tokens whose format proves they are sensitive — <code>sk-</code>-style API keys, GitHub/GitLab tokens, AWS/Google/Slack keys, JWTs, PEM private-key blocks, <code>Bearer</code> headers, <code>token=</code> URL parameters, database-connection-string passwords;</li>
+<li><strong>Readable placeholders</strong>: the model sees <code>[REDACTED:api_key:{{API_KEY_6mnvbp6t}}]</code> — distinct placeholders let it tell multiple keys apart;</li>
+<li><strong>Write-back restores the original</strong>: when the model writes a placeholder into a file ("copy the key into the CI script", "rewrite .env"), the real value is restored before it hits disk — key-copying tasks still work;</li>
+<li><strong>finish summaries stay masked</strong>: task summaries contain placeholders, so keys never land in task files;</li>
+<li><strong>Key-value enhanced rules off by default</strong>: rules like <code>api_key=xxx</code> / <code>"password": "xxx"</code> are broad but also replace the fake keys in docs and test fixtures (the model then reads placeholders instead of the original text) — enable only when your workspace has no such content;</li>
+<li><strong>Custom regex</strong>: for tokens in in-house formats (e.g. <code>PROJECT_SECRET_xxx</code>), add one regex per line; changes take effect immediately after saving.</li>
+</ul>
+<p>Configure it in the dashboard under <strong>Settings → 🛡 Data masking</strong>, or in the <code>masking</code> section of config.yaml (<code>enabled</code> / <code>enhanced_rules</code> / <code>custom_patterns</code>).</p>
 <h3 id="108-auto-update-and-restart">10.8 Auto-update and restart</h3>
 <ul>
 <li>Auto-check for updates on startup (can be turned off);</li>
@@ -1661,7 +1674,7 @@ log;</li>
 <code>orcsy-update-*.zip</code>; same-version reinstall, upgrade, and
 downgrade are supported.</li>
 </ul>
-<h3 id="109-dashboard-login-password">10.9 Dashboard login password</h3>
+<h3 id="1010-dashboard-login-password">10.10 Dashboard login password</h3>
 <p>By default the dashboard only listens on <code>127.0.0.1</code>, so
 only this machine can reach it and no password is needed.</p>
 <p>You <strong>must set a password</strong> if you:</p>
@@ -1693,7 +1706,7 @@ button appears at the top right.</p>
 <li>Authentication is not a substitute for TLS. For internet exposure,
 put a reverse proxy (nginx / caddy) with HTTPS in front.</li>
 </ul>
-<h3 id="1010-logs-autostart-and-port">10.10 Logs, autostart, and
+<h3 id="1011-logs-autostart-and-port">10.11 Logs, autostart, and
 port</h3>
 <p><strong>Logs</strong></p>
 <ul>
@@ -1731,7 +1744,7 @@ rights;</li>
 href="#121-the-dashboard-does-not-open--port-is-in-use">12.1</a>.</li>
 </ul>
 <hr />
-<h3 id="1011-task-review-review-agent-a-second-model-as-gatekeeper">10.11 Task
+<h3 id="1012-task-review-review-agent-a-second-model-as-gatekeeper">10.12 Task
 review (Review Agent): a second model as gatekeeper</h3>
 <p>After a task finishes and before its changes are merged and archived,
 Orcsy can have an <strong>independent review Agent</strong> (<strong>a
@@ -1792,20 +1805,21 @@ read-only calls; on the settings <strong>Usage</strong> view it is recorded
 separately under the review kind, so you can account it apart from
 execution.</p>
 <hr />
-<h3 id="1012-multi-model-agent-project-team">10.12 Multi-Model Agent Project Team</h3>
-<p>Orcsy 0.22.0 introduces <strong>Multi-Model Agent Project Teams</strong>. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:</p>
+<h3 id="1013-multi-model-agent-project-team">10.13 Multi-Model Agent Project Team</h3>
+<p>Orcsy 0.23.0 introduces <strong>Multi-Model Agent Project Teams</strong>. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:</p>
 <ul>
 <li><strong>👑 Project Manager (PM)</strong>: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using <code>depends_on_refs</code>, or dispatches single-component tasks directly via <code>reassign_task</code>.</li>
 <li><strong>⚙️ Backend / 🎨 Frontend Developers</strong>: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries automatically injected into prompts.</li>
 <li><strong>🧪 Test Engineer (QA)</strong>: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using <code>report_bug</code>, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.</li>
-<li><strong>🛡️ Sandboxed Worktree + Human-Gated Final Commit</strong>: all coding runs inside a per-task worktree (<code>.worktree-arranger/&lt;task-id&gt;</code>, branch <code>orcsy/task/&lt;project&gt;/&lt;task-id&gt;</code>) and merges into the main working tree unstaged/uncommitted — <strong>Orcsy never auto-commits or auto-pushes to main branch by default</strong>, leaving 100% of final commit and push authority to the human reviewer (see <a href="#1014-human-gated-commit-pending-commit--dedicated-review-page">10.14 Human-gated commit</a>)!</li>
+<li><strong>🛡️ Sandboxed Worktree + Human-Gated Final Commit</strong>: all coding runs inside a per-task worktree (<code>.worktree-arranger/&lt;task-id&gt;</code>, branch <code>orcsy/task/&lt;project&gt;/&lt;task-id&gt;</code>) and merges into the main working tree unstaged/uncommitted — <strong>Orcsy never auto-commits or auto-pushes to main branch by default</strong>, leaving 100% of final commit and push authority to the human reviewer (see <a href="#1015-human-gated-commit-pending-commit--dedicated-review-page">10.15 Human-gated commit</a>)!</li>
 <li><strong>🧠 Concurrent sub-agent exploration (<code>delegate_explore</code>)</strong>: the Project Manager and every developer role can spawn 2–4 <strong>read-only sub-agents</strong> in one call to explore different modules (data layer, routing, auth, existing tests) in parallel and get a consolidated report in one round; sub-agents are strictly read-only, capped in fan-out and rounds, and honour <strong>Force stop</strong>.</li>
+<li><strong>⚡ Quota-aware adaptive concurrency (<code>subagent.max_parallel</code> / <code>adaptive</code>)</strong>: in-flight requests actually sent to the provider are capped by the sub-agent concurrency budget (default 4 — independent of the 4-sub-agent fan-out fuse). Providers never publish their concurrency ceiling, so adaptation is on by default: an HTTP 429 immediately halves the limit and puts the whole quota pool into a quiet period (honouring <code>Retry-After</code> when present), then gradually climbs back after consecutive successes. <strong>On low-tier plans this degrades to "slower", never "some sub-agents failed"</strong>. Pools are shared per <code>base_url + api_key + model</code>, so parallel projects don't throttle separately.</li>
 <li><strong>📦 Split parent task is archived</strong>: once the PM finishes decomposing a requirement, the parent task is marked <strong>done</strong> and archived into <code>tasks/done/</code>, so the active list only shows the hand-off subtasks.</li>
 <li><strong>⚡ Intra-Cycle Chaining (<code>chain_within_cycle</code>)</strong>: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.</li>
 <li><strong>👥 Two-Tier Configuration</strong>: the global <strong>Multi-Model Team</strong> section configures each role's dedicated model and responsibility prompt template once; project settings reference it with local overrides.</li>
 </ul>
 <hr />
-<h3 id="1013-local-debugging-chromium-cdp-automation">10.13 Local Debugging & Chromium CDP Automation</h3>
+<h3 id="1014-local-debugging-chromium-cdp-automation">10.14 Local Debugging & Chromium CDP Automation</h3>
 <p>For Web and API projects, Orcsy ships built-in tools for end-to-end verification:</p>
 <ul>
 <li><strong>Chromium Browser Automation (<code>browser_*</code>)</strong>: native Python CDP client connected to local Google Chrome or Microsoft Edge (zero external drivers required), providing element snapshots with <code>ref</code> addressing, clicking, typing, waiting, screenshots, and console/network log listening.</li>
@@ -1813,7 +1827,7 @@ execution.</p>
 <li><strong>Local HTTP API Client (<code>http_request</code>)</strong>: tests local/LAN REST and GraphQL endpoints with cookie jars and host allowlist enforcement to block intranet penetration.</li>
 </ul>
 <hr />
-<h3 id="1014-human-gated-commit-pending-commit--dedicated-review-page">10.14 Human-gated commit (Pending commit → dedicated review page)</h3>
+<h3 id="1015-human-gated-commit-pending-commit--dedicated-review-page">10.15 Human-gated commit (Pending commit → dedicated review page)</h3>
 <p>When the Project Team or Worktree isolation is enabled, agent output is only <b>applied incrementally to the main working tree</b> — it never auto-commits or auto-pushes. A red <b>“Pending commit (N)”</b> button on the project card opens a <b>dedicated commit-review page</b> (<code>#/commit?project=&lt;name&gt;</code>, a full tab instead of a dialog):</p>
 <ul>
 <li><b>Left: changed-file list</b> — click any file to see its diff on the right; each row offers <b>Exclude</b> and <b>Delete</b>; the header adds bulk actions <b>Exclude temp artifacts (N)</b> and <b>Delete temp artifacts (N)</b>;</li>

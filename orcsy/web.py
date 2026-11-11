@@ -98,24 +98,29 @@ from . import skills as skills_lib
 from .agent import ProjectAgent
 from .approvals import get_manager, MUTATING_TOOLS, RISKY_TOOLS
 from .auth import hash_password, is_password_hashed, verify_password
+from .concurrency import configure_limiter, snapshot_pools
 from .config import (BUILT_IN_ROLES, ROLE_PROMPT_TEMPLATES, AgentProfileConfig, AppConfig, CommandsConfig,
                      EnvConfig, GitConfig, LLMConfig,
-                     LOCAL_DEBUG_BROWSERS, LocalDebugConfig,
+                     LOCAL_DEBUG_BROWSERS, LocalDebugConfig, MaskingConfig,
+                     MAX_MASKING_PATTERNS, MAX_MASKING_PATTERN_LEN,
                      MirrorsConfig, NotifyConfig, PermissionsConfig,
                      ProjectConfig, ProjectTeamConfig, ReviewConfig, SchedulerConfig,
+                     SubagentConfig,
                      TaskStatus, TeamMemberConfig, ToolsConfig, UpdateConfig, WebConfig,
                      assert_review_model_distinct, normalize_llm_override,
                      normalize_review_llm, resolve_commands, resolve_commit_and_merge, resolve_llm,
                      resolve_permission_mode, resolve_project_team_members, resolve_review_llm,
                      resolve_review_rounds, resolve_tools, resolve_worktree_isolation,
                      validate_agent_profiles, validate_allowed_hosts,
-                     validate_env_vars, validate_permission_mode, validate_project_team,
+                     validate_env_vars, validate_masking_patterns, validate_permission_mode,
+                     validate_project_team,
                      validate_web_security, review_enabled_for)
 from .config import _coerce_llm as _coerce_llm_cfg
 from .executor import WORKTREE_DIR
 from .git_ops import Git, GitError
 from .issues import IssueError, normalize_repo, sync_issues
 from . import notify
+from . import masking
 from . import updater
 from .llm import LLMError, list_models, test_connection
 from .logging_setup import get_logger
@@ -204,6 +209,8 @@ class AppState:
         self.mirror_runtime = mirror_runtime_for(config)
         # 任务结束提醒开关（模块级旁路，同镜像源运行时随配置注入）
         notify.configure(config.notify)
+        # 数据脱敏规则（模块级旁路，同 notify 随配置注入；看板保存后即时生效）
+        masking.configure(config.masking)
         # 模型规格缓存（model id → context_window/max_output_tokens）：看板拉取
         # 模型列表时更新；保存配置时用模型上报值钳制/校验输出与上下文上限——
         # 模型服务端的限制才是真上限。内存态，重启后由下次拉取重建
@@ -516,6 +523,13 @@ class AppState:
                 "interval_seconds": self.config.scheduler.interval_seconds,
                 "max_parallel_agents": self.config.scheduler.max_parallel_agents,
             },
+            # 子代理并发预算：max_parallel/adaptive 是配置值，pools 是运行时
+            # 实际生效值（自适应撞过 429 时 limit 会低于 max_parallel）
+            "subagent_cfg": {
+                "max_parallel": self.config.subagent.max_parallel,
+                "adaptive": self.config.subagent.adaptive,
+                "pools": snapshot_pools(),
+            },
             "web_cfg": {
                 "host": self.config.web.host,
                 "port": self.config.web.port,
@@ -533,6 +547,12 @@ class AppState:
             "notify_cfg": {
                 "sound": self.config.notify.sound,
                 "system": self.config.notify.system,
+            },
+            # 数据脱敏设置（custom_patterns 是用户自填正则，非密钥，直接回显）
+            "masking_cfg": {
+                "enabled": self.config.masking.enabled,
+                "enhanced_rules": self.config.masking.enhanced_rules,
+                "custom_patterns": list(self.config.masking.custom_patterns),
             },
             "logging": {"retention_days": self.config.logging.retention_days,
                         "max_total_mb": self.config.logging.max_total_mb},
@@ -1440,6 +1460,13 @@ class AppState:
             # 任务结束提醒开关必须一起写回：漏写会在看板任意保存时静默
             # 重置为默认全开（同 update 节漏写的教训）
             "notify": {"sound": cfg.notify.sound, "system": cfg.notify.system},
+            # 数据脱敏配置整体写回（同 update/notify 教训：漏写会被看板任意
+            # 保存静默重置回默认）
+            "masking": {
+                "enabled": cfg.masking.enabled,
+                "enhanced_rules": cfg.masking.enhanced_rules,
+                "custom_patterns": list(cfg.masking.custom_patterns),
+            },
             # 任务审查（Review Agent）配置整体写回：漏写会在看板任意保存时
             # 静默重置（llm=None = 审查未启用默认态；同 update/notify 教训）
             "review": {
@@ -1458,6 +1485,11 @@ class AppState:
                 "max_review_rounds": cfg.review.max_review_rounds,
                 "allow_test_commands": cfg.review.allow_test_commands,
                 "squash_merge": cfg.review.squash_merge,
+            },
+            # 子代理并发预算（漏写会被看板任意保存静默重置回默认 4/自适应开）
+            "subagent": {
+                "max_parallel": cfg.subagent.max_parallel,
+                "adaptive": cfg.subagent.adaptive,
             },
             # 本地调试配置整体写回
             "local_debug": {
@@ -1574,6 +1606,7 @@ class AppState:
         self.mirror_runtime = mirror_runtime_for(new_cfg)
         # 任务结束提醒开关随配置刷新（看板保存后立即生效，无需重启）
         notify.configure(new_cfg.notify)
+        masking.configure(new_cfg.masking)
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
         self.agents = {p.name: ProjectAgent(p, resolve_llm(new_cfg.llm, p.llm,
@@ -2414,6 +2447,21 @@ class AppState:
             )
             notify.configure(self.config.notify)
 
+        # 数据脱敏：分块保存，只带 masking 的请求不触碰其它配置；自定义正则
+        # 校验（条数/长度/可编译）400 透传看板
+        if "masking" in data:
+            m_cfg = data.get("masking") or {}
+            self.config.masking = MaskingConfig(
+                enabled=bool(m_cfg.get("enabled", self.config.masking.enabled)),
+                enhanced_rules=bool(m_cfg.get("enhanced_rules",
+                                              self.config.masking.enhanced_rules)),
+                custom_patterns=validate_masking_patterns(
+                    m_cfg.get("custom_patterns",
+                              self.config.masking.custom_patterns),
+                    context="masking.custom_patterns"),
+            )
+            masking.configure(self.config.masking)
+
         # 命令白名单开关：分块保存；键必须是默认白名单成员（400 透传看板）
         if "commands" in data:
             self.config.commands = CommandsConfig(
@@ -2503,6 +2551,25 @@ class AppState:
                                     context=f"项目 {p.name} 的 llm"),
                         eff_review, context=f"项目 {p.name} 的 review")
             self.config.review = new_review  # 复检全过才落盘
+
+        # 子代理并发预算：分块保存，只带 subagent 的请求生效；
+        # 改完立刻同步进程级配额池（无需重启/等下一轮调度）
+        if "subagent" in data:
+            sub_raw = data.get("subagent") or {}
+            try:
+                sub_max = int(sub_raw.get("max_parallel",
+                                          self.config.subagent.max_parallel))
+            except (TypeError, ValueError):
+                raise ValueError("子代理并发上限必须是整数") from None
+            if not (1 <= sub_max <= 16):
+                raise ValueError("子代理并发上限应为 1~16")
+            self.config.subagent = SubagentConfig(
+                max_parallel=sub_max,
+                adaptive=bool(sub_raw.get("adaptive",
+                                          self.config.subagent.adaptive)),
+            )
+            configure_limiter(self.config.subagent.max_parallel,
+                              self.config.subagent.adaptive)
 
         # 本地调试配置：分块保存，只带 local_debug 的请求生效
         if "local_debug" in data:

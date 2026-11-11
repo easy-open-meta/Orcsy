@@ -12,6 +12,7 @@ from typing import Any, Literal
 import yaml
 
 from .approvals import PERMISSION_MODES
+from .concurrency import configure_limiter
 from .issues import IssueError, normalize_repo
 from .mirrors import validate_mirrors
 from .tools import (DEFAULT_ALLOWED_COMMANDS, validate_commands_map,
@@ -284,6 +285,49 @@ class NotifyConfig:
 
 
 @dataclass
+class MaskingConfig:
+    """数据脱敏配置：密码、密钥等敏感信息发送模型厂商前在本地掩除（详见 docs/design-data-masking.md）。
+
+    处理只在内存中进行：不写临时文件、不进日志；任务级映射随任务结束清除。
+    高置信规则只匹配格式自证敏感的令牌（sk-/ghp_/JWT/PEM 私钥块等），默认开；
+    键值对增强规则（api_key=xxx 等）误伤面大（文档示例/测试夹具），默认关。
+    """
+
+    enabled: bool = True           # 总开关（false = 完全透传，零开销路径）
+    enhanced_rules: bool = False   # 键值对增强规则（key 保留 value 掩除）
+    custom_patterns: list[str] = field(default_factory=list)  # 自定义正则（整段匹配替换）
+
+
+MAX_MASKING_PATTERNS = 20       # 自定义正则条数上限（防配置膨胀）
+MAX_MASKING_PATTERN_LEN = 500   # 单条正则长度上限（防灾难性回溯的大而全写法）
+
+
+def validate_masking_patterns(data: object, context: str = "masking.custom_patterns") -> list[str]:
+    """校验自定义脱敏正则列表：条数/长度受限，且必须可编译（加载期即暴露写错）。"""
+    if data is None:
+        return []
+    if not isinstance(data, (list, tuple)):
+        raise ValueError(f"{context} 必须是正则字符串列表。")
+    out: list[str] = []
+    for i, item in enumerate(data, 1):
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        if len(raw) > MAX_MASKING_PATTERN_LEN:
+            raise ValueError(
+                f"{context} 第 {i} 条正则超过 {MAX_MASKING_PATTERN_LEN} 字符（当前 {len(raw)}）")
+        try:
+            re.compile(raw)
+        except re.error as e:
+            raise ValueError(f"{context} 第 {i} 条正则无法编译：{e}") from None
+        if raw not in out:
+            out.append(raw)
+    if len(out) > MAX_MASKING_PATTERNS:
+        raise ValueError(f"{context} 最多 {MAX_MASKING_PATTERNS} 条（当前 {len(out)}）")
+    return out
+
+
+@dataclass
 class ToolsConfig:
     """全局 Agent 工具开关：{工具名: bool}，未列出的工具默认启用。
 
@@ -484,6 +528,19 @@ def validate_permission_mode(value: object, context: str = "permissions.mode") -
 
 
 @dataclass
+class SubagentConfig:
+    """子代理并发预算：按厂商配额自适应地限制「在途大模型请求数」。
+
+    与 delegate_explore 的单次 4 个熔断值是两回事——那个管「一次能派几个」，
+    这个管「真正打给厂商的并发请求有几个」。厂商从不公开自己的并发上限，
+    所以 adaptive 打开时用 AIMD 逼近：撞 429 就对半砍，成功了慢慢爬回来。
+    """
+
+    max_parallel: int = 4   # 同一配额池（base_url+api_key+model）的在途请求上限
+    adaptive: bool = True   # 按 429 / Retry-After 自动降并发，成功后逐步爬回
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -495,8 +552,10 @@ class AppConfig:
     env: EnvConfig = field(default_factory=EnvConfig)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
+    masking: MaskingConfig = field(default_factory=MaskingConfig)
     mirrors: MirrorsConfig = field(default_factory=MirrorsConfig)
     review: ReviewConfig = field(default_factory=ReviewConfig)
+    subagent: SubagentConfig = field(default_factory=SubagentConfig)
     local_debug: LocalDebugConfig = field(default_factory=LocalDebugConfig)
     git: GitConfig = field(default_factory=GitConfig)
     agent_profiles: dict[str, AgentProfileConfig] = field(default_factory=dict)
@@ -1126,6 +1185,23 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         squash_merge=bool(rev_raw.get("squash_merge", True)),
     )
 
+    # 子代理并发预算：厂商并发上限既不公开也无法查询，只能按 429 反馈自适应。
+    # 这里是「初始上限」；adaptive 打开时撞 429 会自动减半、成功后逐步爬回
+    sub_raw = raw.get("subagent") or {}
+    if not isinstance(sub_raw, dict):
+        raise ValueError("subagent 配置必须是字典（键值对）。")
+    try:
+        sub_max = int(sub_raw.get("max_parallel", 4))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"subagent.max_parallel 必须是整数：{e}") from e
+    if not (1 <= sub_max <= 16):
+        raise ValueError(
+            f"subagent.max_parallel 应为 1~16（当前：{sub_max}）")
+    subagent_cfg = SubagentConfig(
+        max_parallel=sub_max,
+        adaptive=bool(sub_raw.get("adaptive", True)),
+    )
+
     # 本地调试配置（驱动 Chrome/Edge 与开发服务）
     debug_raw = raw.get("local_debug") or {}
     if not isinstance(debug_raw, dict):
@@ -1198,6 +1274,18 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     notify = NotifyConfig(
         sound=bool(not_raw.get("sound", True)),
         system=bool(not_raw.get("system", True)),
+    )
+
+    # 数据脱敏：发送模型厂商前本地掩除（默认开启高置信规则）；自定义正则
+    # 加载期即校验（条数/长度/可编译），写错立刻暴露而不是等首个任务
+    mask_raw = raw.get("masking") or {}
+    if not isinstance(mask_raw, dict):
+        raise ValueError("masking 配置必须是字典（键值对）。")
+    masking_cfg = MaskingConfig(
+        enabled=bool(mask_raw.get("enabled", True)),
+        enhanced_rules=bool(mask_raw.get("enhanced_rules", False)),
+        custom_patterns=validate_masking_patterns(
+            mask_raw.get("custom_patterns"), context="masking.custom_patterns"),
     )
 
     # Git 自动化工作流：默认关闭自动代码提交与合并（改动直接留在工作区供人工检查）
@@ -1320,8 +1408,12 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
                     update=update, tools=tools, commands=commands, env=env,
-                    permissions=permissions, notify=notify, mirrors=mirrors,
-                    review=review_cfg, local_debug=local_debug_cfg,
+                    permissions=permissions, notify=notify, masking=masking_cfg,
+                    mirrors=mirrors,
+                    review=review_cfg, subagent=subagent_cfg,
+                    local_debug=local_debug_cfg,
                     git=git_cfg, agent_profiles=agent_profiles,
                     projects=projects, source_path=path.resolve())
+    # 厂商配额池是进程级单例：加载即生效（看板保存走 web.py 的同一入口）
+    configure_limiter(cfg.subagent.max_parallel, cfg.subagent.adaptive)
     return cfg

@@ -14,6 +14,7 @@ const SECTIONS = [
   { key: 'profiles', label: '👥 多模型项目小组 (Team)' },
   { key: 'sched', label: '⏱ 调度与看板' },
   { key: 'notify', label: '🔔 提醒设置' },
+  { key: 'masking', label: '🛡 数据脱敏' },
   { key: 'review', label: '🔍 任务审查（Review Agent）' },
   { key: 'tools', label: '🛠 Agent 工具与访问权限' },
   { key: 'mirrors', label: '🪞 镜像源管理与测速选源' },
@@ -346,6 +347,14 @@ const localDebugDraft = reactive({
   max_services: 3,
   artifacts_retention_days: 7,
 })
+// ---- 子代理并发预算草稿：厂商并发上限不公开，只能按 429 反馈自适应 ----
+const subagentDraft = reactive({ max_parallel: 4, adaptive: true })
+// 运行时实际生效值：自适应撞过 429 时可能低于配置值；多池取最小（瓶颈池）
+const subagentLiveLimit = computed<number | null>(() => {
+  const pools = store.state?.subagent_cfg?.pools ?? []
+  if (!pools.length) return null
+  return Math.min(...pools.map(p => p.limit))
+})
 const testingBrowser = shallowRef(false)
 async function onTestBrowser(): Promise<void> {
   testingBrowser.value = true
@@ -377,6 +386,9 @@ const gitCommitAndMergeDraft = shallowRef(false)
 // ---- 任务结束提醒草稿（完成/受阻时提示音 + 系统通知；cancelled 不提醒） ----
 const notifyDraft = reactive({ sound: true, system: true })
 const notifySaving = shallowRef(false)
+// ---- 数据脱敏草稿：开关两枚 + 自定义正则（每行一条） ----
+const maskingDraft = reactive({ enabled: true, enhanced_rules: false, patternsText: '' })
+const maskingSaving = shallowRef(false)
 // ---- 镜像源管理与测速选源（草稿态：自定义源可增删、内置/自定义皆可禁用；
 //      测速结果是服务端数据，随轮询即时刷新——Agent 自测后看板也能看到） ----
 const mirrorTesting = shallowRef(false)
@@ -430,8 +442,13 @@ watch(() => store.state, (s) => {
     localDebugDraft.artifacts_retention_days = dbg.artifacts_retention_days ?? 7
   }
   gitCommitAndMergeDraft.value = s.git_cfg?.commit_and_merge ?? false
+  subagentDraft.max_parallel = s.subagent_cfg?.max_parallel ?? 4
+  subagentDraft.adaptive = s.subagent_cfg?.adaptive ?? true
   notifyDraft.sound = s.notify_cfg?.sound ?? true
   notifyDraft.system = s.notify_cfg?.system ?? true
+  maskingDraft.enabled = s.masking_cfg?.enabled ?? true
+  maskingDraft.enhanced_rules = s.masking_cfg?.enhanced_rules ?? false
+  maskingDraft.patternsText = (s.masking_cfg?.custom_patterns ?? []).join('\n')
   syncMirrorDraft()
   mirrorSpeeds.value = s.mirror_speeds?.results ?? {}
   mirrorTestedAt.value = s.mirror_speeds?.tested_at ?? ''
@@ -713,6 +730,23 @@ async function saveNotify(): Promise<void> {
   void import('../store').then(m => m.refresh(true))
 }
 
+// ---- 数据脱敏保存：正则按行拆分、去空行；后端校验（≤20 条/可编译）失败 400 透传 ----
+async function saveMasking(): Promise<void> {
+  maskingSaving.value = true
+  try {
+    const custom_patterns = maskingDraft.patternsText
+      .split('\n').map(l => l.trim()).filter(Boolean)
+    await api.config({ masking: {
+      enabled: maskingDraft.enabled,
+      enhanced_rules: maskingDraft.enhanced_rules,
+      custom_patterns,
+    } })
+    message()?.('已保存并生效（进行中任务的已脱敏内容保持原映射）')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { maskingSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+
 // ---- 审查 Agent 保存：模型三态 + 未配置模型时清除绑定（后端 null=审查未启用） ----
 async function saveReview(): Promise<void> {
   reviewSaving.value = true
@@ -855,6 +889,10 @@ async function saveTools(): Promise<void> {
       env: { vars: envVars, path_autofix: pathAutofix.value },
       permissions: { mode: permDraft.mode, timeout_minutes: permDraft.timeout_minutes },
       git: { commit_and_merge: gitCommitAndMergeDraft.value },
+      subagent: {
+        max_parallel: subagentDraft.max_parallel,
+        adaptive: subagentDraft.adaptive,
+      },
       local_debug: {
         browser: localDebugDraft.browser,
         browser_executable: localDebugDraft.browser_executable.trim(),
@@ -1160,6 +1198,9 @@ const providerOptions = [
           <NCollapseItem name="notify" :title="'🔔 提醒设置'">
             <div class="menu-desc" v-if="activeSection === 'notify'">任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。</div>
           </NCollapseItem>
+          <NCollapseItem name="masking" :title="'🛡 数据脱敏'">
+            <div class="menu-desc" v-if="activeSection === 'masking'">密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。</div>
+          </NCollapseItem>
           <NCollapseItem name="review" :title="'🔍 任务审查（Review Agent）'">
             <div class="menu-desc" v-if="activeSection === 'review'">独立模型合并前审查任务成果；未配置审查模型时审查未启用。</div>
           </NCollapseItem>
@@ -1392,6 +1433,29 @@ const providerOptions = [
       <div class="sfoot"><NButton type="primary" :loading="notifySaving" @click="saveNotify">保存提醒设置</NButton></div>
           </NCard>
         </div>
+        <div v-if="settingsSection === 'masking'">
+          <NCard title="🛡 数据脱敏" size="small" class="scard">
+      <label class="checkline">
+        <NSwitch v-model:value="maskingDraft.enabled" />
+        启用脱敏
+        <span class="hint">发送模型厂商前在本地掩除密码/密钥等敏感信息（高置信规则：sk-/ghp_/glpat-/AKIA/AIza/xox-/JWT/PEM 私钥块/Bearer/URL token 参数/连接串密码段）。处理只在内存中进行，不写磁盘、不进日志；模型写回的占位符在落盘前自动还原原文，任务结束即清除映射。</span>
+      </label>
+      <label class="checkline">
+        <NSwitch v-model:value="maskingDraft.enhanced_rules" />
+        键值对增强规则
+        <span class="hint">掩除 api_key=xxx、"password": "xxx" 等键值对的值（键保留）。覆盖面广但误伤面也大——文档示例、测试夹具里的假密钥同样会被替换，模型将读到占位符而非原文，默认关闭，确认工作区无此类内容再开启。</span>
+      </label>
+      <div class="frow">
+        <div class="f1">
+          <label>自定义脱敏正则（每行一条，整段匹配替换；≤20 条、每条 ≤500 字符）</label>
+          <NInput v-model:value="maskingDraft.patternsText" type="textarea"
+                  :autosize="{ minRows: 3, maxRows: 8 }"
+                  placeholder="例：PROJECT_SECRET_[A-Za-z0-9]{16,}" />
+        </div>
+      </div>
+      <div class="sfoot"><NButton type="primary" :loading="maskingSaving" @click="saveMasking">保存脱敏设置</NButton></div>
+          </NCard>
+        </div>
         <div v-if="settingsSection === 'review'">
           <NCard title="🔍 任务审查（Review Agent）" size="small" class="scard">
       <label class="checkline">
@@ -1485,6 +1549,32 @@ const providerOptions = [
               </div>
 
               <div class="tool-groups-container">
+                <!-- 子代理并发预算：厂商不公开并发上限，靠 429 反馈自适应逼近 -->
+                <div class="group-card">
+                  <div class="group-header">
+                    <div class="group-title-wrap">
+                      <span class="group-icon">⚡</span>
+                      <span class="group-title">子代理并发预算</span>
+                      <span class="group-desc">限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；撞 429 自动对半降并发，成功后逐步爬回。</span>
+                    </div>
+                    <div class="group-ops">
+                      <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
+                        {{ subagentLiveLimit === null ? '尚未建立配额池' : `当前实际并发 ${subagentLiveLimit}` }}
+                      </NTag>
+                    </div>
+                  </div>
+                  <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-end; padding-top: 2px;">
+                    <div class="f1" style="margin:0;">
+                      <label>最大并发请求数（1~16，同一模型+密钥共享）</label>
+                      <NInputNumber v-model:value="subagentDraft.max_parallel" :min="1" :max="16" size="small" style="width: 120px;" />
+                    </div>
+                    <div class="f1" style="margin:0;">
+                      <label>按 429 / Retry-After 自适应降速（厂商不返回限流头时也有效）</label>
+                      <NSwitch size="small" v-model:value="subagentDraft.adaptive" />
+                    </div>
+                  </div>
+                </div>
+
                 <div v-for="cat in filteredToolCategories" :key="cat.key" class="group-card">
                   <div class="group-header">
                     <div class="group-title-wrap">
