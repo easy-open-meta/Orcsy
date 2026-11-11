@@ -113,7 +113,7 @@ notify:
 masking:
   enabled: true                # 数据脱敏：密码/密钥等敏感信息发送模型厂商前在本地掩除
                                # （只运行在内存中不写磁盘，任务结束即清除映射）。
-                               # 高置信规则默认生效：sk-/ghp_/glpat-/AKIA/AIza/xox-/
+                               # 高置信规则默认生效：sk-/tp-/ghp_/glpat-/AKIA/AIza/xox-/
                                # JWT/PEM 私钥块/Bearer/URL token 参数/连接串密码段
   enhanced_rules: false        # 键值对增强规则（api_key=xxx、"password": "xxx" 等，
                                # key 保留 value 掩除）：误伤面大（文档示例/测试夹具

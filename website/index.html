@@ -293,7 +293,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <div class="fcard"><div class="ico">🔐</div><h3>看板登录鉴权</h3>
         <p>一个密码即可给看板加上登录门（HttpOnly 会话、防爆破延迟、改密即踢旧会话），配合 Docker / 服务器部署安全暴露到外网。</p></div>
       <div class="fcard"><div class="ico">🕵️</div><h3>数据脱敏（密钥不出本地）</h3>
-        <p>Agent 读到的 API 密钥、数据库密码，<b>发送模型厂商前在本地掩除</b>：处理只在内存进行，不写磁盘、不进日志、任务结束即清除；高置信规则开箱即用（sk-/ghp_/JWT/PEM 私钥块/Bearer/URL token/连接串密码段），模型只见 <code>[REDACTED:api_key:…]</code> 占位符，写回文件自动还原原文，键值对增强规则与自定义正则按需开启。</p></div>
+        <p>Agent 读到的 API 密钥、数据库密码，<b>发送模型厂商前在本地掩除</b>：处理只在内存进行，不写磁盘、不进日志、任务结束即清除；高置信规则开箱即用（sk-/tp-/ghp_/JWT/PEM 私钥块/Bearer/URL token/连接串密码段），模型只见 <code>[REDACTED:api_key:…]</code> 占位符，写回文件自动还原原文，键值对增强规则与自定义正则按需开启。</p></div>
       <div class="fcard"><div class="ico">🐳</div><h3>多平台部署</h3>
         <p>Windows 安装包（托盘常驻 + 开机自启）、Docker Compose（非 root、tini 信号处理）、Linux systemd（崩溃自动拉起）、纯源码 uv 运行，四种姿势全支持。</p></div>
     </div>

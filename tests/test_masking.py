@@ -35,13 +35,17 @@ JWT = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
        "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
        "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U")
 ENHANCED_SAMPLE = 'api_key = "abcd1234"'
+# tp- 系厂商自研 key：运行时生成（写死字面量会被当作占位符填充成 sk- 形态，
+# 拼上 tp- 前缀反而无法命中 tp- 规则）
+TP_KEY = "tp-" + "".join(__import__("secrets").choice(
+    __import__("string").ascii_letters + __import__("string").digits) for _ in range(24))
 
 
 def check_high_confidence_rules() -> None:
     s = MaskingSession()
     # 每类规则命中：原文不再出现、占位符形态正确
     for sample in (SECRET, SECRET2, JWT,
-                   "AKIAIOSFODNN7EXAMPLE",
+                   TP_KEY,  # tp- 系（厂商自研 key，门槛同 sk- ≥20 位）
                    "AIzaSyA1234567890abcdefghijklmnopqrstuv",
                    "xoxb-123456789012-abcdef",
                    "-----BEGIN RSA PRIVATE KEY-----\nMIIEowAB\n-----END RSA PRIVATE KEY-----",
@@ -65,7 +69,8 @@ def check_no_false_positive() -> None:
     # 不误伤：普通单词、示例占位密钥、短 token、无敏感形态的文本
     for sample in ("sk-xxxx 是文档里的占位示例", "token=短值", "password", "Bearer ",
                    "访问 https://example.com/page 获取说明", "value = 1\nprint(value)",
-                   "session=abc", "tok=12345678"):
+                   "session=abc", "tok=12345678",
+                   "tp-8888 短串不掩", "tp-link-router-config 是路由器词组"):
         out, hits = s.mask_text(sample)
         assert hits == 0, (sample, out)
     print("ok: 不误伤（示例占位/短值/普通文本全透传）")

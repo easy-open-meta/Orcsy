@@ -38,6 +38,7 @@ _PLACEHOLDER_GUARD = re.compile(r"\[REDACTED:[A-Za-z0-9_-]+:[0-9a-f]{8}\]")
 _HIGH_CONFIDENCE: list[tuple[re.Pattern, str]] = [
     # (编译正则, 类别名)。顺序即替换顺序，先长后短避免部分前缀抢先命中
     (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "api_key"),          # OpenAI/DeepSeek/GLM 系
+    (re.compile(r"tp-[A-Za-z0-9_-]{20,}"), "api_key"),          # TokenPlan 等厂商自研 key（门槛同 sk-，防 tp-link 等词组误伤）
     (re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}"), "api_key"),     # GitHub PAT（ghp_/gho_/ghu_/ghs_/ghr_）
     (re.compile(r"github_pat_[A-Za-z0-9_]{20,}"), "api_key"),   # GitHub fine-grained PAT
     (re.compile(r"glpat-[A-Za-z0-9_-]{15,}"), "api_key"),       # GitLab PAT
