@@ -478,13 +478,22 @@ export const api = {
     project: string; id: string; title: string; priority: string; status: string
     labels: string[]; assignee: string; description: string; depends_on?: string[]
   }) => post('/api/task', p),
-  commitProject: (p: { name: string; message: string; push?: boolean }) =>
+  commitProject: (p: { name: string; message: string; push?: boolean; exclude?: string[] }) =>
     post('/api/project/commit', p) as Promise<{
-      ok: boolean; committed: boolean; commit: string; pushed: boolean; message: string
+      ok: boolean; committed: boolean; commit: string; pushed: boolean
+      skipped?: string[]; message: string
     }>,
-  /** 人工把关提交弹窗：查看单个文件在主工作区的未提交改动 diff（新文件返回内容预览） */
+  /** 人工把关提交页：查看单个文件在主工作区的未提交改动 diff（新文件返回全文预览） */
   projectFileDiff: (p: { name: string; file: string }) =>
-    post('/api/project/diff', p) as Promise<{ ok: boolean; file: string; diff: string }>,
+    post('/api/project/diff', p) as Promise<{
+      ok: boolean; file: string; diff: string
+      truncated?: boolean; total_chars?: number; lines?: number
+    }>,
+  /** 人工把关提交页：丢弃指定文件的未提交改动（未跟踪→删除，已跟踪→还原到 HEAD） */
+  discardProjectFiles: (p: { name: string; files: string[] }) =>
+    post('/api/project/discard', p) as Promise<{
+      ok: boolean; deleted: string[]; restored: string[]; skipped: string[]; message: string
+    }>,
   gitInitProject: (p: { name: string }) =>
     post('/api/project/git-init', p) as Promise<{ ok: boolean; message: string }>,
   taskStatus: (project: string, id: string, status: string) =>

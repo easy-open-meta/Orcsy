@@ -172,7 +172,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <p>For first-time, non-technical users: install Orcsy, connect a
 project, create tasks, and understand every part of the dashboard —
 without needing to write code.</p>
-<p>Version: <strong>0.18.0</strong>　|　Default dashboard: <strong><a
+<p>Version: <strong>0.22.0</strong>　|　Default dashboard: <strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
 <p>ℹ️ The dashboard is currently Chinese-only. This guide uses English
 names for buttons and cards; a Chinese-label reference is in <a
@@ -744,7 +744,7 @@ change.</strong></li>
 <h3 id="55-save">5.5 Save</h3>
 <p>Click <strong>Save model settings</strong>. The top bar will show the
 current model, for example:</p>
-<pre><code>v0.18.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.22.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>If it says <strong>api_key not configured</strong>, the key was not
 saved. Go back and check.</p>
 <hr />
@@ -1426,6 +1426,9 @@ side shows only the selected section), from top to bottom:</p>
 <ol type="1">
 <li><strong>🤖 LLM Access</strong>: model, key, endpoint,
 parameters;</li>
+<li><strong>👥 Multi-Model Team</strong>: dedicated models and presets for
+PM / Backend / Frontend / QA roles, plus each role's responsibility prompt
+template (referenced by project teams);</li>
 <li><strong>⏱ Scheduler &amp; dashboard</strong>: interval, parallelism,
 port, log retention, login password;</li>
 <li><strong>🔔 Notifications</strong>: sound, system notification;</li>
@@ -1795,9 +1798,11 @@ execution.</p>
 <li><strong>👑 Project Manager (PM)</strong>: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using <code>depends_on_refs</code>, or dispatches single-component tasks directly via <code>reassign_task</code>.</li>
 <li><strong>⚙️ Backend / 🎨 Frontend Developers</strong>: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries automatically injected into prompts.</li>
 <li><strong>🧪 Test Engineer (QA)</strong>: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using <code>report_bug</code>, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.</li>
-<li><strong>🛡️ Sandboxed Worktree + Human-Gated Final Commit</strong>: all coding runs safely inside isolated worktrees and merges into the main working tree unstaged/uncommitted — <strong>Orcsy never auto-commits or auto-pushes to main branch by default</strong>, leaving 100% of final commit and push authority to the human reviewer!</li>
+<li><strong>🛡️ Sandboxed Worktree + Human-Gated Final Commit</strong>: all coding runs inside a per-task worktree (<code>.worktree-arranger/&lt;task-id&gt;</code>, branch <code>orcsy/task/&lt;project&gt;/&lt;task-id&gt;</code>) and merges into the main working tree unstaged/uncommitted — <strong>Orcsy never auto-commits or auto-pushes to main branch by default</strong>, leaving 100% of final commit and push authority to the human reviewer (see <a href="#1014-human-gated-commit-pending-commit--dedicated-review-page">10.14 Human-gated commit</a>)!</li>
+<li><strong>🧠 Concurrent sub-agent exploration (<code>delegate_explore</code>)</strong>: the Project Manager and every developer role can spawn 2–4 <strong>read-only sub-agents</strong> in one call to explore different modules (data layer, routing, auth, existing tests) in parallel and get a consolidated report in one round; sub-agents are strictly read-only, capped in fan-out and rounds, and honour <strong>Force stop</strong>.</li>
+<li><strong>📦 Split parent task is archived</strong>: once the PM finishes decomposing a requirement, the parent task is marked <strong>done</strong> and archived into <code>tasks/done/</code>, so the active list only shows the hand-off subtasks.</li>
 <li><strong>⚡ Intra-Cycle Chaining (<code>chain_within_cycle</code>)</strong>: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.</li>
-<li><strong>👥 Two-Tier Configuration</strong>: global <code>agent_profiles</code> pool reusable across projects, with project-level team customization and fallback routing.</li>
+<li><strong>👥 Two-Tier Configuration</strong>: the global <strong>Multi-Model Team</strong> section configures each role's dedicated model and responsibility prompt template once; project settings reference it with local overrides.</li>
 </ul>
 <hr />
 <h3 id="1013-local-debugging-chromium-cdp-automation">10.13 Local Debugging & Chromium CDP Automation</h3>
@@ -1807,6 +1812,18 @@ execution.</p>
 <li><strong>Dev Server Management (<code>dev_server_*</code>)</strong>: runs background services with dynamic <code>{PORT}</code> allocation and readiness probing, terminating child processes cleanly on task end.</li>
 <li><strong>Local HTTP API Client (<code>http_request</code>)</strong>: tests local/LAN REST and GraphQL endpoints with cookie jars and host allowlist enforcement to block intranet penetration.</li>
 </ul>
+<hr />
+<h3 id="1014-human-gated-commit-pending-commit--dedicated-review-page">10.14 Human-gated commit (Pending commit → dedicated review page)</h3>
+<p>When the Project Team or Worktree isolation is enabled, agent output is only <b>applied incrementally to the main working tree</b> — it never auto-commits or auto-pushes. A red <b>“Pending commit (N)”</b> button on the project card opens a <b>dedicated commit-review page</b> (<code>#/commit?project=&lt;name&gt;</code>, a full tab instead of a dialog):</p>
+<ul>
+<li><b>Left: changed-file list</b> — click any file to see its diff on the right; each row offers <b>Exclude</b> and <b>Delete</b>; the header adds bulk actions <b>Exclude temp artifacts (N)</b> and <b>Delete temp artifacts (N)</b>;</li>
+<li><b>Right: code diff</b> — <b>wrap is on by default</b> so very long lines fold instead of being cut off (toggle to “no wrap + horizontal scrolling”); the header shows “N lines · X KB” and a <b>Download patch</b> button; extremely large changes show a truncated notice, and <b>Download patch</b> gives you the full <code>.patch</code>;</li>
+<li><b>Exclude vs Delete</b>: exclude = not committed and kept in the working tree (restorable); delete = untracked files/directories are <b>physically removed</b>, tracked files are <b>restored to HEAD</b> (change discarded, the file itself kept); both ask for confirmation first;</li>
+<li><b>Automatic temp/test artifact detection</b> — <code>*.log</code>, <code>*.tmp</code>, <code>*.pyc</code>, <code>__pycache__/</code>, <code>.pytest_cache/</code>, <code>node_modules/</code>, <code>coverage/</code> and similar; real test sources such as <code>*_test.go</code> or <code>*.spec.ts</code> are never matched;</li>
+<li><b>Commit</b> — fill in the message (optionally tick push to remote) and click <b>Confirm commit to main branch</b>; only non-excluded files are committed and the working tree becomes clean; if some files remain excluded the page stays open and tells you exactly which ones; when everything is excluded the confirm button is disabled so no empty commit can be created.</li>
+</ul>
+<p>This page is the <b>final human gate</b> of the delivery pipeline: Orcsy will never commit or push on your behalf.</p>
+
 <hr />
 <h2 id="11-data-backup-and-migration">11. Data, backup, and
 migration</h2>

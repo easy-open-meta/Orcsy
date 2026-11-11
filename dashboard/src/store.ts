@@ -55,7 +55,6 @@ export const ui = reactive({
   // taskDlg：id=null 新建；readonly=true 只读查看（归档/非待办任务）
   taskDlg: null as null | { project: string; id: string | null; readonly?: boolean },
   guideDlg: null as null | { project: string },
-  commitDlg: null as null | { project: string },
   skillDlg: null as null | { original: string | null },
   skillScanDlg: false,
   browserDlg: false,
@@ -106,7 +105,7 @@ export function beginRestartWait(target?: string): void {
 }
 
 export const anyModal = computed(() =>
-  !!(ui.projectDlg || ui.taskDlg || ui.guideDlg || ui.commitDlg || ui.skillDlg || ui.skillScanDlg
+  !!(ui.projectDlg || ui.taskDlg || ui.guideDlg || ui.skillDlg || ui.skillScanDlg
     || ui.browserDlg))
 
 export async function refresh(force = false): Promise<void> {
@@ -115,14 +114,19 @@ export async function refresh(force = false): Promise<void> {
   try { store.state = await api.state() } catch { /* 服务瞬时不可达时保持旧数据 */ }
 }
 
-let _navigateHandler: ((name: typeof store.view, query?: Record<string, string>) => void) | null = null
+let _navigateHandler: ((name: string, query?: Record<string, string>) => void) | null = null
 
-export function setNavigateHandler(fn: (name: typeof store.view, query?: Record<string, string>) => void): void {
+export function setNavigateHandler(fn: (name: string, query?: Record<string, string>) => void): void {
   _navigateHandler = fn
 }
 
 export function navigateTo(name: typeof store.view, query?: Record<string, string>): void {
   store.view = name
+  _navigateHandler?.(name, query)
+}
+
+/** 跳转到非 Tab 的子页面（如人工把关提交页 /commit）：不改动顶部 Tab 高亮 */
+export function navigateToRoute(name: string, query?: Record<string, string>): void {
   _navigateHandler?.(name, query)
 }
 
@@ -149,7 +153,8 @@ export function openGuide(project: string): void {
   ui.guideDlg = { project }
 }
 export function openCommitDlg(project: string): void {
-  ui.commitDlg = { project }
+  // 独立「人工把关提交」页：左侧改动文件清单 + 右侧 diff 对比（非弹窗）
+  navigateToRoute('commit', { project })
 }
 export function openSkillNew(): void {
   navigateTo('skills')

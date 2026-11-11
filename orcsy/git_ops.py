@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -89,6 +90,23 @@ class Git:
     def status_porcelain(self) -> list[str]:
         out = self._run("status", "--porcelain")
         return [line for line in out.splitlines() if line.strip()]
+
+    def _status_raw_lines(self) -> list[str]:
+        """原始 porcelain 行（不做整体 strip）。
+
+        status_porcelain() 的 _run 会整体 strip 掉首行开头的空格，导致
+        ` M path`（工作区改动）被裁成 `M path`、固定 2 位状态前缀错位。
+        需要精确解析 XY 前缀时用本方法。
+        """
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "status", "--porcelain"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            startupinfo=_windows_startupinfo(), creationflags=_SUBPROCESS_FLAGS,
+        )
+        if proc.returncode != 0:
+            raise GitError(f"git status --porcelain 失败：{proc.stderr.strip()}")
+        return [ln for ln in proc.stdout.splitlines() if ln.strip()]
 
     def is_dirty(self) -> bool:
         return bool(self.status_porcelain())
@@ -293,31 +311,76 @@ class Git:
             return False, f"增量合入主工作区冲突：{err}"
         return True, ""
 
+    def _status_entries(self) -> list[dict]:
+        """解析 status --porcelain 为结构化条目：[{xy, paths, display, delete_only}]。
+
+        - 普通改动/未跟踪：paths=[p]，display=p
+        - 重命名/复制（XY 首字母 R/C）：`OLD -> NEW` → paths=[OLD, NEW]，
+          display="OLD -> NEW"，任一路径被排除则整条不提交
+        - 删除（XY 含 D）：delete_only=True（用于「暂存删除」判定）
+        文件名为含空格/中文时 porcelain 会加引号，这里统一去引号。
+        """
+        entries: list[dict] = []
+        for ln in self._status_raw_lines():
+            if len(ln) < 4:
+                continue
+            xy = ln[:2]
+            rest = ln[3:]
+            renamed = xy[0] in ("R", "C") and " -> " in rest
+            if renamed:
+                old, new = rest.split(" -> ", 1)
+                paths = [old.strip().strip('"'), new.strip().strip('"')]
+                display = f"{paths[0]} -> {paths[1]}"
+            else:
+                p = rest.strip().strip('"').rstrip("/")  # 未跟踪目录去掉结尾斜杠，便于前缀匹配
+                paths = [p]
+                display = p
+            entries.append({
+                "xy": xy,
+                "paths": [x for x in paths if x],
+                "display": display,
+                "delete_only": "D" in xy,
+            })
+        return entries
+
     def pending_changes_summary(self) -> dict:
         """统计主工作区当前未提交的改动文件信息（看板「待人工审阅提交」展示用）。"""
         if not self.is_repo():
             return {"is_git": False, "count": 0, "files": []}
         try:
-            lines = self.status_porcelain()
+            entries = self._status_entries()
         except GitError:
             return {"is_git": True, "count": 0, "files": []}
-        files: list[str] = []
-        for ln in lines:
-            parts = ln.split(maxsplit=1)
-            if len(parts) == 2:
-                files.append(parts[1].strip())
-        return {"is_git": True, "count": len(files), "files": files[:50]}
+        files = [e["display"] for e in entries]
+        # 上限放宽到 2000：批量生成/删除时也要能看全，避免列表被截断
+        return {"is_git": True, "count": len(files), "files": files[:2000]}
 
-    def file_diff(self, file_path: str) -> str:
-        """单个文件在主工作区的未提交改动 diff（人工把关提交弹窗预览用）。
+    # diff 预览上限：人工把关要看全，给足空间（1MB 文本 ≈ 数万行，浏览器仍可流畅滚动）
+    _DIFF_MAX_CHARS = 1_000_000
+    _DIFF_MAX_NEW_FILE_LINES = 5000
 
-        file_path 为相对仓库根的路径（与 pending_changes_summary 的 files
-        同源）。未跟踪文件展示新增文件全文摘要；其余走 git diff -- <path>。
-        路径穿越/绝对路径拒绝；diff 输出截断到 60K 字符防超长打爆看板。
+    def file_diff(self, file_path: str) -> dict:
+        """单个文件在主工作区的未提交改动 diff（人工把关提交页预览用）。
+
+        返回 {diff, truncated, total_chars, lines}：
+        - diff：diff 文本；未跟踪的新文件返回带「新增文件」标注的全文预览
+        - truncated：是否因超长被截断（前端据此提示并提供下载完整补丁）
+        - total_chars / lines：原始总量（截断时告知真实规模）
+
+        file_path 为相对仓库根的路径（与 pending_changes_summary 的 files 同源）。
+        路径穿越/绝对路径拒绝。
         """
+        def _pack(text: str, total_chars: int, truncated: bool) -> dict:
+            return {"diff": text, "truncated": truncated,
+                    "total_chars": total_chars,
+                    "lines": text.count("\n") + (1 if text else 0)}
+
         if not self.is_repo():
             raise GitError("项目不是 git 仓库，无法查看 diff")
         rel = str(file_path or "").strip()
+        # 重命名条目（`OLD -> NEW`）预览新路径的内容
+        if " -> " in rel:
+            rel = rel.split(" -> ", 1)[1].strip().strip('"')
         if not rel or rel.startswith(("/", "\\")) or ".." in Path(rel).parts:
             raise GitError(f"非法的文件路径：{rel}")
         # porcelain 输出的文件名可能带引号（含空格/中文时），先去引号
@@ -331,7 +394,7 @@ class Git:
         )
         diff_text = proc.stdout.decode("utf-8", errors="replace")
         if not diff_text.strip():
-            # 无 diff 说明是未跟踪的新文件：给出「新增文件」形态预览（前 200 行）
+            # 无 diff 说明是未跟踪的新文件：给出「新增文件」形态全文预览
             status = subprocess.run(
                 ["git", "-C", str(self.repo), "status", "--porcelain", "--", rel_clean],
                 capture_output=True, startupinfo=_windows_startupinfo(),
@@ -342,25 +405,136 @@ class Git:
                     content = (self.repo / rel_clean).read_text(encoding="utf-8",
                                                                 errors="replace")
                 except OSError as e:
-                    return f"（无法读取新文件内容：{e}）"
-                lines = content.splitlines()
-                head = "\n".join(lines[:200])
-                more = f"\n…（共 {len(lines)} 行，已截断）" if len(lines) > 200 else ""
-                return f"（新增文件 · 前 {min(200, len(lines))} 行预览）\n{head}{more}"
-            return "（该文件当前无未提交改动，可能已被其他流程提交）"
-        if len(diff_text) > 60000:
-            diff_text = diff_text[:60000] + "\n…（diff 过长，已截断至 60K 字符）"
-        return diff_text
+                    return _pack(f"（无法读取新文件内容：{e}）", 0, False)
+                all_lines = content.splitlines()
+                total_lines = len(all_lines)
+                shown = all_lines[:self._DIFF_MAX_NEW_FILE_LINES]
+                body = "\n".join(shown)
+                truncated = total_lines > len(shown)
+                # 超长单行（如压缩产物/长 Base64）也要按字符截断，避免撑爆浏览器
+                if len(body) > self._DIFF_MAX_CHARS:
+                    body = body[:self._DIFF_MAX_CHARS]
+                    truncated = True
+                if truncated:
+                    body += (f"\n…（共 {total_lines} 行 / {len(content):,} 字符，已截断；"
+                             "可用「下载补丁」获取本文件全部改动）")
+                return _pack(f"（新增文件 · 共 {total_lines} 行）\n{body}",
+                             len(content), truncated)
+            return _pack("（该文件当前无未提交改动，可能已被其他流程提交）", 0, False)
+        total_chars = len(diff_text)
+        if total_chars > self._DIFF_MAX_CHARS:
+            cut = diff_text[:self._DIFF_MAX_CHARS]
+            return _pack(
+                cut + (f"\n…（diff 共 {total_chars:,} 字符，已截断至 "
+                       f"{self._DIFF_MAX_CHARS:,}；可用「下载补丁」查看完整内容）"),
+                total_chars, True)
+        return _pack(diff_text, total_chars, False)
+
+    def discard_changes(self, files: list[str]) -> dict:
+        """丢弃指定文件的未提交改动（可视化管理临时/测试产物）。
+
+        - 未跟踪（`??`）：从磁盘物理删除（文件或目录，目录递归删除）
+        - 已跟踪：取消暂存并还原到 HEAD（`git reset` + `git checkout --`），
+          即「撤销本次改动」，不会删除仓库里的原始文件
+        只接受当前 status 中真实存在的条目名（用户传入的名字仅用于匹配，
+        不直接拼进删除路径），避免任意路径删除风险。
+        """
+        wanted: set[str] = set()
+        for f in files or []:
+            s = str(f).strip().strip('"')
+            if " -> " in s:
+                s = s.split(" -> ", 1)[1].strip()
+            if s:
+                wanted.add(s)
+        if not wanted:
+            raise GitError("未指定要丢弃的文件")
+        entries = self._status_entries()
+        deleted: list[str] = []
+        restored: list[str] = []
+        skipped: list[str] = []
+        for e in entries:
+            if not (e["display"] in wanted or any(p in wanted for p in e["paths"])):
+                continue
+            if e["xy"] == "??":
+                for p in e["paths"]:
+                    target = self.repo / p
+                    try:
+                        if target.is_dir():
+                            shutil.rmtree(target)
+                        elif target.exists():
+                            target.unlink()
+                        deleted.append(p)
+                    except OSError as err:
+                        skipped.append(f"{p}（{err}）")
+            else:
+                try:
+                    self._run("reset", "-q", "--", *e["paths"], check=False)
+                    self._run("checkout", "--", *e["paths"])
+                    restored.append(e["display"])
+                except GitError as err:
+                    skipped.append(f"{e['display']}（{err}）")
+        if not deleted and not restored and not skipped:
+            raise GitError("没有匹配到可丢弃的改动（可能已提交或被其他流程处理）")
+        return {"deleted": deleted, "restored": restored, "skipped": skipped}
 
     def commit_and_push_manual(self, message: str, *, push: bool = False,
-                               branch: str | None = None) -> dict:
-        """人工确认把关后执行的最终主分支提交（可选推送）。"""
+                               branch: str | None = None,
+                               exclude: list[str] | None = None) -> dict:
+        """人工确认把关后执行的最终主分支提交（可选推送 + 排除部分文件）。
+
+        exclude：不纳入本次提交的改动（如临时测试产物）。命中任一文件名的整条
+        改动都不暂存——重命名条目（OLD -> NEW）只要任一端被排除即整条跳过。
+        被排除的文件**保留在工作区**（不删除、不回滚），后续仍会出现在待提交
+        列表中，可再次选择提交或自行删除。全部改动都被排除时报错，不产生空提交。
+        """
         msg = str(message or "").strip()
         if not msg:
             raise GitError("提交信息（commit message）不能为空")
         if not self.is_dirty():
             raise GitError("主工作区当前没有可提交的改动")
-        committed = self.commit(msg)
+        exclude_set = {str(x).strip().strip('"') for x in (exclude or []) if str(x).strip()}
+
+        def _hit_exclude(paths: list[str]) -> bool:
+            """判断条目是否被排除：支持「目录 ↔ 目录内文件」双向前缀匹配。
+
+            git 对未跟踪目录只报目录本身（`?? __pycache__/`），用户排除的往往是
+            目录内具体文件；反过来排除父目录也应覆盖其下所有文件。
+            """
+            if not exclude_set:
+                return False
+            for p in paths:
+                if p in exclude_set:
+                    return True
+                pfx = p.rstrip("/") + "/"
+                if any(e.startswith(pfx) for e in exclude_set):
+                    return True
+                if any(p.startswith(e.rstrip("/") + "/") for e in exclude_set):
+                    return True
+            return False
+
+        entries = self._status_entries()
+        staged_paths: list[str] = []
+        skipped: list[str] = []
+        for e in entries:
+            if _hit_exclude(e["paths"]):
+                skipped.append(e["display"])
+            else:
+                staged_paths.extend(e["paths"])
+        if not staged_paths:
+            raise GitError("所有改动都被排除，没有可提交的文件（请至少保留一个文件）")
+
+        # 先清空索引（不动工作区），再仅暂存未被排除的路径（含删除），
+        # 避免用户此前已手动 git add 的排除文件被顺带提交
+        self._run("reset")
+        self._run("add", "-A", "--", *staged_paths)
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "commit", "-m", msg],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            startupinfo=_windows_startupinfo(), creationflags=_SUBPROCESS_FLAGS,
+        )
+        if proc.returncode != 0:
+            raise GitError(f"git commit 失败：{proc.stderr.strip() or proc.stdout.strip()}")
+        committed = True
         commit_hash = self.rev_parse("HEAD")[:7] if committed else ""
         pushed = False
         push_note = ""
@@ -377,5 +551,6 @@ class Git:
             "pushed": pushed,
             "branch": target_branch,
             "push_note": push_note,
+            "skipped": skipped,
         }
 

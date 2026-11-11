@@ -215,10 +215,18 @@ def check_manual_commit_and_git_init() -> None:
         res_diff_tracked = state.project_file_diff({
             "name": "my_project", "file": "README.md"})
         assert res_diff_tracked["ok"] and "new line added" in res_diff_tracked["diff"]
+        assert res_diff_tracked["truncated"] is False
+        assert res_diff_tracked["lines"] >= 1 and res_diff_tracked["total_chars"] > 0
         res_diff_untracked = state.project_file_diff({
             "name": "my_project", "file": "feature.py"})
         assert res_diff_untracked["ok"] and "print('feat')" in res_diff_untracked["diff"]
         assert "新增文件" in res_diff_untracked["diff"]
+        # 超大 diff 截断：写入超长内容后 truncated=True，且 diff 内明确提示下载补丁
+        (proj_dir / "big.txt").write_text("x" * 1_200_000 + "\n", encoding="utf-8")
+        res_big = state.project_file_diff({"name": "my_project", "file": "big.txt"})
+        assert res_big["truncated"] is True, res_big.get("truncated")
+        assert len(res_big["diff"]) <= 1_000_300
+        assert "下载补丁" in res_big["diff"]
         # 非法路径拒绝（GitError 与 ValueError 在端点层同样转 400）
         from orcsy.git_ops import GitError
         for bad_path in ("../escape.yaml", "..\\escape.yaml", "/abs/path"):
@@ -259,10 +267,118 @@ def check_manual_commit_and_git_init() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_manual_commit_exclude() -> None:
+    """人工把关提交排除：临时测试产物不随提交进入主分支，且保留在工作区。"""
+    tmp, state = _make_env()
+    try:
+        proj_dir = state.config.projects[0].path
+        g = Git(proj_dir)
+        # 真实改动（应提交）+ 临时测试产物（应排除）
+        (proj_dir / "feature.py").write_text("print('feat')\n", encoding="utf-8")
+        (proj_dir / "junit-report.tmp").write_text("temp output\n", encoding="utf-8")
+        (proj_dir / "__pycache__").mkdir(exist_ok=True)
+        (proj_dir / "__pycache__" / "x.pyc").write_bytes(b"\x00pYC")
+
+        pending = state.full_state()["projects"][0]["pending_git_changes"]
+        assert "junit-report.tmp" in pending["files"], pending
+        assert "__pycache__" in pending["files"], pending
+
+        res = state.manual_commit_project({
+            "name": "my_project",
+            "message": "feat: 只提交真实改动",
+            "exclude": ["junit-report.tmp", "__pycache__/x.pyc"],
+        })
+        assert res["ok"] and res["committed"], res
+        assert sorted(res["skipped"]) == ["__pycache__", "junit-report.tmp"], res["skipped"]
+        assert "排除 2 个文件" in res["message"], res["message"]
+
+        # 提交内容只含真实改动，临时产物未被带入主分支
+        tracked = g.run("ls-files").splitlines()
+        assert "feature.py" in tracked
+        assert "junit-report.tmp" not in tracked, "临时产物不应进入主分支"
+        assert "__pycache__/x.pyc" not in tracked, "缓存产物不应进入主分支"
+        # 排除文件仍保留在工作区（未删除、未回滚）
+        assert (proj_dir / "junit-report.tmp").is_file()
+        assert (proj_dir / "__pycache__" / "x.pyc").is_file()
+        # 工作区仍有这两个未跟踪改动（仍会出现在待提交列表）
+        still = state.full_state()["projects"][0]["pending_git_changes"]["files"]
+        assert "junit-report.tmp" in still and "__pycache__" in still, still
+
+        # 全部排除 → 明确报错，不产生空提交
+        from orcsy.git_ops import GitError
+        try:
+            state.manual_commit_project({
+                "name": "my_project", "message": "x",
+                "exclude": ["junit-report.tmp", "__pycache__"],
+            })
+            raise AssertionError("全部排除应报错")
+        except (ValueError, GitError) as e:
+            assert "排除" in str(e), e
+
+        # 排除已跟踪文件的修改：该文件保持未提交（工作区仍有改动）
+        g.run("add", "--", "README.md")  # 先不提交，制造已暂存状态
+        (proj_dir / "README.md").write_text("# Test\n\nchanged\n", encoding="utf-8")
+        res2 = state.manual_commit_project({
+            "name": "my_project", "message": "feat: 排除 README",
+            "exclude": ["README.md"],
+        })
+        assert res2["ok"] and res2["committed"], res2
+        assert "README.md" in res2["skipped"], res2["skipped"]
+        # README 的改动仍在工作区未提交
+        assert "changed" in (proj_dir / "README.md").read_text(encoding="utf-8")
+        status = g.status_porcelain()
+        assert any("README.md" in ln for ln in status), status
+        print("ok: /api/project/commit 排除临时产物（不入主分支 / 保留工作区 / 全排除拒绝）")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def check_discard_changes() -> None:
+    """可视化丢弃改动：未跟踪删除 / 已跟踪还原 HEAD / 非法目标拒绝。"""
+    tmp, state = _make_env()
+    try:
+        proj_dir = state.config.projects[0].path
+        g = Git(proj_dir)
+        # 未跟踪：临时文件 + 目录；已跟踪：README 修改
+        (proj_dir / "junit.tmp").write_text("temp\n", encoding="utf-8")
+        (proj_dir / "__pycache__").mkdir(exist_ok=True)
+        (proj_dir / "__pycache__" / "m.pyc").write_bytes(b"\x00x")
+        (proj_dir / "README.md").write_text("# Test\n\nmodified\n", encoding="utf-8")
+
+        res = state.discard_project_files({
+            "name": "my_project", "files": ["junit.tmp", "__pycache__"]})
+        assert res["ok"], res
+        assert sorted(res["deleted"]) == ["__pycache__", "junit.tmp"], res["deleted"]
+        assert not (proj_dir / "junit.tmp").exists(), "未跟踪文件应被物理删除"
+        assert not (proj_dir / "__pycache__").exists(), "未跟踪目录应被递归删除"
+
+        # 已跟踪文件：还原到 HEAD（不删除文件本身）
+        res2 = state.discard_project_files({"name": "my_project", "files": ["README.md"]})
+        assert res2["ok"] and res2["restored"] == ["README.md"], res2
+        assert (proj_dir / "README.md").is_file(), "已跟踪文件不应被删除"
+        assert (proj_dir / "README.md").read_text(encoding="utf-8") == "# Test\n", \
+            "已跟踪文件应还原到 HEAD 内容"
+        assert not g.is_dirty(), "丢弃后工作区应干净"
+
+        # 无可匹配目标 → 明确报错
+        from orcsy.git_ops import GitError
+        for bad in (["no-such-file.txt"], ["../escape.yaml"]):
+            try:
+                state.discard_project_files({"name": "my_project", "files": bad})
+                raise AssertionError(f"应报错：{bad}")
+            except (ValueError, GitError):
+                pass
+        print("ok: /api/project/discard 未跟踪删除 / 已跟踪还原 HEAD / 非法目标拒绝")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     check_full_state_and_profiles_saving()
     check_project_team_save_and_task_crud()
     check_manual_commit_and_git_init()
+    check_manual_commit_exclude()
+    check_discard_changes()
     print("\nM3 Web API 状态与操作接口测试全部通过 ✅")
     return 0
 

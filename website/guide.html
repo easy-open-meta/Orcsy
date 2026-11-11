@@ -171,7 +171,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <blockquote>
 <p>面向第一次接触 Orcsy
 的普通使用者：不需要懂编程，也能完成安装、接入项目、创建任务，并看懂看板上的每一条信息。</p>
-<p>适用版本：<strong>0.18.0</strong>　|　默认看板地址：<strong><a
+<p>适用版本：<strong>0.22.0</strong>　|　默认看板地址：<strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
 </blockquote>
 <hr />
@@ -678,7 +678,7 @@ Anthropic 兼容服务选 <code>anthropic</code></td>
 </ul>
 <h3 id="55-保存">5.5 保存</h3>
 <p>点「保存模型配置」。顶部标题下方会显示当前模型，例如：</p>
-<pre><code>v0.18.0 · 模型 deepseek-chat（openai） · 配置 C:\Users\你\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.22.0 · 模型 deepseek-chat（openai） · 配置 C:\Users\你\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>如果显示「未配置 api_key」，说明密钥没保存成功，回到设置页检查。</p>
 <hr />
 <h2 id="6-接入你的第一个项目">6. 接入你的第一个项目</h2>
@@ -1196,6 +1196,7 @@ in_progress（执行中）
 <p>左侧为功能分区手风琴（点击展开，右侧只显示所选分区），从上到下依次是：</p>
 <ol type="1">
 <li><strong>🤖 大模型接入</strong>：模型、密钥、地址、参数；</li>
+<li><strong>👥 多模型项目小组 (Team)</strong>：PM / 后端 / 前端 / 测试等角色的专属模型与预设池、职责提示词模板（供各项目小组引用）；</li>
 <li><strong>⏱
 调度与看板</strong>：扫描间隔、并行数、看板端口、日志保留、登录密码；</li>
 <li><strong>🔔 提醒设置</strong>：提示音、系统通知；</li>
@@ -1484,9 +1485,11 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 <li><strong>👑 项目经理（PM）</strong>：只读摸底项目代码库与架构，将需求拆解为职责明确的子任务并使用 <code>depends_on_refs</code> 编排 DAG 有向无环依赖图；或对简单单端任务直接调用 <code>reassign_task</code> 转派下游。</li>
 <li><strong>⚙️ 后端 / 🎨 前端开发工程师</strong>：在按任务隔离的 Git Worktree 沙盒中专注本端编码与单测，Prompt 自动透传前置依赖任务的交付物摘要（接口契约）。</li>
 <li><strong>🧪 测试工程师（QA）</strong>：拉起本地服务与无头/桌面浏览器进行端到端联调测试；发现缺陷调用 <code>report_bug</code> 派发 Bug 修复任务，原测试任务自动挂靠依赖并进入等待回归状态，待前后端修复后自动唤醒 QA 开展多轮回归测试。</li>
-<li><strong>🛡️ 强制 Worktree 沙盒隔离 + 人工把关最终提交</strong>：所有写代码角色按任务在独立 <code>.worktree-arranger/&lt;task_id&gt;</code> 沙盒中编码，通过审查后仅增量合入主分支工作区（未提交状态），<strong>默认绝不自动执行 git commit 与 git push</strong>，最终提交权 100% 留给人把关！</li>
+<li><strong>🛡️ 强制 Worktree 沙盒隔离 + 人工把关最终提交</strong>：所有写代码角色按任务在独立 worktree（<code>.worktree-arranger/&lt;任务ID&gt;</code>，分支 <code>orcsy/task/&lt;项目&gt;/&lt;任务ID&gt;</code>）中编码，通过审查后仅增量合入主分支工作区（未提交状态），<strong>默认绝不自动执行 git commit 与 git push</strong>，最终提交权 100% 留给人把关（见 <a href="#1014-人工把关提交待人工提交--独立审查页">10.14 人工把关提交</a>）！</li>
+<li><strong>🧠 并发子代理探索（delegate_explore）</strong>：项目经理与各开发角色都能在开工摸底时一次派生 2~4 个<strong>只读子代理</strong>，并行调研数据层、路由、鉴权、既有测试等不同模块，单轮拿到汇总报告；子代理严格只读、有扇出与轮数上限、同样受「强制停止」约束。</li>
+<li><strong>📦 拆分完成即归档</strong>：PM 完成需求拆解并派发后，父任务标记为「已完成」自动归档到 <code>tasks/done/</code>，活跃列表只保留接力的子任务。</li>
 <li><strong>⚡ 同周期链式推进（chain_within_cycle）</strong>：依赖解锁后毫秒级连续接棒推进下一阶段，单个需求无需跨越多个 300 秒调度周期即可完整闭环。</li>
-<li><strong>👥 双层配置复用</strong>：全局设置页「👥 Agent 角色预设池」一次配置各角色专属模型 + 项目设置弹窗自由引用与局部技术栈微调。</li>
+<li><strong>👥 双层配置复用</strong>：全局设置页「👥 多模型项目小组 (Team)」一次配置各角色专属模型与职责提示词模板 + 项目设置弹窗自由引用与局部技术栈微调。</li>
 </ul>
 <hr />
 <h3 id="1013-本地调试与-chromium-浏览器自动化local-debug">10.13 本地调试与 Chromium 浏览器自动化（Local Debug）</h3>
@@ -1497,6 +1500,17 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 <li><strong>本地接口调试（<code>http_request</code>）</strong>：受控放行本地/局域网 HTTP API 调试（Cookie 会话保持，受主机白名单严格约束，杜绝内网穿透）。</li>
 </ul>
 <hr />
+<h3 id="1014-人工把关提交待人工提交--独立审查页">10.14 人工把关提交（待人工提交 → 独立审查页）</h3>
+<p>开启项目小组或 Worktree 隔离后，Agent 的成果只会<b>增量落入主分支工作区</b>，不会自动 <code>commit</code> / <code>push</code>。项目卡片上出现红色「待人工提交 N」按钮时，点它进入<b>独立的人工把关提交页</b>（<code>#/commit?project=项目名</code>，不再是弹窗）：</p>
+<ul>
+<li><b>左侧：改动文件清单</b> —— 点击任一文件，右侧立即显示它的 diff；每行有「排除」与「删除」；列表头提供「排除临时产物 N」「删除临时产物 N」批量操作；</li>
+<li><b>右侧：代码 diff</b> —— 默认<b>自动换行</b>（超长行折行完整显示，可切换「不折行 + 横向滚动」）；顶部显示「N 行 · X KB」与「下载补丁」；超大改动会提示已截断，用「下载补丁」可拿到完整 <code>.patch</code>；</li>
+<li><b>排除 vs 删除</b>：排除 = 不提交且保留在工作区（可恢复）；删除 = 未跟踪文件/目录<b>物理删除</b>、已跟踪文件<b>还原到 HEAD</b>（撤销改动，文件本身保留）；两者都有二次确认；</li>
+<li><b>自动识别临时/测试产物</b>：<code>*.log</code>、<code>*.tmp</code>、<code>*.pyc</code>、<code>__pycache__/</code>、<code>.pytest_cache/</code>、<code>node_modules/</code>、<code>coverage/</code> 等，不会误判 <code>*_test.go</code>、<code>*.spec.ts</code> 这类真实测试源码；</li>
+<li><b>提交</b>：填 Commit Message（可勾选同时推送到远程）→「确认提交主分支」；只提交未排除文件，主工作区随即恢复干净；仍有被排除文件时页面留在原处并明确提示；全部文件被排除时确认按钮禁用，不会产生空提交。</li>
+</ul>
+<p>这个页面就是交付流程的<b>最后一道人工闸门</b>：Agent 永远不会替你 commit / push，最终提交权始终在你手里。</p>
+
 <h2 id="11-数据备份与迁移">11. 数据、备份与迁移</h2>
 <h3 id="111-数据都存在哪">11.1 数据都存在哪</h3>
 <table>

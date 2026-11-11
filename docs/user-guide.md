@@ -347,7 +347,7 @@ Click **Projects & Settings** in the top bar, then find the first card: **🤖 L
 Click **Save model settings**. The top bar will show the current model, for example:
 
 ```
-v0.18.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml
+v0.22.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml
 ```
 
 If it says **api_key not configured**, the key was not saved. Go back and check.
@@ -415,7 +415,7 @@ When you create a project, Orcsy generates an English template and fills in Stac
 Click **Settings** on a project card to change:
 
 - name, path, tasks directory, guide file;
-- max tasks per cycle, max turns, working branch, command whitelist;
+- max tasks per cycle, max turns (accepts `-1` = unlimited), working branch, command whitelist;
 - dedicated model;
 - permission mode;
 - tool overrides;
@@ -423,6 +423,8 @@ Click **Settings** on a project card to change:
 - enabled/disabled.
 
 Renaming a project also updates skills bound to that project, so they do not become orphaned.
+
+> Tip: saving settings never waits for a running task — the change takes effect immediately and is applied automatically on the next scheduler cycle; the task currently running is unaffected.
 
 ---
 
@@ -678,12 +680,13 @@ Shows only the managed project cards (6 per page, paginated with lazy rendering)
 An accordion menu of sections on the left (click to expand; the right side shows only the selected section), from top to bottom:
 
 1. **🤖 LLM Access**: model, key, endpoint, parameters;
-2. **⏱ Scheduler & dashboard**: interval, parallelism, port, log retention, login password;
-3. **🔔 Notifications**: sound, system notification;
-4. **🔍 Task review (Review Agent)**: review model binding, rework limit, test-command and squash-commit switches;
-5. **🛠 Agent tools & permissions**: approval mode, timeout, tool switches, command whitelist, environment variables, PATH auto-fix;
-6. **🪞 Mirror management & speed test**: test, apply fastest, add/disable mirrors;
-7. **⚙️ App**: autostart, auto-update check, update source, manual package import.
+2. **👥 Multi-Model Team**: dedicated models and presets for PM / Backend / Frontend / QA roles, plus each role's responsibility prompt template (referenced by project teams);
+3. **⏱ Scheduler & dashboard**: interval, parallelism, port, log retention, login password;
+4. **🔔 Notifications**: sound, system notification;
+5. **🔍 Task review (Review Agent)**: review model binding, rework limit, test-command and squash-commit switches;
+6. **🛠 Agent tools & permissions**: approval mode, timeout, tool switches, command whitelist, environment variables, PATH auto-fix;
+7. **🪞 Mirror management & speed test**: test, apply fastest, add/disable mirrors;
+8. **⚙️ App**: autostart, auto-update check, update source, manual package import.
 
 ### 9.5 Skills tab
 
@@ -908,6 +911,11 @@ After a task finishes and before its changes are merged and archived, Orcsy can 
 
 **Rework and commits:** after a reworked task finally passes review, its multiple WIP commits are squashed into a single commit before merging (**Squash commits after rework passes**, on by default), keeping the main-branch history clean.
 
+**Limits can be unlimited:** both the rework limit (default 2) and the per-task turn limit (`max_agent_turns`) accept **`-1` = no limit**:
+
+- Rework limit `-1`: a failed review keeps sending the task back **forever** instead of blocking it for humans (use for "must pass" work; it keeps consuming tokens);
+- Turn limit `-1`: the task may run any number of rounds. Loop guards still protect you (the same file read more than 5 times is blocked; a coding role reading 20 consecutive turns without writing is force-stopped; 3 turns without any tool call counts as stuck), so it will not spin forever, but long tasks really can run many rounds.
+
 **Badges on the dashboard:** `🔍 Pending review` on a task card means it has finished and is being reviewed or waiting for a re-review; `🔍 Rework ×N` means it has been sent back by review N times. Project cards show a **Review on / Review off / Review model conflict** status.
 
 **Cost note:** one review costs roughly 3–8 rounds of read-only calls; on the settings **Usage** view it is recorded separately under the review kind, so you can account it apart from execution.
@@ -921,9 +929,11 @@ Orcsy 0.22.0 introduces **Multi-Model Agent Project Teams**. You can assemble sp
 - **👑 Project Manager (PM)**: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using `depends_on_refs`, or dispatches single-component tasks directly via `reassign_task`.
 - **⚙️ Backend / 🎨 Frontend Developers**: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries automatically injected into prompts.
 - **🧪 Test Engineer (QA)**: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using `report_bug`, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.
-- **🛡️ Sandboxed Worktree + Human-Gated Final Commit**: all coding runs safely inside isolated worktrees and merges into the main working tree unstaged/uncommitted — **Orcsy never auto-commits or auto-pushes to main branch by default**, leaving 100% of final commit and push authority to the human reviewer!
+- **🛡️ Sandboxed Worktree + Human-Gated Final Commit**: all coding runs inside a per-task worktree (`.worktree-arranger/<task-id>`, branch `orcsy/task/<project>/<task-id>`) and merges into the main working tree unstaged/uncommitted — **Orcsy never auto-commits or auto-pushes to main branch by default**, leaving 100% of final commit and push authority to the human reviewer (see [10.14 Human-gated commit](#1014-human-gated-commit-pending-commit--dedicated-review-page))!
+- **🧠 Concurrent sub-agent exploration (`delegate_explore`)**: the Project Manager and every developer role can spawn 2–4 **read-only sub-agents** in one call to explore different modules (data layer, routing, auth, existing tests) in parallel and get a consolidated report in one round, dramatically cutting serial file reading. Sub-agents are strictly read-only, capped in fan-out and rounds, and honour **Force stop**.
+- **📦 Split parent task is archived**: once the PM finishes decomposing a requirement, the parent task is marked **done** and archived into `tasks/done/`, so the active list only shows the hand-off subtasks.
 - **⚡ Intra-Cycle Chaining (`chain_within_cycle`)**: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.
-- **👥 Two-Tier Configuration**: global `agent_profiles` pool reusable across projects, with project-level team customization and fallback routing.
+- **👥 Two-Tier Configuration**: the global **Multi-Model Team** section configures each role's dedicated model once, and project settings reference it with local overrides; every role ships with a built-in responsibility prompt template you can load with one click or customise.
 
 ---
 
@@ -933,6 +943,40 @@ For Web and API projects, Orcsy ships built-in tools for end-to-end verification
 - **Chromium Browser Automation (`browser_*`)**: native Python CDP client connected to local Google Chrome or Microsoft Edge (zero external drivers required), providing element snapshots with `ref` addressing, clicking, typing, waiting, screenshots, and console/network log listening.
 - **Dev Server Management (`dev_server_*`)**: runs background services with dynamic `{PORT}` allocation and readiness probing, terminating child processes cleanly on task end.
 - **Local HTTP API Client (`http_request`)**: tests local/LAN REST and GraphQL endpoints with cookie jars and host allowlist enforcement to block intranet penetration.
+
+---
+
+### 10.14 Human-gated commit (Pending commit → dedicated review page)
+
+When the Project Team or Worktree isolation is enabled, agent output is only **applied incrementally to the main working tree** — it never auto-commits or auto-pushes. A red **"Pending commit (N)"** button on the project card opens the **dedicated commit-review page** (`#/commit?project=<name>`, a full tab rather than a dialog):
+
+**Left: changed-file list**
+- Lists every uncommitted change; click a file to see its diff on the right;
+- Each row has **`Exclude`** (don't commit, keep in the working tree) and **`Delete`**;
+- The list header offers bulk actions: **`Exclude temp artifacts (N)`** and **`Delete temp artifacts (N)`**.
+
+**Right: code diff**
+- **Wrap is on by default**, so very long lines fold instead of being cut off; the **Wrap** toggle in the header switches to "no wrap + horizontal scrolling";
+- The header shows **"N lines · X KB"** plus a **Download patch** button (exports the file's full `.patch`);
+- For extremely large changes (over 1,000,000 characters) a banner says the preview is truncated — use **Download patch** for the complete text.
+
+**Exclude vs Delete (both keep test artifacts out of the main branch)**
+
+| Action | Untracked new file/dir (e.g. `test-output.log`, `__pycache__/`) | Tracked file (e.g. modified source) |
+| :--- | :--- | :--- |
+| **Exclude** | Not committed, **kept in the working tree**, can be included later | This change is not committed; edits stay in the working tree |
+| **Delete** | **Physically deleted** (directories removed recursively, unrecoverable) | **Restored to HEAD** (change discarded, the file itself is kept) |
+
+- **Automatic temp/test artifact detection**: `*.log`, `*.tmp`, `*.temp`, `*.orig`, `*.rej`, `*.bak`, `*.pyc`, `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `node_modules/`, `coverage/`, `htmlcov/`, `.nyc_output/`, `.coverage`, `tmp/`, `.DS_Store` and similar; it deliberately **never** matches real test sources such as `*_test.go` or `*.spec.ts`;
+- Every delete asks for confirmation first and lists exactly what will be processed.
+
+**Committing**
+- Fill in the Commit Message; tick **Push to remote** to also run `git push origin`;
+- Click **Confirm commit to main branch** — only non-excluded files are committed; the working tree becomes clean and the internal stage branch is synced;
+- If some files remain excluded, the page stays open and tells you exactly which ones were skipped (**"N file(s) excluded and not committed (kept in the working tree)"**);
+- When every file is excluded, the confirm button is disabled so no empty commit can be created.
+
+> This page is the **final human gate** of the delivery pipeline: Orcsy will never commit or push on your behalf.
 
 ---
 

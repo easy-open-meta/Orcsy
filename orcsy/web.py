@@ -1729,10 +1729,15 @@ class AppState:
         return {"ok": True, "path": str(path)}
 
     def manual_commit_project(self, data: dict) -> dict:
-        """人工把关确认：将主工作区已落地的未提交变更在主分支执行 git commit（可选推送）。"""
+        """人工把关确认：将主工作区已落地的未提交变更在主分支执行 git commit（可选推送）。
+
+        exclude：本次不提交的文件名列表（如临时测试产物），这些文件保留在工作区。
+        """
         name = str(data.get("name") or data.get("project") or "").strip()
         message = str(data.get("message") or "").strip()
         push = bool(data.get("push", False))
+        exclude_raw = data.get("exclude")
+        exclude = ([str(x) for x in exclude_raw] if isinstance(exclude_raw, list) else [])
         agent = self.agents.get(name)
         if agent is None:
             raise ValueError(f"未知项目：{name}")
@@ -1741,23 +1746,30 @@ class AppState:
             raise ValueError(f"项目 {name} 不是 Git 仓库，无法提交")
 
         g = Git(p.path)
-        res = g.commit_and_push_manual(message, push=push, branch=p.allowed_branch)
+        res = g.commit_and_push_manual(message, push=push, branch=p.allowed_branch,
+                                       exclude=exclude)
         # 人工提交完成，主工作区恢复干净，重置 stage 分支到最新 HEAD
         stage_branch = f"orcsy/stage/{p.name}"
         if g.branch_exists(stage_branch):
             g.ensure_stage_branch(stage_branch, g.current_branch(),
                                   stage_worktree=p.path / WORKTREE_DIR / "_stage")
-        log.info("Web 人工确认提交项目 %s：%s（commit=%s, push=%s）",
-                 name, message, res.get("commit"), res.get("pushed"))
+        skipped = res.get("skipped") or []
+        log.info("Web 人工确认提交项目 %s：%s（commit=%s, push=%s, 排除 %d 个文件）",
+                 name, message, res.get("commit"), res.get("pushed"), len(skipped))
         msg = f"已成功提交至主分支（{res.get('commit')}）" + ("并推送到远程仓库" if res.get("pushed") else "")
+        if skipped:
+            msg += f"；已排除 {len(skipped)} 个文件未提交（保留在工作区）：{'、'.join(skipped[:10])}"
+            if len(skipped) > 10:
+                msg += " 等"
         if res.get("push_note"):
             msg += f"（推送警告：{res.get('push_note')}）"
         return {"ok": True, **res, "message": msg}
 
     def project_file_diff(self, data: dict) -> dict:
-        """人工把关提交弹窗：查看单个文件在主工作区的未提交改动 diff。
+        """人工把关提交页：查看单个文件在主工作区的未提交改动 diff。
 
-        新文件（未跟踪）返回内容预览；已修改文件返回 git diff 文本。
+        新文件（未跟踪）返回全文预览；已修改文件返回 git diff 文本。
+        附带 truncated/total_chars/lines 供前端提示与「下载补丁」使用。
         """
         name = str(data.get("name") or data.get("project") or "").strip()
         file_path = str(data.get("file") or "").strip()
@@ -1768,8 +1780,35 @@ class AppState:
         if not agent.executor.probe_git_repo():
             raise ValueError(f"项目 {name} 不是 Git 仓库，无法查看 diff")
         g = Git(p.path)
-        diff = g.file_diff(file_path)
-        return {"ok": True, "file": file_path, "diff": diff}
+        info = g.file_diff(file_path)
+        return {"ok": True, "file": file_path, **info}
+
+    def discard_project_files(self, data: dict) -> dict:
+        """丢弃指定文件的未提交改动（人工把关提交页「删除/还原」按钮）。
+
+        未跟踪文件/目录直接物理删除；已跟踪文件还原到 HEAD（撤销本次改动）。
+        """
+        name = str(data.get("name") or data.get("project") or "").strip()
+        files_raw = data.get("files")
+        files = [str(x) for x in files_raw] if isinstance(files_raw, list) else []
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"未知项目：{name}")
+        p = agent.project
+        if not agent.executor.probe_git_repo():
+            raise ValueError(f"项目 {name} 不是 Git 仓库，无法丢弃改动")
+        g = Git(p.path)
+        res = g.discard_changes(files)
+        parts = []
+        if res["deleted"]:
+            parts.append(f"已删除 {len(res['deleted'])} 项")
+        if res["restored"]:
+            parts.append(f"已还原 {len(res['restored'])} 个文件")
+        if res["skipped"]:
+            parts.append(f"{len(res['skipped'])} 项跳过")
+        log.info("Web 丢弃项目 %s 未提交改动：删除 %d / 还原 %d / 跳过 %d",
+                 name, len(res["deleted"]), len(res["restored"]), len(res["skipped"]))
+        return {"ok": True, **res, "message": "；".join(parts) or "没有可丢弃的改动"}
 
     def git_init_project(self, data: dict) -> dict:
         """为非 Git 目录一键初始化 Git 仓库并创建基础提交与忽略规则（开启小组 Worktree 必备）。"""
@@ -2767,6 +2806,11 @@ class WebHandler(BaseHTTPRequestHandler):
             elif path == "/api/project/diff":
                 try:
                     self._json(self.state.project_file_diff(body))
+                except (ValueError, GitError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/project/discard":
+                try:
+                    self._json(self.state.discard_project_files(body))
                 except (ValueError, GitError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/project/git-init":
