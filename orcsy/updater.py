@@ -27,8 +27,9 @@ import tempfile
 import time
 import traceback
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -167,7 +168,6 @@ def download_installer(download_url: str, dest_dir: Path,
     # 环回地址绕过系统代理（Shadowsocks/Clash 类工具会把 127.0.0.1 的下载
     # 送进隧道导致超时）；外部地址仍尊重系统代理设置
     trust_env = urlparse(download_url).hostname not in ("127.0.0.1", "localhost", "::1")
-    last_err: Exception | None = None
     for attempt in range(5):  # 本机回环 RST 成串出现，退避重试覆盖突发窗口
         try:
             with httpx.stream("GET", download_url, timeout=60, follow_redirects=True,
@@ -184,7 +184,6 @@ def download_installer(download_url: str, dest_dir: Path,
                             progress_cb(min(100, done * 100 // total))
             break
         except httpx.HTTPError as e:
-            last_err = e
             if attempt < 4 and isinstance(e, httpx.TransportError):
                 time.sleep(0.5 * (attempt + 1))
                 continue

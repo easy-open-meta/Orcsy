@@ -8,20 +8,18 @@ from __future__ import annotations
 
 import base64
 import json
-import os
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
 from websockets.sync.client import ClientConnection, connect
 
 from ..hosts import check_host_allowed, extract_host_and_port
 from ..logging_setup import get_logger
-from .page_script import (BUILD_SNAPSHOT_SCRIPT, FOCUS_AND_CLEAR_SCRIPT,
-                          GET_ELEMENT_BOUNDS_SCRIPT)
+from .page_script import BUILD_SNAPSHOT_SCRIPT, FOCUS_AND_CLEAR_SCRIPT, GET_ELEMENT_BOUNDS_SCRIPT
 
 log = get_logger("browser.cdp")
 
@@ -447,8 +445,9 @@ class CdpClient:
         # 尝试使用 PIL 提取尺寸
         dims = ""
         try:
-            from PIL import Image
             import io
+
+            from PIL import Image
             with Image.open(io.BytesIO(img_bytes)) as im:
                 dims = f"（{im.width}x{im.height} 像素，{len(img_bytes) // 1024} KB）"
         except Exception:

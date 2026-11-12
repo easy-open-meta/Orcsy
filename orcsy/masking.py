@@ -17,7 +17,6 @@ import copy
 import hashlib
 import re
 
-from .config import MaskingConfig
 from .logging_setup import get_logger
 
 log = get_logger("masking")
@@ -153,19 +152,19 @@ class MaskingSession:
 
             def _sub(m: re.Match) -> str:
                 nonlocal hits
-                value = m.group(group) if group else m.group(0)
+                value = m.group(group) if group else m.group(0)  # noqa: B023 — 闭包同轮即时消费
                 if not value:
                     return m.group(0)
                 ph = self._rev.get(value)
                 if ph is None:
                     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-                    ph = _PLACEHOLDER.format(category=category, tag=digest[:8])
+                    ph = _PLACEHOLDER.format(category=category, tag=digest[:8])  # noqa: B023 — 闭包同轮即时消费
                     self._rev[value] = ph
                     self._fwd[digest] = value
                     self._fwd_tag[digest[:8]] = digest
                 hits += 1
                 # key/分隔符保留（增强规则 group>0），value 换占位符
-                if group:
+                if group:  # noqa: B023 — 闭包同轮即时消费
                     return m.group(0).replace(value, ph, 1)
                 return ph
 

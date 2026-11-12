@@ -17,7 +17,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
-from .config import AppConfig, resolve_commands, resolve_commit_and_merge, resolve_llm, resolve_permission_mode, resolve_tools
+from .config import (
+    AppConfig,
+    resolve_commands,
+    resolve_commit_and_merge,
+    resolve_llm,
+    resolve_permission_mode,
+    resolve_tools,
+)
 from .issues import sync_issues
 from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
 from .mirrors import mirror_runtime_for

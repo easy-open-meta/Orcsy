@@ -9,11 +9,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
 
 from ..logging_setup import get_logger
-from ..tools import (_NO_WINDOW, _kill_process_tree, _windows_startupinfo,
-                     register_child_proc, unregister_child_proc)
+from ..tools import _NO_WINDOW, _kill_process_tree, _windows_startupinfo, register_child_proc, unregister_child_proc
 
 log = get_logger("browser.discover")
 
@@ -234,8 +232,9 @@ def terminate_browser(proc: subprocess.Popen, *, ws_url: str | None = None,
     # 1. 尝试通过 WebSocket 发送优雅退出命令
     if ws_url and proc.poll() is None:
         try:
-            from websockets.sync.client import connect
             import json
+
+            from websockets.sync.client import connect
             with connect(ws_url, open_timeout=1.5, close_timeout=1.5) as ws:
                 ws.send(json.dumps({"id": 999999, "method": "Browser.close"}))
                 try:

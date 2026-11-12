@@ -16,19 +16,34 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from .config import (AgentProfileConfig, LocalDebugConfig, ProjectConfig,
-                     ReviewConfig, ToolsConfig, resolve_project_team_members,
-                     resolve_review_llm, resolve_review_rounds, review_enabled_for)
+from .config import (
+    AgentProfileConfig,
+    LocalDebugConfig,
+    ProjectConfig,
+    ReviewConfig,
+    ToolsConfig,
+    resolve_project_team_members,
+    resolve_review_llm,
+    resolve_review_rounds,
+)
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
 from .prompts import build_role_prompt_extra
 from .skills import Skill, load_skills, skills_for_project
-from .task_model import (Task, _parse_frontmatter, append_progress,
-                         append_task_dependencies, collect_task_statuses,
-                         evaluate_task_dependencies, increment_task_file_qa_round,
-                         increment_task_file_review_round, parse_task_file,
-                         scan_tasks, set_task_file_review_pending,
-                         set_task_file_status)
+from .task_model import (
+    Task,
+    _parse_frontmatter,
+    append_progress,
+    append_task_dependencies,
+    collect_task_statuses,
+    evaluate_task_dependencies,
+    increment_task_file_qa_round,
+    increment_task_file_review_round,
+    parse_task_file,
+    scan_tasks,
+    set_task_file_review_pending,
+    set_task_file_status,
+)
 from .templates import default_guide
 
 # 回写到任务文件的结果节
@@ -496,7 +511,7 @@ class ProjectAgent:
                 re.sub(r"^status:\s*\S+.*$", f"status: {status}", line, flags=re.MULTILINE)
                 for line in [front]
             ][0]
-            if f"status:" not in front_lines:
+            if "status:" not in front_lines:
                 front_lines = front_lines.rstrip() + f"\nstatus: {status}"
             text = f"---\n{front_lines}\n---\n{rest}"
 
@@ -611,7 +626,7 @@ class ProjectAgent:
             )
             lines = [
                 f"- 时间：{_now_str()}",
-                f"- 结果：blocked",
+                "- 结果：blocked",
                 f"- 原因：{reason}",
             ]
             if bugs:

@@ -16,8 +16,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-from pathlib import Path
 import secrets
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -130,6 +130,6 @@ __all__ = [
     "hash_password",
     "is_password_hashed",
     "verify_password",
-    "update_config_password",
+    "update_config_auth_password",
 ]
 

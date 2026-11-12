@@ -32,8 +32,6 @@ from pathlib import Path
 
 import yaml
 
-from .config import TaskStatus
-
 # 优先级 P0 最高，数字越大越低；无法解析时视为 P9
 _PRIORITY_RE = re.compile(r"^P(\d+)$", re.IGNORECASE)
 
@@ -681,18 +679,22 @@ def read_done_summaries(
 
 __all__ = [
     "Task",
-    "PRIORITY_ORDER",
-    "priority_rank",
-    "parse_task_file",
-    "write_task_file",
-    "list_tasks",
-    "set_task_file_status",
-    "set_task_file_assignee",
-    "set_task_file_depends_on",
     "append_progress",
-    "append_agent_result",
+    "append_task_dependencies",
+    "collect_task_statuses",
     "detect_dependency_cycle",
-    "read_dependency_summaries",
+    "evaluate_task_dependencies",
+    "increment_task_file_qa_round",
+    "increment_task_file_review_round",
+    "parse_task_file",
+    "priority_rank",
+    "read_done_summaries",
+    "scan_tasks",
+    "set_task_file_assignee",
+    "set_task_file_dependencies",
+    "set_task_file_order",
+    "set_task_file_review_pending",
+    "set_task_file_status",
 ]
 
 

@@ -13,8 +13,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from .logging_setup import get_logger
 from .templates import TEMPLATES_DIR
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from .config import ProjectConfig
 from .logging_setup import get_logger
 from .skills import Skill
+from .task_model import Task
 from .tools import _path_key
 
 log = get_logger("prompts")

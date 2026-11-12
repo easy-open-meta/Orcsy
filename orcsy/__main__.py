@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -303,7 +303,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     for p in config.projects:
         print(f"\n项目 [{p.name}] {p.path} {'(已禁用)' if not p.enabled else ''}")
         if not p.path.is_dir():
-            print(f"  [错误] 项目目录不存在")
+            print("  [错误] 项目目录不存在")
             problems += 1
             continue
         guide = p.path / p.guide_file
@@ -624,6 +624,7 @@ def cmd_web(args: argparse.Namespace) -> int:
     # 启动清理：清理系统临时目录遗留的历史调试浏览器 profile 目录
     try:
         import glob
+        import tempfile
         for legacy_profile in glob.glob(str(Path(tempfile.gettempdir()) / "orcsy-browser-profile-*")):
             shutil.rmtree(legacy_profile, ignore_errors=True)
     except Exception:
@@ -722,6 +723,7 @@ def cmd_web(args: argparse.Namespace) -> int:
 def cmd_reset_password(args: argparse.Namespace) -> int:
     """重置看板访问密码为管理员输入的密码（PBKDF2-SHA256 密文写入 config.yaml）。"""
     import getpass
+
     from .auth import update_config_auth_password
     from .config import load_config, validate_web_security
 

@@ -329,7 +329,7 @@ def import_skill(src: Path, base: Path) -> Skill:
     try:
         shutil.copytree(src, dst)
     except OSError as e:
-        raise ValueError(f"复制技能目录失败：{e}")
+        raise ValueError(f"复制技能目录失败：{e}")  # noqa: B904 — 消息直出，链路无需保留
     skill = parse_skill_dir(dst)
     log.info("导入技能 %s ← %s", name, src)
     return skill

@@ -22,10 +22,16 @@ from pathlib import Path
 from typing import Any
 
 from .logging_setup import get_logger
-from .tools import (_NO_WINDOW, _augmented_env, _decode_proc_output,
-                    _kill_process_tree, _resolve_new_install,
-                    _windows_startupinfo, check_command_allowed,
-                    register_child_proc, unregister_child_proc)
+from .tools import (
+    _NO_WINDOW,
+    _decode_proc_output,
+    _kill_process_tree,
+    _resolve_new_install,
+    _windows_startupinfo,
+    check_command_allowed,
+    register_child_proc,
+    unregister_child_proc,
+)
 
 log = get_logger("devserver")
 

@@ -11,22 +11,21 @@ from __future__ import annotations
 
 import threading
 import webbrowser
-from pathlib import Path
 
 from .logging_setup import get_logger
 
 log = get_logger("tray")
 
 # 托盘图标（生成自 build/icon 同款配色，内嵌绘制避免 ICO 文件依赖）
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw  # noqa: E402 — 置于日志器后，注释与实现成组
 
 # 运行中的 pystray.Icon 引用（pystray 延迟导入，用 object 规避类型依赖）
 _ICON_HOLDER: dict[str, object] = {}
 
-_ICON_CACHE: dict[str, "Image.Image"] = {}
+_ICON_CACHE: dict[str, Image.Image] = {}
 
 
-def _make_icon(running: bool = False) -> "Image.Image":
+def _make_icon(running: bool = False) -> Image.Image:
     key = "running" if running else "idle"
     if key in _ICON_CACHE:
         return _ICON_CACHE[key]

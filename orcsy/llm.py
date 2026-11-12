@@ -20,7 +20,7 @@ import re
 import threading
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 import httpx
@@ -267,8 +267,8 @@ def _parse_wait_value(raw: str) -> float | None:
         dt = None
     if dt is not None:
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+            dt = dt.replace(tzinfo=UTC)
+        return max(0.0, (dt - datetime.now(UTC)).total_seconds())
     total = 0.0
     matched = False
     for num, unit in _DURATION_RE.findall(text):
@@ -324,7 +324,7 @@ class AgentResponse:
         self.issues = issues or []
 
     @classmethod
-    def fallback(cls, reason: str) -> "AgentResponse":
+    def fallback(cls, reason: str) -> AgentResponse:
         return cls(action="blocked", summary="", files_changed=[],
                    commit_message="", notes=f"模型未按协议给出结论：{reason}")
 
@@ -630,7 +630,7 @@ class LLMClient:
             if reasoning:
                 log.info("💭 模型思考（收尾轮）：\n%s", _clip_thinking(reasoning))
             self.messages.append(assistant_msg)
-            for call_id, name, args_json in tool_calls:
+            for _call_id, name, args_json in tool_calls:
                 if name == "finish":
                     return self._finish_response(self._parse_finish_args(args_json))
         except LLMError:
@@ -938,7 +938,7 @@ class LLMClient:
             time.sleep(0.2)
 
     def _post_stop_aware(self, url: str, body: bytes, headers: dict,
-                         timeout, stop) -> "httpx.Response":
+                         timeout, stop) -> httpx.Response:
         """子线程发请求，主线程 0.2s 轮询强制停止信号。
 
         不超时（-1）时请求可能无限挂起，停止信号必须能打断等待；有限超时
