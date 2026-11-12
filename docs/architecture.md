@@ -60,6 +60,7 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/worktree.py` | 隔离沙箱层 | Git Worktree 物理目录映射、独立分支检出、陈旧锁恢复与重置清理 |
 | `orcsy/task_service.py` | Web 服务层 | 看板侧任务文件 CRUD（创建/状态/排序/批量删除/清空/读取），纯函数不感知 HTTP |
 | `orcsy/git_service.py` | Web 服务层 | 人工把关提交（stage 分支复位）、diff 预览、改动丢弃、Git 初始化与新项目引导 |
+| `orcsy/settings_service.py` | Web 服务层 | 全局设置分块保存（17 节校验/api_key 三态/模型钳制/互斥复检）与热重载编排 |
 | `orcsy/config.save_config` | 领域模型 | config.yaml 序列化保存器（与 load_config 对称），字段顺序固定、输出与历史 byte-identical |
 | `orcsy/executor.py` | 编排层 | 单任务生命周期编排：调用 WorktreeManager、Agent 轮次循环、审查门对接与落地 |
 | `orcsy/config.py` | 领域模型 | 数据类（AppConfig 等 21 个 dataclass）、YAML 加载反序列化与配置解析 |
