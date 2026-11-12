@@ -14,17 +14,20 @@ git 项目的执行流程：
 from __future__ import annotations
 
 import contextlib
-import re
-import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .approvals import args_preview, get_manager, requires_approval
-from .config import (LLMConfig, LocalDebugConfig, ProjectConfig, ReviewConfig, TaskStatus,
-                     assert_review_model_distinct, resolve_commands,
-                     resolve_permission_mode, resolve_review_llm,
-                     resolve_review_rounds, review_enabled_for)
+from .config import (
+    LLMConfig,
+    LocalDebugConfig,
+    ProjectConfig,
+    ReviewConfig,
+    TaskStatus,
+    assert_review_model_distinct,
+    review_enabled_for,
+)
 from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
 from .logging_setup import get_logger
@@ -33,10 +36,16 @@ from .prompts import build_system_prompt
 from .skills import Skill, skill_bodies
 from .task_control import get_task_controls
 from .task_model import Task, append_progress
-from .tools import (TOGGLEABLE_TOOLS, FinishSignal, TaskStopped, ToolContext,
-                    _tool_path_dirs, persist_path_dirs, scan_tool_env)
-
-WORKTREE_DIR = ".worktree-arranger"
+from .tools import (
+    TOGGLEABLE_TOOLS,
+    FinishSignal,
+    TaskStopped,
+    ToolContext,
+    _tool_path_dirs,
+    persist_path_dirs,
+    scan_tool_env,
+)
+from .worktree import WORKTREE_DIR, WorktreeManager, safe_wt_name  # noqa: F401
 
 
 @dataclass
@@ -129,24 +138,24 @@ class TaskExecutor:
         # 镜像源运行时（mirrors.MirrorRuntime）：speedtest_mirrors 工具 + env-setup
         # 技能正文动态追加「测速优选」段用；None = 未接线（技能保持静态默认序）
         self.mirror_runtime = mirror_runtime
-        self.git = Git(project.path)
-        self.is_git_repo = project.path.is_dir() and self.git.is_repo()
-        self.worktree = project.path / WORKTREE_DIR
+        self.worktree_mgr = WorktreeManager(
+            project.path,
+            project.name,
+            allowed_branch=project.allowed_branch,
+            per_task_worktree=self.per_task_worktree,
+            worktree_isolation=self.worktree_isolation,
+            commit_and_merge=self.commit_and_merge,
+            merge_lock=self.merge_lock,
+        )
+        self.git = self.worktree_mgr.git
+        self.is_git_repo = self.worktree_mgr.is_git_repo()
+        self.worktree = self.worktree_mgr.default_worktree
         self.worktree_git = Git(self.worktree)
         self.log = get_logger(f"executor.{project.name}")
 
     def probe_git_repo(self) -> bool:
-        """实时探测项目目录是否已是 git 仓库，并回写 is_git_repo 缓存。
-
-        会话创建时缓存的 is_git_repo 会过期（用户事后手动 init git），这里
-        先做廉价的 .git 存在性预判：没有 .git 直接判否；有 .git 才跑一次
-        git rev-parse 复核（目录可能还没真正 init 完）。回写缓存让本会话
-        内的 worktree / 提交逻辑立即跟上实际状态。
-        """
-        if not self.project.path.is_dir() or not (self.project.path / ".git").exists():
-            self.is_git_repo = False
-        else:
-            self.is_git_repo = self.git.is_repo()
+        """实时探测项目目录是否已是 git 仓库，并回写 is_git_repo 缓存。"""
+        self.is_git_repo = self.worktree_mgr.is_git_repo()
         return self.is_git_repo
 
     def _make_approval_gate(self, task: Task):
@@ -192,7 +201,7 @@ class TaskExecutor:
 
     def _enabled_tools(self) -> frozenset[str] | None:
         """把开关 map 解析成启用工具名集合；全启用时返回 None（不过滤，保持旧行为）。"""
-        from .tools import DEFAULT_OFF_TOOLS, TOGGLEABLE_TOOLS
+        from .tools import DEFAULT_OFF_TOOLS
 
         enabled = set()
         for name in TOGGLEABLE_TOOLS:
@@ -209,33 +218,25 @@ class TaskExecutor:
     # ---- 对外 ----
 
     def _safe_wt_name(self, task_id: str) -> str:
-        clean = re.sub(r"[^\w\-.]", "_", str(task_id or "task")).strip("_") or "task"
-        return clean[:60]
+        return safe_wt_name(task_id)
 
     def _task_worktree(self, task: Task | None = None) -> Path:
         """返回本任务应使用的 worktree 目录路径（兼容单兵模式与按任务隔离模式）。"""
-        if self.per_task_worktree and task is not None:
-            return self.project.path / WORKTREE_DIR / self._safe_wt_name(task.id)
-        return self.worktree
+        return self.worktree_mgr.task_worktree(task)
 
     def _task_branch(self, task: Task | None = None) -> str:
         """返回本任务应使用的临时沙盒分支名。"""
-        if self.per_task_worktree and task is not None:
-            return f"orcsy/task/{self.project.name}/{self._safe_wt_name(task.id)}"
-        return f"arranger/{self.project.name}"
+        return self.worktree_mgr.task_branch(task)
 
     def _stage_branch(self) -> str:
-        return f"orcsy/stage/{self.project.name}"
+        return self.worktree_mgr.stage_branch()
 
     def _stage_worktree(self) -> Path:
-        return self.project.path / WORKTREE_DIR / "_stage"
+        return self.worktree_mgr.stage_worktree()
 
     def _base_branch(self) -> str:
         """本次任务沙盒的基准分支：自动提交开启时为主分支；否则为内部集成分支 stage。"""
-        main_branch = self.project.allowed_branch or self.git.current_branch()
-        if self.worktree_isolation and not self.commit_and_merge:
-            return self._stage_branch()
-        return main_branch
+        return self.worktree_mgr.base_branch()
 
     def _effective_max_turns(self) -> int:
         if self.max_agent_turns is not None:
@@ -417,8 +418,8 @@ class TaskExecutor:
         # 构建本地调试会话（DebugSession）
         session = None
         try:
-            from .debug_session import DebugSession
             from .config import resolve_debug_hosts
+            from .debug_session import DebugSession
             effective_hosts = resolve_debug_hosts(self.local_debug, self.project.debug_allowed_hosts)
             session = DebugSession(
                 root=work_root,
@@ -482,100 +483,22 @@ class TaskExecutor:
 
     def _prepare_worktree(self, task: Task | None = None) -> str:
         """创建或复用 worktree，返回其工作分支名。"""
-        wt_path = self._task_worktree(task)
-        branch = self._task_branch(task)
-        wt_git = Git(wt_path)
-
-        self.project.path.mkdir(parents=True, exist_ok=True)
-        if self.is_git_repo and not self.git.has_commits():
-            try:
-                self.git.ensure_gitignore([
-                    f"{self.project.tasks_dir.strip('/')}/",
-                    self.project.guide_file,
-                    f"{WORKTREE_DIR}/",
-                ])
-                self.git.add_all()
-                self.git.commit("chore: 初始化项目仓库")
-                self.log.info("空仓库已自动创建初始提交")
-            except GitError as e:
-                self.log.warning("空仓库创建初始提交失败：%s", e)
-
-        if self.is_git_repo:
-            self.git.ensure_local_exclude([f"{WORKTREE_DIR}/"])
-
-        main_branch = self.project.allowed_branch or self.git.current_branch()
-        use_stage = self.worktree_isolation and not self.commit_and_merge
-        if use_stage:
-            lock = self.merge_lock or contextlib.nullcontext()
-            with lock:
-                self.git.ensure_stage_branch(
-                    self._stage_branch(), main_branch,
-                    stage_worktree=self._stage_worktree(),
-                )
-            base_branch = self._stage_branch()
-        else:
-            base_branch = main_branch
-
-        is_rework = bool(task and (task.review_round > 0 or task.review_pending))
-
-        if wt_path.exists() and (wt_path / ".git").exists():
-            if not self.per_task_worktree:
-                if self._branch_exists(branch):
-                    wt_git.run("reset", "--hard", branch)
-                else:
-                    wt_git.run("reset", "--hard")
-            elif is_rework and self._branch_exists(branch):
-                wt_git.run("reset", "--hard", branch)
-            else:
-                wt_git.run("checkout", "-B", branch, base_branch)
-            wt_git.run("clean", "-fd")
-            return branch
-
-        if wt_path.exists():
-            shutil.rmtree(wt_path, ignore_errors=True)
-        wt_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self.git.run("worktree", "prune")
-        except Exception:
-            pass
-
-        if self.per_task_worktree:
-            if is_rework and self._branch_exists(branch):
-                self.git.run("worktree", "add", str(wt_path), branch)
-            else:
-                self.git.run("worktree", "add", "-B", branch, str(wt_path), base_branch)
-        else:
-            if self._branch_exists(branch):
-                self.git.run("worktree", "add", str(wt_path), branch)
-            else:
-                self.git.run("worktree", "add", "-b", branch, str(wt_path), base_branch)
-        return branch
+        return self.worktree_mgr.setup(
+            task,
+            tasks_dir=self.project.tasks_dir,
+            guide_file=self.project.guide_file,
+        )
 
     def _branch_exists(self, branch: str) -> bool:
-        return bool(self.git.run("branch", "--list", branch).strip())
+        return self.worktree_mgr.branch_exists(branch)
 
     def _cleanup_worktree_changes(self, wt_path: Path | None = None) -> None:
         """任务结束后清空 worktree 的未提交改动。"""
-        target = wt_path or self.worktree
-        if not self.is_git_repo or not self.worktree_isolation or not (target / ".git").exists():
-            return
-        try:
-            wt_git = Git(target)
-            wt_git.run("reset", "--hard")
-            wt_git.run("clean", "-fd")
-        except GitError as e:
-            self.log.warning("清理 worktree 失败：%s", e)
+        self.worktree_mgr.cleanup(wt_path)
 
     def remove_worktree(self, wt_path: Path | None = None, branch: str | None = None) -> None:
         """整个移除 worktree（任务全部完成后调用，避免主仓库出现未跟踪目录）。"""
-        target = wt_path or self.worktree
-        if not self.is_git_repo:
-            return
-        if (target / ".git").exists():
-            try:
-                self.git.run("worktree", "remove", "--force", str(target))
-            except GitError as e:
-                self.log.warning("移除 worktree 失败：%s", e)
+        self.worktree_mgr.remove(wt_path, branch)
         if branch and self.per_task_worktree:
             self.git.delete_branch(branch, force=True)
 
@@ -628,7 +551,7 @@ class TaskExecutor:
     def _run_review(self, task: Task, review_pending_path: Path | None,
                     wt_path: Path | None = None,
                     base_branch: str | None = None,
-                    work_branch: str | None = None) -> "object":
+                    work_branch: str | None = None) -> object:
         """构建审查上下文并执行审查 agent（见 review.review_task）。"""
         from .review import review_task  # 局部导入避免 executor→review 循环依赖
 
@@ -678,7 +601,7 @@ class TaskExecutor:
             self.log.warning("审查用量记录失败（可忽略）", exc_info=True)
 
     def _complete_with_review(self, task: Task, response: AgentResponse,
-                              result: "TaskResult") -> tuple[str, object]:
+                              result: TaskResult) -> tuple[str, object]:
         """git 项目 action=completed 的完整路径：WIP 提交 → 审查门 → 安全合入/落地。
 
         返回 (outcome, ReviewResult)。合并前审查开启时：
@@ -735,7 +658,7 @@ class TaskExecutor:
         return self._run_review_gate(task, result, branch, wt_path,
                                      base_branch, _finish_merge)
 
-    def _run_review_gate(self, task: Task, result: "TaskResult", branch: str,
+    def _run_review_gate(self, task: Task, result: TaskResult, branch: str,
                          wt_path: Path, base_branch: str, _finish_merge) -> tuple[str, object]:
         """审查门统一执行体：跳过判断 → 补审 → pass 合入 / fail·error blocked。"""
         active, skip_reason = self._review_active()
@@ -767,7 +690,7 @@ class TaskExecutor:
             self.log.warning("任务 %s 审查失败（保持待审可补审）：%s", task.id, review.error)
         return "blocked", review
 
-    def _merge_to_stage_and_land_main(self, task: Task, result: "TaskResult",
+    def _merge_to_stage_and_land_main(self, task: Task, result: TaskResult,
                                       branch: str, wt_path: Path | None = None) -> bool:
         """合并任务分支至内部集成分支 orcsy/stage/<proj>，并增量安全落地主分支工作区。
 
@@ -822,12 +745,12 @@ class TaskExecutor:
 
     def _skipped_review(self, reason: str):
         """构造 skipped 审查结论（未启用审查时随结果落档）。"""
-        from .review import ReviewResult, VERDICT_SKIPPED
+        from .review import VERDICT_SKIPPED, ReviewResult
         return ReviewResult(verdict=VERDICT_SKIPPED, summary=f"审查未执行（{reason}）",
                             model=self.review_llm.model if self.review_llm else "")
 
     def _review_non_git(self, task: Task, response: AgentResponse,
-                        result: "TaskResult") -> tuple[str, object]:
+                        result: TaskResult) -> tuple[str, object]:
         """非 git 项目 action=completed：无提交/合并，审查直接读项目目录。
 
         fail 同样走返工（agent 层分派）；Agent 的改动已在盘上，返工从现状续作。
@@ -867,7 +790,7 @@ class TaskExecutor:
             allow_test_commands=self.review_cfg.allow_test_commands,
             extra_env=self.extra_env)
 
-    def _merge_and_push(self, task: Task, result: "TaskResult",
+    def _merge_and_push(self, task: Task, result: TaskResult,
                         branch: str, wt_path: Path | None = None) -> bool:
         """审查通过后合并工作分支回主分支（返回是否成功）。
 
