@@ -180,9 +180,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <!-- 未登录时隐藏顶栏：登录层视觉已遮住，但键盘 Tab 不应能触达后面的按钮 -->
       <header class="top" v-show="!showLogin">
         <div class="brand">
-          <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="3" y="5" width="4.5" height="14" rx="1.2"/><rect x="9.75" y="5" width="4.5" height="9" rx="1.2" opacity=".6"/><rect x="16.5" y="5" width="4.5" height="6" rx="1.2" opacity=".35"/>
-          </svg>
+          <img class="logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
           <div>
             <h1>Orcsy 任务编排中心</h1>
             <div class="sub" v-if="store.state">
@@ -239,9 +237,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <!-- 登录层：鉴权开启且未登录时全屏接管（覆盖 App 壳，轮询已静默短路） -->
       <div v-if="showLogin" class="login-overlay">
         <div class="login-box">
-          <svg class="login-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="3" y="5" width="4.5" height="14" rx="1.2"/><rect x="9.75" y="5" width="4.5" height="9" rx="1.2" opacity=".6"/><rect x="16.5" y="5" width="4.5" height="6" rx="1.2" opacity=".35"/>
-          </svg>
+          <img class="login-logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
           <div class="login-title">Orcsy 任务编排中心</div>
           <div class="login-sub">看板已开启访问鉴权，请输入登录密码</div>
           <NInput v-model:value="loginPwd" type="password" show-password-on="click"
@@ -274,7 +270,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
 .login-box { background: var(--panel, #131a2a); border: 1px solid var(--line, #253048);
   border-radius: 12px; padding: 30px 34px; width: 340px; max-width: 90vw;
   text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35); }
-.login-logo { width: 34px; height: 34px; color: #5b8cff; margin-bottom: 6px; }
+.login-logo { width: 34px; height: 34px; margin-bottom: 6px; display: block; margin-left: auto; margin-right: auto; }
 .login-title { font-size: 17px; font-weight: 700; color: var(--text, #e5eaf6); }
 .login-sub { font-size: 12.5px; color: var(--dim, #94a2be); margin: 4px 0 16px; }
 .login-err { font-size: 12.5px; color: #e88080; margin-top: 8px; text-align: left; }
@@ -309,7 +305,7 @@ body {
 .brand { display: flex; gap: 12px; align-items: center; min-width: 0; flex: 1 1 260px; }
 /* 关键：内层 div 也要允许收缩，否则 .sub 的 nowrap 撑破父级、文字溢出到页签下 */
 .brand > div { min-width: 0; }
-.brand .logo { width: 30px; height: 30px; color: #5b8cff; flex: none; }
+.brand .logo { width: 30px; height: 30px; flex: none; display: block; border-radius: 6px; }
 .brand h1 { margin: 0; font-size: 17px; line-height: 1.3; color: var(--text); }
 .brand .sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actions { display: flex; gap: 8px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
