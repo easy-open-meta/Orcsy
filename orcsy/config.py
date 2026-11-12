@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -15,8 +14,7 @@ from .approvals import PERMISSION_MODES
 from .concurrency import configure_limiter
 from .issues import IssueError, normalize_repo
 from .mirrors import validate_mirrors
-from .tool_specs import (DEFAULT_ALLOWED_COMMANDS, validate_commands_map,
-                         validate_tools_map)
+from .tool_specs import DEFAULT_ALLOWED_COMMANDS, validate_commands_map, validate_tools_map
 
 # 任务状态机：open → in_progress → done / blocked / cancelled
 TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
@@ -71,7 +69,7 @@ class ProjectConfig:
     # 代码提交与合并开关：任务完成后是否自动提交代码并合并回主分支（默认 None = 跟随全局 git.commit_and_merge）
     commit_and_merge: bool | None = None
     # 项目小组编排配置：None 或 team.enabled=False 表示沿用传统单兵模式
-    team: "ProjectTeamConfig | None" = None
+    team: ProjectTeamConfig | None = None
 
 
 # ---- 多模型 Agent 项目小组（Project Team）角色体系 ----
@@ -1417,6 +1415,196 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     # 厂商配额池是进程级单例：加载即生效（看板保存走 web.py 的同一入口）
     configure_limiter(cfg.subagent.max_parallel, cfg.subagent.adaptive)
     return cfg
+
+
+# ---- 配置保存（从 orcsy/web.AppState._save_config 逐字拆分，Stage 3 绞杀者重构）----
+# 输出与拆分前 byte-identical：字段顺序固定、注释头一致，roundtrip 测试依赖此约定
+
+def profile_to_yaml(prof: AgentProfileConfig) -> dict:
+    d: dict = {"name": prof.name, "role": prof.role}
+    if prof.description:
+        d["description"] = prof.description
+    if prof.llm:
+        d["llm"] = dict(prof.llm)
+    if prof.tools:
+        d["tools"] = dict(prof.tools)
+    if prof.max_turns is not None:
+        d["max_turns"] = prof.max_turns
+    if prof.produces_code is not None:
+        d["produces_code"] = prof.produces_code
+    if prof.allow_test_scripts:
+        d["allow_test_scripts"] = True
+    if prof.extra_prompt:
+        d["extra_prompt"] = prof.extra_prompt
+    return d
+
+
+def team_to_yaml(team: ProjectTeamConfig) -> dict:
+    members = []
+    for m in team.members:
+        md: dict = {"id": m.id, "enabled": m.enabled}
+        if m.profile:
+            md["profile"] = m.profile
+        if m.name:
+            md["name"] = m.name
+        if m.role:
+            md["role"] = m.role
+        if m.description:
+            md["description"] = m.description
+        if m.llm:
+            md["llm"] = dict(m.llm)
+        if m.tools:
+            md["tools"] = dict(m.tools)
+        if m.max_turns is not None:
+            md["max_turns"] = m.max_turns
+        if m.produces_code is not None:
+            md["produces_code"] = m.produces_code
+        if m.allow_test_scripts is not None:
+            md["allow_test_scripts"] = m.allow_test_scripts
+        if m.extra_prompt:
+            md["extra_prompt"] = m.extra_prompt
+        members.append(md)
+    out: dict = {
+        "enabled": team.enabled,
+        "execution_mode": team.execution_mode,
+        "max_qa_rounds": team.max_qa_rounds,
+        "max_split_depth": team.max_split_depth,
+        "chain_within_cycle": team.chain_within_cycle,
+        "max_chain_steps_per_cycle": team.max_chain_steps_per_cycle,
+    }
+    if team.fallback_role:
+        out["fallback_role"] = team.fallback_role
+    out["members"] = members
+    return out
+
+
+def save_config(cfg: AppConfig) -> None:
+    """把配置对象写回 config.yaml（保留注释做不到，字段顺序固定）。"""
+    src = cfg.source_path
+    if src is None:
+        raise ValueError("配置文件来源未知，无法保存")
+    doc = {
+        "llm": {
+            "provider": cfg.llm.provider, "api_key": cfg.llm.api_key,
+            "base_url": cfg.llm.base_url, "model": cfg.llm.model,
+            "temperature": cfg.llm.temperature, "max_tokens": cfg.llm.max_tokens,
+            "max_context_tokens": cfg.llm.max_context_tokens,
+            "enable_thinking": cfg.llm.enable_thinking,
+            "timeout_seconds": cfg.llm.timeout_seconds,
+        },
+        "scheduler": {
+            "interval_seconds": cfg.scheduler.interval_seconds,
+            "max_parallel_agents": cfg.scheduler.max_parallel_agents,
+            "run_once": cfg.scheduler.run_once,
+        },
+        "logging": {"level": cfg.logging.level, "file": cfg.logging.file,
+                    "retention_days": cfg.logging.retention_days,
+                    "max_total_mb": cfg.logging.max_total_mb},
+        "web": {"host": cfg.web.host, "port": cfg.web.port,
+                "open_browser": cfg.web.open_browser,
+                "auth_password": cfg.web.auth_password},
+        # 全局工具开关：只落盘显式关闭/开启的项（空 dict = 全默认启用）
+        "tools": dict(cfg.tools.enabled),
+        # 命令白名单开关：只落盘显式禁用/启用的项（空 dict = 默认全放行）
+        "commands": dict(cfg.commands.enabled),
+        # Agent 子进程环境变量（代理/镜像）：整体落盘（空 dict = 不注入）；
+        # path_autofix 必须一起写回——漏写会在看板任意保存时静默重置为关
+        #（同 update 节漏写的教训）
+        "env": {"vars": dict(cfg.env.vars),
+                "path_autofix": cfg.env.path_autofix},
+        # 镜像源管理：用户添加源 + 禁用清单（测速结果在边车 JSON，不落这里）
+        "mirrors": {"custom": {k: list(v) for k, v in cfg.mirrors.custom.items()},
+                    "disabled": list(cfg.mirrors.disabled)},
+        "permissions": {"mode": cfg.permissions.mode,
+                        "timeout_minutes": cfg.permissions.timeout_minutes},
+        # 自更新源必须一起写回：此前漏写，看板任意一次保存都会把
+        # 用户填的 update.repo/token 从 config.yaml 里静默抹掉
+        "update": {"repo": cfg.update.repo, "token": cfg.update.token,
+                   "auto_check": cfg.update.auto_check},
+        # 任务结束提醒开关必须一起写回：漏写会在看板任意保存时静默
+        # 重置为默认全开（同 update 节漏写的教训）
+        "notify": {"sound": cfg.notify.sound, "system": cfg.notify.system},
+        # 数据脱敏配置整体写回（同 update/notify 教训：漏写会被看板任意
+        # 保存静默重置回默认）
+        "masking": {
+            "enabled": cfg.masking.enabled,
+            "enhanced_rules": cfg.masking.enhanced_rules,
+            "custom_patterns": list(cfg.masking.custom_patterns),
+        },
+        # 任务审查（Review Agent）配置整体写回：漏写会在看板任意保存时
+        # 静默重置（llm=None = 审查未启用默认态；同 update/notify 教训）
+        "review": {
+            "enabled": cfg.review.enabled,
+            "llm": ({"provider": cfg.review.llm.provider,
+                     "api_key": cfg.review.llm.api_key,
+                     "base_url": cfg.review.llm.base_url,
+                     "model": cfg.review.llm.model,
+                     "temperature": cfg.review.llm.temperature,
+                     "max_tokens": cfg.review.llm.max_tokens,
+                     "max_context_tokens": cfg.review.llm.max_context_tokens,
+                     "enable_thinking": cfg.review.llm.enable_thinking,
+                     "timeout_seconds": cfg.review.llm.timeout_seconds}
+                    if cfg.review.llm else None),
+            "max_turns": cfg.review.max_turns,
+            "max_review_rounds": cfg.review.max_review_rounds,
+            "allow_test_commands": cfg.review.allow_test_commands,
+            "squash_merge": cfg.review.squash_merge,
+        },
+        # 子代理并发预算（漏写会被看板任意保存静默重置回默认 4/自适应开）
+        "subagent": {
+            "max_parallel": cfg.subagent.max_parallel,
+            "adaptive": cfg.subagent.adaptive,
+        },
+        # 本地调试配置整体写回
+        "local_debug": {
+            "browser": cfg.local_debug.browser,
+            "browser_executable": cfg.local_debug.browser_executable,
+            "headless": cfg.local_debug.headless,
+            "allowed_hosts": list(cfg.local_debug.allowed_hosts),
+            "navigation_timeout_seconds": cfg.local_debug.navigation_timeout_seconds,
+            "service_ready_timeout_seconds": cfg.local_debug.service_ready_timeout_seconds,
+            "max_services": cfg.local_debug.max_services,
+            "artifacts_retention_days": cfg.local_debug.artifacts_retention_days,
+        },
+        # Git 自动化工作流配置
+        "git": {
+            "commit_and_merge": cfg.git.commit_and_merge,
+        },
+        # 全局 Agent 角色预设池整体写回（漏写会在看板任意保存时静默丢失）
+        "agent_profiles": {
+            pid: profile_to_yaml(prof) for pid, prof in cfg.agent_profiles.items()
+        },
+        "projects": [
+            {
+                "name": p.name, "path": str(p.path), "enabled": p.enabled,
+                "tasks_dir": p.tasks_dir, "guide_file": p.guide_file,
+                "max_tasks_per_cycle": p.max_tasks_per_cycle,
+                "max_agent_turns": p.max_agent_turns,
+                **({"allowed_branch": p.allowed_branch} if p.allowed_branch else {}),
+                **({"allowed_commands": p.allowed_commands} if p.allowed_commands else {}),
+                **({"llm": p.llm} if p.llm else {}),
+                **({"review_enabled": p.review_enabled}
+                   if p.review_enabled is not None else {}),
+                **({"review_llm": p.review_llm} if p.review_llm else {}),
+                **({"review_max_rounds": p.review_max_rounds}
+                   if p.review_max_rounds is not None else {}),
+                **({"debug_allowed_hosts": p.debug_allowed_hosts}
+                   if p.debug_allowed_hosts is not None else {}),
+                **({"commit_and_merge": p.commit_and_merge}
+                   if p.commit_and_merge is not None else {}),
+                **({"repo": p.repo} if p.repo else {}),
+                **({"tools": p.tools} if p.tools else {}),
+                **({"permission_mode": p.permission_mode} if p.permission_mode else {}),
+                **({"team": team_to_yaml(p.team)} if p.team else {}),
+            }
+            for p in cfg.projects
+        ],
+    }
+    src.write_text(
+        "# orcsy 配置（由看板自动保存）\n"
+        + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
 
 __all__ = [

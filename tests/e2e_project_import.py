@@ -102,7 +102,8 @@ def check_import(root: Path, port: int) -> None:
     assert set(r["created"]) == {"tasks/", "AGENT.md"}, r["created"]
 
     after = {p.name for p in proj.iterdir()}
-    assert after - before == {"tasks", "AGENT.md"}, after
+    # save_project 的 git 引导（新项目/导入项目 git 就绪）预期会创建 .git 与 .gitignore
+    assert after - before == {"tasks", "AGENT.md", ".git", ".gitignore"}, after
     assert not any(proj.joinpath("tasks").glob("*.md")), "不应生成示例任务"
 
     guide = (proj / "AGENT.md").read_text(encoding="utf-8")

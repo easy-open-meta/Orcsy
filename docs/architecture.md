@@ -52,10 +52,18 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 |---|---|---|
 | `orcsy/__init__.py` | 包入口 | 定义包版本 `__version__`、`USER_AGENT` 并导出顶级公共 API 类 |
 | `orcsy/tool_specs.py` | 基础设施 | 无状态命令白名单、生态分类、工具分组常量与纯校验函数 |
+| `orcsy/tools.py` | 执行工具门面 | 工具外观门面（Facade）：聚合各领域工具、管理 `ToolContext` 与派发 `dispatch_tool` |
+| `orcsy/tools_fs.py` | 执行工具层 | 文件沙箱读写、多点编辑、重命名移动、删除与 glob/正则代码搜索 |
+| `orcsy/tools_cmd.py` | 执行工具层 | 终端命令白名单执行、Windows 隐藏控制台、进程树管理与输出编码自愈 |
+| `orcsy/tools_task.py` | 执行工具层 | 任务拆单编排协议（create_tasks/DAG检测）、Bug 提单、PM指派与完成信号 |
+| `orcsy/tools_net.py` | 执行工具层 | SSRF 严格防护网页抓取、HTML 文本抽取、技能正文读取与镜像测速 |
+| `orcsy/worktree.py` | 隔离沙箱层 | Git Worktree 物理目录映射、独立分支检出、陈旧锁恢复与重置清理 |
+| `orcsy/task_service.py` | Web 服务层 | 看板侧任务文件 CRUD（创建/状态/排序/批量删除/清空/读取），纯函数不感知 HTTP |
+| `orcsy/git_service.py` | Web 服务层 | 人工把关提交（stage 分支复位）、diff 预览、改动丢弃、Git 初始化与新项目引导 |
+| `orcsy/config.save_config` | 领域模型 | config.yaml 序列化保存器（与 load_config 对称），字段顺序固定、输出与历史 byte-identical |
+| `orcsy/executor.py` | 编排层 | 单任务生命周期编排：调用 WorktreeManager、Agent 轮次循环、审查门对接与落地 |
 | `orcsy/config.py` | 领域模型 | 数据类（AppConfig 等 21 个 dataclass）、YAML 加载反序列化与配置解析 |
 | `orcsy/task_model.py` | 领域模型 | 任务 Markdown 文件解析、frontmatter 状态机与任务依赖 DAG 环检测 |
-| `orcsy/tools.py` | 执行工具 | Agent 在沙箱工作区内的原子操作实现与工具派发 |
-| `orcsy/executor.py` | 编排层 | 单任务生命周期执行器：Worktree 隔离、Agent 轮次循环、审查门对接与分支合并 |
 | `orcsy/review.py` | 编排层 | 独立模型合并前只读审查 Agent |
 | `orcsy/subagent.py` | 编排层 | 并发只读子代理扇出（fan-out）探索引擎 |
 | `orcsy/masking.py` | 核心逻辑 | 发往模型厂商前的内存级敏感数据正则脱敏与写盘还原闭环 |
