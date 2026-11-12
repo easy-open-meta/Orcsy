@@ -41,11 +41,26 @@ TP_KEY = "tp-" + "".join(__import__("secrets").choice(
     __import__("string").ascii_letters + __import__("string").digits) for _ in range(24))
 
 
+def _vendor_key(prefix: str, body: int) -> str:
+    """厂商前缀 key 的运行时生成（写死字面量会被占位符填充机制拼成 sk- 形态）。"""
+    import secrets
+    import string
+    return prefix + "".join(secrets.choice(string.ascii_letters + string.digits)
+                            for _ in range(body))
+
+
 def check_high_confidence_rules() -> None:
     s = MaskingSession()
     # 每类规则命中：原文不再出现、占位符形态正确
     for sample in (SECRET, SECRET2, JWT,
                    TP_KEY,  # tp- 系（厂商自研 key，门槛同 sk- ≥20 位）
+                   _vendor_key("xai-", 24),          # xAI（Grok）
+                   _vendor_key("co_", 24),           # Cohere
+                   _vendor_key("gsk_", 24),          # Groq
+                   _vendor_key("hf_", 24),           # Hugging Face
+                   "ark-" + "0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d",   # 火山方舟（hex 形态）
+                   "AKID" + "Zz1Yy2Xx3Ww4Vv5Uu6",    # 腾讯云 CAM 密钥
+                   "bce-v3/ALTAK-" + "5XyZ9aBc" * 3,  # 百度千帆
                    "AIzaSyA1234567890abcdefghijklmnopqrstuv",
                    "xoxb-123456789012-abcdef",
                    "-----BEGIN RSA PRIVATE KEY-----\nMIIEowAB\n-----END RSA PRIVATE KEY-----",
@@ -70,7 +85,10 @@ def check_no_false_positive() -> None:
     for sample in ("sk-xxxx 是文档里的占位示例", "token=短值", "password", "Bearer ",
                    "访问 https://example.com/page 获取说明", "value = 1\nprint(value)",
                    "session=abc", "tok=12345678",
-                   "tp-8888 短串不掩", "tp-link-router-config 是路由器词组"):
+                   "tp-8888 短串不掩", "tp-link-router-config 是路由器词组",
+                   "xai-grok-model 名", "co_varnames 与 co_firstlineno 是代码对象属性",
+                   "hf_dataset 与 hf_model_name_v2 是数据集词", "ark-survival-evolved 游戏词",
+                   "AKID12345 太短不掩", "gsk_short 短串"):
         out, hits = s.mask_text(sample)
         assert hits == 0, (sample, out)
     print("ok: 不误伤（示例占位/短值/普通文本全透传）")

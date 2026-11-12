@@ -39,6 +39,13 @@ _HIGH_CONFIDENCE: list[tuple[re.Pattern, str]] = [
     # (编译正则, 类别名)。顺序即替换顺序，先长后短避免部分前缀抢先命中
     (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "api_key"),          # OpenAI/DeepSeek/GLM 系
     (re.compile(r"tp-[A-Za-z0-9_-]{20,}"), "api_key"),          # TokenPlan 等厂商自研 key（门槛同 sk-，防 tp-link 等词组误伤）
+    (re.compile(r"xai-[A-Za-z0-9_-]{20,}"), "api_key"),         # xAI（Grok）
+    (re.compile(r"co_[A-Za-z0-9_-]{20,}"), "api_key"),          # Cohere（门槛 ≥20，防 Python 代码对象属性 co_varnames 等误伤）
+    (re.compile(r"gsk_[A-Za-z0-9_-]{20,}"), "api_key"),         # Groq
+    (re.compile(r"hf_[A-Za-z0-9_-]{20,}"), "api_key"),          # Hugging Face（门槛 ≥20，防 hf_dataset 等词组误伤）
+    (re.compile(r"ark-[0-9a-f-]{24,}"), "api_key"),             # 火山方舟（新版；仅十六进制/连字符，防 ark-survival 等词组误伤）
+    (re.compile(r"AKID[A-Za-z0-9]{16,}"), "api_key"),           # 腾讯云 CAM 密钥（AKID+SecretId）
+    (re.compile(r"bce-v3/ALTAK-[A-Za-z0-9+/=_-]{10,}"), "api_key"),  # 百度千帆（请求头 Bearer bce-v3/ALTAK-...）
     (re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}"), "api_key"),     # GitHub PAT（ghp_/gho_/ghu_/ghs_/ghr_）
     (re.compile(r"github_pat_[A-Za-z0-9_]{20,}"), "api_key"),   # GitHub fine-grained PAT
     (re.compile(r"glpat-[A-Za-z0-9_-]{15,}"), "api_key"),       # GitLab PAT
