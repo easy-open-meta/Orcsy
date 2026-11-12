@@ -169,3 +169,12 @@ def rotate_and_cleanup(log_file: str | Path, retention_days: int,
                          f"（释放 {freed / 1024 / 1024:.1f} MB，"
                          f"上限 {max_total_mb} MB）")
     return "；".join(notes) or None
+
+
+__all__ = [
+    "setup_logging",
+    "get_logger",
+    "anchored_log_path",
+    "rotate_and_cleanup",
+]
+

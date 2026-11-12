@@ -130,3 +130,13 @@ def assert_host_allowed(host: str, allowed_hosts: list[str]) -> None:
     ok, reason = check_host_allowed(host, allowed_hosts)
     if not ok:
         raise ValueError(reason)
+
+
+__all__ = [
+    "extract_host_and_port",
+    "is_ip_in_forbidden_ranges",
+    "normalize_host",
+    "check_host_allowed",
+    "assert_host_allowed",
+]
+

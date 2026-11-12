@@ -122,3 +122,14 @@ def update_config_auth_password(cfg_path: Path, new_password: str) -> str:
 
     cfg_path.write_text(new_text, encoding="utf-8")
     return hashed
+
+
+__all__ = [
+    "PBKDF2_PREFIX",
+    "DEFAULT_ITERATIONS",
+    "hash_password",
+    "is_password_hashed",
+    "verify_password",
+    "update_config_password",
+]
+

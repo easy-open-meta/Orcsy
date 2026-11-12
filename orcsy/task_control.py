@@ -60,3 +60,10 @@ _CONTROLS = TaskControls()
 
 def get_task_controls() -> TaskControls:
     return _CONTROLS
+
+
+__all__ = [
+    "TaskControls",
+    "get_task_controls",
+]
+

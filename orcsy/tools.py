@@ -28,6 +28,26 @@ from urllib.parse import urlparse, urljoin
 
 from .logging_setup import get_logger
 from .mirrors import CATEGORY_BY_KEY, CATEGORY_KEYS
+from .task_model import (
+    _set_frontmatter_field,
+    append_progress,
+    detect_dependency_cycle,
+    parse_task_file,
+    priority_rank,
+    set_task_file_assignee,
+    set_task_file_status,
+)
+from .tool_specs import (
+    ALL_TOOL_NAMES,
+    COMMAND_CATEGORIES,
+    DEFAULT_ALLOWED_COMMANDS,
+    DEFAULT_OFF_TOOLS,
+    TOGGLEABLE_TOOLS,
+    TOOL_CATEGORIES,
+    TOOL_GROUPS,
+    validate_commands_map,
+    validate_tools_map,
+)
 
 log = get_logger("tools")
 
@@ -47,110 +67,6 @@ def _windows_startupinfo() -> subprocess.STARTUPINFO | None:
         si.wShowWindow = 0  # SW_HIDE
         return si
     return None
-
-# 命令白名单：测试、构建、lint 等 Agent 自验证所需的常见命令。
-# 通配符按 argv[0] 的文件名匹配（小写、fnmatch）；不在表内的命令一律拒绝。
-# 列表需覆盖 orcsy/probe.py 为各技术栈推荐的命令（pnpm/yarn 项目、CMake
-# 项目的 ctest）——否则自动写进 AGENT.md 的测试命令会被自家白名单拦下。
-DEFAULT_ALLOWED_COMMANDS = [
-    # Python 生态（python* 覆盖 python3.11 等带版本解释器）
-    "python*", "py", "pip*", "pytest", "uv", "uvx", "poetry", "tox",
-    "ruff", "mypy", "black", "flake8",
-    # Node / 前端
-    "node", "npm", "npx", "pnpm", "yarn", "bun",
-    "tsc", "eslint", "prettier", "vitest", "jest",
-    # Rust / Go / .NET / Java
-    "cargo", "go", "dotnet", "gradle*", "mvn", "java", "javac",
-    # C/C++
-    "make", "cmake", "ctest", "ninja",
-    "gcc", "g++", "clang", "clang++", "msbuild",
-    # 通用
-    "git",
-    # 包管理器（环境引导：缺工具链时静默安装；受访问权限审批约束——
-    # autonomous/ask_on_change 模式下安装会挂起等人工批准，详见 env-setup 技能）
-    "winget*", "choco", "scoop", "brew", "apt*", "apt-get", "dnf", "nvm",
-    # 系统 shell/下载/解压（env-setup 阶段二B 镜像直下流程需要；cmd 本就在
-    # 名单内，白名单挡的是误操作而非恶意，真正的安全边界是访问权限审批门）
-    "powershell", "pwsh", "curl", "tar", "setx",
-    # Windows 环境探测/文件查看（模型排障常用：找解释器、看目录、查环境变量）
-    "where", "cmd", "dir", "type", "echo", "set", "tasklist", "systeminfo",
-    "findstr", "more", "ver", "hostname", "whoami",
-    # POSIX 只读探测/统计（Git Bash / macOS / Linux 常用；模型高频使用——
-    # 统计行数、看文件片段、按文本处理等。只收只读与无害统计类：能写文件的
-    # sed/find/xargs、能执行任意命令的 env/awk/bash/sh 一律不放，模型该用
-    # write_file/edit_file 工具或让项目自身的构建命令干活）
-    "ls", "cat", "wc", "head", "tail", "grep", "sort", "uniq", "cut", "tr",
-    "diff", "stat", "du", "df", "pwd", "printf", "date", "sleep", "uname",
-    "which", "id", "basename", "dirname", "touch", "md5sum", "sha256sum",
-    "printenv",
-]
-
-# 命令白名单生态分类（供设置页与 API 结构化呈现及批量管理）
-COMMAND_CATEGORIES = [
-    {
-        "key": "python",
-        "label": "Python 生态",
-        "icon": "🐍",
-        "description": "Python 解释器、包管理与测试/Lint 工具",
-        "commands": ["python*", "py", "pip*", "pytest", "uv", "uvx", "poetry", "tox", "ruff", "mypy", "black", "flake8"],
-    },
-    {
-        "key": "node",
-        "label": "Node / 前端",
-        "icon": "📦",
-        "description": "Node 运行时、包管理器与前端构建/测试工具",
-        "commands": ["node", "npm", "npx", "pnpm", "yarn", "bun", "tsc", "eslint", "prettier", "vitest", "jest"],
-    },
-    {
-        "key": "compiled",
-        "label": "Rust / Go / .NET / Java",
-        "icon": "⚙️",
-        "description": "系统级与强类型后端编译型语言工具链",
-        "commands": ["cargo", "go", "dotnet", "gradle*", "mvn", "java", "javac"],
-    },
-    {
-        "key": "cpp",
-        "label": "C / C++ 构建",
-        "icon": "🔨",
-        "description": "C/C++ 编译器、构建工具与测试套件",
-        "commands": ["make", "cmake", "ctest", "ninja", "gcc", "g++", "clang", "clang++", "msbuild"],
-    },
-    {
-        "key": "vcs",
-        "label": "版本控制",
-        "icon": "🌿",
-        "description": "Git 代码仓库与分支版本管理",
-        "commands": ["git"],
-    },
-    {
-        "key": "package_managers",
-        "label": "包管理器",
-        "icon": "📥",
-        "description": "系统级包管理器（缺工具链时按需环境引导，受审批约束）",
-        "commands": ["winget*", "choco", "scoop", "brew", "apt*", "apt-get", "dnf", "nvm"],
-    },
-    {
-        "key": "system_shell",
-        "label": "系统 Shell / 实用工具",
-        "icon": "💻",
-        "description": "系统 Shell、网络下载与归档解压",
-        "commands": ["powershell", "pwsh", "curl", "tar", "setx"],
-    },
-    {
-        "key": "windows_probe",
-        "label": "Windows 探测与排障",
-        "icon": "🪟",
-        "description": "Windows 环境排障、进程查看与文件探测（只读/信息性）",
-        "commands": ["where", "cmd", "dir", "type", "echo", "set", "tasklist", "systeminfo", "findstr", "more", "ver", "hostname", "whoami"],
-    },
-    {
-        "key": "posix_probe",
-        "label": "POSIX 只读探测与统计",
-        "icon": "🐧",
-        "description": "跨平台/Unix 常用只读与文本统计命令（只读无害）",
-        "commands": ["ls", "cat", "wc", "head", "tail", "grep", "sort", "uniq", "cut", "tr", "diff", "stat", "du", "df", "pwd", "printf", "date", "sleep", "uname", "which", "id", "basename", "dirname", "touch", "md5sum", "sha256sum", "printenv"],
-    },
-]
 
 MAX_OUTPUT_CHARS = 6000
 MAX_FILE_READ_CHARS = 12000
@@ -1085,17 +1001,7 @@ def tool_create_tasks(ctx: ToolContext, args: dict) -> str:
     - assignee：指派负责角色（项目小组模式下校验是否在已启用可指派角色内）；
     - depends_on / depends_on_refs：声明外部前置任务 ID 或批内下标依赖，落盘前校验环依赖；
     - parent_id / split_depth / created_by：防递归无限拆分与链路追踪。
-
-    延迟导入 task_model：它经 config 依赖本模块，模块级导入会成环。
     """
-    from .task_model import (
-        append_progress,
-        detect_dependency_cycle,
-        parse_task_file,
-        priority_rank,
-        set_task_file_status,
-    )
-
     task = ctx.current_task
     if task is None or getattr(task, "path", None) is None:
         return "错误：无法确定当前任务（上下文未注入任务信息），不能拆分"
@@ -1293,8 +1199,6 @@ def tool_report_bug(ctx: ToolContext, args: dict) -> str:
     - 登记到 ctx.created_bugs，配合 finish(action="wait_retest") 自动挂靠为本 QA
       任务的回归前置依赖（待全部 Bug 修复归档后自动唤醒 QA 复测）。
     """
-    from .task_model import append_progress, parse_task_file, priority_rank
-
     task = ctx.current_task
     if task is None or getattr(task, "path", None) is None:
         return "错误：无法确定当前任务，不能创建 Bug 任务"
@@ -1433,13 +1337,6 @@ def tool_report_bug(ctx: ToolContext, args: dict) -> str:
 
 def tool_reassign_task(ctx: ToolContext, args: dict) -> str:
     """项目经理（PM）判定无需拆分时，直接将当前任务指派给对应开发/测试角色。"""
-    from .task_model import (
-        _set_frontmatter_field,
-        append_progress,
-        priority_rank,
-        set_task_file_assignee,
-    )
-
     task = ctx.current_task
     if task is None or getattr(task, "path", None) is None:
         return "错误：无法确定当前任务，不能直接指派"
@@ -2069,3 +1966,31 @@ def dispatch_tool(ctx: ToolContext, name: str, args_json: str | dict) -> str:
         raise  # finish 由 Agent 循环捕获
     except Exception as e:  # noqa: BLE001 — 工具错误回给模型自行调整
         return f"错误：{e}"
+
+
+__all__ = [
+    "DEFAULT_ALLOWED_COMMANDS",
+    "COMMAND_CATEGORIES",
+    "TOOL_GROUPS",
+    "DEFAULT_OFF_TOOLS",
+    "TOOL_CATEGORIES",
+    "TOGGLEABLE_TOOLS",
+    "MAX_OUTPUT_CHARS",
+    "MAX_FILE_READ_CHARS",
+    "MAX_SKILL_CHARS",
+    "DEFAULT_READ_LINES",
+    "MAX_WEB_FETCH_CHARS",
+    "MAX_WEB_FETCH_BYTES",
+    "TaskStopped",
+    "FinishSignal",
+    "ToolContext",
+    "TOOLS",
+    "tool_definitions_openai",
+    "tool_definitions_anthropic",
+    "validate_tools_map",
+    "validate_commands_map",
+    "dispatch_tool",
+    "scan_tool_env",
+    "persist_path_dirs",
+]
+

@@ -678,3 +678,21 @@ def read_done_summaries(
         })
     return out
 
+
+__all__ = [
+    "Task",
+    "PRIORITY_ORDER",
+    "priority_rank",
+    "parse_task_file",
+    "write_task_file",
+    "list_tasks",
+    "set_task_file_status",
+    "set_task_file_assignee",
+    "set_task_file_depends_on",
+    "append_progress",
+    "append_agent_result",
+    "detect_dependency_cycle",
+    "read_dependency_summaries",
+]
+
+

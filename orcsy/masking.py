@@ -251,3 +251,7 @@ class MaskingSession:
         self._rev.clear()
         self._fwd.clear()
         self._fwd_tag.clear()
+
+
+__all__ = ["MaskingSession"]
+

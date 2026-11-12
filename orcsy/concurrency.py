@@ -220,3 +220,13 @@ def reset_pools() -> None:
     _ADAPTIVE = True
     with _POOLS_LOCK:
         _POOLS.clear()
+
+
+__all__ = [
+    "ConcurrencyBudget",
+    "get_budget",
+    "configure_limiter",
+    "snapshot_pools",
+    "reset_pools",
+]
+

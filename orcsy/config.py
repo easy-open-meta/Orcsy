@@ -15,8 +15,8 @@ from .approvals import PERMISSION_MODES
 from .concurrency import configure_limiter
 from .issues import IssueError, normalize_repo
 from .mirrors import validate_mirrors
-from .tools import (DEFAULT_ALLOWED_COMMANDS, validate_commands_map,
-                    validate_tools_map)
+from .tool_specs import (DEFAULT_ALLOWED_COMMANDS, validate_commands_map,
+                         validate_tools_map)
 
 # 任务状态机：open → in_progress → done / blocked / cancelled
 TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
@@ -1417,3 +1417,35 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     # 厂商配额池是进程级单例：加载即生效（看板保存走 web.py 的同一入口）
     configure_limiter(cfg.subagent.max_parallel, cfg.subagent.adaptive)
     return cfg
+
+
+__all__ = [
+    "TaskStatus",
+    "ProjectConfig",
+    "LLMConfig",
+    "SchedulerConfig",
+    "LoggingConfig",
+    "WebConfig",
+    "UpdateConfig",
+    "ToolsConfig",
+    "CommandsConfig",
+    "EnvConfig",
+    "PermissionsConfig",
+    "NotifyConfig",
+    "MaskingConfig",
+    "MirrorsConfig",
+    "ReviewConfig",
+    "SubagentConfig",
+    "LocalDebugConfig",
+    "GitConfig",
+    "AgentProfileConfig",
+    "ProjectTeamConfig",
+    "TeamMemberConfig",
+    "AppConfig",
+    "load_config",
+    "save_config",
+    "resolve_llm",
+    "resolve_commands",
+    "resolve_permission_mode",
+]
+

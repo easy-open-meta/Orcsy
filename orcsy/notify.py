@@ -75,3 +75,11 @@ def notify_task_end(project: str, task_id: str, title: str, outcome: str) -> Non
         log.info("已发送任务提醒：%s %s（%s）", head, message, task_id)
     except Exception:  # noqa: BLE001 — 提醒是旁路，任何异常都吞掉
         log.warning("任务提醒发送失败（可忽略）", exc_info=True)
+
+
+__all__ = [
+    "SOUNDS_DIR",
+    "configure",
+    "notify_task_end",
+]
+

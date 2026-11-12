@@ -967,3 +967,17 @@ class LLMClient:
             # 原样抛回主线程：超时/传输错误的「重试 + 文案」统一收敛在 _post
             raise out["err"]
         return out["resp"]
+
+
+__all__ = [
+    "DEFAULT_MAX_TURNS",
+    "MODEL_SPECS",
+    "model_spec",
+    "test_connection",
+    "list_models",
+    "LLMError",
+    "AgentResponse",
+    "finish_response",
+    "LLMClient",
+]
+

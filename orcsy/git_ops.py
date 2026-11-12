@@ -554,3 +554,10 @@ class Git:
             "skipped": skipped,
         }
 
+
+__all__ = [
+    "Git",
+    "GitError",
+]
+
+

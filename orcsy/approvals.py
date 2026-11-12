@@ -183,3 +183,18 @@ def get_manager() -> ApprovalManager:
         if _MANAGER is None:
             _MANAGER = ApprovalManager()
         return _MANAGER
+
+
+__all__ = [
+    "PERMISSION_MODES",
+    "MODE_LABELS",
+    "MUTATING_TOOLS",
+    "RISKY_TOOLS",
+    "ApprovalRequest",
+    "ApprovalOutcome",
+    "ApprovalManager",
+    "requires_approval",
+    "args_preview",
+    "get_manager",
+]
+
