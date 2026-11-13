@@ -258,6 +258,10 @@ class WebConfig:
     # 看板登录密码：非空时所有页面/API 需先登录（外网部署务必设置）；
     # 留空 = 关闭鉴权，本机使用零打扰
     auth_password: str = ""
+    # 静态 API 密钥列表（供第三方系统、CI/CD 流水线与自动化脚本直接通过 HTTP 调用）
+    api_keys: list[str] = field(default_factory=list)
+    # 跨域资源共享允许来源（CORS Allowed Origins），默认放行所有来源 ["*"]
+    cors_origins: list[str] = field(default_factory=lambda: ["*"])
 
 
 # 官方更新源：配置未写 update.repo 时作为默认值（零配置即可检查更新）
@@ -766,8 +770,9 @@ def resolve_commands(global_cfg: CommandsConfig,
 
 
 def validate_web_security(host: str, auth_password: str,
-                          context: str = "web") -> None:
-    """非回环绑定必须配置登录密码（安全审计 2026-11-04 M1）。
+                          context: str = "web",
+                          api_keys: list[str] | None = None) -> None:
+    """非回环绑定必须配置登录密码或 API Key（安全审计 2026-11-04 M1）。
 
     看板含全盘文件浏览、任务写档与 Agent 启停控制，把无鉴权的服务暴露到
     局域网等同把机器交给同网段任何人——host 非回环时拒绝（而非仅告警，
@@ -779,10 +784,11 @@ def validate_web_security(host: str, auth_password: str,
         loopback = h == "localhost" or ipaddress.ip_address(h).is_loopback
     except ValueError:
         loopback = False  # 无法解析的主机名一律按非回环从严处理
-    if not loopback and not (auth_password or "").strip():
+    has_auth = bool((auth_password or "").strip()) or bool(api_keys and any(str(k).strip() for k in api_keys))
+    if not loopback and not has_auth:
         raise ValueError(
             f"{context}: web.host 绑定到非回环地址（{host}）时必须设置 web.auth_password "
-            f"登录密码。请设置密码，或将 host 改回 127.0.0.1（仅本机访问）。")
+            f"登录密码或 web.api_keys 访问密钥。请设置凭据，或将 host 改回 127.0.0.1（仅本机访问）。")
 
 
 _SAFE_ID_RE = re.compile(r"^[\w][\w\-]{0,40}$")
@@ -1107,15 +1113,34 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     )
 
     web_raw = raw.get("web") or {}
+    api_keys_in = web_raw.get("api_keys")
+    api_keys: list[str] = []
+    if isinstance(api_keys_in, list):
+        api_keys = [str(k).strip() for k in api_keys_in if str(k).strip()]
+    elif isinstance(api_keys_in, str):
+        api_keys = [k.strip() for k in api_keys_in.split(",") if k.strip()]
+    single_key = str(web_raw.get("api_key") or "").strip()
+    if single_key and single_key not in api_keys:
+        api_keys.append(single_key)
+
+    cors_raw = web_raw.get("cors_origins")
+    cors_origins: list[str] = ["*"]
+    if isinstance(cors_raw, list):
+        cors_origins = [str(o).strip() for o in cors_raw if str(o).strip()] or ["*"]
+    elif isinstance(cors_raw, str):
+        cors_origins = [o.strip() for o in cors_raw.split(",") if o.strip()] or ["*"]
+
     web = WebConfig(
         host=str(web_raw.get("host", "127.0.0.1")),
         port=int(web_raw.get("port", 5116)),
         open_browser=bool(web_raw.get("open_browser", True)),
         auth_password=str(web_raw.get("auth_password") or ""),
+        api_keys=api_keys,
+        cors_origins=cors_origins,
     )
     # 非回环绑定 + 无鉴权的组合直接拒绝启动（M1）：错误经 _config_fatal 呈现，
-    # 文案给出两条可行动出路（设密码 / 改回 127.0.0.1）
-    validate_web_security(web.host, web.auth_password, context="配置文件")
+    # 文案给出两条可行动出路（设密码/Key / 改回 127.0.0.1）
+    validate_web_security(web.host, web.auth_password, context="配置文件", api_keys=web.api_keys)
 
     upd_raw = raw.get("update") or {}
     update = UpdateConfig(
@@ -1500,9 +1525,13 @@ def save_config(cfg: AppConfig) -> None:
         "logging": {"level": cfg.logging.level, "file": cfg.logging.file,
                     "retention_days": cfg.logging.retention_days,
                     "max_total_mb": cfg.logging.max_total_mb},
-        "web": {"host": cfg.web.host, "port": cfg.web.port,
-                "open_browser": cfg.web.open_browser,
-                "auth_password": cfg.web.auth_password},
+        "web": {
+            "host": cfg.web.host, "port": cfg.web.port,
+            "open_browser": cfg.web.open_browser,
+            "auth_password": cfg.web.auth_password,
+            **({"api_keys": list(cfg.web.api_keys)} if cfg.web.api_keys else {}),
+            **({"cors_origins": list(cfg.web.cors_origins)} if cfg.web.cors_origins != ["*"] else {}),
+        },
         # 全局工具开关：只落盘显式关闭/开启的项（空 dict = 全默认启用）
         "tools": dict(cfg.tools.enabled),
         # 命令白名单开关：只落盘显式禁用/启用的项（空 dict = 默认全放行）

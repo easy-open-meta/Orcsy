@@ -151,15 +151,37 @@ def save_settings(state: AppState, data: dict) -> dict:
             state._invalidate_sessions()  # 密码变更后旧会话全部作废
     elif auth_password and not is_password_hashed(auth_password):
         auth_password = hash_password(auth_password)
+
+    # api_keys 三态：键缺失=保持原值；显式提供=按新值更新（列表或逗号分隔串）；留空=清空
+    api_keys = list(state.config.web.api_keys)
+    if "api_keys" in web:
+        raw_keys = web.get("api_keys")
+        if isinstance(raw_keys, list):
+            api_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+        elif isinstance(raw_keys, str):
+            api_keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
+        elif raw_keys is None:
+            api_keys = []
+
+    cors_origins = list(state.config.web.cors_origins)
+    if "cors_origins" in web:
+        raw_cors = web.get("cors_origins")
+        if isinstance(raw_cors, list):
+            cors_origins = [str(o).strip() for o in raw_cors if str(o).strip()] or ["*"]
+        elif isinstance(raw_cors, str):
+            cors_origins = [o.strip() for o in raw_cors.split(",") if o.strip()] or ["*"]
+
     cfg_host = str(web.get("host") or state.config.web.host)
-    # 非回环绑定必须带登录密码（M1）：host 与密码都已定案后校验，
+    # 非回环绑定必须带登录密码或 API Key（M1）：host 与密码都已定案后校验，
     # 不合规抛 ValueError → 400 透传看板，配置不落盘
-    validate_web_security(cfg_host, auth_password, context="看板保存的 web 配置")
+    validate_web_security(cfg_host, auth_password, context="看板保存的 web 配置", api_keys=api_keys)
     state.config.web = WebConfig(
         host=cfg_host,
         port=port,
         open_browser=bool(web.get("open_browser", state.config.web.open_browser)),
         auth_password=auth_password,
+        api_keys=api_keys,
+        cors_origins=cors_origins,
     )
     # 日志保留天数：0 表示关闭自动归档与清理；体积上限同理（0 = 不限制）。
     # 都不能用 `or` 兜底——0 是显式关闭意图，不是「未填」

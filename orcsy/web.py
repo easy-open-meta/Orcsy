@@ -76,6 +76,7 @@ API（均为 GET/POST JSON）：
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -283,8 +284,18 @@ class AppState:
 
     @property
     def auth_enabled(self) -> bool:
-        """配置了登录密码即开启鉴权；留空 = 关闭（本机使用零打扰）。"""
-        return bool(self.config.web.auth_password)
+        """配置了登录密码或静态 API Key 即开启鉴权；均留空 = 关闭（本机使用零打扰）。"""
+        return bool(self.config.web.auth_password) or bool(self.config.web.api_keys)
+
+    def is_valid_api_key(self, key: str | None) -> bool:
+        """校验静态 API 密钥（恒定时间比对，抗时序侧信道攻击）。"""
+        if not key or not self.config.web.api_keys:
+            return False
+        k = str(key).strip()
+        for valid_key in self.config.web.api_keys:
+            if valid_key and hmac.compare_digest(k, str(valid_key).strip()):
+                return True
+        return False
 
     def login(self, password: str, client_ip: str = "") -> dict:
         """校验登录密码；成功颁发会话 token（由 handler 负责下发 Cookie）。
@@ -351,10 +362,13 @@ class AppState:
                 return False
             return True
 
-    def auth_status(self, token: str | None) -> dict:
+    def auth_status(self, token: str | None, api_key: str | None = None) -> dict:
         enabled = self.auth_enabled
-        return {"ok": True, "enabled": enabled,
-                "authed": (not enabled) or self.token_valid(token)}
+        authed = ((not enabled)
+                  or self.token_valid(token)
+                  or self.is_valid_api_key(token)
+                  or self.is_valid_api_key(api_key))
+        return {"ok": True, "enabled": enabled, "authed": authed}
 
     def _prune_sessions(self) -> None:
         """清掉过期会话（调用方须持有 _auth_lock）。"""
@@ -557,6 +571,9 @@ class AppState:
                 "open_browser": self.config.web.open_browser,
                 # 只回显开关状态，绝不回显密码本身
                 "auth_enabled": self.auth_enabled,
+                "api_keys_configured": bool(self.config.web.api_keys),
+                "api_keys_masked": [mask_secret(k) for k in self.config.web.api_keys],
+                "cors_origins": list(self.config.web.cors_origins),
             },
             "update_cfg": {
                 "repo": self.config.update.repo,
@@ -1802,6 +1819,22 @@ class WebHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # noqa: A002 — 静默默认访问日志
         pass
 
+    def _cors_headers(self) -> list[tuple[str, str]]:
+        """为支持第三方系统/跨域单页调用生成标准 CORS 响应头。"""
+        origins = getattr(self.state.config.web, "cors_origins", None) or ["*"]
+        req_origin = self.headers.get("Origin", "")
+        allow_origin = "*"
+        if "*" not in origins and req_origin in origins:
+            allow_origin = req_origin
+        elif "*" not in origins and origins:
+            allow_origin = origins[0]
+        return [
+            ("Access-Control-Allow-Origin", allow_origin),
+            ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+            ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key"),
+            ("Access-Control-Max-Age", "86400"),
+        ]
+
     def _json(self, obj: dict, code: int = 200,
               extra_headers: list[tuple[str, str]] | None = None) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -1809,10 +1842,20 @@ class WebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in self._cors_headers():
+            self.send_header(name, value)
         for name, value in extra_headers or ():
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        """处理跨域预检请求（Preflight）：免鉴权直接返回允许的方法与头部。"""
+        self.send_response(204)
+        for name, value in self._cors_headers():
+            self.send_header(name, value)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _read_body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -1837,9 +1880,37 @@ class WebHandler(BaseHTTPRequestHandler):
         morsel = jar.get(AUTH_COOKIE)
         return morsel.value if morsel else None
 
+    def _bearer_token(self) -> str | None:
+        """从 Authorization: Bearer <token_or_key> 提取凭证。"""
+        auth_hdr = self.headers.get("Authorization", "").strip()
+        if auth_hdr.lower().startswith("bearer "):
+            val = auth_hdr[7:].strip()
+            return val if val else None
+        return None
+
+    def _api_key(self) -> str | None:
+        """从 X-API-Key 头提取静态 API 密钥。"""
+        k = self.headers.get("X-API-Key", "").strip()
+        return k if k else None
+
     def _authorized(self) -> bool:
-        return (not self.state.auth_enabled
-                or self.state.token_valid(self._cookie_token()))
+        """三模鉴权判定：未开鉴权放行；或通过 Bearer / X-API-Key / Cookie 任一凭据认证。"""
+        if not self.state.auth_enabled:
+            return True
+        # 1. Bearer Token：兼容动态会话 Token 与静态 API Key
+        bearer = self._bearer_token()
+        if bearer:
+            if self.state.token_valid(bearer) or self.state.is_valid_api_key(bearer):
+                return True
+        # 2. X-API-Key 请求头
+        api_k = self._api_key()
+        if api_k and self.state.is_valid_api_key(api_k):
+            return True
+        # 3. 会话 Cookie
+        cookie_t = self._cookie_token()
+        if cookie_t and self.state.token_valid(cookie_t):
+            return True
+        return False
 
     def _deny(self) -> None:
         self._json({"ok": False, "unauthorized": True,
@@ -1871,7 +1942,8 @@ class WebHandler(BaseHTTPRequestHandler):
         if path == "/" or path == "/index.html":
             self._html()
         elif path == "/api/auth":
-            self._json(self.state.auth_status(self._cookie_token()))
+            auth_token = self._bearer_token() or self._cookie_token()
+            self._json(self.state.auth_status(auth_token, api_key=self._api_key()))
         elif path == "/api/state":
             self._json(self.state.full_state())
         elif path == "/api/guide":
@@ -1920,6 +1992,8 @@ class WebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
+        for name, value in self._cors_headers():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
