@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
-import { computed, reactive, ref, shallowRef, watch } from 'vue'
-import { api, type DirListing, type ModelInfo, type PermissionMode } from '../api'
-import { navigateTo, refresh, ui, store } from '../store'
+import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
+import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode } from '../api'
+import { isMobile, viewportHeight } from '../mobile'
+import { beginRestartWait, navigateTo, refresh, ui, store } from '../store'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
 // bridge 兼容两种用法：message('文本') 默认 info；message.success('文本') 等——
@@ -56,16 +57,19 @@ const teamMemberKeyTouched = reactive<Record<string, boolean>>({})
 const gitIniting = shallowRef(false)
 
 const roleSelectOptions = [
-  { label: '👑 项目经理 (PM)', value: 'pm' },
-  { label: '⚙️ 后端开发工程师', value: 'backend' },
-  { label: '🎨 前端开发工程师', value: 'frontend' },
-  { label: '🧪 测试工程师 (QA)', value: 'qa' },
-  { label: '🧩 自定义专职角色', value: 'custom' },
+  { label: '项目经理 (PM)', value: 'pm' },
+  { label: '后端开发工程师', value: 'backend' },
+  { label: '前端开发工程师', value: 'frontend' },
+  { label: '测试工程师 (QA)', value: 'qa' },
+  { label: '自定义专职角色', value: 'custom' },
 ]
 
 function getMemberRoleIcon(role: string): string {
-  const map: Record<string, string> = { pm: '👑', backend: '⚙️', frontend: '🎨', qa: '🧪', custom: '🧩' }
-  return map[role] || '🤖'
+  const map: Record<string, string> = {
+    pm: 'manage_accounts', backend: 'terminal', frontend: 'palette',
+    qa: 'science', custom: 'extension',
+  }
+  return map[role] || 'smart_toy'
 }
 
 const globalProfileOptions = computed(() => {
@@ -139,31 +143,31 @@ const defaultProjectToolCategories = [
   {
     key: 'file_ops',
     label: '文件操作与编辑',
-    icon: '📁',
+    icon: 'folder',
     tools: ['read_file', 'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'list_dir'],
   },
   {
     key: 'code_search',
     label: '代码搜索与定位',
-    icon: '🔍',
+    icon: 'search',
     tools: ['find_files', 'grep'],
   },
   {
     key: 'command_exec',
     label: '终端命令执行',
-    icon: '💻',
+    icon: 'terminal',
     tools: ['run_command'],
   },
   {
     key: 'task_collab',
     label: '任务管理与协议',
-    icon: '⚡',
+    icon: 'bolt',
     tools: ['create_tasks', 'finish'],
   },
   {
     key: 'external_net',
     label: '网络与外部知识',
-    icon: '🌐',
+    icon: 'language',
     tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
   },
   {
@@ -735,7 +739,11 @@ const tDraft = reactive({
   parent_id: '',
   qa_round: 0,
   dep_state: '',
+  // 乐观锁基准（编辑已有任务时由 /api/task 下发；保存时回传 base_version）
+  versionToken: '',
 })
+// 409 冲突后「保留我的修改」重试标记：下次 saveTask 带 force_overwrite=true
+const tForceOverwrite = shallowRef(false)
 const PRI_OPTIONS = ['P0', 'P1', 'P2', 'P3', 'P4']
 const priOptions = computed(() => {
   const opts = PRI_OPTIONS.map(v => ({ label: v, value: v }))
@@ -772,14 +780,81 @@ const projectAssigneeOptions = computed(() => {
     }
   } else {
     opts.push(
-      { label: '👑 项目经理 (pm)', value: 'pm' },
-      { label: '⚙️ 后端开发 (backend)', value: 'backend' },
-      { label: '🎨 前端开发 (frontend)', value: 'frontend' },
-      { label: '🧪 测试工程师 (qa)', value: 'qa' },
+      { label: '项目经理 (pm)', value: 'pm' },
+      { label: '后端开发 (backend)', value: 'backend' },
+      { label: '前端开发 (frontend)', value: 'frontend' },
+      { label: '测试工程师 (qa)', value: 'qa' },
     )
   }
   return opts
 })
+
+// ---- 编辑草稿本地暂存（移动端远程编辑防丢）：输入防抖 300ms 落 localStorage，
+// 异常中断（来电/切后台被杀）重开时提示恢复；保存成功即清除 ----
+const DRAFT_PREFIX = 'orcsy_draft_'
+const draftKey = computed(() => {
+  if (!ui.taskDlg || tReadonly.value) return ''
+  return `${DRAFT_PREFIX}${ui.taskDlg.project}_${ui.taskDlg.id || 'new'}`
+})
+const draftAvailable = shallowRef(false)
+let draftTimer = 0
+
+function saveDraft(): void {
+  if (!draftKey.value) return
+  localStorage.setItem(draftKey.value, JSON.stringify({
+    title: tDraft.title, priority: tDraft.priority, labels: tDraft.labels,
+    assignee: tDraft.assignee, description: tDraft.description,
+    depends_on: tDraft.depends_on, at: Date.now(),
+  }))
+}
+function clearDraft(): void {
+  if (draftKey.value) localStorage.removeItem(draftKey.value)
+  draftAvailable.value = false
+}
+function restoreDraft(): void {
+  try {
+    const raw = draftKey.value ? localStorage.getItem(draftKey.value) : null
+    if (!raw) return
+    const d = JSON.parse(raw) as Record<string, any>
+    if (typeof d.title === 'string') tDraft.title = d.title
+    if (typeof d.priority === 'string') tDraft.priority = d.priority
+    if (typeof d.labels === 'string') tDraft.labels = d.labels
+    if (typeof d.assignee === 'string') tDraft.assignee = d.assignee
+    if (typeof d.description === 'string') tDraft.description = d.description
+    if (Array.isArray(d.depends_on)) tDraft.depends_on = d.depends_on
+    draftAvailable.value = false
+    message.success('已恢复未保存的草稿')
+  } catch { /* 草稿损坏按无草稿处理 */ }
+}
+function discardDraft(): void {
+  clearDraft()
+  message.success('已丢弃草稿')
+}
+// 弹窗内容变化防抖落草稿；首次加载（watch 里填值）不触发——用 pending 标记
+let draftPaused = true
+watch(tDraft, () => {
+  if (draftPaused || !draftKey.value) return
+  window.clearTimeout(draftTimer)
+  draftTimer = window.setTimeout(saveDraft, 300)
+})
+
+// ---- 移动端 Markdown 快捷工具条：一键插入常用标记，光标定位插入点 ----
+const descInputRef = ref<any>(null)
+
+async function mdInsert(before: string, after = ''): Promise<void> {
+  const el: HTMLTextAreaElement | undefined = descInputRef.value?.textareaElRef
+    ?? descInputRef.value?.$el?.querySelector?.('textarea')
+  if (!el) return
+  const s = el.selectionStart ?? tDraft.description.length
+  const e = el.selectionEnd ?? s
+  const sel = tDraft.description.slice(s, e)
+  const insert = `${before}${sel}${after}`
+  tDraft.description = tDraft.description.slice(0, s) + insert + tDraft.description.slice(e)
+  await nextTick()
+  el.focus()
+  const caret = s + before.length + sel.length
+  el.setSelectionRange(caret, caret)
+}
 
 watch(() => ui.taskDlg, async (dlg) => {
   if (!dlg) return
@@ -796,6 +871,11 @@ watch(() => ui.taskDlg, async (dlg) => {
   tDraft.parent_id = ''
   tDraft.qa_round = 0
   tDraft.dep_state = ''
+  tDraft.versionToken = ''
+  tForceOverwrite.value = false
+  // 打开即暂停草稿落盘（watch 填值期间不当作用户输入），填完再恢复
+  draftPaused = true
+  draftAvailable.value = false
   if (dlg.id) {
     // 先用看板缓存填，再拉全文覆盖（/api/state 描述截断 2000 字）；
     // 归档任务不在 tasks 里，从 archived 缓存找，最终以 /api/task 的全文为准
@@ -817,12 +897,22 @@ watch(() => ui.taskDlg, async (dlg) => {
       if (r.parent_id) tDraft.parent_id = r.parent_id
       if (r.qa_round) tDraft.qa_round = r.qa_round
       if (r.error) tDraft.err = `注意：任务文件解析有问题 —— ${r.error}`
+      // 版本快照：编辑保存时回传 base_version 触发乐观锁比对
+      tDraft.versionToken = r.version_token || ''
     } catch { /* 拉不到就用缓存 */ }
   }
+  // 有未保存草稿则提示恢复（防来电/切后台杀进程丢输入）
+  try {
+    const raw = draftKey.value ? localStorage.getItem(draftKey.value) : null
+    draftAvailable.value = !!(raw && !tReadonly.value)
+  } catch { draftAvailable.value = false }
+  await nextTick()
+  draftPaused = false
 })
 
-async function saveTask(): Promise<void> {
+async function saveTask(force = false): Promise<void> {
   if (!ui.taskDlg || tReadonly.value) return
+  if (force) tForceOverwrite.value = true
   try {
     // id 留空 = 后端自动生成「优先级-标题」；title 留空则报错
     await api.taskSave({
@@ -833,11 +923,161 @@ async function saveTask(): Promise<void> {
       assignee: tDraft.assignee.trim(),
       depends_on: tDraft.depends_on,
       description: tDraft.description,
+      // 乐观锁：编辑已有任务带 base_version 比对；409 后明确选择覆盖才带 force
+      ...(tDraft.versionToken && !force ? { base_version: tDraft.versionToken } : {}),
+      ...(force ? { force_overwrite: true } : {}),
     })
     message.success('任务已保存')
+    clearDraft()
     ui.taskDlg = null
-  } catch (e: any) { tDraft.err = e.message }
+  } catch (e: any) {
+    if (e instanceof ConflictError) {
+      tDraft.err = ''
+      const latest = e.latestTask || {}
+      window.$dialog?.warning({
+        title: '任务已被修改',
+        content: `${e.message}\n\n当前最新状态：[${latest.priority || '?'}] ${latest.title || latest.id || ''}`
+          + `（${latest.status || '?'}）。\n\n选择「保留我的修改」将覆盖最新内容；「采用最新状态」会放弃本页未保存的输入。`,
+        positiveText: '保留我的修改',
+        negativeText: '采用最新状态',
+        onPositiveClick() { void saveTask(true) },
+        onNegativeClick() {
+          // 载入最新内容：放弃本页输入，以服务端最新为准
+          if (latest.title != null) tDraft.title = latest.title
+          if (latest.priority != null) tDraft.priority = latest.priority
+          if (latest.description != null) tDraft.description = latest.description
+          if (Array.isArray(latest.depends_on)) tDraft.depends_on = [...latest.depends_on]
+          if (latest.assignee != null) tDraft.assignee = latest.assignee
+          if (latest.labels) {
+            tDraft.labels = Array.isArray(latest.labels)
+              ? latest.labels.join(', ') : String(latest.labels)
+          }
+          tDraft.versionToken = latest.version_token || ''
+          tForceOverwrite.value = false
+          tDraft.err = '已载入最新任务内容，请核对后再保存'
+        },
+      })
+      return
+    }
+    tDraft.err = e.message
+  }
   void refresh(true)
+}
+
+// ---------- 手机连接向导（移动端远程访问） ----------
+// 枚举本机可达地址（局域网直连/公网域名/回环）+ 扫码二维码；后端 /api/system/endpoints
+// 免登录，二维码 /api/system/qr 需登录（桌面端此刻必然已登录）。
+// 仅监听 127.0.0.1 时：不渲染打不开的回环二维码，改为展示「开放手机访问」操作指引
+const cVisible = computed(() => ui.connectDlg)
+const cEndpoints = shallowRef<{ name: string; url: string; active?: boolean }[]>([])
+const cAuthRequired = shallowRef(false)
+const cAllLoopback = shallowRef(false)
+const cHint = shallowRef('')
+const cLoading = shallowRef(false)
+const cQrSvg = shallowRef('')
+const cSelected = shallowRef('')
+const cEnableChecked = shallowRef(false)
+
+watch(() => ui.connectDlg, async (show) => {
+  if (!show) return
+  cLoading.value = true
+  cQrSvg.value = ''
+  cSelected.value = ''
+  try {
+    const r = await api.systemEndpoints()
+    cEndpoints.value = r.endpoints || []
+    cAuthRequired.value = r.auth_required
+    cAllLoopback.value = r.all_loopback === true
+    cHint.value = r.hint || ''
+    cPasswordConfigured.value = r.password_configured === true
+    // 二维码默认地址：公网域名 → 可达局域网地址；仅回环可达时不选（改出指引卡片）
+    const actives = cEndpoints.value.filter(e => e.active !== false)
+    const prefer = actives.find(e => e.url.startsWith('https://'))
+      || actives.find(e => !e.url.includes('127.0.0.1'))
+    await selectEndpoint(prefer?.url || '')
+  } catch (e: any) { message.error(e.message) }
+  finally { cLoading.value = false }
+})
+
+async function selectEndpoint(url: string): Promise<void> {
+  cSelected.value = url
+  cQrSvg.value = ''
+  if (!url) return
+  try { cQrSvg.value = await api.systemQr(url) } catch { cQrSvg.value = '' }
+}
+
+function clickEndpoint(e: { name: string; url: string; active?: boolean }): void {
+  if (e.active === false) {
+    message.warning('该地址未开放：可勾选上方「一键开放手机访问」自动改配置并重启。')
+    return
+  }
+  void selectEndpoint(e.url)
+}
+
+// ---- 一键开放手机访问：打勾 → 确认 → 改配置落盘（host=0.0.0.0 + 密码）→ 自动重启 ----
+// 复用 /api/config（settings_service 落盘 + PBKDF2 密文存储）与 /api/app-restart +
+// 自更新同款「重启等待」UI（遮罩 + 应用回归自动 reload）。生成的访问密码暂存
+// sessionStorage：重启 reload 后登录页横幅再展示一次（配置里只存密文，不可找回）
+const cEnableBusy = shallowRef(false)
+const cEnabled = shallowRef(false)      // 配置已保存（等待重启生效）
+const cPasswordConfigured = shallowRef(false)
+const cEnableNote = shallowRef('')
+
+function genPassword(): string {
+  // 无歧义字母表（去 0/O/1/l/I）：手机手抄也认得出的 12 位强密码（CSPRNG）
+  const chars = '23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ'
+  const rnd = crypto.getRandomValues(new Uint32Array(12))
+  return Array.from(rnd, n => chars[n % chars.length]).join('')
+}
+
+function onEnableToggle(on: boolean): void {
+  if (!on || cEnableBusy.value || cEnabled.value) return
+  // 未配置登录密码时自动生成一个（沿用现有密码时留空 = 不改）
+  const pwd = cPasswordConfigured.value ? '' : genPassword()
+  window.$dialog?.warning({
+    title: '开放手机局域网访问？',
+    content: (cPasswordConfigured.value
+      ? '看板将绑定全部网卡（web.host: 0.0.0.0），沿用现有登录密码。'
+      : '看板将绑定全部网卡（web.host: 0.0.0.0），并设置访问密码：\n\n${pwd}\n\n请先复制保存该密码（手机登录要用；配置里只存密文，此弹窗关闭后不可再查看，重启后登录页会再提示一次）。'
+      + '\n\n配置保存后应用会自动重启（数秒离线），重启后重新打开本向导即可看到可扫码的局域网地址。'),
+    positiveText: '开启并自动重启',
+    negativeText: '取消',
+    onPositiveClick() { void doEnable(pwd) },
+    onNegativeClick() { cEnableChecked.value = false },
+    onClose() { cEnableChecked.value = false },
+  })
+}
+
+async function doEnable(pwd: string): Promise<void> {
+  cEnableBusy.value = true
+  try {
+    // settings_service 分块保存：只带 web 键，其余配置项保持原值不动
+    await api.config({ web: { host: '0.0.0.0', ...(pwd ? { auth_password: pwd } : {}) } })
+    cEnabled.value = true
+    cEnableNote.value = ''
+    if (pwd) {
+      // 新密码只此一次明文：暂存 sessionStorage，重启 reload 后登录页横幅再提示
+      sessionStorage.setItem('orcsyMobilePwd', pwd)
+    }
+    try {
+      await api.restartApp()
+      beginRestartWait()  // 遮罩 + 探测应用回归后自动 reload（登录页横幅提示密码）
+    } catch (e: any) {
+      // 源码/Docker 部署不支持程序内重启：配置已落盘，指引用户手动重启
+      cEnableNote.value = '配置已保存，但程序内重启不可用（'
+        + (e.message || '当前部署方式') + '）——请手动重启 Orcsy 后生效。'
+    }
+  } catch (e: any) {
+    cEnableChecked.value = false
+    message.error(e.message || '开启失败')
+  } finally { cEnableBusy.value = false }
+}
+
+async function copyEndpoint(url: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(url)
+    message.success('已复制访问地址')
+  } catch { message.error('复制失败，请长按地址手动复制') }
 }
 
 // ---------- 人工把关提交 ----------
@@ -1052,7 +1292,7 @@ async function newFolder(): Promise<void> {
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <label class="checkline" style="margin:0; gap:8px;">
           <NSwitch v-model:value="pDraft.team.enabled" />
-          <span style="font-weight:600; font-size:13px; color:var(--text)">👥 多模型 Agent 项目小组模式 (Team)</span>
+          <span style="font-weight:600; font-size:13px; color:var(--text)"><i class="ms sm">group</i> 多模型 Agent 项目小组模式 (Team)</span>
         </label>
         <NTag size="tiny" round :type="pDraft.team.enabled ? 'info' : 'default'">
           {{ pDraft.team.enabled ? '小组协同模式已启用' : '传统单兵模式' }}
@@ -1103,10 +1343,10 @@ async function newFolder(): Promise<void> {
 
           <div style="display:flex; flex-direction:column; gap:8px;">
             <div v-for="(m, mIdx) in pDraft.team.members" :key="m.id" style="border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:var(--card);">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="tm-head" style="display:flex; justify-content:space-between; align-items:center;">
                 <div style="display:flex; align-items:center; gap:6px;">
                   <NSwitch size="small" v-model:value="m.enabled" />
-                  <span style="font-weight:600; font-size:12px; display:inline-flex; align-items:center;">{{ getMemberRoleIcon(m.role || m.id) }} {{ m.name || m.id }}</span>
+                  <span style="font-weight:600; font-size:12px; display:inline-flex; align-items:center;"><i class="ms sm">{{ getMemberRoleIcon(m.role || m.id) }}</i> {{ m.name || m.id }}</span>
                   <NTag size="tiny" round type="info">{{ (m.role || m.id).toUpperCase() }}</NTag>
                   <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">id: {{ m.id }}</NTag>
                 </div>
@@ -1116,7 +1356,7 @@ async function newFolder(): Promise<void> {
                 </div>
               </div>
 
-              <div v-if="m.enabled" style="margin-top:8px; display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <div v-if="m.enabled" class="tm-grid" style="margin-top:8px; display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                 <div>
                   <label style="font-size:11px">引用全局预设</label>
                   <NSelect size="small" v-model:value="m.profile" :options="globalProfileOptions" clearable placeholder="自定义配置" />
@@ -1147,7 +1387,7 @@ async function newFolder(): Promise<void> {
               <div v-if="m.enabled" style="margin-top:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
                   <label style="font-size:11px; margin:0; color:var(--dim)">角色专属提示词覆盖 (选填)</label>
-                  <NButton size="tiny" quaternary type="primary" @click="loadMemberTemplate(m)" style="font-size:10px; padding:0 2px">📋 载入内置模版</NButton>
+                  <NButton size="tiny" quaternary type="primary" @click="loadMemberTemplate(m)" style="font-size:10px; padding:0 2px"><i class="ms sm">description</i> 载入内置模版</NButton>
                 </div>
                 <NInput size="small" v-model:value="m.extra_prompt" type="textarea" :rows="2" :autosize="{ minRows: 2, maxRows: 6 }"
                         placeholder="留空继承全局预设提示词；亦可载入内置模版或填入本项目特定规范" />
@@ -1227,7 +1467,7 @@ async function newFolder(): Promise<void> {
     </template>
     <label style="margin-top:12px">访问权限（人工审批模式）</label>
     <NSelect v-model:value="pDraft.perm_mode" :options="permOptions" />
-    <div class="hint">询问 = 任务挂起等待看板顶栏「🔔 待审批」批准/拒绝；超时自动拒绝，任务不会永久挂起。</div>
+    <div class="hint">询问 = 任务挂起等待看板顶栏「待审批」批准/拒绝；超时自动拒绝，任务不会永久挂起。</div>
     <label class="checkline" style="margin-top:12px">
       <NSwitch v-model:value="pDraft.use_tools" />
       覆盖 Agent 工具开关（关闭=跟随全局「Agent 工具能力」配置）
@@ -1254,7 +1494,7 @@ async function newFolder(): Promise<void> {
         <div v-for="cat in projectToolCategories" :key="cat.key" class="pcat-group">
           <div class="pcat-head">
             <div style="display:flex;align-items:center;gap:6px">
-              <span>{{ cat.icon }}</span>
+              <span><i class="ms sm">{{ cat.icon }}</i></span>
               <span style="font-weight:600;font-size:12px;color:var(--text)">{{ cat.label }}</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px">
@@ -1281,7 +1521,7 @@ async function newFolder(): Promise<void> {
       <div class="hint" style="margin-top:4px">finish 为协议工具始终可用；其余开关保存后立即生效（下一轮任务按此执行）。</div>
     </template>
     <div style="margin-top:10px">
-      <label style="font-size:12px;font-weight:bold">🌐 额外允许的调试主机（局域网测试机 / 内部域名）</label>
+      <label style="font-size:12px;font-weight:bold"><i class="ms sm">language</i> 额外允许的调试主机（局域网测试机 / 内部域名）</label>
       <NInput v-model:value="pDraft.debug_hosts_text" type="textarea" :rows="2"
               placeholder="每行一个主机名或IP（如 192.168.1.50 或 dev.local，只追加，全局回环地址默认放行）" />
       <div class="hint">该项目测试时允许额外访问的主机白名单；链路本地与云元数据等硬禁区强制拦截。</div>
@@ -1354,9 +1594,28 @@ async function newFolder(): Promise<void> {
     </div>
   </NModal>
 
-  <!-- 任务 编辑/新建/只读查看 -->
+  <!-- 任务 编辑/新建/只读查看。
+       移动端（≤768px）切换为全屏抽屉（Sheet）：吸顶操作条（取消/保存常驻可视区，
+       软键盘顶起时仍可触达）+ Markdown 快捷工具条 + 草稿恢复提示；高度跟随
+       visualViewport（键盘弹起自动压缩滚动区，杜绝遮挡） -->
   <NModal v-model:show="tVisible" preset="card" :title="tTitle"
-          style="width: min(560px, 92vw)">
+          :class="isMobile ? 'tsheet' : ''"
+          :style="isMobile
+            ? { width: '100vw', height: viewportHeight + 'px', maxHeight: viewportHeight + 'px' }
+            : { width: 'min(560px, 92vw)' }">
+    <!-- 移动端吸顶操作条：保存/取消永远固定在最顶端 -->
+    <div class="tsheet-bar" v-if="isMobile">
+      <NButton size="small" quaternary @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
+      <span class="tsheet-title">{{ tTitle }}</span>
+      <NButton v-if="!tReadonly" size="small" type="primary"
+               @click="saveTask(tForceOverwrite)">保存</NButton>
+    </div>
+    <!-- 未保存草稿恢复提示：来电/切后台被杀后重开不丢输入 -->
+    <div class="draftbar" v-if="draftAvailable">
+      <span class="draftbar-msg">检测到未保存的草稿</span>
+      <NButton size="tiny" type="primary" @click="restoreDraft">恢复</NButton>
+      <NButton size="tiny" quaternary @click="discardDraft">丢弃</NButton>
+    </div>
     <div class="hint" v-if="tReadonly">该任务不在待办状态（已归档/执行中/受阻），只读查看；重新入队后再编辑。</div>
     <div class="hint" v-else>仅待办（open）状态的任务可编辑；执行中/受阻的任务请等本轮结束后再改。</div>
     <div class="err" v-if="tDraft.err">{{ tDraft.err }}</div>
@@ -1382,7 +1641,17 @@ async function newFolder(): Promise<void> {
       </div>
     </div>
     <label>任务描述（Markdown 正文）</label>
-    <NInput v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
+    <!-- 移动端 Markdown 快捷工具条：一键插入标题/待办/加粗/代码块 -->
+    <div class="md-bar" v-if="isMobile && !tReadonly">
+      <button type="button" @click="mdInsert('# ', '')">H1</button>
+      <button type="button" @click="mdInsert('## ', '')">H2</button>
+      <button type="button" @click="mdInsert('- [ ] ', '')">☑ 待办</button>
+      <button type="button" @click="mdInsert('- ', '')">• 列表</button>
+      <button type="button" @click="mdInsert('**', '**')">B 粗体</button>
+      <button type="button" @click="mdInsert('`', '`')">‹code›</button>
+      <button type="button" @click="mdInsert('\n```\n', '\n```\n')">```</button>
+    </div>
+    <NInput ref="descInputRef" v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
     <!-- 结构化审查意见（从正文「## 审查结果」节解析）：severity 色标条目列表 -->
     <template v-if="reviewIssues.length">
       <label style="margin-top:10px">审查意见（独立审查 Agent 退回的问题清单）</label>
@@ -1395,10 +1664,52 @@ async function newFolder(): Promise<void> {
         </div>
       </div>
     </template>
-    <div class="dlg-actions">
+    <div class="dlg-actions" v-if="!isMobile">
       <NButton @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
-      <NButton v-if="!tReadonly" type="primary" @click="saveTask">保存</NButton>
+      <NButton v-if="!tReadonly" type="primary" @click="saveTask(tForceOverwrite)">保存</NButton>
     </div>
+  </NModal>
+
+  <!-- 手机连接向导：可达地址清单 + 扫码二维码 + 开放指引 -->
+  <NModal v-model:show="cVisible" preset="card" title="手机远程连接"
+          style="width: min(480px, 94vw)">
+    <div class="hint">手机与电脑连同一 Wi-Fi（或经反代/内网穿透/公网域名），用手机相机扫码直达看板；
+      首次打开需输入登录密码{{ cAuthRequired ? '（已开启访问鉴权）' : '（未开启鉴权可直接访问）' }}。</div>
+    <!-- 仅监听 127.0.0.1：不渲染打不开的回环二维码，展示一键开启 + 手动指引 -->
+    <div class="ep-guide" v-if="cAllLoopback && !cLoading">
+      <div class="ep-guide-title">⚠️ 手机现在还连不上：看板只监听了本机回环（127.0.0.1）</div>
+      <div class="ep-enable">
+        <NCheckbox :checked="cEnableChecked" :disabled="cEnableBusy || cEnabled"
+                   @update:checked="onEnableToggle">
+          一键开放手机访问（自动改配置并重启应用）
+        </NCheckbox>
+        <div class="ep-enable-note" v-if="cEnabled">✅ 已开放（配置已保存）{{ cEnableNote ? '——' + cEnableNote : '，应用重启中，请稍候…' }}</div>
+      </div>
+      <div class="ep-guide-steps">
+        <div>手动方式：打开 config.yaml（数据目录下），把 <code>web.host</code> 改为 <code>0.0.0.0</code>，
+          设置 <code>web.auth_password</code> 登录密码后重启。</div>
+      </div>
+      <div class="ep-guide-hint" v-if="cHint">{{ cHint }}</div>
+    </div>
+    <NSpin :show="cLoading">
+      <div class="qr-wrap" v-if="cSelected">
+        <div v-if="cQrSvg" class="qr-svg" v-html="cQrSvg" />
+        <div v-else class="qr-empty">二维码生成失败，请直接输入下方地址</div>
+        <div class="qr-url">{{ cSelected }}</div>
+      </div>
+      <div class="ep-list">
+        <button v-for="e in cEndpoints" :key="e.url" class="ep-item"
+                :class="{ on: cSelected === e.url, off: e.active === false }"
+                @click="clickEndpoint(e)">
+          <span class="ep-name">{{ e.name }}</span>
+          <span class="ep-url">{{ e.url }}</span>
+        </button>
+      </div>
+      <div class="dlg-actions">
+        <NButton size="small" :disabled="!cSelected" @click="copyEndpoint(cSelected)">复制地址</NButton>
+        <NButton size="small" type="primary" @click="ui.connectDlg = false">完成</NButton>
+      </div>
+    </NSpin>
   </NModal>
 
   <!-- AGENT.md 编辑 -->
@@ -1483,7 +1794,7 @@ async function newFolder(): Promise<void> {
     <div class="brow-crumb">
       <!-- parent=="" 是盘符列表根入口（可点）；仅 null/undefined 才禁用 -->
       <NButton size="small" @click="browseTo(bStack?.parent ?? '')"
-               :disabled="bStack?.parent == null">⬆ 上一级</NButton>
+               :disabled="bStack?.parent == null"><i class="ms sm">arrow_upward</i> 上一级</NButton>
       <span class="bcur">{{ bStack?.path || '（请选择盘符 / 常用目录）' }}</span>
     </div>
     <div class="blist">
@@ -1510,7 +1821,7 @@ async function newFolder(): Promise<void> {
 
   <!-- 人工审批面板：列表绑定 store.state.approvals，5s 轮询自动刷新；
        本面板故意不暂停轮询（store.anyModal 不含 approvalDlg），处理结果即时可见 -->
-  <NModal v-model:show="approvalVisible" preset="card" title="🔔 待人工审批"
+  <NModal v-model:show="approvalVisible" preset="card" title="待人工审批"
           style="width: min(640px, 92vw)">
     <div class="hint">
       Agent 按访问权限模式（变更前询问 / 自主模式）挂起了以下操作，等待你的决定；
@@ -1616,4 +1927,81 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .review-issue { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
 .ri-loc { font-family: Consolas, "Cascadia Mono", monospace; color: var(--dim); flex: none; }
 .ri-msg { color: var(--text); min-width: 0; word-break: break-word; }
+
+/* ---- 移动端任务全屏抽屉（Sheet）：吸顶操作条 + 键盘避让 + 工具条 ---- */
+.tsheet { border-radius: 0; }
+.tsheet :deep(.n-card-header) { display: none; }  /* 顶部由吸顶操作条接管 */
+.tsheet :deep(.n-card__content) {
+  display: flex; flex-direction: column;
+  height: calc(100% - 2px); overflow-y: auto; padding-bottom: 24px;
+}
+.tsheet-bar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  background: var(--panel, #131a2a); margin: -8px -8px 8px; padding: 8px 10px;
+  border-bottom: 1px solid var(--line, #253048);
+}
+.tsheet-title { font-size: 14px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: center; }
+.draftbar {
+  display: flex; gap: 8px; align-items: center;
+  background: rgba(91, 140, 255, 0.12); border: 1px solid var(--acc, #5b8cff);
+  border-radius: 8px; padding: 8px 12px; margin-bottom: 8px;
+}
+.draftbar-msg { flex: 1; font-size: 12.5px; color: var(--text); }
+/* Markdown 快捷工具条：手机打字效率（插入位置=当前光标/选区） */
+.md-bar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.md-bar button {
+  appearance: none; border: 1px solid var(--line, #253048); background: var(--card, #1a2235);
+  color: var(--text, #e5eaf6); font: 12px/1.4 inherit; padding: 5px 9px;
+  border-radius: 6px; cursor: pointer;
+}
+.md-bar button:active { border-color: var(--acc, #5b8cff); color: var(--acc, #5b8cff); }
+/* ---- 手机连接向导 ---- */
+.qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 14px 0 6px; }
+.qr-svg { width: 220px; height: 220px; background: #fff; border-radius: 10px;
+  padding: 10px; line-height: 0; }
+.qr-svg :deep(svg) { width: 100%; height: 100%; }
+.qr-empty { font-size: 12.5px; color: var(--dim); padding: 24px 0; }
+.qr-url { font: 13px/1.5 Consolas, monospace; color: var(--text); word-break: break-all;
+  text-align: center; }
+.ep-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.ep-item {
+  appearance: none; cursor: pointer; text-align: left; font: inherit;
+  border: 1px solid var(--line); background: var(--card); border-radius: 8px;
+  padding: 8px 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.ep-item.on { border-color: var(--acc, #5b8cff); }
+.ep-item.off { opacity: 0.55; cursor: not-allowed; }
+/* 小组成员卡片（手机）：头部换行防成员名竖排、按钮截断；字段网格单列 */
+@media (max-width: 768px) {
+  .tm-head { flex-wrap: wrap !important; row-gap: 6px; }
+  .tm-head > div:first-child { flex: 1; min-width: 0; }
+  .tm-head span { white-space: normal; }
+  .tm-grid { grid-template-columns: 1fr !important; }
+}
+.ep-name { font-size: 12.5px; color: var(--dim); }
+.ep-url { font: 12.5px/1.5 Consolas, monospace; color: var(--text); word-break: break-all; }
+/* 仅监听 127.0.0.1 时的开放步骤指引卡片 */
+.ep-guide { border: 1px solid #e8a840; background: rgba(232, 168, 64, 0.12);
+  border-radius: 10px; padding: 12px 14px; margin: 10px 0 4px; }
+.ep-guide-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.ep-guide-steps { font-size: 12.5px; color: var(--text); display: flex;
+  flex-direction: column; gap: 4px; line-height: 1.7; }
+.ep-guide-steps code { font-family: Consolas, monospace; background: rgba(128, 128, 160, 0.18);
+  border-radius: 4px; padding: 1px 5px; }
+.ep-guide-hint { font-size: 11.5px; color: var(--dim); margin-top: 8px; word-break: break-all; }
+.ep-enable { margin: 6px 0 8px; }
+.ep-enable-note { font-size: 12.5px; color: var(--text); margin-top: 6px; word-break: break-all; }
+</style>
+
+<!-- NModal 瞬移到 body 后 scoped :deep() 够不到 NCard 内部节点：这两条须全局。
+     类名 tsheet 是本组件专属（移动端任务全屏抽屉），不与其它样式冲突 -->
+<style>
+.tsheet .n-card-header { display: none; }
+.tsheet .n-card__content {
+  display: flex; flex-direction: column;
+  height: calc(100% - 2px); overflow-y: auto; padding-bottom: 24px;
+}
 </style>
