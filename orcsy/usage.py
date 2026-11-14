@@ -190,11 +190,10 @@ class UsageStore:
             "projects": proj_list,
             "roles": role_list,
             "days": list(day_map.values()),
-            # 最近任务记录只收 kind=task：review 记录的 outcome 是审查结论
-            # （pass/fail/error/skipped），与任务结果（done/blocked/cancelled/open）
-            # 词汇不同，混排会让结果列出现两种 badge 体系（前端按任务结果映射）
-            "recent": list(reversed(
-                [e for e in entries if str(e.get("kind") or "task") == "task"][-20:])),
+            # 最近记录任务与审查同框（kind 字段区分），前端按 kind 分轨渲染
+            # badge：任务用完成/受阻，审查用「🔍 审查通过」等独立词汇——
+            # 不再把审查记录一刀切隐藏（审查结论解释了任务为何受阻/待审）
+            "recent": list(reversed(entries[-20:])),
         }
 
 

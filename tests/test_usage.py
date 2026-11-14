@@ -48,8 +48,8 @@ def check_record_and_summary() -> None:
 
 
 def check_recent_excludes_review() -> None:
-    """最近任务记录只收 kind=task：review 记录（outcome=pass/fail 等）不混入，
-    否则结果列会出现审查结论 badge 与任务结果 badge 两套词汇（bug 修复）。"""
+    """最近记录任务与审查同框（kind 区分），脏 kind 兼容；
+    review 的越界 outcome（旧开发态写的 done）已在 summary 归位为 pass。"""
     tmp = Path(tempfile.mkdtemp(prefix="usage-recent-"))
     try:
         st = UsageStore(tmp / "usage.jsonl")
@@ -57,12 +57,15 @@ def check_recent_excludes_review() -> None:
         st.record("p", "T1", "pass", 1, 50, 5, "m", kind="review")
         st.record("p", "T2", "blocked", 3, 200, 20, "m")
         s = st.summary()
-        assert [r["task_id"] for r in s["recent"]] == ["T2", "T1"], s["recent"]
-        assert all(str(r.get("kind") or "task") == "task" for r in s["recent"])
-        # review 消耗仍进总额/角色聚合（只在任务记录列表隐藏）
+        # 同框：最近记录含任务+审查（新在前），与角色聚合互补
+        assert [r["task_id"] for r in s["recent"]] == ["T2", "T1", "T1"], s["recent"]
+        kinds = [(r.get("kind") or "task") for r in s["recent"]]
+        assert kinds == ["task", "review", "task"], kinds
+        assert [r["outcome"] for r in s["recent"]] == ["blocked", "pass", "done"]
+        # review 消耗仍进总额/角色聚合
         assert s["total"]["tasks"] == 3
         assert any(r["role"] == "review" for r in s["roles"]), s["roles"]
-        print("ok: recent 只收任务记录（review 不混入结果 badge）")
+        print("ok: recent 任务与审查同框（kind 分轨，badge 词汇不混用）")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

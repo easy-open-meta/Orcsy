@@ -23,6 +23,24 @@ const OUT_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error
   cancelled: { type: 'default', name: '取消' },
 }
 
+// 审查记录（kind=review）的结果列用另一套词汇：badge 颜色区分 + 🔍 前缀，
+// 与任务结果（完成/受阻）同框但一眼可辨，不再混用同一列语义
+const REVIEW_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }> = {
+  pass: { type: 'success', name: '🔍 审查通过' },
+  fail: { type: 'error', name: '🔍 审查不通过' },
+  error: { type: 'warning', name: '🔍 审查失败' },
+  skipped: { type: 'default', name: '🔍 免审查' },
+}
+
+// 台账旧记录缺 kind 字段视为任务记录
+function isReview(r: { kind?: string }): boolean {
+  return (r.kind || 'task') === 'review'
+}
+function tagOf(r: { kind?: string; outcome: string }): { type: string; name: string } {
+  if (isReview(r)) return REVIEW_TAG[r.outcome] || { type: 'default', name: r.outcome }
+  return OUT_TAG[r.outcome] || { type: 'default', name: r.outcome }
+}
+
 function roleLabel(role: string): string {
   const map: Record<string, string> = {
     pm: '👑 项目经理 (PM)',
@@ -159,20 +177,20 @@ const heat = computed(() => {
     </NCard>
 
     <NCard title="🕘 最近任务记录" size="small" class="scard">
-      <template #header-extra><span class="hint">最新 20 条</span></template>
+      <template #header-extra><span class="hint">最新 20 条（含 🔍 审查记录，任务与审查消耗同框可核）</span></template>
       <table class="utable" v-if="usage?.recent.length">
         <thead><tr>
           <th>时间</th><th>项目</th><th>任务</th><th>结果</th>
           <th>轮数</th><th>输入 / 输出</th><th>模型</th>
         </tr></thead>
         <tbody>
-          <tr v-for="(r, i) in usage.recent" :key="i">
+          <tr v-for="(r, i) in usage.recent" :key="i"
+              :class="{ 'rev-row': isReview(r) }">
             <td class="dim">{{ r.at }}</td>
             <td class="pname">{{ r.project }}</td>
             <td class="tid">{{ r.task_id }}</td>
-            <td><NTag size="small" :bordered="false"
-                  :type="(OUT_TAG[r.outcome] || { type: 'default' }).type">
-                {{ (OUT_TAG[r.outcome] || { name: r.outcome }).name }}</NTag></td>
+            <td><NTag size="small" :bordered="false" :type="tagOf(r).type">
+                {{ tagOf(r).name }}</NTag></td>
             <td>{{ r.turns }}</td>
             <td>{{ fmt(r.prompt_tokens) }} / {{ fmt(r.completion_tokens) }}</td>
             <td class="dim">{{ r.model || '—' }}</td>
@@ -202,6 +220,8 @@ const heat = computed(() => {
 .utable .sum { color: var(--text); font-weight: 600; }
 .utable .dim, .dim { color: var(--faint); }
 .tid { font-family: Consolas, monospace; font-size: 12px; }
+/* 审查记录行整行降饱和：任务记录为主角，审查是附属证据 */
+.rev-row { opacity: 0.78; }
 .uempty { color: var(--faint); font-size: 13px; text-align: center; padding: 20px 0; }
 /* ---- 热力图（git 提交热力图风格：周列 × 星期行） ---- */
 .hm-months { display: flex; gap: 3px; margin-bottom: 4px; }

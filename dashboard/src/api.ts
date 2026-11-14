@@ -216,7 +216,7 @@ export interface ApprovalT {
   waited_seconds: number
 }
 
-/** 一条模型用量记录（任务级台账，logs/usage.jsonl） */
+/** 一条模型用量记录（任务级台账，logs/usage.jsonl；kind=task/review） */
 export interface UsageEntryT {
   at: string
   project: string
@@ -226,6 +226,7 @@ export interface UsageEntryT {
   prompt_tokens: number
   completion_tokens: number
   model: string
+  kind?: string
 }
 export interface UsageAggT {
   tasks: number
