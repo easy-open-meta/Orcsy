@@ -238,7 +238,8 @@ export interface UsageAggT {
 export interface UsageT {
   total: UsageAggT
   projects: (UsageAggT & { name: string; last_at?: string })[]
-  roles?: (UsageAggT & { role: string })[]
+  /** 按角色聚合；小组模式每个角色带 members 成员明细 */
+  roles?: (UsageAggT & { role: string; members?: (UsageAggT & { role: string; agent: string })[] })[]
   days: (UsageAggT & { date: string })[]
   recent: UsageEntryT[]
 }

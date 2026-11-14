@@ -590,13 +590,18 @@ class TaskExecutor:
             return {}
 
     def _record_review_usage(self, task: Task, review) -> None:
-        """审查用量入台账（kind=review）；旁路，任何异常吞掉。"""
+        """审查用量入台账（kind=review）；旁路，任何异常吞掉。
+
+        role/agent_name 记为触发审查的执行成员（补审路径的 executor 即该成员）：
+        角色表的成员明细才能把审查消耗与执行消耗合并归到同一人。
+        """
         try:
             from .usage import get_usage_store
             get_usage_store().record(
                 self.project.name, task.id, review.verdict, review.turns,
                 review.prompt_tokens, review.completion_tokens,
-                review.model, kind="review")
+                review.model, kind="review",
+                role=self.team_role, agent_name=self.agent_name)
         except Exception:  # noqa: BLE001 — 台账是旁路
             self.log.warning("审查用量记录失败（可忽略）", exc_info=True)
 

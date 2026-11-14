@@ -127,22 +127,33 @@ const heat = computed(() => {
 
     <NCard v-if="usage?.roles?.length" title="👥 按 Agent 角色用量" size="small" class="scard">
       <template #header-extra>
-        <span class="hint">按总 tokens 降序统计各角色消耗</span>
+        <span class="hint">按总 tokens 降序；小组模式展开成员明细（执行 + 触发的审查）</span>
       </template>
       <table class="utable">
         <thead><tr>
-          <th>角色</th><th>任务数</th><th>轮数</th>
+          <th>角色 / 成员</th><th>任务数</th><th>轮数</th>
           <th>输入 tokens</th><th>输出 tokens</th><th>合计</th>
         </tr></thead>
         <tbody>
-          <tr v-for="r in usage.roles" :key="r.role">
-            <td class="pname">{{ roleLabel(r.role) }}</td>
-            <td>{{ r.tasks }}</td>
-            <td>{{ fmtFull(r.turns) }}</td>
-            <td>{{ fmt(r.prompt_tokens) }}</td>
-            <td>{{ fmt(r.completion_tokens) }}</td>
-            <td class="sum">{{ fmt(r.prompt_tokens + r.completion_tokens) }}</td>
-          </tr>
+          <template v-for="r in usage.roles" :key="r.role">
+            <tr>
+              <td class="pname">{{ roleLabel(r.role) }}</td>
+              <td>{{ r.tasks }}</td>
+              <td>{{ fmtFull(r.turns) }}</td>
+              <td>{{ fmt(r.prompt_tokens) }}</td>
+              <td>{{ fmt(r.completion_tokens) }}</td>
+              <td class="sum">{{ fmt(r.prompt_tokens + r.completion_tokens) }}</td>
+            </tr>
+            <!-- 小组成员明细子行：执行 + 归属到该成员的审查消耗 -->
+            <tr v-for="m in r.members || []" :key="r.role + '|' + m.agent" class="member-row">
+              <td class="mname">└ {{ m.agent }}</td>
+              <td>{{ m.tasks }}</td>
+              <td>{{ fmtFull(m.turns) }}</td>
+              <td>{{ fmt(m.prompt_tokens) }}</td>
+              <td>{{ fmt(m.completion_tokens) }}</td>
+              <td class="sum">{{ fmt(m.prompt_tokens + m.completion_tokens) }}</td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </NCard>
@@ -222,6 +233,9 @@ const heat = computed(() => {
 .tid { font-family: Consolas, monospace; font-size: 12px; }
 /* 审查记录行整行降饱和：任务记录为主角，审查是附属证据 */
 .rev-row { opacity: 0.78; }
+/* 角色表成员明细子行：缩进 + 弱化，从属于角色行 */
+.member-row td { color: var(--dim); padding-top: 4px; padding-bottom: 4px; }
+.mname { color: var(--dim); font-weight: 500; padding-left: 22px !important; }
 .uempty { color: var(--faint); font-size: 13px; text-align: center; padding: 20px 0; }
 /* ---- 热力图（git 提交热力图风格：周列 × 星期行） ---- */
 .hm-months { display: flex; gap: 3px; margin-bottom: 4px; }

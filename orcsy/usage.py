@@ -138,6 +138,8 @@ class UsageStore:
         total = blank()
         projects: dict[str, dict] = {}
         roles: dict[str, dict] = {}
+        # 角色内按成员细分（项目小组模式）：key = "role|agent_name"
+        members: dict[str, dict] = {}
         for e in entries:
             total["tasks"] += 1
             total["turns"] += int(e.get("turns") or 0)
@@ -152,14 +154,23 @@ class UsageStore:
             if at > p.get("last_at", ""):
                 p["last_at"] = at
             # 按角色聚合同步统计（review 记为 review，无角色记为 solo）
-            role_key = str(e.get("role") or "").strip() or (
-                "review" if e.get("kind") == "review" else "solo"
-            )
+            role_raw = str(e.get("role") or "").strip()
+            is_review = e.get("kind") == "review"
+            role_key = role_raw or ("review" if is_review else "solo")
             r = roles.setdefault(role_key, blank())
             r["tasks"] += 1
             r["turns"] += int(e.get("turns") or 0)
             r["prompt_tokens"] += int(e.get("prompt_tokens") or 0)
             r["completion_tokens"] += int(e.get("completion_tokens") or 0)
+            # 成员明细：小组模式执行记录带 agent_name；审查归属触发它的成员
+            # （review 记录的 role/agent_name = 被审查任务的执行成员）
+            agent = str(e.get("agent_name") or "").strip()
+            if agent:
+                m = members.setdefault(f"{role_key}|{agent}", blank())
+                m["tasks"] += 1
+                m["turns"] += int(e.get("turns") or 0)
+                m["prompt_tokens"] += int(e.get("prompt_tokens") or 0)
+                m["completion_tokens"] += int(e.get("completion_tokens") or 0)
 
         proj_list = [{"name": name, **agg} for name, agg in projects.items()]
         # 按总 tokens 降序，用量大户排前面
@@ -168,6 +179,13 @@ class UsageStore:
         role_list = [{"role": rkey, **agg} for rkey, agg in roles.items()]
         role_list.sort(key=lambda x: x["prompt_tokens"] + x["completion_tokens"],
                        reverse=True)
+        # 成员明细挂到所属角色的行上（同名成员跨角色极少见，以 role|agent 定位）
+        member_list = [{"role": k.split("|", 1)[0], "agent": k.split("|", 1)[1], **agg}
+                       for k, agg in members.items()]
+        member_list.sort(key=lambda x: x["prompt_tokens"] + x["completion_tokens"],
+                         reverse=True)
+        for row in role_list:
+            row["members"] = [m for m in member_list if m["role"] == row["role"]]
 
         # 近 N 天逐日（含零值天，趋势图横轴稳定）
         day_map: dict[str, dict] = {}

@@ -444,7 +444,8 @@ class ProjectAgent:
                                 base_branch=base_branch, work_branch=branch)
         result.review = review
         set_task_file_review_pending(task.path, False)
-        self._record_review_usage(task, review)
+        self._record_review_usage(task, review,
+                                  role=ex.team_role, agent_name=ex.agent_name)
         if review.verdict == "pass":
             result.outcome = "done"
             lock = ex.merge_lock or threading.Lock()
@@ -585,6 +586,7 @@ class ProjectAgent:
         if verdict == "error":
             self._handle_review_error(task, result, review)
             return
+        # 审查门 fail/error 的 record 已在上面完成；此处通过/跳过不再补记
 
         # PM 调用 reassign_task 直接转交下游角色：保持 open 且不覆盖 assignee，立即交接
         if getattr(result, "reassigned_to", ""):
@@ -678,7 +680,9 @@ class ProjectAgent:
         返工轮静默（不触发通知）：防骚扰由 notify 层按 outcome 判定，这里
         只负责任务文件的状态机流转。
         """
-        self._record_review_usage(task, review)
+        self._record_review_usage(task, review,
+                                  role=getattr(result, "role", ""),
+                                  agent_name=getattr(result, "agent_name", ""))
         max_rounds = resolve_review_rounds(self.review_cfg, self.project)
         new_round = increment_task_file_review_round(task.path)
         self._write_review_section(task, review)
@@ -704,7 +708,9 @@ class ProjectAgent:
         连续 error 达生效返工上限 → blocked（防审查服务故障把任务挂死）。
         error 轮数与 fail 轮数共用 review_round 计数（都是「审查未放行」次数）。
         """
-        self._record_review_usage(task, review)
+        self._record_review_usage(task, review,
+                                  role=getattr(result, "role", ""),
+                                  agent_name=getattr(result, "agent_name", ""))
         max_rounds = resolve_review_rounds(self.review_cfg, self.project)
         new_round = increment_task_file_review_round(task.path)
         self._write_review_section(task, review)
@@ -724,17 +730,22 @@ class ProjectAgent:
                         f"成果保留在 arranger/{self.project.name} 分支")
         self.log.warning("任务 %s 审查连续失败 %d 次，转 blocked", task.id, new_round)
 
-    def _record_review_usage(self, task: Task, review) -> None:
+    def _record_review_usage(self, task: Task, review,
+                             role: str = "", agent_name: str = "") -> None:
         """审查用量入台账（kind=review，与执行 Agent 的消耗单列可核算）。
 
-        旁路：任何异常吞掉，审查结论的落档不受影响。
+        role/agent_name 归属触发审查的执行成员：pending 补审传实际跑审查的
+        成员 executor 的身份；fail/error 路径传 TaskResult 里记的执行成员。
         """
         try:
             from .usage import get_usage_store
+            executor = self.executor
             get_usage_store().record(
                 self.project.name, task.id, review.verdict, review.turns,
                 review.prompt_tokens, review.completion_tokens,
-                review.model, kind="review")
+                review.model, kind="review",
+                role=role or executor.team_role,
+                agent_name=agent_name or executor.agent_name)
         except Exception:  # noqa: BLE001 — 台账是旁路
             self.log.warning("审查用量记录失败（可忽略）", exc_info=True)
 

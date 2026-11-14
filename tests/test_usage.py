@@ -70,6 +70,40 @@ def check_recent_excludes_review() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_member_aggregation() -> None:
+    """项目小组成员明细：同角色多成员的用量按 agent_name 细分，
+    审查消耗归属触发它的成员（role/agent_name 记被审查任务的执行者）。"""
+    tmp = Path(tempfile.mkdtemp(prefix="usage-member-"))
+    try:
+        st = UsageStore(tmp / "usage.jsonl")
+        # backend 角色两个成员
+        st.record("p", "T1", "done", 5, 1000, 200, "m",
+                  role="backend", agent_name="小明")
+        st.record("p", "T2", "blocked", 3, 500, 80, "m",
+                  role="backend", agent_name="小红")
+        # 小明触发的审查（kind=review，归属小明的 executor）
+        st.record("p", "T1", "pass", 2, 300, 50, "m",
+                  kind="review", role="backend", agent_name="小明")
+        # 无成员名的旧记录（solo / 历史数据）：只进角色行不进成员明细
+        st.record("p", "T3", "done", 1, 100, 10, "m")
+        s = st.summary()
+        backend = next(r for r in s["roles"] if r["role"] == "backend")
+        assert backend["tasks"] == 3 and backend["prompt_tokens"] == 1800, backend
+        members = {m["agent"]: m for m in backend["members"]}
+        assert set(members) == {"小明", "小红"}, members
+        # 小明 = 执行 1000+200 加审查 300+50
+        assert members["小明"]["tasks"] == 2
+        assert members["小明"]["prompt_tokens"] == 1300
+        assert members["小明"]["completion_tokens"] == 250
+        assert members["小红"]["tasks"] == 1 and members["小红"]["prompt_tokens"] == 500
+        # solo 记录无 agent_name → 角色行有数据但 members 为空
+        solo = next(r for r in s["roles"] if r["role"] == "solo")
+        assert solo["tasks"] == 1 and solo.get("members") == [], solo
+        print("ok: 成员明细聚合（同角色多成员细分 + 审查归属执行成员）")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def check_review_outcome_normalized() -> None:
     """历史脏数据兼容：kind=review 但 outcome 越界（如旧开发态写的 done）
     归位为 pass，不再污染聚合与角色统计。"""
@@ -191,6 +225,7 @@ def main() -> int:
     check_record_and_summary()
     check_recent_excludes_review()
     check_review_outcome_normalized()
+    check_member_aggregation()
     check_days_bucket()
     check_persistence_and_truncation()
     check_singleton_and_web()
