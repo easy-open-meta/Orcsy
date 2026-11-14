@@ -27,9 +27,11 @@ if [ -z "$(git config --global --get user.email || true)" ]; then
 fi
 
 # 命令覆盖走 CLI 子命令时(docker compose run orcsy run --once)自动补上 orcsy 前缀,
-# 其余(自定义可执行文件、shell)原样 exec
+# 其余(自定义可执行文件、shell)原样 exec。
+# web 容器内必无显示与会话：禁用托盘与自动开浏览器（起不来只留 ERROR 噪音）
 case "${1:-}" in
-    web|run|init|validate) set -- orcsy "$@" ;;
+    web) shift; set -- orcsy web --no-tray --no-browser "$@" ;;
+    run|init|validate) set -- orcsy "$@" ;;
 esac
 
 exec "$@"

@@ -20,6 +20,10 @@ _PY_FRAMEWORKS = [
     ("fastapi", "FastAPI"), ("flask", "Flask"), ("django", "Django"),
     ("pyqt", "PyQt"), ("pyside", "PySide"), ("typer", "Typer"), ("click", "Click"),
 ]
+_PHP_FRAMEWORKS = [
+    ("laravel", "Laravel"), ("symfony", "Symfony"), ("hyperf", "Hyperf"),
+    ("thinkphp", "ThinkPHP"), ("codeigniter", "CodeIgniter"),
+]
 
 
 def probe_project(path: Path) -> dict[str, str]:
@@ -28,7 +32,7 @@ def probe_project(path: Path) -> dict[str, str]:
     run: list[str] = []
     test: list[str] = []
     for prober in (_probe_node, _probe_python, _probe_rust, _probe_go,
-                   _probe_dotnet, _probe_java, _probe_cmake):
+                   _probe_dotnet, _probe_java, _probe_cmake, _probe_php):
         prober(path, stack, run, test)
     return {"stack": "; ".join(stack), "run": " / ".join(run), "test": " / ".join(test)}
 
@@ -131,3 +135,23 @@ def _probe_cmake(path: Path, stack: list[str], run: list[str], test: list[str]) 
     stack.append("C/C++ (CMake)")
     test.append("ctest")
     # C++ 项目入口不固定，run 留空
+
+
+def _probe_php(path: Path, stack: list[str], run: list[str], test: list[str]) -> None:
+    if not (path / "composer.json").is_file():
+        return
+    try:
+        data = json.loads(_read(path / "composer.json"))
+    except ValueError:
+        data = {}
+    require = {k.lower() for k in (data.get("require") or {})}
+    frameworks = [fw for key, fw in _PHP_FRAMEWORKS
+                  if any(key in k for k in require)]
+    stack.append("PHP" + (f" ({', '.join(frameworks)})" if frameworks else ""))
+    scripts = data.get("scripts") or {}
+    if "test" in scripts:
+        test.append("composer test")
+    if "dev" in scripts:
+        run.append("composer dev")
+    elif "start" in scripts:
+        run.append("composer start")
