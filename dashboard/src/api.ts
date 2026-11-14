@@ -443,6 +443,17 @@ function isNetErr(e: unknown): boolean {
 export class UnauthorizedError extends Error {
   constructor() { super('未登录或会话已过期') }
 }
+
+// 任务并发保存冲突（后端 409 Conflict）：携带服务端最新任务内容，
+// 由任务弹窗弹「保留我的修改 / 采用最新状态」冲突解决交互
+export class ConflictError extends Error {
+  latestTask: Record<string, any>
+  constructor(message: string, latestTask: Record<string, any>) {
+    super(message)
+    this.latestTask = latestTask
+  }
+}
+
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: () => void): void { onUnauthorized = fn }
 
@@ -451,12 +462,40 @@ function handle401(r: Response, path: string): void {
   if (r.status === 401 && path !== '/api/login') onUnauthorized?.()
 }
 
+// ---- Cookie + Bearer Token 双轨鉴权（移动端远程访问）：登录响应体里的
+// token 持久化到 localStorage，每次请求附加 Authorization: Bearer——iOS Safari
+// 等移动浏览器在反代/切网/息屏后极易丢 Cookie，token 是第二凭证
+const AUTH_TOKEN_KEY = 'orcsyAuthToken'
+export function getAuthToken(): string {
+  // 双层读取：记住设备 → localStorage；未记住 → sessionStorage（Cookie 仍是主凭证）
+  return localStorage.getItem(AUTH_TOKEN_KEY)
+      || sessionStorage.getItem(AUTH_TOKEN_KEY) || ''
+}
+export function setAuthToken(t: string, persistent = true): void {
+  localStorage.removeItem(AUTH_TOKEN_KEY)
+  sessionStorage.removeItem(AUTH_TOKEN_KEY)
+  if (!t) return
+  // persistent=true：用户勾选了「记住这台设备」→ localStorage 跨浏览器会话保存；
+  // false：仅 sessionStorage（随标签页结束消失）——两种存储都按源严格隔离，
+  // 主凭证始终是服务端的 HttpOnly Cookie（XSS 不可读）
+  ;(persistent ? localStorage : sessionStorage).setItem(AUTH_TOKEN_KEY, t)
+}
+export function clearAuthToken(): void {
+  localStorage.removeItem(AUTH_TOKEN_KEY)
+  sessionStorage.removeItem(AUTH_TOKEN_KEY)
+}
+
+function authHeaders(): Record<string, string> {
+  const t = getAuthToken()
+  return t ? { Authorization: `Bearer ${t}` } : {}
+}
+
 async function post(path: string, body: unknown): Promise<any> {
   let r: Response
   try {
     r = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     })
   } catch {
@@ -464,6 +503,9 @@ async function post(path: string, body: unknown): Promise<any> {
   }
   handle401(r, path)
   const j = await r.json().catch(() => ({}))
+  if (r.status === 409 || j.conflict === true) {
+    throw new ConflictError(j.message || '任务已被其他终端或后台 Agent 修改', j.latest_task || {})
+  }
   if (!r.ok || j.ok === false) throw new Error(j.message || j.error || `HTTP ${r.status}`)
   return j
 }
@@ -472,7 +514,7 @@ async function get(path: string): Promise<any> {
   let last: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await fetch(path)
+      const r = await fetch(path, { headers: authHeaders() })
       handle401(r, path)
       const j = await r.json().catch(() => ({}))
       if (!r.ok || j.ok === false) throw new Error(j.message || j.error || `HTTP ${r.status}`)
@@ -487,12 +529,17 @@ async function get(path: string): Promise<any> {
 }
 
 export const api = {
-  state: (): Promise<AppStateT> => get('/api/state'),
-  /** 鉴权状态：enabled=是否配置了登录密码；authed=当前会话 Cookie 是否有效 */
+  /** 全量状态；summary=true 移动端轻量摘要（省略日志尾部与归档，省流量省电） */
+  state: (summary = false): Promise<AppStateT> =>
+    get(summary ? '/api/state?summary=true' : '/api/state'),
+  /** 鉴权状态：enabled=是否配置了登录密码；authed=当前会话是否有效 */
   authStatus: () => get('/api/auth') as Promise<{
     ok: boolean; enabled: boolean; authed: boolean
   }>,
-  login: (password: string) => post('/api/login', { password }),
+  login: (password: string, rememberMe = false) =>
+    post('/api/login', { password, remember_me: rememberMe }) as Promise<{
+      ok: boolean; token?: string; expires_in?: number
+    }>,
   logout: () => post('/api/logout', {}),
   scan: () => post('/api/scan', {}),
   taskFull: (project: string, id: string) =>
@@ -500,7 +547,11 @@ export const api = {
   taskSave: (p: {
     project: string; id: string; title: string; priority: string; status: string
     labels: string[]; assignee: string; description: string; depends_on?: string[]
-  }) => post('/api/task', p),
+    /** 乐观锁比对基准（编辑已有任务时必带）：与磁盘版本不符返回 409 Conflict */
+    base_version?: string
+    /** true=409 冲突后用户明确选择「保留我的修改」：强制覆盖落盘 */
+    force_overwrite?: boolean
+  }) => post('/api/task', p) as Promise<{ ok: boolean; id: string; version_token?: string }>,
   commitProject: (p: { name: string; message: string; push?: boolean; exclude?: string[] }) =>
     post('/api/project/commit', p) as Promise<{
       ok: boolean; committed: boolean; commit: string; pushed: boolean
@@ -619,4 +670,21 @@ export const api = {
   updateInstall: (path: string) => post('/api/update/install', { path }) as Promise<{
     ok: boolean; phase: string; message: string; target: string | null
   }>,
+  /** 手机连接向导（免登录白名单）：本机可达 URL 清单 + 鉴权开关。
+   * active=false = 该地址未开放（如仅监听 127.0.0.1 时局域网候选不可达）；
+   * all_loopback=true + hint = 仅监听回环，前端展示开放操作指引而非二维码 */
+  systemEndpoints: () => get('/api/system/endpoints') as Promise<{
+    ok: boolean; port: number; auth_required: boolean
+    /** 已配置登录密码：一键开放时据此决定沿用现有密码还是生成新密码 */
+    password_configured?: boolean
+    all_loopback?: boolean; hint?: string
+    endpoints: { name: string; url: string; active?: boolean }[]
+  }>,
+  /** 连接二维码（需登录）：后端 segno 生成 SVG 文本，<img>/v-html 直嵌 */
+  systemQr: async (url: string): Promise<string> => {
+    const r = await fetch(`/api/system/qr?url=${encodeURIComponent(url)}`,
+                          { headers: authHeaders() })
+    if (!r.ok) throw new Error(`二维码生成失败（HTTP ${r.status}）`)
+    return r.text()
+  },
 }

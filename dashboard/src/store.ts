@@ -1,6 +1,7 @@
 // 全局共享状态：/api/state 数据 + 当前视图 + 弹窗开关（任一弹窗打开时轮询暂停）
 import { computed, reactive, ref, shallowRef } from 'vue'
-import { api, setUnauthorizedHandler, type AppStateT } from './api'
+import { api, clearAuthToken, setAuthToken, setUnauthorizedHandler, type AppStateT } from './api'
+import { isMobile } from './mobile'
 
 export const store = reactive({
   state: null as AppStateT | null,
@@ -30,15 +31,21 @@ export async function initAuth(): Promise<void> {
   auth.checked = true
 }
 
-/** 登录成功后拉全量状态并恢复轮询 */
-export async function doLogin(password: string): Promise<void> {
-  await api.login(password)   // 失败抛出后端 message（如「密码错误」），由调用方提示
+/** 登录成功后拉全量状态并恢复轮询。
+ * remember=true 签发 30 天长会话（手机远程访问息屏/切网频繁，短会话易掉登录）；
+ * token 随响应体下发，持久化后以 Bearer 头双轨鉴权（Cookie 丢失时的第二凭证）。 */
+export async function doLogin(password: string, remember = false): Promise<void> {
+  const r = await api.login(password, remember)  // 失败抛出后端 message（如「密码错误」）
+  // 勾选「记住这台设备」→ Bearer 存 localStorage（跨浏览器会话）；
+  // 未勾选 → sessionStorage（随标签页结束消失，与未记住语义一致）
+  setAuthToken(r.token || '', remember)
   auth.authed = true
   await refresh(true)
 }
 
 export async function doLogout(): Promise<void> {
   try { await api.logout() } catch { /* 服务端注销失败也照常退出界面 */ }
+  clearAuthToken()  // 本地 Bearer 凭证一并清除（两种存储）
   auth.authed = false
   store.state = null
 }
@@ -68,6 +75,8 @@ export const ui = reactive({
   approvalDlg: false,
   // 拖拽排序进行中的任务 id：期间暂停轮询，避免 5s 刷新把拖拽中的列表冲掉
   dragTask: null as string | null,
+  // 「手机连接」向导弹窗：局域网地址 + 扫码二维码（桌面顶栏与移动抽屉菜单入口）
+  connectDlg: false,
 })
 
 // ---- 自更新收尾：记录目标版本，应用回归后核对并明确提示成功 ----
@@ -111,7 +120,10 @@ export const anyModal = computed(() =>
 export async function refresh(force = false): Promise<void> {
   if (needLogin()) return  // 未登录：静默跳过（401 已由全局回调处理）
   if (!force && (anyModal.value || ui.dragTask)) return  // 弹窗/拖拽中不覆盖列表
-  try { store.state = await api.state() } catch { /* 服务瞬时不可达时保持旧数据 */ }
+  try {
+    // 移动端蜂窝网络走轻量摘要（省略 60KB 日志尾部与归档）；桌面全量
+    store.state = await api.state(isMobile.value)
+  } catch { /* 服务瞬时不可达时保持旧数据 */ }
 }
 
 let _navigateHandler: ((name: string, query?: Record<string, string>) => void) | null = null

@@ -12,4 +12,18 @@ export default defineConfig({
     Components({ resolvers: [NaiveUiResolver()] }),
     viteSingleFile(),
   ],
+  // 本机调试：npm run dev 起 5173，API/静态资源代理到本机 5116 的实例——
+  // 移动端仿真迭代样式时免于每轮 build + 重启（viteSingleFile 只影响 build）
+  build: {
+    // Material Icons woff2（~174KB）内联进单文件，保持零外部请求
+    assetsInlineLimit: 400000,
+  },
+  server: {
+    proxy: {
+      '/api': 'http://127.0.0.1:5116',
+      '/manifest.webmanifest': 'http://127.0.0.1:5116',
+      '/appicon.png': 'http://127.0.0.1:5116',
+      '/sw.js': 'http://127.0.0.1:5116',
+    },
+  },
 })

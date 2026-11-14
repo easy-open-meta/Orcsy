@@ -2,17 +2,52 @@
 import { darkTheme, lightTheme, type GlobalTheme, type GlobalThemeOverrides } from 'naive-ui'
 import { computed, ref } from 'vue'
 
-export type ThemeName = 'dark' | 'light'
+export type ThemeName = 'dark' | 'light' | 'system'
 
-export const theme = ref<ThemeName>(
-  (document.documentElement.dataset.theme as ThemeName) || 'dark')
+const KEY = 'ta-theme'
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
+
+// 主题模式：'system' = 跟随系统外观（浏览器设置变化实时跟随）。
+// index.html 的早期脚本已按同样规则把 data-theme 置成生效值（防闪屏）
+export const theme = ref<ThemeName>((() => {
+  try {
+    const v = localStorage.getItem(KEY)
+    if (v === 'light' || v === 'dark' || v === 'system') return v
+  } catch { /* 隐私模式忽略 */ }
+  return 'system'
+})())
+
+function effective(): 'dark' | 'light' {
+  if (theme.value === 'system') return systemDark.matches ? 'dark' : 'light'
+  return theme.value
+}
+
+function apply(): void {
+  const e = effective()
+  document.documentElement.dataset.theme = e
+  // PWA：浏览器 UI 主题色跟随（地址栏/状态栏着色）
+  document.querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', e === 'dark' ? '#0b0f17' : '#f2f4f9')
+}
+
+const CYCLE: ThemeName[] = ['dark', 'light', 'system']
 
 export function toggleTheme(): void {
-  const next: ThemeName = theme.value === 'dark' ? 'light' : 'dark'
-  theme.value = next
-  document.documentElement.dataset.theme = next
-  try { localStorage.setItem('ta-theme', next) } catch { /* 隐私模式忽略 */ }
+  const i = CYCLE.indexOf(theme.value)
+  theme.value = CYCLE[(i + 1) % CYCLE.length]
+  apply()
+  try { localStorage.setItem(KEY, theme.value) } catch { /* 隐私模式忽略 */ }
 }
+
+export const themeIcon = computed(() =>
+  theme.value === 'system' ? 'brightness_auto'
+    : theme.value === 'dark' ? 'dark_mode' : 'light_mode')
+export const themeLabel = computed(() =>
+  theme.value === 'system' ? '跟随系统'
+    : theme.value === 'dark' ? '深色' : '浅色')
+
+apply()
+systemDark.addEventListener('change', () => { if (theme.value === 'system') apply() })
 
 const DARK: GlobalThemeOverrides = {
   common: {
