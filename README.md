@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 > Orcsy is an Agent task-orchestration system that plugs into any LLM API. Write tasks as Markdown, and a scheduler scans each managed project's `tasks/` directory, dispatches them by priority (P0 → P4) to that project's dedicated Agent, the Agent reads and writes real code and runs tests inside an isolated git worktree, and on completion Orcsy commits, merges and writes the status back — an unattended, closed-loop development pipeline with a web dashboard throughout.
 
-![version](https://img.shields.io/badge/version-0.23.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.24.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 ```
 ┌────────────────────────────────── Orcsy ────────────────────────────────┐
@@ -40,6 +40,7 @@ English | [简体中文](README.zh-CN.md)
 - **Concurrent sub-agents (`delegate_explore`)** — PM and developer roles can spawn 2–4 **read-only sub-agents** in one call to explore different modules in parallel and get a consolidated report in a single round.
 - **Skill library** — import local directories, create in the dashboard, or one-click scan user-level skills from ZCode / Claude Code / Codex etc. with batch import; prompts only receive a "name + description" index, full content is read on demand via `read_skill`, never bloating the context.
 - **Repo Issues integration** — bind a GitHub / Gitee / GitLab / Gitea repo (self-hosted included) and pull open Issues into the task queue in one click (label-mapped priorities, archive-aware dedup, one-way import).
+- **📱 Mobile remote access** — view/edit/create tasks from a phone: scan-to-connect QR codes, 30-day dual-credential login (Cookie + Bearer), dedicated mobile layout (slim top bar / bottom nav / fullscreen task sheet), touch reorder, optimistic-lock conflict-safe saving, draft auto-save, PWA home-screen install; trusted-proxy-aware throttling behind reverse proxies.
 - **Web dashboard** — status overview, task CRUD and drag-and-drop sorting, a **dedicated human-gated commit page** (file list + diff, confirm commit/push), model connectivity test, run logs with collapsible model thinking; tray icon, autostart, self-update (zero-UAC / one prompt under system dirs), task-end alerts, per-role usage ledger with a 12-week heatmap.
 - **Zero-friction project onboarding** — creating/importing a project only adds `tasks/` and `AGENT.md`; tech stack auto-detection pre-fills run and test commands.
 

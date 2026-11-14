@@ -6,7 +6,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：把任务写成 Markdown，定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态——全程 Web 看板可视化掌控，无人值守闭环运转。
 
-![version](https://img.shields.io/badge/version-0.23.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.24.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 ```
 ┌────────────────────────────────── Orcsy ────────────────────────────────┐
@@ -40,6 +40,7 @@
 - **并发子代理探索** —— PM 与开发角色可一次派生 2~4 个**只读子代理**并行摸底不同模块，单轮拿汇总报告，串行探索耗时成倍压缩。
 - **技能库（Skill）** —— 导入本地目录 / 看板新建 / 一键扫描 ZCode / Claude Code / Codex 等工具的用户级技能批量导入；提示词只注入「名称+描述」索引，全文按需 `read_skill`，不撑爆上下文。
 - **仓库 Issues 集成** —— 绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），open Issue 一键转任务（标签映射优先级、归档去重、单向导入）。
+- **📱 移动端远程访问** —— 手机远程查看/编辑/新建任务：扫码直达、30 天 Cookie + Bearer 双轨免登录、专属移动布局（吸顶顶栏/底部导航/全屏任务抽屉）、触屏排序、乐观锁冲突保存、草稿暂存、PWA 添加到主屏幕；受信任代理限速，防反代误锁 127.0.0.1。
 - **Web 可视化看板** —— 状态总览、任务增删改与拖拽排序、**人工把关提交页**（文件清单 + diff 对比，一键确认 commit/push）、模型连通测试、运行日志与模型思考查看；托盘常驻、开机自启、自更新（零 UAC / 系统目录一次提权）、任务结束提醒、按角色用量台账与 12 周热力图。
 - **开箱即用的项目接入** —— 新建/导入项目只新增 `tasks/` 与 `AGENT.md`；自动探测技术栈预填运行与测试命令。
 

@@ -996,6 +996,43 @@ When the Project Team or Worktree isolation is enabled, agent output is only **a
 
 ---
 
+### 10.16 Mobile remote access (phone dashboard / PWA)
+
+Orcsy can be operated from a phone browser — watch Agent progress on the go, unblock a stuck task with a one-line note, or capture a new idea straight into the queue.
+
+**Step 1: open access + set a password**
+
+The easiest way: click the **📱 button** in the desktop top bar (mobile: inside the ☰ menu) to open the
+"Phone connect" wizard. While the dashboard only listens on loopback, the wizard offers a
+**one-click "Enable phone access"** checkbox — tick it and confirm: Orcsy rewrites the config
+(`web.host: 0.0.0.0` + an auto-generated strong password, stored hashed only) and **restarts
+automatically**. After the restart, the login screen shows the password once more — copy it, log in, done.
+
+Manual alternative: set `web.host` to `0.0.0.0` and `web.auth_password` in `config.yaml`, then restart.
+The wizard lists every reachable URL, renders the QR code, and copies the address; after a restart the
+terminal also prints the LAN addresses plus a **scan-to-connect QR code**.
+
+**Step 2: connect from the phone**
+
+- Phone on the **same Wi-Fi**: scan the code (or type the address), enter the login password;
+- Tick **"Remember this device (30 days)"**: a long session + a Bearer token are issued side by side with the cookie, so screen-off, network switching, or reverse-proxy cookie loss rarely logs you out;
+- Cross-network access works via an HTTPS reverse proxy (Nginx / Caddy), tunnels (FRP / Tailscale / Cloudflare Tunnel), or a public VPS; set `web.public_url` and the wizard/terminal will prefer your public domain.
+
+**Mobile-specific UI** (auto-enabled at viewport width ≤ 768px; desktop layout unchanged):
+
+- **Slim sticky top bar**: only the approval badge, refresh, and ☰ menu — low-frequency actions live in the drawer;
+- **Bottom navigation**: Dashboard / Projects / **＋ New task** (pick a project, then a fullscreen sheet) / More;
+- **Fullscreen task sheet**: Save / Cancel stay pinned at the very top — the on-screen keyboard can never cover them; a **Markdown toolbar** (headings, checklist, list, bold, code block) sits above the body;
+- **Touch reorder**: ▲▼ buttons on each task card move it within its priority group (desktop keeps drag-and-drop);
+- **Draft protection**: edits are auto-stashed locally every 0.3 s; if the browser is killed (incoming call, backgrounded), reopening shows "unsaved draft found" with one-tap restore;
+- **No clobbering**: saving runs an **optimistic-lock check** — if the Agent just modified the task, the server returns 409 and you choose "keep my changes" or "take the latest"; Agent write-backs are never silently overwritten;
+- **Weak-network friendly**: polling pauses when the screen is off and self-heals with an instant refresh on return; mobile polling uses a lightweight summary (log tail and archives omitted, ~80 KB → a few KB per poll); the run log loads on demand;
+- **Add to home screen (PWA)**: "Install / Add to home screen" in the phone browser menu opens Orcsy like a standalone app (icon + splash).
+
+**Reverse proxy deployments (optional)**: when the peer address is always the proxy, login throttling resolves the real client IP from `X-Forwarded-For` only if the proxy is listed in `web.trusted_proxies` — loopback is trusted by default (same-host Nginx/Caddy/FRP works out of the box), so a lockout can never pin `127.0.0.1` and lock the local machine out too.
+
+---
+
 ## 11. Data, backup, and migration
 
 ### 11.1 Where data lives
