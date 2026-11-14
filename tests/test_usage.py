@@ -67,6 +67,32 @@ def check_recent_excludes_review() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_review_outcome_normalized() -> None:
+    """历史脏数据兼容：kind=review 但 outcome 越界（如旧开发态写的 done）
+    归位为 pass，不再污染聚合与角色统计。"""
+    import json as _json
+    tmp = Path(tempfile.mkdtemp(prefix="usage-dirty-"))
+    try:
+        f = tmp / "usage.jsonl"
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write(_json.dumps({
+                "ts": time.time(), "at": "2026-11-08 16:27", "project": "p",
+                "task_id": "T1", "outcome": "done", "turns": 7,
+                "prompt_tokens": 100, "completion_tokens": 10,
+                "model": "m", "kind": "review"}) + "\n")
+        st = UsageStore(f)
+        s = st.summary()
+        # 角色聚合里该记录仍算 review，outcome 已归位 pass（badge 词汇干净）
+        assert s["total"]["tasks"] == 1
+        assert any(r["role"] == "review" for r in s["roles"]), s["roles"]
+        assert all(str(r.get("kind") or "task") != "review"
+                   or r["outcome"] in ("pass", "fail", "error", "skipped")
+                   for r in s["recent"])
+        print("ok: review 记录越界 outcome 归位为 pass（历史脏数据兼容）")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def check_days_bucket() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="usage-days-"))
     try:
@@ -161,6 +187,7 @@ def check_singleton_and_web() -> None:
 def main() -> int:
     check_record_and_summary()
     check_recent_excludes_review()
+    check_review_outcome_normalized()
     check_days_bucket()
     check_persistence_and_truncation()
     check_singleton_and_web()

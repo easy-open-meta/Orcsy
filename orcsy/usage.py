@@ -120,6 +120,18 @@ class UsageStore:
         with self._lock:
             entries = list(self._entries)
 
+        # 历史脏数据兼容：某开发态曾把审查记录的 outcome 写成任务结果（done）。
+        # 审查记录的 outcome 只认审查结论词表，越界的按「审查通过」归位，
+        # 保证「最近任务记录」的 outcome 列永远是干净的两套词汇之一
+        _REVIEW_VERDICTS = {"pass", "fail", "error", "skipped"}
+        normalized: list[dict] = []
+        for e in entries:
+            if e.get("kind") == "review" and str(e.get("outcome") or "") \
+                    not in _REVIEW_VERDICTS:
+                e = {**e, "outcome": "pass"}
+            normalized.append(e)
+        entries = normalized
+
         def blank() -> dict:
             return {"tasks": 0, "turns": 0, "prompt_tokens": 0, "completion_tokens": 0}
 
