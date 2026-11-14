@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 模型用量页：总体 + 各项目 + 近 14 天趋势 + 最近任务记录。
+// 模型用量页：总体 + 各项目 + 近 14 天趋势 + 最近任务记录（任务/审查分类 Tab）。
 // 数据来自 /api/state 的 usage 聚合（台账 logs/usage.jsonl，任务结束即记）。
 import { NCard, NTag } from 'naive-ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { store } from '../store'
 import { fmtTokens } from '../utils'
 
@@ -36,10 +36,21 @@ const REVIEW_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'er
 function isReview(r: { kind?: string }): boolean {
   return (r.kind || 'task') === 'review'
 }
-function tagOf(r: { kind?: string; outcome: string }): { type: string; name: string } {
+type TagType = 'success' | 'warning' | 'default' | 'error' | 'info'
+function tagOf(r: { kind?: string; outcome: string }): { type: TagType; name: string } {
   if (isReview(r)) return REVIEW_TAG[r.outcome] || { type: 'default', name: r.outcome }
   return OUT_TAG[r.outcome] || { type: 'default', name: r.outcome }
 }
+
+// ---- 最近记录分类 Tab：全部 / 任务 / 审查 ----
+type RecTab = 'all' | 'task' | 'review'
+const recTab = ref<RecTab>('all')
+const recentRows = computed(() => usage.value?.recent ?? [])
+const taskCount = computed(() => recentRows.value.filter(r => !isReview(r)).length)
+const reviewCount = computed(() => recentRows.value.filter(r => isReview(r)).length)
+const filteredRecent = computed(() =>
+  recTab.value === 'all' ? recentRows.value
+    : recentRows.value.filter(r => isReview(r) === (recTab.value === 'review')))
 
 function roleLabel(role: string): string {
   const map: Record<string, string> = {
@@ -188,14 +199,23 @@ const heat = computed(() => {
     </NCard>
 
     <NCard title="🕘 最近任务记录" size="small" class="scard">
-      <template #header-extra><span class="hint">最新 20 条（含 🔍 审查记录，任务与审查消耗同框可核）</span></template>
-      <table class="utable" v-if="usage?.recent.length">
+      <template #header-extra>
+        <div class="rec-tabs">
+          <button class="rtab" :class="{ on: recTab === 'all' }" @click="recTab = 'all'">
+            全部 {{ recentRows.length }}</button>
+          <button class="rtab" :class="{ on: recTab === 'task' }" @click="recTab = 'task'">
+            任务 {{ taskCount }}</button>
+          <button class="rtab" :class="{ on: recTab === 'review' }" @click="recTab = 'review'">
+            审查 {{ reviewCount }}</button>
+        </div>
+      </template>
+      <table class="utable" v-if="filteredRecent.length">
         <thead><tr>
           <th>时间</th><th>项目</th><th>任务</th><th>结果</th>
           <th>轮数</th><th>输入 / 输出</th><th>模型</th>
         </tr></thead>
         <tbody>
-          <tr v-for="(r, i) in usage.recent" :key="i"
+          <tr v-for="(r, i) in filteredRecent" :key="i"
               :class="{ 'rev-row': isReview(r) }">
             <td class="dim">{{ r.at }}</td>
             <td class="pname">{{ r.project }}</td>
@@ -208,7 +228,7 @@ const heat = computed(() => {
           </tr>
         </tbody>
       </table>
-      <div v-else class="uempty">暂无任务记录。</div>
+      <div v-else class="uempty">该分类下暂无记录。</div>
     </NCard>
   </div>
 </template>
@@ -236,6 +256,14 @@ const heat = computed(() => {
 /* 角色表成员明细子行：缩进 + 弱化，从属于角色行 */
 .member-row td { color: var(--dim); padding-top: 4px; padding-bottom: 4px; }
 .mname { color: var(--dim); font-weight: 500; padding-left: 22px !important; }
+/* ---- 最近记录分类 Tab（卡片头部分段按钮） ---- */
+.rec-tabs { display: flex; gap: 4px; }
+.rtab { border: 1px solid var(--line); background: transparent; color: var(--dim);
+  font-size: 12px; padding: 3px 10px; border-radius: 12px; cursor: pointer;
+  font-variant-numeric: tabular-nums; transition: all .15s; }
+.rtab:hover { color: var(--text); border-color: var(--dim); }
+.rtab.on { background: var(--primary, #3574f0); border-color: var(--primary, #3574f0);
+  color: #fff; }
 .uempty { color: var(--faint); font-size: 13px; text-align: center; padding: 20px 0; }
 /* ---- 热力图（git 提交热力图风格：周列 × 星期行） ---- */
 .hm-months { display: flex; gap: 3px; margin-bottom: 4px; }
