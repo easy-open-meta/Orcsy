@@ -152,3 +152,7 @@ uv run python tests/run_all.py --unit-only
 # 过滤运行特定关键字相关的测试用例
 uv run python tests/run_all.py masking
 ```
+
+跨平台说明：Windows 专属用例（powershell/GBK 码页/注册表路径等）带 `sys.platform`
+守卫，在 Linux/Docker 下自动跳过；测试套件在 Windows（50/51）与 Linux 容器
+（51/51，以 orcsy 应用身份运行）双平台回归通过。

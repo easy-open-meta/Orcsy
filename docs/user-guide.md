@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.23.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.24.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 > ℹ️ The dashboard is currently Chinese-only. This guide uses English names for buttons and cards; a Chinese-label reference is in [section 9.1](#91-top-toolbar).
 
@@ -657,7 +657,7 @@ Toolbar buttons:
 | ⟳ Restart | Restart the program so config/code changes take effect; running tasks are interrupted and can be requeued after restart |
 | ＋ New project | Open the New project dialog |
 | ↻ | Refresh dashboard data |
-| ☀ / ☾ | Toggle light/dark theme |
+| ☀ / ☾ / ◐ | Theme three-state cycle: dark → light → follow system (icon shows current mode; in follow-system mode the dashboard tracks the phone appearance in real time) |
 | 🔔 Pending approvals N | N operations are waiting for your decision (approval modes only) |
 | Log out | Appears when a login password is set |
 
@@ -1002,7 +1002,7 @@ Orcsy can be operated from a phone browser — watch Agent progress on the go, u
 
 **Step 1: open access + set a password**
 
-The easiest way: click the **📱 button** in the desktop top bar (mobile: inside the ☰ menu) to open the
+The easiest way: click the **📱 button** in the desktop top bar (mobile: in the bottom-nav "More" drawer menu) to open the
 "Phone connect" wizard. While the dashboard only listens on loopback, the wizard offers a
 **one-click "Enable phone access"** checkbox — tick it and confirm: Orcsy rewrites the config
 (`web.host: 0.0.0.0` + an auto-generated strong password, stored hashed only) and **restarts
@@ -1020,8 +1020,8 @@ terminal also prints the LAN addresses plus a **scan-to-connect QR code**.
 
 **Mobile-specific UI** (auto-enabled at viewport width ≤ 768px; desktop layout unchanged):
 
-- **Slim sticky top bar**: only the approval badge, refresh, and ☰ menu — low-frequency actions live in the drawer;
-- **Bottom navigation**: Dashboard / Projects / **＋ New task** (pick a project, then a fullscreen sheet) / More;
+- **Slim sticky top bar**: only the approval badge and refresh — low-frequency actions live in the drawer;
+- **Bottom navigation**: Dashboard / Projects / **＋ New task** (pick a project, then a fullscreen sheet) / More (drawer menu: navigation, theme cycle, scan, restart, logout);
 - **Fullscreen task sheet**: Save / Cancel stay pinned at the very top — the on-screen keyboard can never cover them; a **Markdown toolbar** (headings, checklist, list, bold, code block) sits above the body;
 - **Touch reorder**: ▲▼ buttons on each task card move it within its priority group (desktop keeps drag-and-drop);
 - **Draft protection**: edits are auto-stashed locally every 0.3 s; if the browser is killed (incoming call, backgrounded), reopening shows "unsaved draft found" with one-tap restore;
