@@ -25,3 +25,17 @@ dashboard/components.d.ts
 # PyInstaller 中间产物目录（orcsy.spec 产物工作区）
 build/orcsy/
 *.sha256
+
+# 登录会话落盘（运行期产物）
+sessions.json
+
+# ---- 移动端/部署工作区产物（不入库） ----
+# npm 解包散落的 material-icons 源包（字体已拷入 dashboard/src/assets/）
+/package/
+/mi.tgz
+# 部署物料与运维脚本（含服务器 IP/密码/密钥路径，属机器本地隐私）
+deploy/ACCESS_PASSWORD.txt
+deploy/server-config.yaml
+deploy/*.tar.gz
+deploy/linux-smoke.sh
+deploy/redeploy-server.sh
