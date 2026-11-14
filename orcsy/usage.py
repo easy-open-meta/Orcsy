@@ -178,7 +178,11 @@ class UsageStore:
             "projects": proj_list,
             "roles": role_list,
             "days": list(day_map.values()),
-            "recent": list(reversed(entries[-20:])),
+            # 最近任务记录只收 kind=task：review 记录的 outcome 是审查结论
+            # （pass/fail/error/skipped），与任务结果（done/blocked/cancelled/open）
+            # 词汇不同，混排会让结果列出现两种 badge 体系（前端按任务结果映射）
+            "recent": list(reversed(
+                [e for e in entries if str(e.get("kind") or "task") == "task"][-20:])),
         }
 
 

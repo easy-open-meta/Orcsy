@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.23.1"
+__version__ = "0.23.2"
 
 # 对外 HTTP 请求的统一身份（httpx 默认 UA 是 python-httpx/x.y，无辨识度）
 USER_AGENT = f"Orcsy/{__version__}"

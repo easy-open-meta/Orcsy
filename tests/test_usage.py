@@ -47,6 +47,26 @@ def check_record_and_summary() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_recent_excludes_review() -> None:
+    """最近任务记录只收 kind=task：review 记录（outcome=pass/fail 等）不混入，
+    否则结果列会出现审查结论 badge 与任务结果 badge 两套词汇（bug 修复）。"""
+    tmp = Path(tempfile.mkdtemp(prefix="usage-recent-"))
+    try:
+        st = UsageStore(tmp / "usage.jsonl")
+        st.record("p", "T1", "done", 2, 100, 10, "m")
+        st.record("p", "T1", "pass", 1, 50, 5, "m", kind="review")
+        st.record("p", "T2", "blocked", 3, 200, 20, "m")
+        s = st.summary()
+        assert [r["task_id"] for r in s["recent"]] == ["T2", "T1"], s["recent"]
+        assert all(str(r.get("kind") or "task") == "task" for r in s["recent"])
+        # review 消耗仍进总额/角色聚合（只在任务记录列表隐藏）
+        assert s["total"]["tasks"] == 3
+        assert any(r["role"] == "review" for r in s["roles"]), s["roles"]
+        print("ok: recent 只收任务记录（review 不混入结果 badge）")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def check_days_bucket() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="usage-days-"))
     try:
@@ -140,6 +160,7 @@ def check_singleton_and_web() -> None:
 
 def main() -> int:
     check_record_and_summary()
+    check_recent_excludes_review()
     check_days_bucket()
     check_persistence_and_truncation()
     check_singleton_and_web()

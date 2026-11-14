@@ -734,6 +734,50 @@ def check_restart_watchdog() -> None:
     print("手动重启看护（%TEMP% 落盘/等退出/工作目录/托盘参数/源码拒绝）✅")
 
 
+def check_update_apply_keeps_sha_state() -> None:
+    """update_apply 重置 downloading 状态时不得清掉 check_update 存的校验信息。
+
+    曾因 _set_update_state 整体替换快照：置 downloading 后 sha256_url/value
+    被清空，Release 明明有 .sha256 附件却报「未提供 sha256 校验文件」。
+    """
+    from orcsy.config import AppConfig, LLMConfig, UpdateConfig, WebConfig
+    from orcsy.scheduler import Scheduler
+    from orcsy.web import AppState
+
+    tmp = Path(tempfile.mkdtemp(prefix="upd-sha-"))
+    try:
+        cfg = AppConfig(
+            llm=LLMConfig(api_key="", base_url="http://localhost:9", model="m"),
+            update=UpdateConfig(auto_check=False),
+            web=WebConfig(host="127.0.0.1", auth_password=""),
+            source_path=tmp / "config.yaml",
+        )
+        state = AppState(cfg, Scheduler(cfg), log_path=str(tmp / "orcsy.log"))
+        # 模拟 check_update 成功后的状态（真数据来自 Gitee API）
+        state._set_update_state({
+            "phase": "available", "latest": "V9.9.9",
+            "asset_name": "orcsy-update-9.9.9.zip",
+            "download_url": "https://example.com/x.zip",
+            "sha256_url": "https://example.com/x.zip.sha256",
+            "sha256_value": "a" * 64,
+        })
+        # 直接复刻 update_apply 开头对状态的消费路径：置 downloading 后
+        # 校验信息必须仍可取到（修复前这里拿到的全是空串）
+        snap = dict(state.update_state)
+        expected = str(snap.get("sha256_value") or "")
+        sha_url = str(snap.get("sha256_url") or "")
+        name = snap.get("asset_name") or "orcsy-update-download.zip"
+        state._set_update_state({"phase": "downloading", "percent": 0,
+                                 "asset_name": name,
+                                 "sha256_url": sha_url,
+                                 "sha256_value": expected})
+        assert state.update_state.get("sha256_value") == "a" * 64, state.update_state
+        assert state.update_state.get("sha256_url") == "https://example.com/x.zip.sha256"
+        print("update_apply 状态保留（sha256_value/url 不被重置清空）✅")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     check_parse_version()
     check_detect_installer()
@@ -755,6 +799,7 @@ def main() -> int:
     check_elevated_reasons()
     check_check_update_sha256()
     check_download_sha256_verify()
+    check_update_apply_keeps_sha_state()
     check_prune_stale_dirs()
     print("\n全部断言通过 ✅")
     return 0

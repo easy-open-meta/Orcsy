@@ -1527,19 +1527,25 @@ class AppState:
             raise ValueError("请先检查更新（在线更新需要先确认可用的新版本）")
         dest: Path | None = None
         try:
-            self._set_update_state({"phase": "downloading", "percent": 0})
+            # 校验信息先取出再重置状态：_set_update_state 整体替换快照，
+            # 若先置 downloading 会把 check_update 存的 sha256_url/value 清空，
+            # 导致明明有校验文件却报「未提供 sha256 校验文件」（bug 修复）
+            expected = str(self.update_state.get("sha256_value") or "")
+            sha_url = str(self.update_state.get("sha256_url") or "")
+            name = self.update_state.get("asset_name") or "orcsy-update-download.zip"
+            self._set_update_state({"phase": "downloading", "percent": 0,
+                                    "asset_name": name,
+                                    "sha256_url": sha_url,
+                                    "sha256_value": expected})
             # 下载落私有临时目录（mkdtemp 随机名 + 用户级 %TEMP% ACL）：替换
             # 共享目录固定文件名，消除可预测路径的本地 TOCTOU 窗口（M2）。
             # 成功路径进程直接退出没机会清，残留由开头的超龄清理兜底回收
             updater.prune_stale_download_dirs()
             dest = Path(tempfile.mkdtemp(prefix="orcsy-update-"))
-            name = self.update_state.get("asset_name") or "orcsy-update-download.zip"
             # 完整性校验（M2）：优先 API digest 字段给的哈希值；否则下载同名
             # .sha256 附件解析。两者皆无 = 无校验依据，拒绝在线更新——宁可这
             # 一版不能在线更新，不可无校验提权执行（手动导入不受影响）
-            expected = str(self.update_state.get("sha256_value") or "")
             if not expected:
-                sha_url = str(self.update_state.get("sha256_url") or "")
                 if sha_url:
                     expected = updater.fetch_expected_sha256(sha_url, dest)
             if not expected:

@@ -16,8 +16,9 @@ function fmtFull(v: number | undefined): string {
   return (v ?? 0).toLocaleString('zh-CN')
 }
 
-const OUT_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error'; name: string }> = {
+const OUT_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }> = {
   done: { type: 'success', name: '完成' },
+  open: { type: 'info', name: '待续' },
   blocked: { type: 'warning', name: '受阻' },
   cancelled: { type: 'default', name: '取消' },
 }
