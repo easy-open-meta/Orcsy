@@ -172,7 +172,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <p>For first-time, non-technical users: install Orcsy, connect a
 project, create tasks, and understand every part of the dashboard —
 without needing to write code.</p>
-<p>Version: <strong>0.23.0</strong>　|　Default dashboard: <strong><a
+<p>Version: <strong>0.24.0</strong>　|　Default dashboard: <strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
 <p>ℹ️ The dashboard is currently Chinese-only. This guide uses English
 names for buttons and cards; a Chinese-label reference is in <a
@@ -387,7 +387,7 @@ required, but then you lose automatic commit/merge).</li>
 </ul>
 <h4 id="steps">Steps</h4>
 <ol type="1">
-<li>Download <code>orcsy-setup-0.23.0-windows-amd64.exe</code> from the release page:
+<li>Download <code>orcsy-setup-0.24.0-windows-amd64.exe</code> from the release page:
 <ul>
 <li>Gitee: <a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -744,7 +744,7 @@ change.</strong></li>
 <h3 id="55-save">5.5 Save</h3>
 <p>Click <strong>Save model settings</strong>. The top bar will show the
 current model, for example:</p>
-<pre><code>v0.23.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.24.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>If it says <strong>api_key not configured</strong>, the key was not
 saved. Go back and check.</p>
 <hr />
@@ -1300,7 +1300,7 @@ in the dashboard):</p>
 </tr>
 <tr>
 <td>Theme</td>
-<td>☀ / ☾</td>
+<td>☀ / ☾ / ◐ (dark / light / follow system)</td>
 </tr>
 <tr>
 <td>Pending approvals</td>
@@ -1388,7 +1388,7 @@ tasks are interrupted and can be requeued after restart</td>
 <td>Refresh dashboard data</td>
 </tr>
 <tr>
-<td>☀ / ☾</td>
+<td>☀ / ☾ / ◐ (dark / light / follow system)</td>
 <td>Toggle light/dark theme</td>
 </tr>
 <tr>
@@ -1839,6 +1839,30 @@ execution.</p>
 <p>This page is the <b>final human gate</b> of the delivery pipeline: Orcsy will never commit or push on your behalf.</p>
 
 <hr />
+<h3 id="1016-mobile-remote-access-phone-dashboard-pwa">10.16 Mobile remote access (phone dashboard / PWA)</h3>
+<p>Orcsy can be operated from a phone browser — watch Agent progress on the go, unblock a stuck task with a one-line note, or capture a new idea straight into the queue.</p>
+<p><strong>Step 1: open access + set a password</strong></p>
+<p>The easiest way: click the 📱 button in the desktop top bar to open the "Phone connect" wizard. While the dashboard only listens on loopback, the wizard offers a one-click "Enable phone access" checkbox — tick it and confirm: Orcsy rewrites the config (<code>web.host: 0.0.0.0</code> + an auto-generated strong password, stored hashed only) and restarts automatically. After the restart, the login screen shows the password once more — copy it, log in, done.</p>
+<p>Manual alternative: set <code>web.host</code> to <code>0.0.0.0</code> and <code>web.auth_password</code> in <code>config.yaml</code>, then restart.</p>
+<p><strong>Step 2: connect from the phone</strong></p>
+<ul>
+<li>Phone on the same Wi-Fi: scan the code (or type the address), enter the login password;</li>
+<li>Tick "Remember this device (30 days)": a long session + a Bearer token are issued side by side with the cookie, so screen-off, network switching, or reverse-proxy cookie loss rarely logs you out;</li>
+<li>Cross-network access works via an HTTPS reverse proxy, tunnels (FRP / Tailscale / Cloudflare Tunnel), or a public VPS; set <code>web.public_url</code> and the wizard/terminal will prefer your public domain.</li>
+</ul>
+<p><strong>Mobile-specific UI</strong> (auto-enabled at viewport width ≤ 768px; desktop layout unchanged):</p>
+<ul>
+<li><strong>Slim sticky top bar</strong>: only the approval badge and refresh — low-frequency actions live in the drawer;</li>
+<li><strong>Bottom navigation</strong>: Dashboard / Projects / <strong>＋ New task</strong> (pick a project, then a fullscreen sheet) / More (drawer menu: navigation, theme cycle, scan, restart, logout);</li>
+<li><strong>Fullscreen task sheet</strong>: Save / Cancel stay pinned at the very top — the on-screen keyboard can never cover them; a Markdown toolbar sits above the body;</li>
+<li><strong>Touch reorder</strong>: ▲▼ buttons on each task card move it within its priority group (desktop keeps drag-and-drop);</li>
+<li><strong>Draft protection</strong>: edits are auto-stashed locally every 0.3 s; if the browser is killed, reopening shows "unsaved draft found" with one-tap restore;</li>
+<li><strong>No clobbering</strong>: saving runs an optimistic-lock check — if the Agent just modified the task, the server returns 409 and you choose "keep my changes" or "take the latest";</li>
+<li><strong>Weak-network friendly</strong>: polling pauses when the screen is off and self-heals on return; mobile polling uses a lightweight summary; the run log loads on demand;</li>
+<li><strong>Add to home screen (PWA)</strong>: "Install / Add to home screen" opens Orcsy like a standalone app.</li>
+</ul>
+<p><strong>Reverse proxy deployments (optional)</strong>: login throttling resolves the real client IP from X-Forwarded-For only if the proxy is listed in <code>web.trusted_proxies</code> — loopback is trusted by default, so a lockout can never pin 127.0.0.1 and lock the local machine out too.</p>
+
 <h2 id="11-data-backup-and-migration">11. Data, backup, and
 migration</h2>
 <h3 id="111-where-data-lives">11.1 Where data lives</h3>

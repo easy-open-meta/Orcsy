@@ -171,7 +171,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <blockquote>
 <p>面向第一次接触 Orcsy
 的普通使用者：不需要懂编程，也能完成安装、接入项目、创建任务，并看懂看板上的每一条信息。</p>
-<p>适用版本：<strong>0.23.0</strong>　|　默认看板地址：<strong><a
+<p>适用版本：<strong>0.24.0</strong>　|　默认看板地址：<strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
 </blockquote>
 <hr />
@@ -347,7 +347,7 @@ GLM、Kimi、OpenAI、通义千问等）；</li>
 </ul>
 <h4 id="安装步骤">安装步骤</h4>
 <ol type="1">
-<li>打开项目发布页，下载 <code>orcsy-setup-0.23.0-windows-amd64.exe</code>。
+<li>打开项目发布页，下载 <code>orcsy-setup-0.24.0-windows-amd64.exe</code>。
 <ul>
 <li>Gitee：<a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -678,7 +678,7 @@ Anthropic 兼容服务选 <code>anthropic</code></td>
 </ul>
 <h3 id="55-保存">5.5 保存</h3>
 <p>点「保存模型配置」。顶部标题下方会显示当前模型，例如：</p>
-<pre><code>v0.23.0 · 模型 deepseek-chat（openai） · 配置 C:\Users\你\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.24.0 · 模型 deepseek-chat（openai） · 配置 C:\Users\你\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>如果显示「未配置 api_key」，说明密钥没保存成功，回到设置页检查。</p>
 <hr />
 <h2 id="6-接入你的第一个项目">6. 接入你的第一个项目</h2>
@@ -971,7 +971,7 @@ in_progress（执行中）
 <td>待办任务打开编辑；其它状态只读查看</td>
 </tr>
 <tr>
-<td>拖拽任务行</td>
+<td>拖拽任务行 / ▲▼ 按钮</td>
 <td>任务列表</td>
 <td>调整同一优先级内的顺序，同时决定 Agent 领取顺序</td>
 </tr>
@@ -1165,7 +1165,7 @@ in_progress（执行中）
 </tr>
 <tr>
 <td>☀ / ☾</td>
-<td>切换浅色/深色主题</td>
+<td>主题三态循环：深色 → 浅色 → 跟随系统（跟随系统时手机外观变化看板实时跟随）</td>
 </tr>
 <tr>
 <td>🔔 待审批 N</td>
@@ -1525,6 +1525,29 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 </ul>
 <p>这个页面就是交付流程的<b>最后一道人工闸门</b>：Agent 永远不会替你 commit / push，最终提交权始终在你手里。</p>
 
+<h3 id="1016-移动端远程访问手机看板-pwa">10.16 移动端远程访问（手机看板 / PWA）</h3>
+<p>Orcsy 支持在手机浏览器上远程查看、编辑与新建任意项目的任务——适合外出巡检时盯进度、任务受阻时随手补一句话、灵感来了立即录入排队。</p>
+<p><strong>第一步：开放访问 + 设置密码</strong></p>
+<p>最省事的方式：桌面看板右上角点「📱」按钮打开「手机远程连接」向导——看板还只监听本机回环时，向导给出「一键开放手机访问」勾选项：打勾并确认后自动改配置（<code>web.host: 0.0.0.0</code> + 自动生成强密码，只存密文）落盘并<strong>自动重启应用</strong>；重启后登录页会再提示一次访问密码，复制登录即可。</p>
+<p>手动方式：<code>config.yaml</code> 里把 <code>web.host</code> 改为 <code>0.0.0.0</code> 并设置 <code>web.auth_password</code>，重启生效。</p>
+<p><strong>第二步：手机连接</strong></p>
+<ul>
+<li>手机与电脑连<strong>同一 Wi-Fi</strong>，用相机扫码（或输入地址）直达看板，输入登录密码即可；</li>
+<li>登录页勾选「记住这台设备（30 天免重复登录）」：签发 30 天长会话 + Bearer Token 双凭证，手机息屏、切网、反代丢 Cookie 都不容易掉登录；</li>
+<li>跨网访问可用反向代理（Nginx / Caddy 上 HTTPS）、FRP / Tailscale / Cloudflare Tunnel 内网穿透，或直接部署在公网服务器；配置 <code>web.public_url</code> 后向导与终端会优先展示你的公网域名。</li>
+</ul>
+<p><strong>手机端专属界面</strong>（屏幕宽 ≤ 768px 自动切换，桌面布局不变）：</p>
+<ul>
+<li><strong>极简吸顶顶栏</strong>：只留待审批徽标与刷新，低频操作全部收进抽屉菜单；</li>
+<li><strong>底部导航栏</strong>：看板 / 项目 / <strong>＋ 新建</strong>（选项目后呼出全屏新建抽屉）/ 更多（抽屉菜单：导航、主题三态切换、扫描、重启、退出等都在这里）；</li>
+<li><strong>任务全屏抽屉</strong>：新建/编辑任务时「保存 / 取消」固定在最顶端——软键盘顶起也不会挡住按钮；正文框上方有 Markdown 快捷工具条；</li>
+<li><strong>触屏排序</strong>：任务卡片上的 ▲▼ 按钮，同一优先级分组内上移/下移（替代桌面拖拽）；</li>
+<li><strong>草稿防丢</strong>：编辑中每 0.3 秒自动暂存到本机；来电、切后台被杀后重开，提示「检测到未保存的草稿」一键恢复；</li>
+<li><strong>防冲覆盖</strong>：保存任务时后端做乐观锁校验——后台 Agent 刚改过这个任务时返回 409 冲突，弹出「保留我的修改 / 采用最新状态」由你决定，绝不静默覆盖 Agent 的回写；</li>
+<li><strong>弱网低耗</strong>：手机息屏自动暂停轮询，回到前台立即静默刷新；移动端轮询走轻量摘要（省略日志尾部与归档），蜂窝流量从 ~80KB/次压到几 KB；运行日志改为点开时按需加载；</li>
+<li><strong>添加到主屏幕（PWA）</strong>：手机浏览器菜单里「添加到主屏幕 / 安装」，Orcsy 会像独立 App 一样全屏打开（带图标与启动画面）。</li>
+</ul>
+<p><strong>反向代理部署（可选）</strong>：Orcsy 收到的对端 IP 恒为反代地址时，登录限速按 <code>web.trusted_proxies</code> 名单解析 <code>X-Forwarded-For</code> 里的真实客户端 IP——默认信任本机回环（同机 Nginx/Caddy/FRP 场景开箱即用），不会因为封禁 <code>127.0.0.1</code> 把本机也锁在门外。</p>
 <h2 id="11-数据备份与迁移">11. 数据、备份与迁移</h2>
 <h3 id="111-数据都存在哪">11.1 数据都存在哪</h3>
 <table>
