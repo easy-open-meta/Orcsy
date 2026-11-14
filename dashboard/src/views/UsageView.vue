@@ -26,10 +26,10 @@ const OUT_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error
 // 审查记录（kind=review）的结果列用另一套词汇：badge 颜色区分 + 🔍 前缀，
 // 与任务结果（完成/受阻）同框但一眼可辨，不再混用同一列语义
 const REVIEW_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }> = {
-  pass: { type: 'success', name: '🔍 审查通过' },
-  fail: { type: 'error', name: '🔍 审查不通过' },
-  error: { type: 'warning', name: '🔍 审查失败' },
-  skipped: { type: 'default', name: '🔍 免审查' },
+  pass: { type: 'success', name: '审查通过' },
+  fail: { type: 'error', name: '审查不通过' },
+  error: { type: 'warning', name: '审查失败' },
+  skipped: { type: 'default', name: '免审查' },
 }
 
 // 台账旧记录缺 kind 字段视为任务记录
@@ -54,14 +54,14 @@ const filteredRecent = computed(() =>
 
 function roleLabel(role: string): string {
   const map: Record<string, string> = {
-    pm: '👑 项目经理 (PM)',
-    backend: '⚙️ 后端开发工程师',
-    frontend: '🎨 前端开发工程师',
-    qa: '🧪 测试工程师 (QA)',
-    review: '🔍 任务审查 (Review Agent)',
-    solo: '🤖 全栈单兵 / 传统模式',
+    pm: '项目经理 (PM)',
+    backend: '后端开发工程师',
+    frontend: '前端开发工程师',
+    qa: '测试工程师 (QA)',
+    review: '任务审查 (Review Agent)',
+    solo: '全栈单兵 / 传统模式',
   }
-  return map[role] || `🧩 ${role}`
+  return map[role] || role
 }
 
 // ---- GitHub 贡献图风格热力图：列=周（周一起列）、行=星期、色深=当日 tokens ----
@@ -112,7 +112,8 @@ const heat = computed(() => {
         <div class="usub">精确值 {{ fmtFull(usage?.total.completion_tokens) }}</div></div>
     </div>
 
-    <NCard title="📊 各项目用量" size="small" class="scard">
+    <NCard size="small" class="scard">
+      <template #header><i class="ms">analytics</i> 各项目用量</template>
       <template #header-extra>
         <span class="hint">按总 tokens 降序；台账文件 logs/usage.jsonl，任务结束即追加</span>
       </template>
@@ -136,7 +137,8 @@ const heat = computed(() => {
       <div v-else class="uempty">还没有用量记录——跑一轮任务后这里会按项目累计 tokens。</div>
     </NCard>
 
-    <NCard v-if="usage?.roles?.length" title="👥 按 Agent 角色用量" size="small" class="scard">
+    <NCard v-if="usage?.roles?.length" size="small" class="scard">
+        <template #header><i class="ms">group</i> 按 Agent 角色用量</template>
       <template #header-extra>
         <span class="hint">按总 tokens 降序；小组模式展开成员明细（执行 + 触发的审查）</span>
       </template>
@@ -169,7 +171,8 @@ const heat = computed(() => {
       </table>
     </NCard>
 
-    <NCard title="🔥 用量热力图（近 12 周）" size="small" class="scard">
+    <NCard size="small" class="scard">
+        <template #header><i class="ms">local_fire_department</i> 用量热力图（近 12 周）</template>
       <template #header-extra><span class="hint">色深 = 当日输入+输出 tokens；悬停看单日明细</span></template>
       <div class="hm" v-if="heat.cols.length">
         <div class="hm-months">

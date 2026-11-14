@@ -24,9 +24,9 @@ function onPageChange(pg: number): void {
 
 function roleBadgeText(role: string): string {
   const map: Record<string, string> = {
-    pm: '👑 PM', backend: '⚙️ 后端', frontend: '🎨 前端', qa: '🧪 测试',
+    pm: 'PM', backend: '后端', frontend: '前端', qa: '测试',
   }
-  return map[role] || `🤖 ${role}`
+  return map[role] || role
 }
 
 // ---- 任务排序与卡片内分页（与看板页同规则：状态分组 → 优先级 → 拖拽 order） ----
@@ -361,11 +361,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
             </NTag>
             <NButton size="tiny" quaternary class="git-refresh" :loading="gitRefreshing === p.name"
                      title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
-                     @click="refreshGit(p)">↻</NButton>
+                     @click="refreshGit(p)"><i class="ms sm">refresh</i></NButton>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
             <NTag v-if="p.team_enabled" size="small" type="info" :bordered="false"
                   :title="'已启用项目小组：' + (p.team_members_effective?.map(m => m.name).join('、') || '')">
-              👥 小组 ({{ p.team_members_effective?.length || 0 }})
+              <i class="ms sm">group</i> 小组 ({{ p.team_members_effective?.length || 0 }})
             </NTag>
             <NButton v-if="p.pending_git_changes && p.pending_git_changes.count > 0"
                      size="tiny" type="warning" secondary
@@ -467,20 +467,20 @@ async function quickAdd(p: ProjectT): Promise<void> {
                 ⚠ 前置受阻
               </NTag>
               <NTag v-if="(t.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
-                🔁 回归 #{{ t.qa_round }}
+                <i class="ms sm">autorenew</i> 回归 #{{ t.qa_round }}
               </NTag>
               <NTag v-if="t.review_pending" size="small" type="info" :bordered="false"
                     title="任务已完成，独立审查进行中或等待补审；审查通过后合并归档">
-                🔍 待审查
+                <i class="ms sm">rate_review</i> 待审查
               </NTag>
               <NTag v-else-if="(t.review_round || 0) > 0 && t.status !== 'done' && t.status !== 'cancelled'"
                     size="small" type="warning" :bordered="false"
                     :title="`已被审查退回 ${t.review_round} 次（返工轮）`">
-                🔍 返工 ×{{ t.review_round }}
+                <i class="ms sm">rate_review</i> 返工 ×{{ t.review_round }}
               </NTag>
               <NTag v-if="waitingApproval(p.name, t.id)" size="small" type="warning"
-                    :bordered="false" title="Agent 有操作挂起等待人工审批，点顶栏「🔔 待审批」处理">
-                ⏸ 待审批
+                    :bordered="false" title="Agent 有操作挂起等待人工审批，点顶栏「待审批」处理">
+                <i class="ms sm">pause_circle</i> 待审批
               </NTag>
             </div>
             <div class="t-meta">

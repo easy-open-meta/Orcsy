@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { NButton, NCard, NCheckbox, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
+import { NButton, NCard, NCheckbox, NInput, NPagination, NSelect, NSpin, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref, shallowRef } from 'vue'
 import { navigateTo, openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
+import { isMobile } from '../mobile'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { parseLogEntries, relTime } from '../utils'
 import type { ProjectT, TaskT } from '../api'
 import { api } from '../api'
 
-function roleBadgeText(role: string): string {
+function roleIcon(role: string): string {
   const map: Record<string, string> = {
-    pm: '👑 PM', backend: '⚙️ 后端', frontend: '🎨 前端', qa: '🧪 测试',
+    pm: 'manage_accounts', backend: 'terminal', frontend: 'palette', qa: 'science',
   }
-  return map[role] || `🤖 ${role}`
+  return map[role] || 'smart_toy'
+}
+function roleLabel(role: string): string {
+  const map: Record<string, string> = { pm: 'PM', backend: '后端', frontend: '前端', qa: '测试' }
+  return map[role] || role
 }
 
 // ---- 看板仅展示有正在执行任务的项目（其余项目在「项目」页管理） ----
@@ -102,6 +107,48 @@ async function onDrop(p: ProjectT, t: TaskT): Promise<void> {
     await api.taskReorder(p.name, ids)
   } catch (e: any) { window.$message?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
+}
+
+// ---- 触屏友好排序（移动端）：HTML5 DnD 在触屏上不可用，行内 ▲▼ 按钮替代——
+// 同「状态 + 优先级」分组内相邻交换，落盘整项目顺序（与拖拽同一 /api/task/reorder）----
+async function moveTask(p: ProjectT, t: TaskT, dir: -1 | 1): Promise<void> {
+  const all = sorted(p)
+  const idx = all.findIndex(x => x.id === t.id)
+  const j = idx + dir
+  if (idx < 0 || j < 0 || j >= all.length) return
+  const neighbor = all[j]
+  if (neighbor.status !== t.status || neighbor.rank !== t.rank) {
+    window.$message?.('任务顺序仅在同一优先级分组内调整（跨级请先改优先级）', 'warning')
+    return
+  }
+  const ids = all.map(x => x.id)
+  ;[ids[idx], ids[j]] = [ids[j], ids[idx]]
+  try {
+    await api.taskReorder(p.name, ids)
+    void import('../store').then(m => m.refresh(true))
+  } catch (e: any) { window.$message?.(e.message, 'error') }
+}
+
+// ---- 移动端运行日志：摘要轮询不含 60KB 日志尾部（省流量），打开日志区按需
+// 全量拉取 + 手动刷新（不挂自动定时器，蜂窝网络下保持低耗） ----
+const mobileLog = shallowRef('')
+const mobileLogOpen = shallowRef(false)
+const mobileLogLoading = shallowRef(false)
+const mobileLogEntries = computed(() => parseLogEntries(mobileLog.value))
+
+async function loadMobileLog(): Promise<void> {
+  mobileLogLoading.value = true
+  try {
+    const s = await api.state(false)
+    mobileLog.value = s.log_tail || ''
+  } catch (e: any) {
+    mobileLog.value = `加载失败：${e.message}`
+  } finally { mobileLogLoading.value = false }
+}
+
+function toggleMobileLog(): void {
+  mobileLogOpen.value = !mobileLogOpen.value
+  if (mobileLogOpen.value && !mobileLog.value) void loadMobileLog()
 }
 
 // ---- 任务列表分页：批量导入 Issue 后卡片不至于无限长 ----
@@ -375,11 +422,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
             </NTag>
             <NButton size="tiny" quaternary class="git-refresh" :loading="gitRefreshing === p.name"
                      title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
-                     @click="refreshGit(p)">↻</NButton>
+                     @click="refreshGit(p)"><i class="ms sm">refresh</i></NButton>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
             <NTag v-if="p.team_enabled" size="small" type="info" :bordered="false"
                   :title="'已启用项目小组：' + (p.team_members_effective?.map(m => m.name).join('、') || '')">
-              👥 小组 ({{ p.team_members_effective?.length || 0 }})
+              <i class="ms sm">group</i> 小组 ({{ p.team_members_effective?.length || 0 }})
             </NTag>
             <NButton v-if="p.pending_git_changes && p.pending_git_changes.count > 0"
                      size="tiny" type="warning" secondary
@@ -470,7 +517,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
                 {{ ST_NAME[t.status] || t.status }}
               </NTag>
               <NTag v-if="t.assignee" size="small" type="info" :bordered="false">
-                {{ roleBadgeText(t.assignee) }}
+                <i class="ms sm">{{ roleIcon(t.assignee) }}</i> {{ roleLabel(t.assignee) }}
               </NTag>
               <NTag v-if="t.dep_state === 'waiting'" size="small" :bordered="false"
                     title="等待前置依赖任务完成">
@@ -481,20 +528,20 @@ async function quickAdd(p: ProjectT): Promise<void> {
                 ⚠ 前置受阻
               </NTag>
               <NTag v-if="(t.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
-                🔁 回归 #{{ t.qa_round }}
+                <i class="ms sm">autorenew</i> 回归 #{{ t.qa_round }}
               </NTag>
               <NTag v-if="t.review_pending" size="small" type="info" :bordered="false"
                     title="任务已完成，独立审查进行中或等待补审；审查通过后合并归档">
-                🔍 待审查
+                <i class="ms sm">rate_review</i> 待审查
               </NTag>
               <NTag v-else-if="(t.review_round || 0) > 0 && t.status !== 'done' && t.status !== 'cancelled'"
                     size="small" type="warning" :bordered="false"
                     :title="`已被审查退回 ${t.review_round} 次（返工轮）`">
-                🔍 返工 ×{{ t.review_round }}
+                <i class="ms sm">rate_review</i> 返工 ×{{ t.review_round }}
               </NTag>
               <NTag v-if="waitingApproval(p.name, t.id)" size="small" type="warning"
-                    :bordered="false" title="Agent 有操作挂起等待人工审批，点顶栏「🔔 待审批」处理">
-                ⏸ 待审批
+                    :bordered="false" title="Agent 有操作挂起等待人工审批，点顶栏「待审批」处理">
+                <i class="ms sm">pause_circle</i> 待审批
               </NTag>
             </div>
             <div class="t-meta">
@@ -505,6 +552,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
               <pre>{{ t.description }}</pre>
             </details>
             <div class="ops-row">
+              <!-- 触屏排序（仅移动端显示）：同优先级分组内上移/下移 -->
+              <template v-if="isMobile">
+                <NButton size="tiny" title="上移（同一优先级分组内）"
+                         @click="moveTask(p, t, -1)"><i class="ms sm">keyboard_arrow_up</i></NButton>
+                <NButton size="tiny" title="下移（同一优先级分组内）"
+                         @click="moveTask(p, t, 1)"><i class="ms sm">keyboard_arrow_down</i></NButton>
+              </template>
               <NButton v-if="t.status !== 'open' && t.status !== 'cancelled'" size="tiny"
                        @click="setStatus(p, t, 'open')">重新入队</NButton>
               <NButton v-if="t.status === 'open' || t.status === 'in_progress'" size="tiny"
@@ -547,7 +601,9 @@ async function quickAdd(p: ProjectT): Promise<void> {
       </div>
     </div>
 
-    <details v-if="store.state" class="logsec" open>
+    <!-- 运行日志：桌面端随 5s 轮询全量刷新；移动端摘要轮询省流量，
+         打开日志区按需全量拉取 + 手动刷新（低耗优先） -->
+    <details v-if="store.state && !isMobile" class="logsec" open>
       <summary>运行日志（从新到旧，点击收起）</summary>
       <div class="logbox">
         <div v-if="!logEntries.length" class="logempty">（暂无日志）</div>
@@ -560,6 +616,27 @@ async function quickAdd(p: ProjectT): Promise<void> {
           <div v-else class="logentry">{{ e.head }}<template v-if="e.body">{{ '\n' + e.body }}</template></div>
         </template>
       </div>
+    </details>
+    <details v-else-if="store.state" class="logsec" :open="mobileLogOpen">
+      <summary @click.prevent="toggleMobileLog">
+        <span class="logsum-title">运行日志{{ mobileLogOpen ? '（点击收起）' : '' }}</span>
+        <NButton v-if="mobileLogOpen" size="tiny" quaternary :loading="mobileLogLoading"
+                 class="log-refresh" @click.stop="loadMobileLog">
+          <i class="ms sm">refresh</i> 刷新
+        </NButton>
+      </summary>
+      <template v-if="mobileLogOpen">
+        <div class="logbox">
+          <div v-if="!mobileLogEntries.length" class="logempty">（暂无日志）</div>
+          <template v-for="(e, i) in mobileLogEntries" :key="i">
+            <details v-if="e.thinking" class="think">
+              <summary>{{ e.head }}</summary>
+              <pre>{{ e.body || '（无正文）' }}</pre>
+            </details>
+            <div v-else class="logentry">{{ e.head }}<template v-if="e.body">{{ '\n' + e.body }}</template></div>
+          </template>
+        </div>
+      </template>
     </details>
   </div>
 </template>
@@ -613,7 +690,9 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .arch { margin-top: 10px; font-size: 13px; }
 .arch summary { cursor: pointer; color: var(--dim); }
 .logsec { margin: 16px 0; font-size: 13px; }
-.logsec summary { cursor: pointer; color: var(--dim); }
+.logsec summary { cursor: pointer; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+.logsec summary .log-refresh { margin-left: auto; min-width: 78px; }
+/* loading 转圈出现/消失时按钮宽度恒定，标题行不跳动 */
 .logbox {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 10px 12px; max-height: 380px; overflow: auto;
@@ -626,5 +705,19 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .think pre {
   margin: 4px 0 0; font: inherit; white-space: pre-wrap; word-break: break-word;
   opacity: 0.85; border-left: 2px solid var(--line2); padding-left: 8px;
+}
+/* ---- 移动端适配（≤768px）：单列卡片、任务标题可折行、按钮换行不溢出 ---- */
+@media (max-width: 768px) {
+  .dash { padding: 0 12px; }
+  .grid { grid-template-columns: 1fr; }
+  .stats { gap: 6px; margin-bottom: 10px; }
+  .stats .n-tag { font-size: 12px; }
+  .t-main { flex-wrap: wrap; }
+  .task .title { white-space: normal; }
+  .ops-row { flex-wrap: wrap; }
+  .card-footer-ops { flex-wrap: wrap; }
+  .quickadd { flex-wrap: wrap; }
+  .quickadd .qpri { width: 76px; }
+  .pathline { flex-direction: column; align-items: flex-start; gap: 2px; }
 }
 </style>

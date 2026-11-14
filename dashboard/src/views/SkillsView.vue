@@ -89,11 +89,12 @@ const projectCount = computed(() => store.state?.projects.length ?? 0)
 
 <template>
   <div class="skills" v-if="store.state">
-    <NCard title="🧩 技能库" size="small" class="scard">
+    <NCard size="small" class="scard">
+        <template #header><i class="ms">extension</i> 技能库</template>
       <template #header-extra>
         <div class="head-ops">
-          <NButton size="small" @click="openSkillScan">🔍 扫描 AI 工具</NButton>
-          <NButton size="small" @click="importSkill">⬆ 导入本地技能</NButton>
+          <NButton size="small" @click="openSkillScan"><i class="ms sm">search</i> 扫描 AI 工具</NButton>
+          <NButton size="small" @click="importSkill"><i class="ms sm">upload</i> 导入本地技能</NButton>
           <NButton type="primary" size="small" @click="openSkillNew">＋ 新建技能</NButton>
           <NButton v-if="checkedNames.length" size="small" type="error"
                    @click="removeSkills(checkedNames)">删除选中（{{ checkedNames.length }}）</NButton>

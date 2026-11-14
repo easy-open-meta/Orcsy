@@ -4,21 +4,22 @@ import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
 import { cmpVersion, fmtTokens } from '../utils'
+import { miIcon } from '../mi'
 
 const message = () => window.$message
 
 // ---- 功能分区手风琴：左侧分区菜单，右侧只渲染当前分区（懒加载，未点开不挂载） ----
 // key 与 settingsSection 联动（跨视图跳转定位，如看板「设置」按钮直达对应分区）
 const SECTIONS = [
-  { key: 'llm', label: '🤖 大模型接入' },
-  { key: 'profiles', label: '👥 多模型项目小组 (Team)' },
-  { key: 'sched', label: '⏱ 调度与看板' },
-  { key: 'notify', label: '🔔 提醒设置' },
-  { key: 'masking', label: '🛡 数据脱敏' },
-  { key: 'review', label: '🔍 任务审查（Review Agent）' },
-  { key: 'tools', label: '🛠 Agent 工具与访问权限' },
-  { key: 'mirrors', label: '🪞 镜像源管理与测速选源' },
-  { key: 'app', label: '⚙️ 应用' },
+  { key: 'llm', label: '大模型接入' },
+  { key: 'profiles', label: '多模型项目小组 (Team)' },
+  { key: 'sched', label: '调度与看板' },
+  { key: 'notify', label: '提醒设置' },
+  { key: 'masking', label: '数据脱敏' },
+  { key: 'review', label: '任务审查（Review Agent）' },
+  { key: 'tools', label: 'Agent 工具与访问权限' },
+  { key: 'mirrors', label: '镜像源管理与测速选源' },
+  { key: 'app', label: '应用' },
 ] as const
 const activeSection = computed(() => settingsSection.value)
 function onSectionChange(v: string | number | (string | number)[] | null): void {
@@ -494,16 +495,19 @@ const editingProfileId = shallowRef<string | null>(null)
 const profileTestingId = shallowRef<string | null>(null)
 
 const roleSelectOptions = [
-  { label: '👑 项目经理 (PM)', value: 'pm' },
-  { label: '⚙️ 后端开发工程师', value: 'backend' },
-  { label: '🎨 前端开发工程师', value: 'frontend' },
-  { label: '🧪 测试工程师 (QA)', value: 'qa' },
-  { label: '🧩 自定义专职角色', value: 'custom' },
+  { label: '项目经理 (PM)', value: 'pm' },
+  { label: '后端开发工程师', value: 'backend' },
+  { label: '前端开发工程师', value: 'frontend' },
+  { label: '测试工程师 (QA)', value: 'qa' },
+  { label: '自定义专职角色', value: 'custom' },
 ]
 
 function getRoleIcon(role: string): string {
-  const map: Record<string, string> = { pm: '👑', backend: '⚙️', frontend: '🎨', qa: '🧪', custom: '🧩' }
-  return map[role] || '🤖'
+  const map: Record<string, string> = {
+    pm: 'manage_accounts', backend: 'terminal', frontend: 'palette',
+    qa: 'science', custom: 'extension',
+  }
+  return map[role] || 'smart_toy'
 }
 
 function getRoleTemplate(role: string): string {
@@ -1186,31 +1190,40 @@ const providerOptions = [
       <!-- 左：功能分区手风琴（单开；key 与 settingsSection 联动支持跨页定位） -->
       <aside class="menu">
         <NCollapse :expanded-names="activeSection" :accordion="true" @update:expanded-names="onSectionChange">
-          <NCollapseItem name="llm" :title="'🤖 大模型接入'">
+          <NCollapseItem name="llm">
+            <template #header><i class="ms">smart_toy</i> 大模型接入</template>
             <div class="menu-desc" v-if="activeSection === 'llm'">OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。</div>
           </NCollapseItem>
-          <NCollapseItem name="profiles" :title="'👥 多模型项目小组 (Team)'">
+          <NCollapseItem name="profiles">
+            <template #header><i class="ms">group</i>  多模型项目小组 (Team)</template>
             <div class="menu-desc" v-if="activeSection === 'profiles'">配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。</div>
           </NCollapseItem>
-          <NCollapseItem name="sched" :title="'⏱ 调度与看板'">
+          <NCollapseItem name="sched">
+            <template #header><i class="ms">schedule</i>  调度与看板</template>
             <div class="menu-desc" v-if="activeSection === 'sched'">扫描间隔、并行数保存后立即生效；看板端口下次启动生效。</div>
           </NCollapseItem>
-          <NCollapseItem name="notify" :title="'🔔 提醒设置'">
+          <NCollapseItem name="notify">
+            <template #header><i class="ms">notifications</i>  提醒设置</template>
             <div class="menu-desc" v-if="activeSection === 'notify'">任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。</div>
           </NCollapseItem>
-          <NCollapseItem name="masking" :title="'🛡 数据脱敏'">
+          <NCollapseItem name="masking">
+            <template #header><i class="ms">security</i>  数据脱敏</template>
             <div class="menu-desc" v-if="activeSection === 'masking'">密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。</div>
           </NCollapseItem>
-          <NCollapseItem name="review" :title="'🔍 任务审查（Review Agent）'">
+          <NCollapseItem name="review">
+            <template #header><i class="ms">rate_review</i>  任务审查（Review Agent）</template>
             <div class="menu-desc" v-if="activeSection === 'review'">独立模型合并前审查任务成果；未配置审查模型时审查未启用。</div>
           </NCollapseItem>
-          <NCollapseItem name="tools" :title="'🛠 Agent 工具与访问权限'">
+          <NCollapseItem name="tools">
+            <template #header><i class="ms">handyman</i>  Agent 工具与访问权限</template>
             <div class="menu-desc" v-if="activeSection === 'tools'">全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。</div>
           </NCollapseItem>
-          <NCollapseItem name="mirrors" :title="'🪞 镜像源管理与测速选源'">
+          <NCollapseItem name="mirrors">
+            <template #header><i class="ms">sync_alt</i>  镜像源管理与测速选源</template>
             <div class="menu-desc" v-if="activeSection === 'mirrors'">Agent 装环境/拉依赖前测速，哪个快用哪个。</div>
           </NCollapseItem>
-          <NCollapseItem name="app" :title="'⚙️ 应用'">
+          <NCollapseItem name="app">
+            <template #header><i class="ms">settings</i> ️ 应用</template>
             <div class="menu-desc" v-if="activeSection === 'app'">更新源、自更新检查、看板登录密码与开机自启动。</div>
           </NCollapseItem>
         </NCollapse>
@@ -1218,7 +1231,8 @@ const providerOptions = [
       <!-- 右：当前分区内容（v-if 懒加载，未选中不挂载不轮询开销） -->
       <section class="content">
         <div v-if="settingsSection === 'llm'">
-          <NCard title="🤖 大模型接入" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">smart_toy</i> 大模型接入</template>
       <div class="frow">
         <div class="f1"><label>协议 provider</label>
           <NSelect v-model:value="draft.provider" :options="providerOptions" /></div>
@@ -1265,14 +1279,15 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'profiles'">
-          <NCard title="👥 多模型 Agent 项目小组与角色预设池 (Team Profiles)" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">group</i> 多模型 Agent 项目小组与角色预设池 (Team Profiles)</template>
             <div class="team-banner" style="background: rgba(91, 140, 255, 0.08); border: 1px solid rgba(91, 140, 255, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text);">
               <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;">💡 多模型 Agent 项目小组模式 (Team) 配置说明</div>
               <div>
                 系统采用<b>「全局角色预设池 + 项目小队自由进驻」</b>的双层架构：
                 <ul style="margin: 4px 0 0 16px; padding: 0;">
                   <li><b>全局层（此处）</b>：统一配置 <b>项目经理 (PM)</b>、<b>后端工程师</b>、<b>前端工程师</b>、<b>测试工程师 (QA)</b> 各自绑定的专属大模型（如 DeepSeek-R1、Claude 3.7、GPT-4o）与独立 API 密钥，一次配置后全系统共享；</li>
-                  <li><b>项目层进驻</b>：每个项目可独立决定是否启用小组模式。在「项目」页或「看板」卡片点击<b>「设置」→「👥 多模型 Agent 项目小组模式 (Team)」</b>即可一键勾选启用小队进驻并自由调整成员名单。</li>
+                  <li><b>项目层进驻</b>：每个项目可独立决定是否启用小组模式。在「项目」页或「看板」卡片点击<b>「设置」→「多模型 Agent 项目小组模式 (Team)」</b>即可一键勾选启用小队进驻并自由调整成员名单。</li>
                 </ul>
               </div>
             </div>
@@ -1285,7 +1300,7 @@ const providerOptions = [
               <div v-for="(prof, pid) in profilesDraft" :key="pid" class="group-card profile-card" :class="{ 'active-card': editingProfileId === pid }">
                 <div class="group-header" style="cursor: pointer" @click="editingProfileId = editingProfileId === pid ? null : pid">
                   <div class="group-title-wrap" style="display:flex; align-items:center; gap:6px;">
-                    <span class="group-icon">{{ getRoleIcon(prof.role) }}</span>
+                    <span class="group-icon"><i class="ms">{{ getRoleIcon(prof.role) }}</i></span>
                     <span class="group-title">{{ prof.name }}</span>
                     <NTag size="tiny" round type="info">{{ prof.role.toUpperCase() }}</NTag>
                     <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">ID: {{ pid }}</NTag>
@@ -1369,7 +1384,7 @@ const providerOptions = [
                   <div style="margin-top: 8px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                       <label style="font-size: 12px; color: var(--dim); margin: 0;">角色专属补充提示词（注入该角色系统提示词）</label>
-                      <NButton size="tiny" quaternary type="primary" @click="loadRolePromptTemplate(prof)" style="font-size: 11.5px; padding: 0 4px;">📋 载入内置角色模版（类似 AGENT.md）</NButton>
+                      <NButton size="tiny" quaternary type="primary" @click="loadRolePromptTemplate(prof)" style="font-size: 11.5px; padding: 0 4px;"><i class="ms sm">description</i> 载入内置角色模版（类似 AGENT.md）</NButton>
                     </div>
                     <NInput v-model:value="prof.extra_prompt" type="textarea" :rows="4" :autosize="{ minRows: 3, maxRows: 14 }"
                             placeholder="如：工作流与协作规范、测试要求、编码风格与交付验收标准..." />
@@ -1384,7 +1399,8 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'sched'">
-          <NCard title="⏱ 调度与看板" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">schedule</i> 调度与看板</template>
       <div class="frow">
         <div class="f1"><label>扫描间隔（秒，30~86400）</label><NInputNumber v-model:value="draft.interval" :min="30" :max="86400" /></div>
         <div class="f1"><label>并行 Agent 数（1~16）</label><NInputNumber v-model:value="draft.parallel" :min="1" :max="16" /></div>
@@ -1417,7 +1433,8 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'notify'">
-          <NCard title="🔔 提醒设置" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">notifications</i> 提醒设置</template>
       <div class="frow">
         <div class="f1"><label class="checkline">
           <NSwitch v-model:value="notifyDraft.sound" />
@@ -1434,7 +1451,8 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'masking'">
-          <NCard title="🛡 数据脱敏" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">security</i> 数据脱敏</template>
       <label class="checkline">
         <NSwitch v-model:value="maskingDraft.enabled" />
         启用脱敏
@@ -1457,7 +1475,8 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'review'">
-          <NCard title="🔍 任务审查（Review Agent）" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">rate_review</i> 任务审查（Review Agent）</template>
       <label class="checkline">
         <NSwitch v-model:value="reviewDraft.enabled" />
         启用审查（配置审查模型后即对全部项目默认生效；项目可单独关闭）
@@ -1509,13 +1528,14 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'tools'">
-          <NCard title="🛠 Agent 工具与访问权限" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">handyman</i> Agent 工具与访问权限</template>
             <!-- 一级：四大核心分类 Tab -->
             <div style="margin-bottom: 14px;">
-              <NTabs v-model:value="toolsTab" type="segment" size="small">
+              <NTabs v-model:value="toolsTab" type="segment" size="small" class="tools-tabs">
                 <NTabPane name="tools">
                   <template #tab>
-                    <span>🛠 Agent 工具能力</span>
+                    <i class="ms">handyman</i> Agent 工具能力
                     <NTag size="tiny" round :type="toolsEnabledCount === toolsTotalCount ? 'success' : 'default'" style="margin-left: 6px;">
                       {{ toolsEnabledCount }}/{{ toolsTotalCount }}
                     </NTag>
@@ -1523,7 +1543,7 @@ const providerOptions = [
                 </NTabPane>
                 <NTabPane name="commands">
                   <template #tab>
-                    <span>💻 终端命令白名单</span>
+                    <i class="ms">terminal</i> 终端命令白名单
                     <NTag size="tiny" round :type="cmdsEnabledCount === cmdsTotalCount ? 'success' : 'warning'" style="margin-left: 6px;">
                       {{ cmdsEnabledCount }}/{{ cmdsTotalCount }}
                     </NTag>
@@ -1531,13 +1551,13 @@ const providerOptions = [
                 </NTabPane>
                 <NTabPane name="debug">
                   <template #tab>
-                    <span>🌐 本地调试与浏览器</span>
+                    <i class="ms">language</i> 本地调试与浏览器
                     <NTag size="tiny" round :type="debugActiveCount > 0 ? 'info' : 'default'" style="margin-left: 6px;">
                       {{ debugActiveCount > 0 ? `${debugActiveCount} 项启用` : '默认关闭' }}
                     </NTag>
                   </template>
                 </NTabPane>
-                <NTabPane name="perms" tab="🔒 权限模式与环境" />
+                <NTabPane name="perms"><template #tab><i class="ms">lock</i> 权限模式与环境</template></NTabPane>
               </NTabs>
             </div>
 
@@ -1578,7 +1598,7 @@ const providerOptions = [
                 <div v-for="cat in filteredToolCategories" :key="cat.key" class="group-card">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">{{ cat.icon }}</span>
+                      <span class="group-icon"><i class="ms">{{ miIcon(cat.icon) || cat.icon }}</i></span>
                       <span class="group-title">{{ cat.label }}</span>
                       <span class="group-desc">{{ cat.description }}</span>
                     </div>
@@ -1645,7 +1665,7 @@ const providerOptions = [
                 <div v-for="cat in filteredCommandCategories" :key="cat.key" class="group-card">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">{{ cat.icon }}</span>
+                      <span class="group-icon"><i class="ms">{{ miIcon(cat.icon) || cat.icon }}</i></span>
                       <span class="group-title">{{ cat.label }}</span>
                       <span class="group-desc">{{ cat.description }}</span>
                     </div>
@@ -1761,7 +1781,7 @@ const providerOptions = [
                 <div class="group-card">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">⚙️</span>
+                      <span class="group-icon"><i class="ms">settings</i></span>
                       <span class="group-title">调试环境运行参数与安全限制</span>
                       <span class="group-desc">配置浏览器内核路径、窗口显示模式及内网穿透防护主机白名单</span>
                     </div>
@@ -1810,7 +1830,7 @@ const providerOptions = [
             <div v-show="toolsTab === 'perms'" class="tab-content">
               <div class="group-card" style="margin-bottom: 12px; padding: 12px;">
                 <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text);">
-                  🛡 敏感操作访问权限模式
+                  <i class="ms sm">security</i> 敏感操作访问权限模式
                 </div>
                 <div class="frow">
                   <div class="f2"><label>访问权限模式（敏感操作是否挂起等待看板批准）</label>
@@ -1819,7 +1839,7 @@ const providerOptions = [
                     <NInputNumber v-model:value="permDraft.timeout_minutes" :min="1" :max="1440" /></div>
                 </div>
                 <div class="hint pwd-hint" style="margin-top: 6px;">
-                  询问 = 任务挂起，顶栏出现「🔔 待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。
+                  询问 = 任务挂起，顶栏出现「待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。
                 </div>
               </div>
 
@@ -1835,7 +1855,7 @@ const providerOptions = [
 
               <div class="group-card" style="padding: 12px;">
                 <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text);">
-                  💻 Agent 子进程环境变量与 PATH 引导
+                  <i class="ms sm">terminal</i> Agent 子进程环境变量与 PATH 引导
                 </div>
                 <label style="font-size: 12px; color: var(--dim); margin-bottom: 4px; display: block;">自定义环境变量（代理 / 国内镜像，每行 KEY=VALUE）</label>
                 <NInput v-model:value="envDraft" type="textarea" :rows="3"
@@ -1860,7 +1880,8 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'mirrors'">
-          <NCard title="🪞 镜像源管理与测速选源" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">sync_alt</i> 镜像源管理与测速选源</template>
       <div class="mirror-ops">
         <NButton size="small" :loading="mirrorTesting" @click="testMirrors()">测速全部源</NButton>
         <NButton size="small" type="primary" :loading="mirrorApplying" @click="applyMirrors">
@@ -1914,7 +1935,8 @@ const providerOptions = [
           </NCard>
         </div>
         <div v-if="settingsSection === 'app'">
-          <NCard title="⚙️ 应用" size="small" class="scard">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">settings</i> 应用</template>
       <label class="checkline">
         <NSwitch :value="store.state.app_autostart.enabled" @update:value="toggleAutostart" />
         开机自动启动（写入当前用户注册表）
@@ -1962,6 +1984,12 @@ const providerOptions = [
 </template>
 <style scoped>
 .settings { padding: 0 20px; max-width: 1180px; display: flex; flex-direction: column; gap: 14px; }
+@media (max-width: 768px) { .settings { padding: 0 24px; } }
+/* 工具区四大分类段式 Tab：4 个长标签+计数徽标在窄屏放不下——
+   允许胶囊换行成两行两列，避免第三个/第四个标签被截断 */
+.tools-tabs :deep(.n-tabs-rail) { flex-wrap: wrap; }
+.tools-tabs :deep(.n-tabs-tab-wrapper) { min-width: 46%; }
+.tools-tabs :deep(.n-tabs-tab) { justify-content: center; width: 100%; }
 /* 左手风琴分区 + 右内容区：窄屏自动竖排 */
 .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; align-items: start; }
 @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
@@ -2033,6 +2061,9 @@ const providerOptions = [
   margin-bottom: 12px;
   overflow: hidden;
 }
+/* 卡片内容行（头部以外的直接子元素）与卡片边缘留出间距：
+   头部自带 12px 内边距，正文行此前 0 内边距会贴死卡片左右边框 */
+.group-card > div:not(.group-header) { padding: 4px 12px 10px; }
 .group-header {
   display: flex;
   justify-content: space-between;
