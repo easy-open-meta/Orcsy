@@ -27,24 +27,28 @@ def api(path: str, body: dict | None = None) -> dict:
 
 
 def main() -> int:
-    os.makedirs(r"D:\tmp\newproj", exist_ok=True)
+    import tempfile
 
-    r = api("/api/project", {"name": "web-proj", "path": r"D:\tmp\newproj",
+    base = tempfile.mkdtemp(prefix="e2e-api-")
+    proj_path = os.path.join(base, "newproj")
+    os.makedirs(proj_path, exist_ok=True)
+
+    r = api("/api/project", {"name": "web-proj", "path": proj_path,
                              "tasks_dir": "tasks", "guide_file": "AGENT.md",
                              "max_tasks_per_cycle": 2, "max_agent_turns": 60,
                              "enabled": True,
-                             "llm": {"api_key": "{{SECRET_ll7k2m9p}}"},
+                             "llm": {"api_key": "sk-masked-test-0000000000"},
                              "repo": {"url": "https://github.com/o/r",
-                                      "token": "{{SECRET_px7d9k2m}}"}})
+                                      "token": "ghp-masked-test-0000000000"}})
     assert r["ok"], r
     assert set(r["created"]) == {"tasks/", "AGENT.md"}, r
     print("1. 新建项目 + 自动初始化:", r["message"])
 
-    r = api("/api/project", {"name": "web-proj", "path": r"D:\tmp\newproj"})
+    r = api("/api/project", {"name": "web-proj", "path": proj_path})
     assert not r["ok"] and "已存在" in r["message"], r
     print("2. 重名拦截:", r["message"])
 
-    r = api("/api/project", {"name": "ghost", "path": r"D:\no\such\dir"})
+    r = api("/api/project", {"name": "ghost", "path": os.path.join(base, "no", "such", "dir")})
     assert not r["ok"], r
     print("3. 坏路径拦截:", r["message"])
 
@@ -60,9 +64,9 @@ def main() -> int:
     assert p["llm"]["api_key_configured"] is True and "…" in p["llm"]["api_key_masked"]
     assert "token" not in (p["repo"] or {}), p["repo"]
     assert p["repo"]["token_configured"] is True and "…" in p["repo"]["token_masked"]
-    assert "{{SECRET_ll7k2m9p}}" not in blob and "{{SECRET_px7d9k2m}}" not in blob
+    assert "sk-masked-test" not in blob and "ghp-masked-test" not in blob
     # 编辑项目不带密钥键 → 保持原值；显式空串 → 清除
-    r = api("/api/project", {"name": "web-proj", "path": r"D:\tmp\newproj",
+    r = api("/api/project", {"name": "web-proj", "path": proj_path,
                              "llm": {"model": "deepseek-chat"},
                              "repo": {"url": "https://github.com/o/r"},
                              "original_name": "web-proj"})
@@ -70,7 +74,7 @@ def main() -> int:
     p = [x for x in api("/api/state")["projects"] if x["name"] == "web-proj"][0]
     assert p["repo"]["token_configured"] is True, "不带 token 键应保持原令牌"
     assert p["llm"]["api_key_configured"] is True, "不带 api_key 键应保持原密钥"
-    r = api("/api/project", {"name": "web-proj", "path": r"D:\tmp\newproj",
+    r = api("/api/project", {"name": "web-proj", "path": proj_path,
                              "repo": {"url": "https://github.com/o/r", "token": ""},
                              "original_name": "web-proj"})
     assert r["ok"], r
@@ -98,10 +102,11 @@ def main() -> int:
     s = api("/api/state")
     assert s["scheduler_cfg"]["interval_seconds"] == 120, s["scheduler_cfg"]
     assert s["scheduler_cfg"]["max_parallel_agents"] == 2
-    assert s["llm"]["api_key"] == "sk-test"
-    print("7. 配置保存 + 热重载: interval=120s, parallel=2, key 回显 ok")
+    assert s["llm"]["api_key_masked"], s["llm"]
+    assert "sk-test" not in json.dumps(s["llm"]), "明文密钥不得出现在 /api/state"
+    print("7. 配置保存 + 热重载: interval=120s, parallel=2, key 仅掩码 ok")
 
-    cfg_text = open(r"D:\Repos\agent-task-arrangement-system\run\config.yaml", encoding="utf-8").read()
+    cfg_text = open(s["config_path"], encoding="utf-8").read()
     assert "interval_seconds: 120" in cfg_text and "web-proj" in cfg_text
     print("8. config.yaml 回写: ok")
 

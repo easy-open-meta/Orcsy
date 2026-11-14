@@ -87,6 +87,10 @@ def test_kill_process_tree_helper_ends_windows_tree(tmp_path) -> None:
 
 
 if __name__ == "__main__":
+    import sys as _sys
+    if _sys.platform != "win32":
+        print("跳过：断言 powershell/taskkill 的超时与进程树终止语义，仅 Windows 运行")
+        raise SystemExit(0)
     import tempfile
     t1 = Path(tempfile.mkdtemp(prefix="rc-stop-"))
     test_timeout_path_terminates_tree_and_returns(t1)

@@ -51,6 +51,9 @@ def test_run_command_chinese_output() -> None:
 
 
 def main() -> int:
+    if sys.platform != "win32":
+        print("跳过：断言 GBK 代码页控制台输出解码，仅 Windows 运行")
+        return 0
     test_decode_utf8_native()
     test_decode_gbk_fallback()
     test_decode_gbk_high_ratio()

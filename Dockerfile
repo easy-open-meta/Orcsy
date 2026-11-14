@@ -10,7 +10,8 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 WORKDIR /app
 
 # 先只拷依赖清单,利用层缓存:清单不变时依赖层直接命中
-COPY pyproject.toml uv.lock ./
+# README.md 随清单一起拷:pyproject 声明了 readme,hatchling 构建 wheel 时要读
+COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
@@ -52,7 +53,7 @@ EXPOSE 5116
 
 # /api/state 与 cmd_web 端口探测同款端点;slim 镜像无 curl/wget,用 venv 内置 python
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5116/api/state', timeout=4)"]
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5116/api/auth', timeout=4)"]
 
 ENTRYPOINT ["tini", "--", "orcsy-entrypoint"]
 # 容器内长驻:看板 + 内置调度器。托盘/浏览器均关(容器无显示与桌面)。

@@ -88,7 +88,7 @@ def check_auth_disabled() -> None:
     state = AppState(cfg, Scheduler(cfg))
     try:
         r = state.login("anything", "1.2.3.4")
-        assert r == {"ok": True, "token": None}, r
+        assert r == {"ok": True, "token": None, "expires_in": 0}, r
         print("ok: 未启用鉴权时不限速（本机零打扰）")
     finally:
         state._clear_login_throttle()

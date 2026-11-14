@@ -5,11 +5,16 @@
 错误抛出顺序与消息文本与拆分前逐字一致（含「未知项目」晚于「标题不能为空」
 的校验优先级）。
 
+并发控制：任务文件版本快照（task_version_token）+ 乐观锁（base_version 前置
+校验）——手机端远程编辑保存时，若后台 Agent 或其他终端已改过任务，抛出
+TaskConflictError，由 Web 层转为 409 Conflict，绝不静默覆盖。
+
 日志沿用 `orcsy.web` 流（get_logger("web")）保持运维侧日志身份不变。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -31,6 +36,33 @@ VALID_STATUS = ("open", "in_progress", "done", "blocked", "cancelled")
 
 # 任务文件 frontmatter 识别（status 重写用）
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
+
+
+class TaskConflictError(Exception):
+    """任务并发编辑冲突（乐观锁命中）：任务在 base_version 之后已被修改。
+
+    payload 携带当前最新任务内容，Web 层转 409 Conflict 随响应体回给前端，
+    由用户决定「保留我的修改（强制覆盖）」还是「采用最新状态」。
+    """
+
+    def __init__(self, message: str, latest_task: dict | None = None) -> None:
+        super().__init__(message)
+        self.latest_task = latest_task or {}
+
+
+def task_version_token(path: Path, status: str = "") -> str:
+    """任务文件的版本快照签名：MD5(mtime_ns + 文件大小 + 状态) 前 12 位。
+
+    无状态轻量签名：Agent 或其他终端对任务文件的任何落盘改动（mtime/大小/
+    状态变化）都会改变签名，作为乐观锁的 base_version 比对基准。
+    文件不存在时返回空串（新建任务无需版本校验）。
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return ""
+    raw = f"{st.st_mtime_ns}-{st.st_size}-{status}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]  # noqa: S324 — 非安全用途，仅快照比对
 
 
 def task_path(agents: dict, project: str, task_id: str) -> Path:
@@ -65,6 +97,25 @@ def create_or_update_task(agents: dict, data: dict) -> dict:
         task_id = auto_task_id(agents, project, priority, title)
 
     path = task_path(agents, project, task_id)
+
+    # 乐观并发校验（移动端远程编辑防脏写）：编辑已有任务时前端回传 base_version
+    # （GET /api/task 下发的版本快照）。后台 Agent 已改过任务（状态流转/审查
+    # 回写）则拒绝覆盖，抛 409 由用户决定强制覆盖还是采用最新。
+    base_version = str(data.get("base_version") or "").strip()
+    force_overwrite = bool(data.get("force_overwrite"))
+    if path.exists() and base_version and not force_overwrite:
+        old_probe = parse_task_file(path)
+        current_version = task_version_token(
+            path, "" if old_probe.error else old_probe.status)
+        if base_version != current_version:
+            cur_status = "" if old_probe.error else old_probe.status
+            log.info("Web 任务保存冲突 %s/%s：base=%s 现为=%s（状态 %s）",
+                     project, task_id, base_version, current_version, cur_status or "?")
+            raise TaskConflictError(
+                "任务已被后台 Agent 或其他终端修改"
+                + (f"（状态已变更为 {cur_status}）" if cur_status else ""),
+                latest_task=get_task(agents, {"project": project, "id": task_id}))
+
     labels = data.get("labels") or []
     labels_line = ", ".join(str(x) for x in labels) if isinstance(labels, list) else ""
 
@@ -148,7 +199,10 @@ def create_or_update_task(agents: dict, data: dict) -> dict:
     body = description or title
     path.write_text("\n".join(fm) + "\n\n" + body + "\n", encoding="utf-8")
     log.info("Web 创建/更新任务 %s/%s [%s]", project, task_id, priority)
-    return {"ok": True, "file": str(path), "id": task_id}
+    # 回传落盘后的新版本快照：前端下次编辑以此作为 base_version
+    new_version = task_version_token(path, status)
+    return {"ok": True, "file": str(path), "id": task_id,
+            "version_token": new_version}
 
 
 def next_task_order(agents: dict, project: str) -> int:
@@ -326,17 +380,21 @@ def get_task(agents: dict, params: dict) -> dict:
     if t.error:
         return {"ok": True, "id": task_id, "title": t.title, "archived": archived,
                 "priority": "P2", "labels": [], "assignee": "",
-                "depends_on": [], "description": "", "error": t.error}
+                "depends_on": [], "description": "", "error": t.error,
+                "version_token": ""}
     return {"ok": True, "id": t.id, "title": t.title, "priority": t.priority,
             "status": t.status, "labels": t.labels, "assignee": t.assignee,
             "depends_on": list(t.depends_on), "parent_id": t.parent_id,
             "qa_round": t.qa_round,
-            "description": t.description, "archived": archived}
+            "description": t.description, "archived": archived,
+            # 版本快照：编辑保存时回传 base_version 触发乐观锁比对
+            "version_token": task_version_token(path, t.status)}
 
 
 __all__ = [
     "FRONTMATTER_RE",
     "VALID_STATUS",
+    "TaskConflictError",
     "auto_task_id",
     "clear_tasks",
     "create_or_update_task",
@@ -347,4 +405,5 @@ __all__ = [
     "reorder_tasks",
     "set_task_status",
     "task_path",
+    "task_version_token",
 ]

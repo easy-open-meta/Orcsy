@@ -243,4 +243,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import faulthandler
+
+    faulthandler.enable()  # 退出期段错误取证：崩溃时打印当时的 Python 栈
     main()

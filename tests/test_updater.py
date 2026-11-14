@@ -162,13 +162,22 @@ def check_stage_package() -> None:
 
 
 def check_apply_gate() -> None:
-    # 源码运行（非 frozen）：应用更新必须被门禁拦下并给出指引
+    import orcsy.updater as U
+    # 源码运行（非 frozen）：应用更新必须被门禁拦下并给出指引。
+    # 门禁文案按平台分支（Windows 源码 = git pull 指引；Linux/Docker = 拉取新镜像），
+    # 本测试断言 Windows 文案——非 Windows 平台临时打 win32 补丁（同文件既有模式）
+    orig = (U.sys.platform, getattr(U.sys, "frozen", False), U.sys.executable)
     try:
-        run_local_install(Path("orcsy-update-0.15.0.zip"), Path("D:/x"), Path("t.log"))
-        raise AssertionError("非 frozen 应拒绝应用更新")
-    except UpdateError as e:
-        assert "git pull" in str(e)
-    print("apply 门禁（源码运行给指引）✅")
+        U.sys.platform = "win32"
+        U.sys.frozen = False
+        try:
+            run_local_install(Path("orcsy-update-0.15.0.zip"), Path("D:/x"), Path("t.log"))
+            raise AssertionError("非 frozen 应拒绝应用更新")
+        except UpdateError as e:
+            assert "git pull" in str(e)
+        print("apply 门禁（源码运行给指引）✅")
+    finally:
+        (U.sys.platform, U.sys.frozen, U.sys.executable) = orig
 
 
 def check_watchdog_script() -> None:
@@ -219,8 +228,15 @@ def check_clean_env() -> None:
         assert env.get("KEEP_ME") == "keep"
         # 进程创建标志：绝不与 DETACHED_PROCESS 同用（会让 CREATE_NO_WINDOW
         # 失效、控制台子进程弹窗）
-        assert not (_WATCHDOG_FLAGS & subprocess.DETACHED_PROCESS)
-        assert _WATCHDOG_FLAGS & subprocess.CREATE_NO_WINDOW
+        # DETACHED_PROCESS 是 Windows 专属常量，Linux 的 subprocess 没有
+        detached = getattr(subprocess, "DETACHED_PROCESS", 0)
+        assert not (_WATCHDOG_FLAGS & detached)
+        # CREATE_NO_WINDOW 是 Windows 专属常量，Linux 的 subprocess 没有
+        create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if sys.platform == "win32":
+            assert _WATCHDOG_FLAGS & create_no_window
+        else:
+            assert _WATCHDOG_FLAGS == 0  # 非 Windows 平台看护标志恒为 0
         print("子进程环境剥离（_PYI_* 全家 + RESET_ENVIRONMENT + 无弹窗标志）✅")
     finally:
         _os.environ.clear()

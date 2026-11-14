@@ -48,13 +48,29 @@ logging:
   max_total_mb: 200          # 日志总占用上限（MB）：活动日志+滚动备份+归档合计超限即从最旧删起；0 不限制
 
 web:
-  host: 127.0.0.1            # 看板监听地址
+  host: 127.0.0.1            # 看板监听地址；手机远程访问改为 0.0.0.0（绑定全部网卡，
+                             # 需先设置 auth_password 或 api_keys），启动后终端会打印
+                             # 局域网地址与手机扫码二维码，看板右上角「手机连接」同理
   port: 5116                 # 看板端口（被占用时可改这里，或启动时用 --port 覆盖）
   open_browser: true         # 启动时自动打开浏览器
   auth_password: ""          # 看板登录密码：非空则所有页面/API 需先登录；
-                             # host 非回环（0.0.0.0 / 局域网 IP）时必须设置，否则拒绝启动；
+                             # host 非回环（0.0.0.0 / 局域网 IP）时必须设置（或配置 api_keys），否则拒绝启动；
                              # 留空 = 关闭鉴权，仅限 127.0.0.1 本机使用（零打扰）；
                              # 密码以 PBKDF2 密文存储，忘记时运行 orcsy reset-password 快捷重置
+  # api_keys:                # 静态 API 密钥列表（供第三方系统、CI/CD、Webhook 自动化调用）：
+  #   - "sk-orcsy-app-xxxxxxxx" # 请求时通过 Authorization: Bearer <key> 或 X-API-Key: <key> 鉴权，
+  #                           # 免去模拟登录换取 Cookie 的流程，重启服务后凭证永久有效。
+  # cors_origins:            # 跨域资源共享允许的来源列表（默认 ["*"] 允许任意来源）：
+  #   - "*"                  # 支持企业内网 Portal、第三方前端单页直接以跨域 AJAX/fetch 调用系统 API
+  # trusted_proxies:         # 受信任的反向代理 IP（单 IP 或 CIDR 网段）。手机经
+  #   - "127.0.0.1"          # Nginx/Caddy/FRP 反代接入时，反代的对端 IP 恒为
+  #   - "::1"                # 127.0.0.1——只有对端在此名单内才采信 X-Forwarded-For
+  #   - "172.17.0.0/16"      # 解析真实客户端 IP（登录限速按真实 IP 计数，避免
+                             # 反代部署误锁 127.0.0.1 导致本机也进不去的 DoS）。
+                             # 默认信任本机回环；置空列表 [] = 完全不采信转发头
+  # public_url: ""           # 可选：对外暴露的访问地址（如 https://orcsy.example.com），
+                             # 用于「手机连接」二维码与连接向导展示；留空 = 仅展示
+                             # 局域网/本机地址
 
 # tools:                     # Agent 工具开关（全局默认）：未列出的常规工具默认启用。
 #   browser: true            # 可一键按组开关：browser（10个浏览器工具）/ dev_server（3个后台服务工具）；
@@ -528,6 +544,62 @@ def _config_fatal(err: Exception) -> None:
             pass
 
 
+def _display_url(host: str, port: int) -> str:
+    """把绑定地址换算成「可打开」的访问 URL（浏览器自动打开/控制台展示用）。
+
+    0.0.0.0 / :: 是「绑定所有网卡」的监听通配符，不是可访问地址——浏览器直接
+    访问会报 ERR_ADDRESS_INVALID。绑全零时展示局域网 IP（缺省回环兜底）；
+    绑回环时展示标准 127.0.0.1；绑具体地址原样展示。"""
+    if host in ("0.0.0.0", "::"):
+        from .web import lan_ipv4_addresses
+
+        ips = lan_ipv4_addresses()
+        return f"http://{ips[0] if ips else '127.0.0.1'}:{port}"
+    if host.startswith("127.") or host in ("::1", "localhost"):
+        return f"http://127.0.0.1:{port}"
+    return f"http://{host}:{port}"
+
+
+def _print_mobile_access_hint(config, host: str, port: int) -> None:
+    """移动端远程访问启动提示：局域网地址清单 + 手机扫码二维码（stderr）。
+
+    绑定 0.0.0.0/:: 时枚举非回环局域网 IPv4 并打印二维码（segno 可用时）；
+    绑定回环时给一条「如何开放手机访问」的指引。二维码/枚举失败静默跳过，
+    不影响启动。
+    """
+    try:
+        from .web import lan_ipv4_addresses
+
+        if host not in ("0.0.0.0", "::"):
+            if host.startswith(("127.", "::1")):
+                print("提示：当前仅监听本机回环地址，手机无法访问；"
+                      "如需手机远程访问，把 config.yaml 的 web.host 改为 0.0.0.0"
+                      "（并确保已设置 web.auth_password）。",
+                      file=sys.stderr, flush=True)
+            return
+        ips = lan_ipv4_addresses()
+        if not ips:
+            return
+        print("手机远程访问（同一局域网 Wi-Fi）：", file=sys.stderr, flush=True)
+        primary = f"http://{ips[0]}:{port}"
+        for ip in ips:
+            print(f"  http://{ip}:{port}", file=sys.stderr, flush=True)
+        if config.web.public_url:
+            primary = config.web.public_url
+            print(f"  配置的公网地址：{primary}", file=sys.stderr, flush=True)
+        # 终端二维码（segno 缺失/失败静默跳过；URL 清单已足够指导连接）
+        import io
+
+        import segno
+
+        buf = io.StringIO()
+        segno.make(primary, error="m").save(buf, kind="ans", border=1)
+        print(buf.getvalue(), file=sys.stderr, flush=True)
+        print("（手机相机/浏览器扫码直达看板）", file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001 — 提示失败不影响启动
+        pass
+
+
 def cmd_web(args: argparse.Namespace) -> int:
     import socket
     import threading
@@ -634,15 +706,22 @@ def cmd_web(args: argparse.Namespace) -> int:
     state = AppState(config, scheduler, log_path=str(log_file))
     _load_page()  # 启动即缓存看板页面（冻结环境下 _MEI 文件可能稍后不可读）
     server = make_server(state, host, port)
-    url = f"http://{host}:{port}"
+    # 展示/自动打开用的 URL 必须是可访问地址：0.0.0.0 是监听通配符，
+    # 浏览器直接访问会 ERR_ADDRESS_INVALID（绑定地址本身单独打印）
+    url = _display_url(host, port)
 
     log = __import__("logging").getLogger("orcsy.web")
-    log.info("看板服务启动：%s（配置：%s）", url, config_path)
+    log.info("看板服务启动：%s（绑定 %s:%s，配置：%s）", url, host, port, config_path)
     # 提示信息同时打到 stderr，避免被 logging 配置吞掉或缓冲
-    print(f"Orcsy 看板已启动：{url} （Ctrl+C 或右键托盘图标退出）", file=sys.stderr, flush=True)
+    bind_note = f"（绑定 {host}:{port}）" if host not in ("0.0.0.0", "::") else "（绑定全部网卡）"
+    print(f"Orcsy 看板已启动：{url} {bind_note}（Ctrl+C 或右键托盘图标退出）",
+          file=sys.stderr, flush=True)
     if fallback_notice:
         print(fallback_notice, file=sys.stderr, flush=True)
     print(f"配置文件：{config_path}", file=sys.stderr, flush=True)
+    # 移动端远程访问：绑定全零地址（对外服务）时枚举局域网 IP 并打印手机连接
+    # 二维码；绑定回环时提示如何开放局域网访问
+    _print_mobile_access_hint(config, host, port)
     if not config.llm.api_key:
         print("提示：config.yaml 中 llm.api_key 尚未配置，Agent 执行任务前请先填写。",
               file=sys.stderr, flush=True)

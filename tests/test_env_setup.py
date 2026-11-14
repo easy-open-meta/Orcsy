@@ -239,6 +239,9 @@ def check_skill_injection() -> None:
 
 
 def main() -> int:
+    if sys.platform != "win32":
+        print("跳过：断言 go.exe 等 Windows 工具链路径形态与镜像注入，仅 Windows 运行")
+        return 0
     check_seed()
     check_builtin_upgrade()
     check_whitelist_and_approval()

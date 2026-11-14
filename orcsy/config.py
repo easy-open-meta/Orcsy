@@ -262,6 +262,14 @@ class WebConfig:
     api_keys: list[str] = field(default_factory=list)
     # 跨域资源共享允许来源（CORS Allowed Origins），默认放行所有来源 ["*"]
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    # 受信任的反向代理 IP 列表（单 IP 或 CIDR 网段，如 127.0.0.1 / 172.17.0.0/16）。
+    # 仅当直连对端属于此名单时才采信 X-Forwarded-For / X-Real-IP 解析真实客户端
+    # IP（登录限速按真实 IP 计数）。默认信任本机回环——Nginx/Caddy/FRP 同机反代
+    # 是移动端远程访问的最常见部署；不信任任何代理时改回空列表即可。
+    trusted_proxies: list[str] = field(default_factory=lambda: ["127.0.0.1", "::1"])
+    # 可选：对外暴露的公网访问地址（如 https://orcsy.example.com），用于
+    # 「手机连接」二维码与连接向导展示；留空 = 只展示局域网/本机地址
+    public_url: str = ""
 
 
 # 官方更新源：配置未写 update.repo 时作为默认值（零配置即可检查更新）
@@ -1130,6 +1138,15 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     elif isinstance(cors_raw, str):
         cors_origins = [o.strip() for o in cors_raw.split(",") if o.strip()] or ["*"]
 
+    # 受信任代理：列表或逗号分隔字符串皆收；未配置时保持默认（信任本机回环，
+    # 覆盖同机 Nginx/Caddy/FRP 反代部署）；显式空列表 = 完全不采信转发头
+    tp_raw = web_raw.get("trusted_proxies")
+    trusted_proxies: list[str] = ["127.0.0.1", "::1"]
+    if isinstance(tp_raw, list):
+        trusted_proxies = [str(x).strip() for x in tp_raw if str(x).strip()]
+    elif isinstance(tp_raw, str):
+        trusted_proxies = [x.strip() for x in tp_raw.split(",") if x.strip()]
+
     web = WebConfig(
         host=str(web_raw.get("host", "127.0.0.1")),
         port=int(web_raw.get("port", 5116)),
@@ -1137,6 +1154,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         auth_password=str(web_raw.get("auth_password") or ""),
         api_keys=api_keys,
         cors_origins=cors_origins,
+        trusted_proxies=trusted_proxies,
+        public_url=str(web_raw.get("public_url") or "").strip(),
     )
     # 非回环绑定 + 无鉴权的组合直接拒绝启动（M1）：错误经 _config_fatal 呈现，
     # 文案给出两条可行动出路（设密码/Key / 改回 127.0.0.1）
@@ -1531,6 +1550,11 @@ def save_config(cfg: AppConfig) -> None:
             "auth_password": cfg.web.auth_password,
             **({"api_keys": list(cfg.web.api_keys)} if cfg.web.api_keys else {}),
             **({"cors_origins": list(cfg.web.cors_origins)} if cfg.web.cors_origins != ["*"] else {}),
+            # 移动端远程访问：受信任代理与公网地址必须一起写回，否则看板
+            # 任意保存会把用户配置静默重置回默认（同 update/notify 教训）
+            **({"trusted_proxies": list(cfg.web.trusted_proxies)}
+               if cfg.web.trusted_proxies != ["127.0.0.1", "::1"] else {}),
+            **({"public_url": cfg.web.public_url} if cfg.web.public_url else {}),
         },
         # 全局工具开关：只落盘显式关闭/开启的项（空 dict = 全默认启用）
         "tools": dict(cfg.tools.enabled),

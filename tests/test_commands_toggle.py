@@ -139,6 +139,9 @@ def check_config_and_web() -> None:
 
 
 def main() -> int:
+    if sys.platform != "win32":
+        print("跳过：断言 where 等命令的放行/拦截行为，仅 Windows 运行")
+        return 0
     check_validate_and_resolve()
     check_dispatch_gate()
     check_config_and_web()

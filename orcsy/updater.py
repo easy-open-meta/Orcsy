@@ -672,7 +672,12 @@ def _clean_env() -> dict[str, str]:
 # CREATE_NO_WINDOW 在与 DETACHED_PROCESS 同用时会被忽略；而 DETACHED 让 cmd
 # 没有控制台，powershell/find 等控制台子进程会各自弹出新窗口（曾弹出黑框）。
 # 进程一旦创建就独立于本进程存活，不需要 DETACHED 来「防父退出被带走」。
-_WATCHDOG_FLAGS = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+# CREATE_NO_WINDOW 等 Windows 专属常量在 Linux 的 subprocess 里不存在——
+# 看护脚本本身也只在 Windows 冻结版运行（start_watchdog 调 cmd /c *.bat），
+# 非 Windows 平台置 0，保证模块在 Linux/Docker 部署下可导入
+_WATCHDOG_FLAGS = (
+    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+) if sys.platform == "win32" else 0
 
 
 def start_watchdog(bat: Path) -> subprocess.Popen | None:

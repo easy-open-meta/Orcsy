@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -28,17 +29,24 @@ def make_project() -> tuple:
 def check_prompt_section() -> None:
     proj, _ = make_project()
     try:
+        # 夹具按平台构造路径：本机工具节的目录匹配逻辑本身是平台中立的
+        if os.name == "nt":
+            node_dir = r"C:\Program Files\nodejs"
+            npm_path = node_dir + r"\npm.cmd"
+            node_path = node_dir + r"\node.EXE"
+            git_path = r"C:\Program Files\Git\cmd\git.exe"
+        else:
+            node_dir = "/opt/nodejs/bin"
+            npm_path = node_dir + "/npm"
+            node_path = node_dir + "/node"
+            git_path = "/usr/bin/git"
         tool_map = {
-            "tools": {
-                "npm": r"C:\Program Files\nodejs\npm.cmd",
-                "node": r"C:\Program Files\nodejs\node.EXE",
-                "git": r"C:\Program Files\Git\cmd\git.exe",
-            },
-            "extra_dirs": [r"C:\Program Files\nodejs"],
+            "tools": {"npm": npm_path, "node": node_path, "git": git_path},
+            "extra_dirs": [node_dir],
         }
         p = build_system_prompt(proj, "指引", is_git_repo=False, tool_map=tool_map)
         assert "## 本机工具" in p
-        assert r"C:\Program Files\nodejs\npm.cmd" in p
+        assert npm_path in p
         assert "node →" in p
         assert "git →" not in p  # 不在注入目录里的命令不列（本来就能用）
         assert "用裸名直接调用即可" in p
@@ -47,8 +55,8 @@ def check_prompt_section() -> None:
         assert "本机工具" not in p2
         # 有 extra_dirs 但命令都不属于注入目录：同样省略
         p3 = build_system_prompt(proj, "指引", is_git_repo=False, tool_map={
-            "tools": {"git": r"C:\Program Files\Git\cmd\git.exe"},
-            "extra_dirs": [r"C:\Program Files\nodejs"]})
+            "tools": {"git": git_path},
+            "extra_dirs": [node_dir]})
         assert "本机工具" not in p3
         print("ok: 提示词「本机工具」节（只列注入命令/None 省略/空注入省略）")
     finally:

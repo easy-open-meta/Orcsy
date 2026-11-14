@@ -146,7 +146,10 @@ def save_settings(state: AppState, data: dict) -> dict:
             if auth_password:
                 auth_password = ""
                 state._invalidate_sessions()
-        elif not verify_password(new_pwd, auth_password):
+        elif not auth_password or not verify_password(new_pwd, auth_password):
+            # 原本无密码：任何非空新值都是「首次设置」——verify_password 对空密文
+            # 恒真（免密语义），不能当作「与现值一致」而跳过，否则首次设密码
+            # 静默不生效（「一键开放手机访问」与设置页首次设密码都会踩中）
             auth_password = hash_password(new_pwd)
             state._invalidate_sessions()  # 密码变更后旧会话全部作废
     elif auth_password and not is_password_hashed(auth_password):
@@ -171,6 +174,22 @@ def save_settings(state: AppState, data: dict) -> dict:
         elif isinstance(raw_cors, str):
             cors_origins = [o.strip() for o in raw_cors.split(",") if o.strip()] or ["*"]
 
+    # trusted_proxies 三态：键缺失=保持原值；列表/逗号分隔串=更新；null=清空（不采信转发头）
+    trusted_proxies = list(state.config.web.trusted_proxies)
+    if "trusted_proxies" in web:
+        raw_tp = web.get("trusted_proxies")
+        if isinstance(raw_tp, list):
+            trusted_proxies = [str(x).strip() for x in raw_tp if str(x).strip()]
+        elif isinstance(raw_tp, str):
+            trusted_proxies = [x.strip() for x in raw_tp.split(",") if x.strip()]
+        elif raw_tp is None:
+            trusted_proxies = []
+
+    # public_url 三态：键缺失=保持原值；空串=清除；非空=更新
+    public_url = state.config.web.public_url
+    if "public_url" in web:
+        public_url = str(web.get("public_url") or "").strip()
+
     cfg_host = str(web.get("host") or state.config.web.host)
     # 非回环绑定必须带登录密码或 API Key（M1）：host 与密码都已定案后校验，
     # 不合规抛 ValueError → 400 透传看板，配置不落盘
@@ -182,6 +201,8 @@ def save_settings(state: AppState, data: dict) -> dict:
         auth_password=auth_password,
         api_keys=api_keys,
         cors_origins=cors_origins,
+        trusted_proxies=trusted_proxies,
+        public_url=public_url,
     )
     # 日志保留天数：0 表示关闭自动归档与清理；体积上限同理（0 = 不限制）。
     # 都不能用 `or` 兜底——0 是显式关闭意图，不是「未填」

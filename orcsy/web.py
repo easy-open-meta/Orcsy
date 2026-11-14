@@ -1,10 +1,14 @@
 """Web 可视化看板：看板页面 + JSON API，基于标准库 http.server。
 
 API（均为 GET/POST JSON）：
-  GET  /api/state        全量状态：调度器、各项目、任务列表、日志尾部
+  GET  /api/state        全量状态：调度器、各项目、任务列表、日志尾部；
+                         ?summary=true 移动端轻量摘要（省略日志尾部与归档，省流量）
   POST /api/scan         手动触发一轮扫描（立即返回，后台执行）
-  GET  /api/task         单个任务完整内容 ?project=&id=（编辑弹窗用，不截断）
-  POST /api/task         创建/更新任务  {project, id, title, priority, status, description}
+  GET  /api/task         单个任务完整内容 ?project=&id=（编辑弹窗用，不截断；
+                         含 version_token 版本快照供乐观锁比对）
+  POST /api/task         创建/更新任务  {project, id, title, priority, status, description,
+                         base_version?（乐观锁比对基准，版本不符返回 409 Conflict），
+                         force_overwrite?（true=冲突时强制覆盖）}
   POST /api/task/delete  删除任务       {project, id}
   POST /api/task/status  修改任务状态   {project, id, status}（blocked→open 重新入队等）
   POST /api/task/reorder 看板拖拽排序落盘 {project, ids:[拖拽后的完整任务 id 顺序]}
@@ -13,6 +17,13 @@ API（均为 GET/POST JSON）：
   POST /api/models       拉取大模型列表 {provider?, base_url?, api_key?}（缺省用已存配置）
   POST /api/llm/test     测试大模型连通性 {provider?, base_url?, api_key?, model?}
                          （一条极短对话；缺省回退已存配置；失败返回 ok:false+原因）
+
+移动端远程访问（docs/design-mobile-remote-access.md）：
+  GET  /api/system/endpoints  手机连接向导（免登录白名单）：本机局域网 IP/回环/
+                              配置公网地址的可达 URL 清单 + 鉴权开关
+  GET  /api/system/qr         连接二维码 ?url=…（需登录）：SVG 响应，<img> 直嵌
+  GET  /manifest.webmanifest  PWA manifest（添加到手机主屏幕）
+  GET  /appicon.png           PWA 应用图标（?size=192/512 缩放）
 
 项目管理（可视化配置）：
   POST /api/browse       浏览本地目录    {path}，返回子目录列表（供新建项目选路径）
@@ -49,7 +60,10 @@ API（均为 GET/POST JSON）：
 
 登录鉴权（web.auth_password 非空时，除白名单外所有页面/API 需先登录）：
   GET  /api/auth         查询鉴权状态 {enabled, authed}（凭会话 Cookie 判定）
-  POST /api/login        登录 {password}；成功下发 HttpOnly 会话 Cookie（7 天有效）
+  POST /api/login        登录 {password, remember_me?}；成功下发 HttpOnly 会话
+                         Cookie（7 天，remember_me=true 时 30 天）并在响应体
+                         下发 token——前端持久化后以 Authorization: Bearer 双轨
+                         鉴权（移动端反代/切网丢 Cookie 时的第二凭证）
   POST /api/logout       退出登录；服务端注销当前会话并清除 Cookie
 
 程序自更新（零 UAC 静默换名安装，详见 orcsy/updater.py）：
@@ -76,12 +90,15 @@ API（均为 GET/POST JSON）：
 
 from __future__ import annotations
 
+import base64
 import hmac
+import ipaddress
 import json
 import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -138,6 +155,9 @@ from .task_model import (
     scan_tasks,
 )
 from .task_service import (
+    TaskConflictError,
+)
+from .task_service import (
     auto_task_id as _svc_auto_task_id,
 )
 from .task_service import (
@@ -185,6 +205,8 @@ _NAME_RE = re.compile(r"^[\w][\w\-]*$")
 # 登录会话：Cookie 名与有效期（秒）；会话仅存内存，进程重启后需重新登录
 AUTH_COOKIE = "orcsy_session"
 SESSION_TTL = 7 * 24 * 3600
+# 「记住我」会话有效期：手机远程访问场景息屏/切网频繁，短会话极易掉登录
+SESSION_TTL_REMEMBER = 30 * 24 * 3600
 
 # 浏览目录时忽略的噪音项
 _DIR_IGNORE = {"$Recycle.Bin", "System Volume Information", "Windows", "AppData",
@@ -205,6 +227,130 @@ def mask_secret(value: str) -> str:
     return f"{v[:4]}…{v[-4:]}"
 
 
+def _is_ip_trusted(ip_str: str, trusted_list: list[str]) -> bool:
+    """判断 IP 是否属于受信任代理名单（支持单 IP 与 CIDR 网段；非法值按不信任处理）。"""
+    try:
+        addr = ipaddress.ip_address(ip_str.strip())
+        for net in trusted_list or ():
+            net_s = str(net).strip()
+            if not net_s:
+                continue
+            if "/" in net_s:
+                if addr in ipaddress.ip_network(net_s, strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(net_s):
+                return True
+    except ValueError:
+        return False
+    return False
+
+
+def get_client_ip(peer_ip: str, headers, trusted_proxies: list[str]) -> str:
+    """安全解析真实客户端 IP（移动端远程访问：反代/穿透部署下的登录限速锚点）。
+
+    只有当直连对端 IP 属于 trusted_proxies 时，才允许采信 X-Forwarded-For /
+    X-Real-IP，且取代理链路中最右侧不受信任的 IP（防伪造）；否则一律使用
+    直连对端 IP。这样反代部署下限速锁定的是真实外网客户端，而不是恒等于
+    127.0.0.1 的对端——避免本机被误锁导致整个看板拒绝服务（DoS）。
+    headers 传请求头对象（BaseHTTPRequestHandler.headers 或同构 dict/Mapping）。
+    """
+    peer_ip = str(peer_ip or "")
+    if not _is_ip_trusted(peer_ip, trusted_proxies):
+        return peer_ip
+
+    def _hdr(name: str) -> str:
+        try:
+            return str(headers.get(name) or "").strip()
+        except Exception:  # noqa: BLE001 — 畸形头按缺失处理
+            return ""
+
+    xff = _hdr("X-Forwarded-For")
+    if not xff:
+        return _hdr("X-Real-IP") or peer_ip
+    ips = [item.strip() for item in xff.split(",") if item.strip()]
+    for ip in reversed(ips):
+        if not _is_ip_trusted(ip, trusted_proxies):
+            return ip
+    return ips[0] if ips else peer_ip
+
+
+def lan_ipv4_addresses() -> list[str]:
+    """枚举本机非回环局域网 IPv4 地址（手机扫码/连接向导用；标准库零探测流量）。
+
+    UDP connect 技巧取默认路由源地址（不实际发包）+ getaddrinfo(hostname) 补齐
+    多网卡。候选按「手机可达概率」排序而非默认路由优先：装了 VPN/代理的机器
+    默认路由常指向虚拟 tun 网卡（198.18.0.0/15 假 IP 网段等），手机在同一 Wi-Fi
+    根本够不到——真实局域网网段（192.168.x → 172.16-31.x → 10.x）排前，
+    虚拟/基准测试网段排最后。去重并剔除回环/链路本地。
+    """
+    found: list[str] = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(0)
+            s.connect(("8.8.8.8", 80))  # 不发任何包：只为触发内核选路，取源 IP
+            found.append(s.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = str(info[4][0] or "")
+            if ip and not ip.startswith(("127.", "169.254.")):
+                found.append(ip)
+    except OSError:
+        pass
+    # 去重保序；过滤明显非局域网的 0.0.0.0
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for ip in found:
+        if ip and ip != "0.0.0.0" and ip not in seen:
+            seen.add(ip)
+            candidates.append(ip)
+
+    def _rank(ip: str) -> int:
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return 9
+        if addr in ipaddress.ip_network("198.18.0.0/15"):   # VPN 假 IP/基准测试网段
+            return 8
+        if addr in ipaddress.ip_network("192.168.0.0/16"):  # 家用/办公 Wi-Fi 最常见
+            return 0
+        if addr in ipaddress.ip_network("172.16.0.0/12"):   # Docker/内网段
+            return 2
+        if addr in ipaddress.ip_network("10.0.0.0/8"):      # 企业内网/部分 VPN
+            return 3
+        return 5
+
+    return sorted(candidates, key=lambda ip: (_rank(ip), candidates.index(ip)))
+
+
+def qr_svg(text: str, scale: int = 6) -> str | None:
+    """生成 SVG 二维码文本（手机连接向导用）；segno 不可用时返回 None 优雅降级。"""
+    if not text:
+        return None
+    try:
+        import io
+
+        import segno
+
+        buf = io.BytesIO()  # segno 的 SVG 写入器按 bytes 输出
+        segno.make(text, error="m").save(buf, kind="svg", scale=scale, border=2)
+        return buf.getvalue().decode("utf-8")
+    except Exception:  # noqa: BLE001 — 二维码生成失败不影响主流程
+        return None
+
+
+def _is_https_request(handler: BaseHTTPRequestHandler) -> bool:
+    """请求是否经由 HTTPS 到达用户：X-Forwarded-Proto: https 且对端是受信任
+    代理（proto 头可伪造，不受信任来源不采信——误设 Secure 会弄坏 Cookie 回传）。
+    用于给会话 Cookie 追加 Secure 标记（移动端 PWA/反代 HTTPS 部署）。"""
+    proto = str(handler.headers.get("X-Forwarded-Proto") or "").strip().lower()
+    if proto != "https":
+        return False
+    return _is_ip_trusted(handler.client_address[0],
+                          handler.state.config.web.trusted_proxies)
+
+
 # 新项目/导入项目的 AGENT.md 初始内容：统一走 templates.default_guide（唯一来源）
 
 
@@ -221,12 +367,40 @@ def read_log_tail(path: str, max_bytes: int = 60000) -> str:
         return ""
 
 
+def _browse_root_entries(os_name: str, home: str) -> list[str]:
+    """目录选择器「根入口」清单：Windows 列盘符；POSIX 列常用根目录
+    （含 Docker 部署约定的 /data /projects）；用户目录仅存在时列出——
+    不存在的目录列出来就是点不进去的死链接（Linux/容器部署曾踩过）。
+
+    参数化 os_name/home、只用 os.path 字符串接口：两个平台分支都能在
+    Windows 上直接单测（不触发 pathlib 的平台 flavor 限制）。"""
+    roots: list[str] = []
+    if os_name == "nt":
+        import string
+
+        for letter in string.ascii_uppercase:
+            drive = f"{letter}:/"
+            if os.path.isdir(drive):
+                roots.append(drive)
+    else:
+        for cand in ("/", "/home", "/data", "/projects",
+                     "/mnt", "/media", "/opt", "/srv"):
+            if os.path.isdir(cand):
+                roots.append(cand)
+    for sub in ("Documents", "Desktop", "Downloads"):
+        d = os.path.join(home, sub)
+        if os.path.isdir(d):
+            roots.append(d)
+    return roots
+
+
 class AppState:
     """Web 层共享的应用状态与操作。"""
 
     # /api/login 限速参数（L1）：同 IP 滑窗内失败达上限即锁定，锁定期间直接
-    # 拒绝不做密码比对。类属性便于测试缩短窗口；不采信 X-Forwarded-For（本
-    # 工具部署形态是直连，该头可伪造）
+    # 拒绝不做密码比对。类属性便于测试缩短窗口；限速按 get_client_ip 解析的
+    # 真实客户端 IP 计数（直连 = 对端 IP；受信任反代后 = 转发头里的真实 IP，
+    # 防止反代部署误把 127.0.0.1 锁死造成全站拒绝服务）
     LOGIN_WINDOW = 600.0      # 失败计数滑窗：10 分钟
     LOGIN_MAX_FAILS = 5       # 窗口内允许的失败次数
     LOGIN_LOCKOUT = 900.0     # 触发后的锁定时长：15 分钟
@@ -257,8 +431,16 @@ class AppState:
         self.agents = self._build_agents(config)
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
         self.update_state: dict = {"phase": "idle"}
-        # 登录会话：token -> 过期时间戳（内存态，进程重启即全部失效）
+        # 实际监听地址（make_server 绑定成功后写回）：web.host 可在看板保存后热更
+        # （内存值），但监听 socket 只在进程启动时确定——连接向导必须按实际绑定
+        # 报告可达性，否则保存后未重启时会把「还没监听的局域网地址」标成可扫码
+        self.bound_host: str = config.web.host
+        # 登录会话：token -> 过期时间戳。内存态 + 落盘持久化（sessions.json，
+        # 与 config 同目录、Docker 下在数据卷内）——进程重启/部署重建容器后
+        # 「30 天免登录」依旧有效，不再被部署动作清空
         self._auth_tokens: dict[str, float] = {}
+        self._auth_store = Path(skills_lib.skills_base(config)).parent / "sessions.json"
+        self._load_sessions()
         self._auth_lock = threading.Lock()
         # 登录限速（L1）：ip -> 滑窗内失败时间戳 / 锁定到期时间戳。
         # 内存态，重启清零可接受
@@ -297,14 +479,17 @@ class AppState:
                 return True
         return False
 
-    def login(self, password: str, client_ip: str = "") -> dict:
-        """校验登录密码；成功颁发会话 token（由 handler 负责下发 Cookie）。
+    def login(self, password: str, client_ip: str = "",
+              remember: bool = False) -> dict:
+        """校验登录密码；成功颁发会话 token（由 handler 负责下发 Cookie 与响应体）。
 
         限速（L1）：同 IP 滑窗内失败达 LOGIN_MAX_FAILS 次即锁定 LOGIN_LOCKOUT
         秒，锁定期间直接拒绝、不做密码比对；登录成功清零该 IP 的失败计数。
+        remember=True 时签发长有效期会话（30 天）：手机远程访问息屏/切网频繁，
+        短会话极易掉登录；token 同时随响应体下发（Bearer 双轨鉴权）。
         """
         if not self.auth_enabled:
-            return {"ok": True, "token": None}
+            return {"ok": True, "token": None, "expires_in": 0}
         now = time.time()
         with self._auth_lock:
             locked_until = self._login_locked_until.get(client_ip, 0.0)
@@ -332,12 +517,14 @@ class AppState:
                 self._login_failures.setdefault(client_ip, []).append(now)
             return {"ok": False, "message": "密码错误"}
         token = secrets.token_urlsafe(32)
+        ttl = SESSION_TTL_REMEMBER if remember else SESSION_TTL
         with self._auth_lock:
             self._login_failures.pop(client_ip, None)  # 成功即清零失败计数
             self._login_locked_until.pop(client_ip, None)
             self._prune_sessions()
-            self._auth_tokens[token] = time.time() + SESSION_TTL
-        return {"ok": True, "token": token}
+            self._auth_tokens[token] = time.time() + ttl
+            self._save_sessions()
+        return {"ok": True, "token": token, "expires_in": int(ttl)}
 
     def _clear_login_throttle(self) -> None:
         """清空登录限速状态（密码变更/测试重置用）：旧失败不应继续锁新密码。"""
@@ -348,6 +535,7 @@ class AppState:
     def logout(self, token: str | None) -> dict:
         with self._auth_lock:
             self._auth_tokens.pop(token or "", None)
+            self._save_sessions()
         return {"ok": True}
 
     def token_valid(self, token: str | None) -> bool:
@@ -374,6 +562,30 @@ class AppState:
         """清掉过期会话（调用方须持有 _auth_lock）。"""
         now = time.time()
         self._auth_tokens = {t: e for t, e in self._auth_tokens.items() if e >= now}
+        self._save_sessions()
+
+    def _load_sessions(self) -> None:
+        """启动时恢复持久化的会话（过期条目顺带剔除；文件缺失/损坏按空处理）。"""
+        try:
+            raw = json.loads(self._auth_store.read_text(encoding="utf-8"))
+            now = time.time()
+            self._auth_tokens = {str(k): float(v) for k, v in raw.items()
+                                 if isinstance(v, (int, float)) and float(v) > now}
+        except (OSError, ValueError, AttributeError):
+            self._auth_tokens = {}
+
+    def _save_sessions(self) -> None:
+        """会话落盘（原子写；失败仅失去跨重启免登录，不影响本次登录）。"""
+        try:
+            tmp = self._auth_store.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._auth_tokens), encoding="utf-8")
+            os.replace(tmp, self._auth_store)
+            try:
+                os.chmod(self._auth_store, 0o600)  # 令牌文件仅属主可读
+            except OSError:
+                pass
+        except OSError:
+            pass
 
     def _invalidate_sessions(self) -> None:
         """密码变更/清除后注销全部会话：旧 Cookie 立即失效，需用新密码重登。
@@ -382,8 +594,61 @@ class AppState:
         """
         with self._auth_lock:
             self._auth_tokens.clear()
+            self._save_sessions()
             self._login_failures.clear()
             self._login_locked_until.clear()
+
+    def system_endpoints(self) -> dict:
+        """手机连接向导：枚举本机可达的看板访问地址（局域网直连/公网域名/回环）。
+
+        免登录白名单端点（/api/system/endpoints）：只回地址与鉴权开关，
+        绝不回任何密钥/会话凭据。
+
+        仅监听回环（web.host: 127.0.0.1）时：局域网候选地址仍列出但标记
+        active=false（手机现在够不到），并回 all_loopback=true 与 hint——
+        前端据此显示「如何开放手机访问」的操作指引，而不是渲染一个
+        扫出来打不开的 127.0.0.1 二维码。
+        """
+        host = self.config.web.host
+        port = self.config.web.port
+        # 可达性按实际监听地址（bound_host）判断：看板保存可热更内存配置，
+        # 但监听 socket 只在启动时绑定——保存后未重启时 host 已是 0.0.0.0
+        # 而 bound_host 仍是回环，此时局域网地址不可达，必须标「未开放」
+        bound = getattr(self, "bound_host", host)
+        loopback_only = bound.startswith("127.") or bound in ("::1", "localhost")
+        endpoints: list[dict] = []
+        if self.config.web.public_url:
+            endpoints.append({"name": "配置的公网地址", "url": self.config.web.public_url,
+                              "active": True})
+        # 绑定全零地址时每个局域网 IP 都可达；绑定具体 IP 时只列该绑定本身；
+        # 仅回环时列出局域网候选但未开放（active=false，前端置灰并给指引）
+        for ip in lan_ipv4_addresses():
+            active = bound in ("0.0.0.0", "::")
+            endpoints.append({"name": "局域网直连 (Wi-Fi)"
+                                      + ("" if active else "（未开放）"),
+                              "url": f"http://{ip}:{port}", "active": active})
+        if bound not in ("0.0.0.0", "::") and not loopback_only:
+            endpoints.append({"name": "看板绑定地址", "url": f"http://{bound}:{port}",
+                              "active": True})
+        endpoints.append({"name": "本机回环", "url": f"http://127.0.0.1:{port}",
+                          "active": True})
+        hint = ""
+        if loopback_only:
+            if host in ("0.0.0.0", "::"):
+                # 内存配置已开放但监听未切换：保存后还没重启（或重启失败）
+                hint = ("配置已保存（web.host: 0.0.0.0），但尚未重启生效——当前仍只监听"
+                        "本机回环，手机无法访问。请重启 Orcsy 后再扫码；重启完成后本向导"
+                        "会直接展示可扫码的局域网地址。")
+            else:
+                hint = ("看板当前仅监听本机回环地址（web.host: "
+                        f"{host}），手机无法访问。勾选「一键开放手机访问」自动配置，"
+                        "或把 config.yaml 的 web.host 改为 0.0.0.0 并设置"
+                        " web.auth_password 登录密码后重启程序。")
+        return {"ok": True, "port": port, "auth_required": self.auth_enabled,
+                # 已配置登录密码：向导的「一键开放」据此决定是沿用还是生成新密码
+                "password_configured": bool(self.config.web.auth_password),
+                "all_loopback": loopback_only, "hint": hint,
+                "endpoints": endpoints}
 
     # ---- 人工审批 ----
 
@@ -449,7 +714,9 @@ class AppState:
 
     # ---- 查询 ----
 
-    def full_state(self) -> dict:
+    def full_state(self, summary: bool = False) -> dict:
+        """全量看板状态。summary=True 为移动端轻量摘要：剔除 60KB 日志尾部与
+        归档任务列表（手机蜂窝网络下的轮询流量从 ~80KB 压到几 KB）。"""
         projects = []
         for name, agent in self.agents.items():
             p = agent.project
@@ -457,7 +724,7 @@ class AppState:
             all_statuses, done_ids = collect_task_statuses(agent.tasks_dir)
             archive_dir = agent.tasks_dir / "done"
             archived = []
-            if archive_dir.is_dir():
+            if archive_dir.is_dir() and not summary:  # 摘要模式跳过归档解析（省流量省 CPU）
                 for f in sorted(archive_dir.glob("*.md")):
                     archived.append(self._task_dict(parse_task_file(f)))
             # 所有文件（含 in_progress/blocked/cancelled），不只是 open
@@ -518,7 +785,7 @@ class AppState:
                 "tasks": all_tasks,
                 "parse_errors": [{"id": t.id, "path": str(t.path), "error": t.error}
                                  for t in errors],
-                "archived": archived[-30:],
+                "archived": [] if summary else archived[-30:],
             })
         return {
             "version": __version__,
@@ -669,7 +936,8 @@ class AppState:
             "skills_dir": str(self.skills_dir),
             "skills": [self._skill_dict(s) for s in skills_lib.load_skills(self.skills_dir)],
             "projects": projects,
-            "log_tail": read_log_tail(self.log_path or self.config.logging.file),
+            # 摘要模式省略 60KB 日志尾部：手机轮询流量大头，桌面端保持全量
+            "log_tail": "" if summary else read_log_tail(self.log_path or self.config.logging.file),
         }
 
     @staticmethod
@@ -1001,16 +1269,9 @@ class AppState:
         p = Path(raw).resolve() if raw else None
 
         if p is None or not p.is_dir():
-            # 根入口：给出各盘符与用户目录
-            roots = []
-            import string
-            for letter in string.ascii_uppercase:
-                drive = Path(f"{letter}:/")
-                if drive.exists():
-                    roots.append(str(drive))
-            home = Path.home()
+            # 根入口：跨平台清单见 _browse_root_entries
             return {"ok": True, "path": "", "parent": None,
-                    "dirs": roots + [str(home / "Documents"), str(home / "Desktop")],
+                    "dirs": _browse_root_entries(os.name, str(Path.home())),
                     "files": []}
 
         dirs, files = [], []
@@ -1343,7 +1604,14 @@ class AppState:
             os.startfile(path)  # noqa: S606 — 本机用户主动打开自己的项目目录
         else:
             opener = "open" if sys.platform == "darwin" else "xdg-open"
-            subprocess.Popen([opener, str(path)])
+            try:
+                subprocess.Popen([opener, str(path)])
+            except OSError as e:
+                # 无头/容器部署：服务器上没有桌面会话，无法弹出文件夹——
+                # 明确告知路径，让用户走 SFTP/云控制台文件管理器
+                raise ValueError(
+                    f"当前部署无法打开服务器上的文件夹（{opener} 不可用）。"
+                    f"项目目录：{path}（可通过 SFTP 或云控制台文件管理器访问）") from e
         log.info("Web 打开项目文件夹 %s（%s）", name, path)
         return {"ok": True, "path": str(path)}
 
@@ -1804,7 +2072,12 @@ class AppState:
             os.startfile(d)  # noqa: S606 — 本机用户主动打开自己的技能目录
         else:
             opener = "open" if sys.platform == "darwin" else "xdg-open"
-            subprocess.Popen([opener, str(d)])
+            try:
+                subprocess.Popen([opener, str(d)])
+            except OSError as e:
+                raise ValueError(
+                    f"当前部署无法打开服务器上的文件夹（{opener} 不可用）。"
+                    f"技能目录：{d}（可通过 SFTP 或云控制台文件管理器访问）") from e
         return {"ok": True, "path": str(d)}
 
     # ---- 模型/调度/看板配置 ----
@@ -1923,18 +2196,28 @@ class WebHandler(BaseHTTPRequestHandler):
                     "message": "未登录或会话已过期"}, 401)
 
     def _handle_login(self, body: dict) -> None:
-        # client_address[0] 是真实对端 IP（直连部署，无反代）；不采信
-        # X-Forwarded-For——可伪造，限速会失去意义
+        # 限速锚定真实客户端 IP：直连 = 对端 IP；受信任反代（trusted_proxies）
+        # 后 = X-Forwarded-For 链中最右侧不受信任的 IP。不采信不受信任来源的
+        # 转发头——可伪造，限速会失去意义
+        client_ip = get_client_ip(self.client_address[0], self.headers,
+                                  self.state.config.web.trusted_proxies)
+        remember = bool(body.get("remember_me"))
         result = self.state.login(str(body.get("password") or ""),
-                                  client_ip=self.client_address[0])
+                                  client_ip=client_ip, remember=remember)
         if not result.get("ok"):
             return self._json(
                 {"ok": False, "message": result.get("message", "密码错误")}, 401)
         token = result.get("token")
         if token:
+            # Cookie 与 Bearer Token 双轨（移动端远程访问）：iOS Safari 等移动
+            # 浏览器在反代/切网/息屏场景极易丢 Cookie，前端把响应体里的 token
+            # 持久化到 localStorage，后续请求带 Authorization: Bearer，双保险
+            ttl = int(result.get("expires_in") or SESSION_TTL)
+            secure = "; Secure" if _is_https_request(self) else ""
             cookie = (f"{AUTH_COOKIE}={token}; HttpOnly; Path=/; "
-                      f"Max-Age={SESSION_TTL}; SameSite=Lax")
-            self._json({"ok": True}, extra_headers=[("Set-Cookie", cookie)])
+                      f"Max-Age={ttl}; SameSite=Lax{secure}")
+            self._json({"ok": True, "token": token, "expires_in": ttl},
+                       extra_headers=[("Set-Cookie", cookie)])
         else:
             self._json({"ok": True})  # 鉴权未开启：无需会话
 
@@ -1942,16 +2225,59 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        # 鉴权守卫：SPA 壳（/、/index.html）与 /api/auth 放行，登录界面由页内接管
-        if path not in ("/", "/index.html", "/api/auth") and not self._authorized():
+        # 鉴权守卫：SPA 壳（/、/index.html）、PWA 资源、连接向导与 /api/auth 放行，
+        # 登录界面由页内接管
+        if path not in ("/", "/index.html", "/api/auth", "/api/system/endpoints",
+                        "/manifest.webmanifest", "/appicon.png", "/sw.js",
+                        "/offline.html") and not self._authorized():
             return self._deny()
         if path == "/" or path == "/index.html":
             self._html()
         elif path == "/api/auth":
             auth_token = self._bearer_token() or self._cookie_token()
             self._json(self.state.auth_status(auth_token, api_key=self._api_key()))
+        elif path == "/api/system/endpoints":
+            # 免登录连接向导：只回可达地址与鉴权开关，无任何凭据
+            self._json(self.state.system_endpoints())
+        elif path == "/api/system/qr":
+            # 连接二维码（需登录）：把 URL 编成 SVG，前端 <img> 直嵌
+            url = self._query_params().get("url", "").strip()
+            svg = qr_svg(url)
+            if not svg:
+                return self._json({"ok": False, "message": "二维码生成失败"}, 500)
+            body = svg.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for name, value in self._cors_headers():
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/manifest.webmanifest":
+            self._serve_manifest()
+        elif path == "/sw.js":
+            body = _SW_JS.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Service-Worker-Allowed", "/")
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/offline.html":
+            body = _OFFLINE_HTML.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/appicon.png":
+            self._serve_app_icon()
         elif path == "/api/state":
-            self._json(self.state.full_state())
+            self._json(self.state.full_state(
+                summary=self._query_params().get("summary") in ("1", "true")))
         elif path == "/api/guide":
             try:
                 self._json(self.state.get_guide(self._query_params()))
@@ -2007,6 +2333,58 @@ class WebHandler(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs
         qs = parse_qs(urlparse(self.path).query)
         return {k: v[0] for k, v in qs.items()}
+
+    # ---- PWA 支持（移动端「添加到主屏幕」）----
+
+    def _serve_manifest(self) -> None:
+        """PWA manifest：手机浏览器据它提供「添加到主屏幕」与独立窗口体验。"""
+        manifest = {
+            "name": "Orcsy 任务编排中心",
+            "short_name": "Orcsy",
+            "description": "Agent 任务编排系统：远程查看、编辑与新建任意项目的任务",
+            "start_url": "/",
+            "scope": "/",
+            "display": "standalone",
+            "orientation": "portrait-primary",
+            "background_color": "#0b0f17",
+            "theme_color": "#0b0f17",
+            "icons": [
+                {"src": "/appicon.png?size=192", "sizes": "192x192", "type": "image/png"},
+                {"src": "/appicon.png?size=512", "sizes": "512x512", "type": "image/png"},
+                {"src": "/appicon.png", "sizes": "1024x1024", "type": "image/png",
+                 "purpose": "any maskable"},
+            ],
+        }
+        self._json(manifest)
+
+    def _serve_app_icon(self) -> None:
+        """应用图标（PWA manifest 引用）：内置 base64 解码，size 查询参数可缩放。"""
+        try:
+            data = base64.b64decode(_APP_ICON_B64)
+        except Exception:  # noqa: BLE001 — 图标损坏按 404 处理，不影响主流程
+            return self._json({"error": "icon unavailable"}, 404)
+        size = self._query_params().get("size", "").strip()
+        if size.isdigit() and int(size) in (192, 512) and int(size) != 1024:
+            try:
+                from io import BytesIO
+
+                from PIL import Image
+
+                im = Image.open(BytesIO(data)).convert("RGBA")
+                im = im.resize((int(size), int(size)), Image.LANCZOS)
+                buf = BytesIO()
+                im.save(buf, format="PNG")
+                data = buf.getvalue()
+            except Exception:  # noqa: BLE001 — 缩放失败回退原图
+                pass
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        for name, value in self._cors_headers():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -2125,6 +2503,11 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.save_settings(body))
             else:
                 self._json({"error": "not found"}, 404)
+        except TaskConflictError as e:
+            # 乐观锁命中（移动端远程编辑防脏写）：409 Conflict + 最新任务内容，
+            # 前端弹「保留我的修改 / 采用最新状态」冲突解决交互
+            self._json({"ok": False, "conflict": True, "message": str(e),
+                        "latest_task": e.latest_task}, 409)
         except (ValueError, OSError) as e:
             self._json({"ok": False, "message": str(e)}, 400)
 
@@ -2141,6 +2524,9 @@ class WebHandler(BaseHTTPRequestHandler):
 def make_server(state: AppState, host: str, port: int) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (WebHandler,), {"state": state})
     server = ThreadingHTTPServer((host, port), handler)
+    # 绑定成功写回实际监听地址：连接向导按它（而非可能已被看板保存热更的
+    # config.web.host）报告可达性
+    state.bound_host = host
     # 请求线程随主线程退出：否则看板页面的轮询连接会让进程迟迟退不干净
     server.daemon_threads = True
     return server
@@ -2158,6 +2544,66 @@ def _load_page() -> str:
 
 
 _PAGE_CACHE: str | None = None
+
+# 应用图标（build/icon.png 的 base64）：PWA manifest 的 /appicon.png 端点用。
+# 编译进模块常量——冻结 exe 环境不依赖磁盘文件（同 dashboard_html.PAGE 策略）
+
+# ---- PWA Service Worker 与离线回退页（Dockerfile/移动端标准：可安装性需 fetch handler）----
+_SW_JS = """// Orcsy PWA service worker：网络优先；导航失败回退离线页
+// （看板服务重启/部署窗口期间，手机端优雅降级而不是报错）
+const OFFLINE_URL = "/offline.html";
+const CACHE = "orcsy-shell-v1";
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll([OFFLINE_URL])));
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()));
+});
+
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  if (event.request.mode === "navigate") {
+    // 导航请求网络优先；看板不可达时回退离线提示页
+    event.respondWith(fetch(event.request).catch(() => caches.match(OFFLINE_URL)));
+  }
+});
+"""
+
+_OFFLINE_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Orcsy · 暂时离线</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: #0b0f17; color: #e5eaf6; font: 15px/1.7 system-ui, sans-serif; text-align: center; }
+  .box { padding: 32px 24px; max-width: 420px; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  p { color: #94a2be; margin: 6px 0; }
+  button { margin-top: 18px; padding: 10px 28px; border: 0; border-radius: 8px;
+           background: #5b8cff; color: #fff; font-size: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Orcsy 暂时无法连接</h1>
+  <p>看板服务正在重启或部署更新，通常几秒内恢复。</p>
+  <p>本页恢复联网后会自动可用，也可点击下方按钮重试。</p>
+  <button onclick="location.reload()">重试连接</button>
+</div>
+<script>setTimeout(() => location.reload(), 5000);</script>
+</body>
+</html>
+"""
+
+_APP_ICON_B64 = ("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")
 
 
 # 看板单页：无外部依赖，5 秒自动刷新 + 手动操作

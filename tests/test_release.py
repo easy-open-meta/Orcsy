@@ -18,6 +18,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
 
 # 用文件路径加载 build/release.py：避免与 site-packages 里的 pypa「build」包撞名
+if not (Path(__file__).resolve().parents[1] / "build" / "release.py").is_file():
+    print("跳过：缺少 build/release.py（Windows 打包目录未随部署上传）")
+    raise SystemExit(0)
+
 _spec = importlib.util.spec_from_file_location(
     "orcsy_release", Path(__file__).resolve().parents[1] / "build" / "release.py")
 assert _spec and _spec.loader
