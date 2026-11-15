@@ -1411,6 +1411,15 @@ index、Node.js 安装包、JDK、Python
 <li>也可以「手动导入本地安装包」：选择
 <code>orcsy-update-*.zip</code>，支持同版本覆盖、升级、降级。</li>
 </ul>
+<blockquote>
+<p>⚠️ <strong>降级注意（运行台账）</strong>：运行台账是 0.25
+起的新能力，涉及 <code>runlog</code> 配置节与 <code>runs/</code>
+目录。旧版本不认识该配置节：降级后<strong>不要</strong>在旧版本里修改台账相关设置（保存任意设置可能把
+<code>runlog</code>
+节连同自定义目录一起写丢）；台账数据文件不会被删除。降级前请备份
+<code>config.yaml</code>
+与台账目录；升级回新版本后，程序会按配置和上次运行目录自动接回历史记录。</p>
+</blockquote>
 <h3 id="1010-看板登录密码">10.10 看板登录密码</h3>
 <p>默认只监听 <code>127.0.0.1</code>，只有本机能访问，不需要密码。</p>
 <p>如果你要：</p>
@@ -1608,6 +1617,8 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 <p>建议备份：</p>
 <ul>
 <li>数据目录（配置、技能、日志、用量）；</li>
+<li>运行台账目录（默认在数据目录下的 <code>runs/</code>；若在
+<code>runlog.dir</code> 指定了其它位置，备份那个目录）；</li>
 <li>各项目的 <code>tasks/</code> 和 <code>AGENT.md</code>；</li>
 <li>项目代码本身（用 Git 远端备份）。</li>
 </ul>

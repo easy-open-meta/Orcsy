@@ -219,6 +219,65 @@ def save_settings(state: AppState, data: dict) -> dict:
             raise ValueError("日志总占用上限应为 0~100000 MB（0 表示不限制）")
         state.config.logging.max_total_mb = mb
 
+    # 运行台账（V1-R1）：分块保存；改目录触发后台迁移（迁移中拒绝修改）
+    if "runlog" in data:
+        rl = data.get("runlog") or {}
+        if not isinstance(rl, dict):
+            raise ValueError("runlog 必须是键值对字典")
+        from .runlog import get_run_store
+
+        store = get_run_store()
+        if store.is_migrating():
+            raise ValueError("运行台账正在迁移，请等待完成后再修改设置")
+        enabled = bool(rl.get("enabled", state.config.runlog.enabled))
+        rd = int(rl.get("retention_days", state.config.runlog.retention_days))
+        if not (0 <= rd <= 3650):
+            raise ValueError("运行台账保留天数应为 0~3650（0 表示不按时间清理）")
+        raw_mb = rl.get("max_total_mb")
+        mb = (state.config.runlog.max_total_mb if raw_mb is None
+              else int(raw_mb))
+        if not (0 <= mb <= 100000):
+            raise ValueError("运行台账总占用上限应为 0~100000 MB（0 表示不限制）")
+        # 目录：留空 = 默认（配置文件同级 runs/）；非空必须是绝对路径。
+        # 允许路径不存在（首次保存时自动创建）；已存在但不是目录则拒绝。
+        new_dir = state.config.runlog.dir
+        dir_explicit = state.config.runlog.dir_explicit
+        if "dir" in rl:
+            dir_explicit = True
+            raw_dir = str(rl.get("dir") or "").strip()
+            if raw_dir:
+                if any(ch in raw_dir for ch in ("\r", "\n", "\x00")):
+                    raise ValueError("运行台账目录不能包含换行或空字符")
+                p = Path(raw_dir).expanduser()
+                if not p.is_absolute():
+                    raise ValueError("运行台账目录必须是绝对路径（或留空使用默认目录）")
+                if p.exists() and not p.is_dir():
+                    raise ValueError(f"运行台账目录已存在但不是文件夹：{p}")
+                try:
+                    current = store.root.resolve()
+                    target = p.resolve()
+                    if target != current and (target.is_relative_to(current)
+                                              or current.is_relative_to(target)):
+                        raise ValueError("新旧运行台账目录不能互相包含（会递归迁移）")
+                except OSError:
+                    pass
+                for proj in state.config.projects:
+                    try:
+                        pj = Path(proj.path).resolve()
+                    except OSError:
+                        continue
+                    if p.resolve() == pj or pj in p.resolve().parents:
+                        raise ValueError(
+                            f"运行台账目录不能位于受管项目内：{proj.name}")
+                new_dir = str(p)
+            else:
+                new_dir = ""
+        state.config.runlog.enabled = enabled
+        state.config.runlog.retention_days = rd
+        state.config.runlog.max_total_mb = mb
+        state.config.runlog.dir = new_dir
+        state.config.runlog.dir_explicit = dir_explicit
+
     # 软件更新源：分块保存，只带 update 的请求不触碰其它配置
     if "update" in data:
         upd = data.get("update") or {}

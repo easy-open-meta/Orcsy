@@ -64,7 +64,8 @@ def review_task(project: ProjectConfig, task: Task, work_root: Path,
                 allowed_commands: list[str] | None = None,
                 approval_gate=None, max_turns: int = 10,
                 allow_test_commands: bool = True,
-                extra_env: dict[str, str] | None = None) -> ReviewResult:
+                extra_env: dict[str, str] | None = None,
+                run_recorder=None) -> ReviewResult:
     """执行一次审查，返回结论。本函数不抛异常——所有失败都体现在结果里。
 
     work_root：审查工具的根目录（git 项目 = worktree，非 git 项目 = 项目根），
@@ -98,8 +99,12 @@ def review_task(project: ProjectConfig, task: Task, work_root: Path,
                           approval_gate=approval_gate,
                           stop_event=stop_event,
                           extra_env=extra_env,
-                          current_task=task)
+                          current_task=task,
+                          run_recorder=run_recorder)
         client = LLMClient(review_llm)
+        if run_recorder is not None:
+            # 审查的模型调用与工具调用同样计入本 run 的事件流
+            client.event_sink = run_recorder.event
         client.reset(system_prompt)
         try:
             resp = client.run_task_loop(task_prompt, ctx, max_turns=max_turns)

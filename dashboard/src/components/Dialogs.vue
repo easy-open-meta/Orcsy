@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
-import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode } from '../api'
+import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode, type RunDetailT, type RunSummaryT } from '../api'
 import { isMobile, viewportHeight } from '../mobile'
 import { beginRestartWait, navigateTo, refresh, ui, store } from '../store'
 
@@ -744,6 +744,78 @@ const tDraft = reactive({
 })
 // 409 冲突后「保留我的修改」重试标记：下次 saveTask 带 force_overwrite=true
 const tForceOverwrite = shallowRef(false)
+
+// ---- 运行台账（V1-R1）：任务详情内的运行记录与回放（只读） ----
+const runList = ref<RunSummaryT[]>([])
+const runLoading = ref(false)
+const runOpen = ref('')
+const runDetail = ref<RunDetailT | null>(null)
+const runDetailLoading = ref(false)
+const runArtifact = ref('')
+const runArtifactName = ref('')
+const runError = ref('')
+// 目录迁移期间锁定回放（迁移线程可能正移动当前 run 的目录）
+const runlogBusy = computed(() => store.state?.runlog_migration?.state === 'running')
+
+async function loadRuns(): Promise<void> {
+  const dlg = ui.taskDlg
+  if (!dlg?.id) { runList.value = []; return }
+  runLoading.value = true
+  try {
+    const r = await api.runs({ project: dlg.project, task_id: dlg.id, limit: 20 })
+    runList.value = r.runs || []
+  } catch {
+    runList.value = []
+  } finally {
+    runLoading.value = false
+  }
+}
+
+async function toggleRun(r: RunSummaryT): Promise<void> {
+  if (runlogBusy.value) return
+  if (runOpen.value === r.run_id) {
+    runOpen.value = ''; runDetail.value = null; runArtifact.value = ''
+    return
+  }
+  runOpen.value = r.run_id
+  runArtifact.value = ''; runArtifactName.value = ''
+  runDetail.value = null
+  runError.value = ''
+  runDetailLoading.value = true
+  try {
+    runDetail.value = await api.runDetail(r.project || ui.taskDlg?.project || '', r.run_id)
+  } catch (e: any) {
+    runError.value = String(e?.message || e)
+  } finally {
+    runDetailLoading.value = false
+  }
+}
+
+async function viewRunArtifact(r: RunSummaryT, name: string): Promise<void> {
+  if (runlogBusy.value) return
+  try {
+    runArtifactName.value = name
+    runArtifact.value = await api.runArtifact(r.project || ui.taskDlg?.project || '', r.run_id, name)
+  } catch (e: any) {
+    runArtifact.value = `读取失败：${e?.message || e}`
+  }
+}
+
+function runEventLine(e: { type: string; data: Record<string, any> }): string {
+  const d = e.data || {}
+  switch (e.type) {
+    case 'progress': return String(d.line || '')
+    case 'tool_call': return `${d.name || '?'}${d.ok ? '' : '（失败）'}${d.intercepted ? '（拦截）' : ''} ${d.ms || 0}ms ${d.preview || ''}`
+    case 'model_call': return `${d.model || ''} ${d.prompt_tokens || 0}+${d.completion_tokens || 0} tokens`
+    case 'review_verdict': return `${d.verdict || ''} ${d.summary || ''}`
+    case 'review_start': return `model=${d.model || ''} round=${d.round || 0}`
+    case 'commit': return `${d.hash || ''} @ ${d.branch || ''}`
+    case 'merge': return `${d.mode || ''} ${d.review_verdict || ''}`
+    case 'run_end': return `${d.outcome || ''} / ${d.exit_reason || ''}`
+    case 'run_start': return `${d.role || ''} ${d.model || ''}`
+    default: return JSON.stringify(d).slice(0, 120)
+  }
+}
 const PRI_OPTIONS = ['P0', 'P1', 'P2', 'P3', 'P4']
 const priOptions = computed(() => {
   const opts = PRI_OPTIONS.map(v => ({ label: v, value: v }))
@@ -873,6 +945,9 @@ watch(() => ui.taskDlg, async (dlg) => {
   tDraft.dep_state = ''
   tDraft.versionToken = ''
   tForceOverwrite.value = false
+  // 运行记录：重开对话框时清空，避免看到上一个任务的 run
+  runList.value = []; runOpen.value = ''; runDetail.value = null
+  runArtifact.value = ''; runArtifactName.value = ''; runError.value = ''
   // 打开即暂停草稿落盘（watch 填值期间不当作用户输入），填完再恢复
   draftPaused = true
   draftAvailable.value = false
@@ -906,6 +981,8 @@ watch(() => ui.taskDlg, async (dlg) => {
     const raw = draftKey.value ? localStorage.getItem(draftKey.value) : null
     draftAvailable.value = !!(raw && !tReadonly.value)
   } catch { draftAvailable.value = false }
+  // 运行台账：已有任务才拉取（新建任务尚无 run）
+  if (dlg.id) void loadRuns()
   await nextTick()
   draftPaused = false
 })
@@ -1664,6 +1741,59 @@ async function newFolder(): Promise<void> {
         </div>
       </div>
     </template>
+    <!-- 运行台账（V1-R1）：历史 run 列表 + 事件回放 + 工件查看（只读） -->
+    <div v-if="ui.taskDlg?.id" class="runsec">
+      <div class="runsec-head">
+        <label style="margin:0">运行记录</label>
+        <span class="hint" style="margin:0">{{ runList.length ? `${runList.length} 次` : '暂无' }}</span>
+        <NButton size="tiny" quaternary :loading="runLoading" :disabled="runlogBusy"
+                 @click="loadRuns">刷新</NButton>
+      </div>
+      <div v-if="runlogBusy" class="hint">
+        运行台账正在迁移目录，暂不可回放；迁移完成后自动恢复。
+      </div>
+      <div v-if="!runLoading && !runList.length" class="hint">
+        暂无运行记录：任务首次执行后生成；配置 runlog.enabled=false 时不记录。
+      </div>
+      <div v-for="r in runList" :key="r.run_id" class="runrow">
+        <div class="runrow-head clickable" :class="{ disabled: runlogBusy }"
+             @click="toggleRun(r)">
+          <span class="run-badge" :class="`o-${r.outcome || 'running'}`">{{ r.outcome || 'running' }}</span>
+          <span class="run-time">{{ (r.started_at || '').slice(5, 16).replace('T', ' ') }}</span>
+          <span class="run-meta">{{ r.role || r.agent_name || 'agent' }} · {{ r.event_count }} 事件{{ r.review_verdict ? ' · 审查 ' + r.review_verdict : '' }}</span>
+          <span class="run-toggle">{{ runOpen === r.run_id ? '▾' : '▸' }}</span>
+        </div>
+        <div v-if="runOpen === r.run_id" class="run-detail">
+          <div v-if="runDetailLoading" class="hint">加载中…</div>
+          <template v-else-if="runDetail">
+            <div v-if="runError" class="err">{{ runError }}</div>
+            <div class="hint">
+              exit: {{ runDetail.meta.exit_reason || '-' }} · tokens:
+              {{ runDetail.meta.tokens?.prompt_tokens || 0 }}+{{ runDetail.meta.tokens?.completion_tokens || 0 }}
+              <template v-if="runDetail.meta.commit"> · commit {{ runDetail.meta.commit }}</template>
+            </div>
+            <div class="run-actions">
+              <NButton v-for="a in runDetail.artifacts" :key="a.name" size="tiny" quaternary
+                       :disabled="runlogBusy"
+                       :type="runArtifactName === a.name ? 'primary' : 'default'"
+                       @click="viewRunArtifact(r, a.name)">{{ a.name }}</NButton>
+            </div>
+            <pre v-if="runArtifact" class="run-artifact">{{ runArtifact }}</pre>
+            <div v-if="runDetail.event_total > runDetail.events.length" class="hint">
+              仅显示前 {{ runDetail.events.length }} / {{ runDetail.event_total }} 条事件（可在 meta.json 查看完整计数）
+            </div>
+            <div class="run-events">
+              <div v-for="e in runDetail.events" :key="e.seq" class="run-event">
+                <span class="re-seq">{{ e.seq }}</span>
+                <span class="re-type">{{ e.type }}</span>
+                <span class="re-ts">{{ (e.ts || '').slice(11, 19) }}</span>
+                <span class="re-data">{{ runEventLine(e) }}</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
     <div class="dlg-actions" v-if="!isMobile">
       <NButton @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
       <NButton v-if="!tReadonly" type="primary" @click="saveTask(tForceOverwrite)">保存</NButton>
@@ -1994,6 +2124,38 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .ep-guide-hint { font-size: 11.5px; color: var(--dim); margin-top: 8px; word-break: break-all; }
 .ep-enable { margin: 6px 0 8px; }
 .ep-enable-note { font-size: 12.5px; color: var(--text); margin-top: 6px; word-break: break-all; }
+/* ---- 运行台账（V1-R1）：任务详情内的 run 列表与回放 ---- */
+.runsec { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.runsec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.runsec-head .hint { flex: 1; }
+.runrow { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+.runrow-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 12.5px; }
+.runrow-head:hover { background: rgba(128, 140, 180, 0.12); }
+.runrow-head.disabled { opacity: 0.55; cursor: not-allowed; }
+.run-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: rgba(128, 140, 180, 0.18); color: var(--dim); }
+.run-badge.o-done { background: rgba(64, 180, 120, 0.18); color: #4cbf87; }
+.run-badge.o-blocked { background: rgba(220, 120, 90, 0.18); color: #e08a6a; }
+.run-badge.o-cancelled { background: rgba(160, 160, 160, 0.18); color: var(--faint); }
+.run-badge.o-open { background: rgba(90, 140, 255, 0.18); color: #6f9dff; }
+.run-time { font-family: Consolas, monospace; color: var(--dim); }
+.run-meta { flex: 1; color: var(--faint); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.run-toggle { color: var(--faint); }
+.run-detail { padding: 8px 10px; border-top: 1px dashed var(--line); }
+.run-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.run-artifact { max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.22);
+  border-radius: 6px; padding: 8px; font: 11.5px/1.5 Consolas, monospace;
+  white-space: pre-wrap; word-break: break-all; margin: 0 0 8px; }
+.run-events { max-height: 260px; overflow: auto; border: 1px solid var(--line);
+  border-radius: 6px; }
+.run-event { display: flex; gap: 6px; padding: 3px 7px;
+  font: 11.5px/1.5 Consolas, monospace; border-bottom: 1px solid rgba(128, 140, 180, 0.1); }
+.run-event:last-child { border-bottom: none; }
+.re-seq { color: var(--faint); min-width: 26px; text-align: right; }
+.re-type { color: #6f9dff; min-width: 92px; }
+.re-ts { color: var(--faint); min-width: 58px; }
+.re-data { flex: 1; color: var(--text); word-break: break-all; }
 </style>
 
 <!-- NModal 瞬移到 body 后 scoped :deep() 够不到 NCard 内部节点：这两条须全局。

@@ -30,6 +30,7 @@ from .logging_setup import anchored_log_path, get_logger, rotate_and_cleanup
 from .mirrors import mirror_runtime_for
 from .skills import ensure_builtin_skills, skills_base
 from .usage import init_usage_store
+from .runlog import init_run_store
 
 log = get_logger("scheduler")
 
@@ -48,6 +49,9 @@ class Scheduler:
             log.info("已播种/升级内置技能：%s", ", ".join(seeded))
         # 用量台账按配置锚定路径（executor 记录、看板聚合共用同一单例）
         init_usage_store(config)
+        # 运行台账（V1-R1）：按配置锚定目录/保留期；已初始化则复用（避免
+        # 迁移进行中被第二次 force 重建导致重复迁移）
+        init_run_store(config)
         # 镜像源运行时（测速结果边车与 config.yaml 同目录）：executor 的
         # speedtest_mirrors 工具与 env-setup 技能动态优选段共用
         self.mirror_runtime = mirror_runtime_for(config)

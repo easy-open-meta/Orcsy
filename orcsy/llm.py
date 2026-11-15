@@ -401,6 +401,18 @@ class LLMClient:
         # 时还原原文；映射仅存内存，任务循环结束即清除（masking.configure
         # 关闭总开关时 mask_payload 内部零开销透传）
         self._masking = MaskingSession()
+        # 运行台账事件出口（V1-R1）：executor 注入 RunRecorder.event 的适配
+        # 函数；None = 未启用台账。台账是旁路，异常一律吞掉，不影响任务。
+        self.event_sink = None
+
+    def _emit(self, kind: str, **data) -> None:
+        sink = getattr(self, "event_sink", None)
+        if sink is None:
+            return
+        try:
+            sink(kind, **data)
+        except Exception:  # noqa: BLE001 — 留痕失败绝不能打断模型调用
+            log.warning("运行台账事件写入失败（忽略）：%s", kind, exc_info=True)
 
     def _acc_usage(self, data: dict, provider: str) -> None:
         u = data.get("usage") or {}
@@ -413,6 +425,8 @@ class LLMClient:
         self.usage["turns"] += 1
         self.usage["prompt_tokens"] += pt
         self.usage["completion_tokens"] += ct
+        self._emit("model_call", model=self.cfg.model, prompt_tokens=pt,
+                   completion_tokens=ct, turn=self.usage["turns"])
 
     def reset(self, system_prompt: str) -> None:
         self.messages = [{"role": "system", "content": system_prompt}]
@@ -523,6 +537,12 @@ class LLMClient:
                 if name == "finish":
                     # finish 不还原：结论（summary/notes）会写进任务文件落盘，
                     # 占位符保持脱敏形态正是需求效果（密钥不落盘）
+                    rec = getattr(ctx, "run_recorder", None)
+                    if rec is not None:
+                        try:
+                            rec.tool_event("finish", ok=True, ms=0, preview="finish")
+                        except Exception:  # noqa: BLE001 — 台账旁路
+                            pass
                     raise FinishSignal(self._parse_finish_args(args_json))
                 # 写回还原（返回侧闭环）：模型把占位符当真实值引用时（复制密钥、
                 # 整文件回写等），dispatch 前还原原文——还原在参数日志之后，
@@ -566,13 +586,39 @@ class LLMClient:
                             )
                             log.warning("拦截重复读取文件 [%s]（第 %d 次）", p_target, file_read_counts[p_target])
 
+                tool_t0 = time.monotonic()
                 if intercepted is not None:
                     # 被拦截的重读同样计作一次只读轮（已在上面计入），这里只回
                     # 错误结果给模型；tool_call/tool_result 配对保持完整
                     log.debug("工具结果 [%d] %s（拦截）：%s", turn, name, intercepted[:120])
                     self.messages.append(self._tool_result(call_id, intercepted))
+                    rec = getattr(ctx, "run_recorder", None)
+                    if rec is not None:
+                        try:
+                            rec.tool_event(name, ok=False,
+                                           ms=int((time.monotonic() - tool_t0) * 1000),
+                                           preview=(args_json or "")[:120],
+                                           intercepted=True)
+                        except Exception:  # noqa: BLE001 — 台账旁路
+                            pass
                 else:
                     result = dispatch_tool(ctx, name, args_json)
+                    tool_ok = not result.startswith("错误")
+                    tool_ms = int((time.monotonic() - tool_t0) * 1000)
+                    rec = getattr(ctx, "run_recorder", None)
+                    if rec is not None:
+                        try:
+                            rec.tool_event(name, ok=tool_ok, ms=tool_ms,
+                                           preview=(args_json or "")[:120])
+                            if name == "run_command":
+                                cmd_args = json.loads(args_json) if isinstance(args_json, str) else (args_json or {})
+                                cmd_val = ((cmd_args or {}).get("command")
+                                           or (cmd_args or {}).get("cmd") or "")
+                                if isinstance(cmd_val, list):
+                                    cmd_val = " ".join(str(x) for x in cmd_val)
+                                rec.record_command_output(str(cmd_val), result)
+                        except Exception:  # noqa: BLE001 — 台账旁路
+                            pass
 
                     if produces_code and consecutive_read_turns == 10:
                         result += (

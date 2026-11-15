@@ -361,6 +361,8 @@ See `config.example.yaml` at the repo root for the full annotated config (kept i
 ## 📊 Logging & Observability
 
 - Console + `logs/orcsy.log` (rotating, 5MB × 5 files); every scheduling round, every task start/end, commit hashes and blocking reasons are logged;
+- **Run ledger (RunLog)**: each task run leaves an event stream, diff, test output, review verdict and token usage under `runs/` (next to `config.yaml` by default; relocate it with `runlog.dir`), replayable from the task drawer; the directory can be changed under Settings → Run ledger, and history is migrated in the background with a progress indicator;
+  - **Downgrade note**: older versions do not know the `runlog` section. After downgrading, do not change ledger settings in the older build — saving any settings may drop that section. Run files are never deleted. Back up `config.yaml` and the ledger directory before downgrading;
 - Task files double as reports: every executed task carries an "Agent result" section;
 - The `validate` command confirms config, task format and guide file presence before anything runs.
 

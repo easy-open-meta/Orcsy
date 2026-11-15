@@ -14,6 +14,7 @@ git 项目的执行流程：
 from __future__ import annotations
 
 import contextlib
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -267,12 +268,34 @@ class TaskExecutor:
         # 强制停止注册：看板可随时置位，工具循环在轮次/工具边界响应
         controls = get_task_controls()
         stop_event = controls.begin(self.project.name, task.id)
+
+        # 运行台账（V1-R1）：本任务一个 run；旁路写入，初始化失败返回 None
+        recorder = None
+        try:
+            from .runlog import get_run_store
+            recorder = get_run_store().new_run(
+                self.project.name, task.id, role=self.team_role,
+                agent_name=self.agent_name, model=self.llm.model)
+            self._run_recorder = recorder
+        except Exception:  # noqa: BLE001 — 台账绝不能阻断任务
+            self.log.warning("运行台账初始化失败（忽略）", exc_info=True)
+            self._run_recorder = None
+
+        def _on_progress(line: str) -> None:
+            append_progress(task.path, line)
+            if recorder is not None:
+                try:
+                    recorder.progress(line)
+                except Exception:  # noqa: BLE001 — 台账旁路
+                    pass
+
         try:
             response = self._agent_loop(
                 task, guide_content, skills or [], usage_out=usage,
                 stop_event=stop_event,
                 created_bugs_out=created_bugs,
-                on_progress=lambda line: append_progress(task.path, line))
+                on_progress=_on_progress,
+                recorder=recorder)
             sub_u = usage.pop("_subagent_usage", {})
             result.turns = int(usage.get("turns", 0)) + int(sub_u.get("turns", 0))
             result.prompt_tokens = int(usage.get("prompt_tokens", 0)) + int(sub_u.get("prompt_tokens", 0))
@@ -379,6 +402,27 @@ class TaskExecutor:
                 notify_task_end(self.project.name, task.id, task.title, result.outcome)
             except Exception:  # noqa: BLE001 — 提醒是旁路，任何异常都吞掉
                 self.log.warning("任务提醒失败（可忽略）", exc_info=True)
+        # 运行台账收尾（V1-R1）：用量工件 + run_end；旁路失败不影响返回值
+        if recorder is not None:
+            try:
+                recorder.artifact("usage.json", json.dumps({
+                    "turns": result.turns,
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                    "model": self.llm.model,
+                    "role": self.team_role,
+                    "agent_name": self.agent_name,
+                }, ensure_ascii=False, indent=2))
+                recorder.finish(
+                    result.outcome, self._exit_reason(result),
+                    tokens={"prompt_tokens": result.prompt_tokens,
+                            "completion_tokens": result.completion_tokens},
+                    commit=str(getattr(result, "commit", "") or result.wip_commit or ""),
+                    review_verdict=str(getattr(result.review, "verdict", "") or ""))
+            except Exception:  # noqa: BLE001 — 台账旁路
+                self.log.warning("运行台账收尾失败（可忽略）", exc_info=True)
+            finally:
+                self._run_recorder = None
         return result
 
     # ---- Agent 循环 ----
@@ -386,7 +430,8 @@ class TaskExecutor:
     def _agent_loop(self, task: Task, guide_content: str, skills: list[Skill],
                     on_progress=None, usage_out: dict | None = None,
                     stop_event=None,
-                    created_bugs_out: list[str] | None = None) -> AgentResponse:
+                    created_bugs_out: list[str] | None = None,
+                    recorder=None) -> AgentResponse:
         use_worktree = self.is_git_repo and self.worktree_isolation and self.produces_code
         work_root = self._task_worktree(task) if use_worktree else self.project.path
         if use_worktree:
@@ -444,8 +489,12 @@ class TaskExecutor:
                           current_role=self.team_role,
                           produces_code=self.produces_code,
                           max_split_depth=self.max_split_depth,
-                          llm_config=self.llm)
+                          llm_config=self.llm,
+                          run_recorder=recorder)
         client = LLMClient(self.llm)
+        if recorder is not None:
+            # 台账事件出口：模型调用事件由 LLMClient 统一上报
+            client.event_sink = recorder.event
         sys_prompt = build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,
                                          permission_mode=self.permission_mode,
@@ -570,7 +619,8 @@ class TaskExecutor:
                 approval_gate=gate,
                 max_turns=(-1 if self.review_cfg.max_turns == -1 else max(1, self.review_cfg.max_turns)),
                 allow_test_commands=self.review_cfg.allow_test_commands,
-                extra_env=self.extra_env)
+                extra_env=self.extra_env,
+                run_recorder=self._rec())
         finally:
             pass
 
@@ -604,6 +654,110 @@ class TaskExecutor:
                 role=self.team_role, agent_name=self.agent_name)
         except Exception:  # noqa: BLE001 — 台账是旁路
             self.log.warning("审查用量记录失败（可忽略）", exc_info=True)
+
+    # ---- 运行台账辅助（V1-R1；全部旁路，异常只告警） ----
+
+    @staticmethod
+    def _exit_reason(result: TaskResult) -> str:
+        """把结果收敛成稳定的 exit_reason（看板筛选与统计按此聚合）。"""
+        if getattr(result, "llm_error", ""):
+            return "llm_error"
+        outcome = str(getattr(result, "outcome", "") or "")
+        verdict = str(getattr(getattr(result, "review", None), "verdict", "") or "")
+        if outcome == "done":
+            return "completed"
+        if outcome == "cancelled":
+            return "stopped"
+        if outcome == "blocked":
+            if verdict == "fail":
+                return "review_fail"
+            if verdict == "error":
+                return "review_error"
+            return "blocked"
+        if outcome == "open":
+            return "reassigned" if getattr(result, "reassigned_to", "") else "wait_retest"
+        return outcome or "unknown"
+
+    def _rec(self):
+        return getattr(self, "_run_recorder", None)
+
+    def _rec_event(self, kind: str, **data) -> None:
+        rec = self._rec()
+        if rec is None:
+            return
+        try:
+            rec.event(kind, **data)
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("运行台账事件写入失败（可忽略）：%s", kind)
+
+    def _record_commit_artifact(self, task: Task, result: TaskResult,
+                                wt_git: Git, base_branch: str) -> None:
+        """记录 WIP 提交与本次 diff；diff 计算失败不影响任务。"""
+        rec = self._rec()
+        if rec is None:
+            return
+        try:
+            commit = str(getattr(result, "wip_commit", "") or "")
+            rec.update_meta(commit=commit)
+            rec.event("commit", hash=commit, branch=self._task_branch(task))
+            diff = wt_git.run("diff", f"{base_branch}...HEAD") or ""
+            if diff.strip():
+                rec.artifact("diff.patch", diff)
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("提交事件/工件记录失败（可忽略）", exc_info=True)
+
+    def _record_review_artifact(self, review: object) -> None:
+        rec = self._rec()
+        if rec is None or review is None:
+            return
+        try:
+            issues = [
+                {"file": i.file, "line": i.line, "severity": i.severity,
+                 "message": i.message}
+                for i in getattr(review, "issues", []) or []
+            ]
+            payload = {
+                "verdict": getattr(review, "verdict", ""),
+                "summary": getattr(review, "summary", ""),
+                "model": getattr(review, "model", ""),
+                "turns": getattr(review, "turns", 0),
+                "prompt_tokens": getattr(review, "prompt_tokens", 0),
+                "completion_tokens": getattr(review, "completion_tokens", 0),
+                "error": getattr(review, "error", ""),
+                "issues": issues,
+                "issues_raw": getattr(review, "issues_raw", ""),
+            }
+            rec.artifact("review.json", json.dumps(payload, ensure_ascii=False, indent=2))
+            rec.update_meta(review_verdict=payload["verdict"])
+            rec.event("review_verdict", verdict=payload["verdict"],
+                      summary=payload["summary"], model=payload["model"],
+                      issues=len(issues))
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("审查工件记录失败（可忽略）", exc_info=True)
+
+    def _record_merge_event(self, merged: bool, review: object = None) -> None:
+        if not merged:
+            return
+        self._rec_event("merge", mode=("commit_and_merge" if self.commit_and_merge
+                                       else "stage_land"),
+                        review_verdict=getattr(review, "verdict", ""))
+
+    def _record_workspace_diff(self) -> None:
+        """工作区模式（未开启 worktree/提交合并）的改动证据：git diff HEAD。
+
+        该模式没有 WIP 提交与 merge，改动直接落在主工作区等待人工把关；
+        run 仍然要留下 diff，否则「回放」只剩事件没有内容。
+        """
+        rec = self._rec()
+        if rec is None or not self.is_git_repo:
+            return
+        try:
+            diff = self.git.run("diff", "HEAD") or ""
+            if diff.strip():
+                rec.artifact("diff.patch", diff)
+            rec.event("merge", mode="workspace")
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("工作区 diff 记录失败（可忽略）", exc_info=True)
 
     def _complete_with_review(self, task: Task, response: AgentResponse,
                               result: TaskResult) -> tuple[str, object]:
@@ -648,6 +802,7 @@ class TaskExecutor:
                         "任务 %s 为返工/补审恢复重跑（无新改动，但分支领先基线 %d 个提交），"
                         "直接进入审查门补审", task.id, ahead_n)
                     result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
+                    self._record_commit_artifact(task, result, wt_git, base_branch)
                     return self._run_review_gate(task, result, branch, wt_path,
                                                  base_branch, _finish_merge)
             if self.team_role == "qa":
@@ -659,6 +814,7 @@ class TaskExecutor:
             self._cleanup_worktree_changes(wt_path)
             return "blocked", None
         result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
+        self._record_commit_artifact(task, result, wt_git, base_branch)
 
         return self._run_review_gate(task, result, branch, wt_path,
                                      base_branch, _finish_merge)
@@ -670,10 +826,14 @@ class TaskExecutor:
         if not active:
             self.log.info("审查门跳过（%s），安全合入", skip_reason)
             merged = _finish_merge()
+            self._rec_event("review_verdict", verdict="skipped", summary=skip_reason)
+            self._record_merge_event(merged)
             review = self._skipped_review(skip_reason)
             return ("done" if merged else "blocked"), review
 
         append_progress(task.path, "🔍 独立审查开始（合并前）")
+        self._rec_event("review_start", model=getattr(self.review_llm, "model", ""),
+                        round=getattr(task, "review_round", 0))
         from .task_model import set_task_file_review_pending
         set_task_file_review_pending(task.path, True)
         review = self._run_review(task, task.path, wt_path=wt_path,
@@ -681,9 +841,11 @@ class TaskExecutor:
         result.review = review
         set_task_file_review_pending(task.path, False)
         self._record_review_usage(task, review)
+        self._record_review_artifact(review)
 
         if review.verdict == "pass":
             merged = _finish_merge()
+            self._record_merge_event(merged, review)
             if not merged:
                 return "blocked", review
             return "done", review
@@ -763,6 +925,7 @@ class TaskExecutor:
         active, skip_reason = self._review_active()
         if not active:
             review = self._skipped_review(skip_reason)
+            self._record_workspace_diff()
             return "done", review
         append_progress(task.path, "🔍 独立审查开始（合并前）")
         from .task_model import set_task_file_review_pending
@@ -772,6 +935,7 @@ class TaskExecutor:
         set_task_file_review_pending(task.path, False)
         self._record_review_usage(task, review)
         if review.verdict == "pass":
+            self._record_workspace_diff()
             return "done", review
         return "blocked", review
 

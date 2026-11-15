@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { NCollapse, NCollapseItem, NButton, NCard, NInput, NInputNumber, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
-import { computed, reactive, ref, shallowRef, watch } from 'vue'
+import { NCollapse, NCollapseItem, NButton, NCard, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
+import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
 import { cmpVersion, fmtTokens } from '../utils'
@@ -16,6 +16,7 @@ const SECTIONS = [
   { key: 'sched', label: '调度与看板' },
   { key: 'notify', label: '提醒设置' },
   { key: 'masking', label: '数据脱敏' },
+  { key: 'runlog', label: '运行台账' },
   { key: 'review', label: '任务审查（Review Agent）' },
   { key: 'tools', label: 'Agent 工具与访问权限' },
   { key: 'mirrors', label: '镜像源管理与测速选源' },
@@ -38,6 +39,8 @@ const draft = reactive({
   temperature: 0.2, max_tokens: 8192, max_context_tokens: 131072,
   enable_thinking: false, timeout_seconds: 300,
   interval: 300, parallel: 1, port: 5116, retention: 7, max_total_mb: 200,
+  // 运行台账（V1-R1）：开关 + 保留期 + 占用上限 + 自定义目录（留空 = 默认）
+  runlog_enabled: true, runlog_retention: 30, runlog_max_mb: 500, runlog_dir: '',
 })
 // ---- 任务审查（Review Agent）草稿：模型绑定 + 返工次数 + 测试命令 + squash ----
 const reviewDraft = reactive({
@@ -484,6 +487,10 @@ watch(() => store.state, (s) => {
   draft.port = s.web_cfg.port
   draft.retention = s.logging?.retention_days ?? 7
   draft.max_total_mb = s.logging?.max_total_mb ?? 200
+  draft.runlog_enabled = s.runlog?.enabled ?? true
+  draft.runlog_retention = s.runlog?.retention_days ?? 30
+  draft.runlog_max_mb = s.runlog?.max_total_mb ?? 500
+  draft.runlog_dir = s.runlog?.dir ?? ''
   syncProfilesDraft(s.agent_profiles)
 })
 
@@ -826,6 +833,74 @@ async function saveSched(): Promise<void> {
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
+
+// ---- 运行台账（V1-R1）：保存即重建台账单例（开关/保留期热生效，无需重启） ----
+const runlogSaving = shallowRef(false)
+async function saveRunlog(): Promise<void> {
+  if (runlogBusy.value) {
+    message()?.('运行台账正在迁移，请等待完成后再修改', 'warning')
+    return
+  }
+  runlogSaving.value = true
+  try {
+    await api.config({ runlog: {
+      enabled: draft.runlog_enabled,
+      retention_days: draft.runlog_retention,
+      max_total_mb: draft.runlog_max_mb,
+      dir: draft.runlog_dir.trim(),
+    } })
+    message()?.('运行台账设置已保存并立即生效')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { runlogSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+
+function pickRunlogDir(): void {
+  openDirBrowser(draft.runlog_dir || '', (p) => { draft.runlog_dir = p }, 'dir')
+}
+
+// ---- 目录迁移：迁移中锁定台账设置与回放，每秒轮询进度 ----
+const mig = computed(() => store.state?.runlog_migration)
+const runlogBusy = computed(() => mig.value?.state === 'running')
+const migPercent = computed(() => Math.min(100, Math.max(0, mig.value?.percent || 0)))
+let migTimer: ReturnType<typeof setInterval> | null = null
+
+function fmtMB(n?: number): string {
+  return `${((n || 0) / 1048576).toFixed(1)} MB`
+}
+
+async function pollMigration(): Promise<void> {
+  try {
+    const r = await api.runlogMigration()
+    if (store.state) store.state.runlog_migration = r.migration
+  } catch { /* 轮询失败静默，下一轮再试 */ }
+}
+
+watch(() => mig.value?.state, (s, prev) => {
+  if (s === 'running') {
+    if (!migTimer) migTimer = setInterval(pollMigration, 1000)
+  } else if (migTimer) {
+    clearInterval(migTimer); migTimer = null
+  }
+  if (s === 'done' && prev === 'running') {
+    message()?.('运行台账目录迁移完成', 'success')
+    draft.runlog_dir = store.state?.runlog?.dir ?? ''
+    void import('../store').then(m => m.refresh(true))
+  }
+  if (s === 'failed' && prev === 'running') {
+    message()?.('运行台账目录迁移失败，请查看错误后重试或改回原目录', 'error')
+  }
+}, { immediate: true })
+
+async function retryRunlogMigration(): Promise<void> {
+  try {
+    const r = await api.retryRunlogMigration()
+    if (store.state) store.state.runlog_migration = r.migration
+    message()?.('已重新开始迁移')
+  } catch (e: any) { message()?.(e.message, 'error') }
+}
+
+onUnmounted(() => { if (migTimer) { clearInterval(migTimer); migTimer = null } })
 
 // ---- 看板登录密码（web.auth_password）：留空保持不变 / 输入即改 / 清除即关鉴权 ----
 const authPwd = shallowRef('')
@@ -1210,6 +1285,10 @@ const providerOptions = [
             <template #header><i class="ms">security</i>  数据脱敏</template>
             <div class="menu-desc" v-if="activeSection === 'masking'">密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。</div>
           </NCollapseItem>
+          <NCollapseItem name="runlog">
+            <template #header><i class="ms">receipt_long</i>  运行台账</template>
+            <div class="menu-desc" v-if="activeSection === 'runlog'">每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。</div>
+          </NCollapseItem>
           <NCollapseItem name="review">
             <template #header><i class="ms">rate_review</i>  任务审查（Review Agent）</template>
             <div class="menu-desc" v-if="activeSection === 'review'">独立模型合并前审查任务成果；未配置审查模型时审查未启用。</div>
@@ -1472,6 +1551,55 @@ const providerOptions = [
         </div>
       </div>
       <div class="sfoot"><NButton type="primary" :loading="maskingSaving" @click="saveMasking">保存脱敏设置</NButton></div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'runlog'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">receipt_long</i> 运行台账（RunLog）</template>
+            <div v-if="runlogBusy || mig?.state === 'failed'" class="migbox">
+              <NProgress type="line" :percentage="migPercent" :processing="runlogBusy"
+                         :status="mig?.state === 'failed' ? 'error' : 'default'" />
+              <div class="hint" style="margin-top:6px">
+                <template v-if="runlogBusy">
+                  正在迁移 {{ mig?.done_runs || 0 }}/{{ mig?.total_runs || 0 }} 个 run ·
+                  {{ fmtMB(mig?.done_bytes) }}/{{ fmtMB(mig?.total_bytes) }}
+                  <template v-if="mig?.current"> · 当前 {{ mig.current }}</template>
+                </template>
+                <template v-else>
+                  迁移失败：{{ mig?.error || '未知错误' }}
+                  <NButton size="tiny" type="warning" style="margin-left:8px"
+                           @click="retryRunlogMigration">重试迁移</NButton>
+                </template>
+              </div>
+            </div>
+            <label class="checkline">
+              <NSwitch v-model:value="draft.runlog_enabled" :disabled="runlogBusy" />
+              启用运行台账
+              <span class="hint">每个任务一轮执行生成一个 run 目录：事件流 + diff + 测试输出 + 审查结论 + 用量。用于看板「任务详情 → 运行记录」回放；关闭后不再记录，不影响任务执行。</span>
+            </label>
+            <div class="frow">
+              <div class="f1"><label>保留天数（0 为不按时间清理）</label>
+                <NInputNumber v-model:value="draft.runlog_retention" :min="0" :max="3650"
+                              :disabled="runlogBusy" /></div>
+              <div class="f1"><label>总占用上限（MB，超出从最旧 run 删起，0 为不限制）</label>
+                <NInputNumber v-model:value="draft.runlog_max_mb" :min="0" :max="100000"
+                              :disabled="runlogBusy" /></div>
+            </div>
+            <div class="frow">
+              <div class="f1"><label>台账目录（留空 = 配置文件同级 runs/；改目录会自动迁移历史记录）</label>
+                <div class="pathline">
+                  <NInput v-model:value="draft.runlog_dir" :disabled="runlogBusy"
+                          placeholder="留空使用默认目录；也可输入绝对路径" />
+                  <NButton :disabled="runlogBusy" @click="pickRunlogDir">浏览…</NButton>
+                </div>
+              </div>
+            </div>
+            <div class="hint">
+              默认不写入受管仓库；自定义目录建议放本机独立磁盘。切换目录后后台异步迁移，
+              迁移期间台账设置与回放按钮会锁定并显示进度。
+            </div>
+            <div class="sfoot"><NButton type="primary" :loading="runlogSaving"
+                                        :disabled="runlogBusy" @click="saveRunlog">保存运行台账设置</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'review'">
@@ -2004,6 +2132,9 @@ const providerOptions = [
 .hint { font-size: 12px; color: var(--faint); font-weight: 400; }
 .frow { display: flex; gap: 10px; margin-bottom: 10px; }
 .frow > div { display: flex; flex-direction: column; gap: 4px; }
+.pathline { display: flex; gap: 8px; align-items: center; }
+.migbox { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  margin-bottom: 10px; background: rgba(91, 140, 255, 0.06); }
 .frow label, .checkline { font-size: 12.5px; color: var(--dim); }
 .f1 { flex: 1; } .f14 { flex: 1.4; } .f2 { flex: 2; } .f0 { flex: none; }
 .btnrow { display: flex; gap: 8px; }

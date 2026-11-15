@@ -1680,6 +1680,18 @@ log;</li>
 <code>orcsy-update-*.zip</code>; same-version reinstall, upgrade, and
 downgrade are supported.</li>
 </ul>
+<blockquote>
+<p>⚠️ <strong>Downgrade note (run ledger)</strong>: the run ledger is new
+in 0.25 and uses the <code>runlog</code> config section plus the
+<code>runs/</code> directory. Older versions do not know that section:
+after downgrading, do <strong>not</strong> change ledger-related settings
+in the older build — saving any settings may drop the
+<code>runlog</code> section together with a custom directory. Ledger
+data files are never deleted. Back up <code>config.yaml</code> and the
+ledger directory before downgrading; after upgrading again, the app
+reconnects the history automatically from the config and the last used
+directory.</p>
+</blockquote>
 <h3 id="1010-dashboard-login-password">10.10 Dashboard login password</h3>
 <p>By default the dashboard only listens on <code>127.0.0.1</code>, so
 only this machine can reach it and no password is needed.</p>
@@ -1924,6 +1936,9 @@ migration</h2>
 <p>Back up:</p>
 <ul>
 <li>the data directory (config, skills, logs, usage);</li>
+<li>the run ledger directory (by default <code>runs/</code> inside the
+data directory; if <code>runlog.dir</code> points elsewhere, back up that
+directory);</li>
 <li>each project's <code>tasks/</code> and <code>AGENT.md</code>;</li>
 <li>the project code itself (use a Git remote).</li>
 </ul>

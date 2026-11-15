@@ -197,6 +197,7 @@ from .tools import (
     validate_tools_map,
 )
 from .usage import get_usage_store, init_usage_store
+from .runlog import apply_runlog_config, get_run_store, init_run_store
 
 log = get_logger("web")
 
@@ -417,6 +418,9 @@ class AppState:
         self.skills_dir = skills_lib.skills_base(config)
         # 用量台账锚定到配置目录（Scheduler 若已初始化则同路径幂等）
         init_usage_store(config)
+        # 运行台账（V1-R1）：看板读取与调度写入共用同一单例；
+        # 已初始化时复用（迁移进行中不能被第二次 force 重建）
+        init_run_store(config)
         # 镜像源运行时（测速边车与 config.yaml 同目录；与 Scheduler 各持一份，
         # 数据经边车文件天然共享）
         self.mirror_runtime = mirror_runtime_for(config)
@@ -861,6 +865,15 @@ class AppState:
             },
             "logging": {"retention_days": self.config.logging.retention_days,
                         "max_total_mb": self.config.logging.max_total_mb},
+            # 运行台账（V1-R1）：开关/保留期/占用上限 + 目录与当前占用（只读展示）
+            "runlog": {
+                "enabled": self.config.runlog.enabled,
+                "dir": str(self.config.runlog.dir or ""),
+                "retention_days": self.config.runlog.retention_days,
+                "max_total_mb": self.config.runlog.max_total_mb,
+            },
+            # 目录迁移进度（前端据此锁定控件；迁移中每秒轮询专用端点）
+            "runlog_migration": get_run_store().migration_status(),
             # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
             # finish 也进目录——前端把它渲染成「常开且禁用」的展示行，
             # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
@@ -1139,6 +1152,51 @@ class AppState:
     def get_task(self, params: dict) -> dict:
         """读取单个任务的完整内容（业务实现在 task_service）。"""
         return _svc_get_task(self.agents, params)
+
+    # ---- 运行台账（V1-R1）：只读回放 ----
+
+    def list_runs(self, params: dict) -> dict:
+        """run 列表（摘要）。project 缺省 = 全部项目。"""
+        project = str(params.get("project") or "").strip()
+        task_id = str(params.get("task_id") or "").strip()
+        try:
+            limit = int(params.get("limit") or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        runs = get_run_store().list_runs(project or None, task_id, limit)
+        return {"ok": True, "runs": runs}
+
+    def get_run(self, params: dict) -> dict:
+        """单个 run 的 meta + 事件分页 + 工件清单。"""
+        project = str(params.get("project") or "").strip()
+        run_id = str(params.get("run_id") or "").strip()
+        if not project or not run_id:
+            raise ValueError("project 与 run_id 不能为空")
+        try:
+            offset = int(params.get("offset") or 0)
+            limit = int(params.get("limit") or 2000)
+        except (TypeError, ValueError):
+            offset, limit = 0, 2000
+        out = get_run_store().load_run(project, run_id, offset=offset, limit=limit)
+        return {"ok": True, **out}
+
+    def run_artifact(self, params: dict) -> tuple[bytes, str]:
+        project = str(params.get("project") or "").strip()
+        run_id = str(params.get("run_id") or "").strip()
+        name = str(params.get("name") or "").strip()
+        if not project or not run_id or not name:
+            raise ValueError("project / run_id / name 不能为空")
+        return get_run_store().read_artifact(project, run_id, name)
+
+    def runlog_migration_status(self) -> dict:
+        return {"ok": True, "migration": get_run_store().migration_status()}
+
+    def retry_runlog_migration(self) -> dict:
+        try:
+            state = get_run_store().retry_migration(background=True)
+        except (ValueError, RuntimeError, OSError) as e:
+            raise ValueError(str(e)) from e
+        return {"ok": True, "migration": state}
 
     def make_dir(self, data: dict) -> dict:
         """在指定位置创建新文件夹（目录选择器「新建项目」流程用）。"""
@@ -1469,6 +1527,8 @@ class AppState:
         # 任务结束提醒开关随配置刷新（看板保存后立即生效，无需重启）
         notify.configure(new_cfg.notify)
         masking.configure(new_cfg.masking)
+        # 运行台账（V1-R1）：同目录只更新选项；改目录则后台迁移历史记录
+        apply_runlog_config(new_cfg)
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
         self.agents = self._build_agents(new_cfg)
@@ -2306,6 +2366,23 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._serve_artifact(self._query_params())
             except Exception as e:
                 self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/runs":
+            try:
+                self._json(self.state.list_runs(self._query_params()))
+            except (ValueError, OSError) as e:
+                self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/runs/detail":
+            try:
+                self._json(self.state.get_run(self._query_params()))
+            except (ValueError, OSError) as e:
+                self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/runs/artifact":
+            try:
+                self._serve_run_artifact(self._query_params())
+            except (ValueError, OSError) as e:
+                self._json({"ok": False, "message": str(e)}, 400)
+        elif path == "/api/runlog/migration":
+            self._json(self.state.runlog_migration_status())
         else:
             self._json({"error": "not found"}, 404)
 
@@ -2322,6 +2399,18 @@ class WebHandler(BaseHTTPRequestHandler):
         mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
         self.send_response(200)
         self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        for name, value in self._cors_headers():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_run_artifact(self, query: dict) -> None:
+        """运行台账工件（V1-R1）：名字走白名单，只读，不落缓存。"""
+        data, mime = self.state.run_artifact(query)
+        self.send_response(200)
+        self.send_header("Content-Type", f"{mime}; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
         for name, value in self._cors_headers():
@@ -2501,6 +2590,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.update_install(body))
             elif path == "/api/config":
                 self._json(self.state.save_settings(body))
+            elif path == "/api/runlog/migration/retry":
+                self._json(self.state.retry_runlog_migration())
             else:
                 self._json({"error": "not found"}, 404)
         except TaskConflictError as e:

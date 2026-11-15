@@ -249,6 +249,25 @@ class LoggingConfig:
 
 
 @dataclass
+class RunLogConfig:
+    """运行台账（V1-R1）：每轮任务的结构化留痕与回放。
+
+    默认开启：留痕是「敢关页面睡觉」的前提，且写入失败全程旁路，不影响任务。
+    """
+
+    enabled: bool = True
+    # 自定义目录；空 = 与 config.yaml / logs 同级（<配置目录>/runs）。
+    # 默认不写受管仓库，避免污染用户生产仓库与 .gitignore
+    dir: str = ""
+    # 配置文件里是否显式出现过 dir 键（仅内存标记，不落盘）：
+    # 用于区分「用户主动留空回默认」与「旧版本把整个 runlog 节写丢」
+    dir_explicit: bool = False
+    # 保留天数与总占用：任一命中即从最旧的 run 删起；0 表示不清理
+    retention_days: int = 30
+    max_total_mb: int = 500
+
+
+@dataclass
 class WebConfig:
     """Web 可视化看板配置。"""
 
@@ -555,6 +574,7 @@ class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    runlog: RunLogConfig = field(default_factory=RunLogConfig)
     web: WebConfig = field(default_factory=WebConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
@@ -1120,6 +1140,15 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         max_total_mb=max(0, min(int(log_raw.get("max_total_mb", 200)), 100000)),
     )
 
+    runlog_raw = raw.get("runlog") or {}
+    runlog = RunLogConfig(
+        enabled=bool(runlog_raw.get("enabled", True)),
+        dir=str(runlog_raw.get("dir") or "").strip(),
+        dir_explicit=("dir" in runlog_raw),
+        retention_days=max(0, min(int(runlog_raw.get("retention_days", 30)), 3650)),
+        max_total_mb=max(0, min(int(runlog_raw.get("max_total_mb", 500)), 100000)),
+    )
+
     web_raw = raw.get("web") or {}
     api_keys_in = web_raw.get("api_keys")
     api_keys: list[str] = []
@@ -1448,7 +1477,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
             assert_review_model_distinct(
                 p_task_llm, p_review_llm, context=f"项目 {p_name} 的 review")
 
-    cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg, web=web,
+    cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
+                    runlog=runlog, web=web,
                     update=update, tools=tools, commands=commands, env=env,
                     permissions=permissions, notify=notify, masking=masking_cfg,
                     mirrors=mirrors,
@@ -1544,6 +1574,11 @@ def save_config(cfg: AppConfig) -> None:
         "logging": {"level": cfg.logging.level, "file": cfg.logging.file,
                     "retention_days": cfg.logging.retention_days,
                     "max_total_mb": cfg.logging.max_total_mb},
+        # 运行台账（V1-R1）：整体写回，漏写会在看板任意保存时静默重置回默认
+        "runlog": {"enabled": cfg.runlog.enabled,
+                   **({"dir": cfg.runlog.dir} if cfg.runlog.dir else {}),
+                   "retention_days": cfg.runlog.retention_days,
+                   "max_total_mb": cfg.runlog.max_total_mb},
         "web": {
             "host": cfg.web.host, "port": cfg.web.port,
             "open_browser": cfg.web.open_browser,

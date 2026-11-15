@@ -846,6 +846,8 @@ Configure it in the dashboard under **Settings → 🛡 Data masking**, or in th
 - A failed update rolls back automatically and opens the install log;
 - You can also **import a local package**: choose `orcsy-update-*.zip`; same-version reinstall, upgrade, and downgrade are supported.
 
+> ⚠️ **Downgrade note (run ledger)**: the run ledger is new in 0.25 and uses the `runlog` config section plus the `runs/` directory. Older versions do not know that section: after downgrading, do **not** change ledger-related settings in the older build — saving any settings may drop the `runlog` section together with a custom directory. Ledger data files are never deleted. Back up `config.yaml` and the ledger directory before downgrading; after upgrading again, the app reconnects the history automatically from the config and the last used directory.
+
 ### 10.10 Dashboard login password
 
 By default the dashboard only listens on `127.0.0.1`, so only this machine can reach it and no password is needed.
@@ -1051,6 +1053,7 @@ terminal also prints the LAN addresses plus a **scan-to-connect QR code**.
 Back up:
 
 - the data directory (config, skills, logs, usage);
+- the run ledger directory (by default `runs/` inside the data directory; if `runlog.dir` points elsewhere, back up that directory);
 - each project's `tasks/` and `AGENT.md`;
 - the project code itself (use a Git remote).
 
