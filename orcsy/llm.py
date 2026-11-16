@@ -499,7 +499,8 @@ class LLMClient:
         no_tool_turns = 0        # 连续未调用工具的轮数（连续过多升级强制收尾）
         repeat_calls: Counter[tuple[str, str]] = Counter()  # (工具, 参数) → 次数
         file_read_counts: Counter[str] = Counter()         # path -> 累计读取次数（防死循环）
-        consecutive_read_turns = 0                         # 连续只读未动笔轮次
+        consecutive_read_turns = 0                         # 连续只读/扫描未产生文件改动的次数
+        read_warning_sent = False                          # 本轮连续只读是否已发过 10 次警告
         forced_reason = ""       # 非空 = 因卡住/轮数耗尽强制收尾（而非 finish）
 
         while unlimited or turn < max_turns:
@@ -571,9 +572,14 @@ class LLMClient:
                 # 熔断阈值再也达不到，`-1` 不限轮数时就会无限空转。
                 produces_code = bool(getattr(ctx, "produces_code", True))
                 is_read_op = name in ("read_file", "list_dir", "find_files", "grep", "read_skill")
-                is_write_op = name in ("write_file", "edit_file", "multi_edit", "delete_file", "move_file", "run_command")
-                if is_write_op:
+                # 只有真正产生文件改动的工具才重置「只读死循环」计数。
+                # run_command 不算写操作：它常被用来跑扫描/测试/构建，若重置计数，
+                # 模型只要在 read_file 之间穿插扫描命令就能无限绕过熔断（实际事故）。
+                is_edit_op = name in ("write_file", "edit_file", "multi_edit",
+                                      "delete_file", "move_file", "update_architecture")
+                if is_edit_op:
                     consecutive_read_turns = 0
+                    read_warning_sent = False
                 elif is_read_op:
                     consecutive_read_turns += 1
 
@@ -630,11 +636,14 @@ class LLMClient:
                         except Exception:  # noqa: BLE001 — 台账旁路
                             pass
 
-                    if produces_code and consecutive_read_turns == 10:
+                    if produces_code and consecutive_read_turns >= 10 and not read_warning_sent:
+                        read_warning_sent = True
                         result += (
-                            f"\n\n🚨 警告：你已连续 {consecutive_read_turns} 轮只读文件而未动笔写代码！"
-                            "已收集的信息足够推进。请立即停止调研，使用 edit_file 或 write_file 编写实现！"
-                        )
+                            f"\n\n🚨 警告：你已连续 {consecutive_read_turns} 次调用只读/扫描工具"
+                            "而没有任何文件改动！已收集的信息足够推进。"
+                            "如果任务是文档/分析类，请立即创建目标文件并增量写入，"
+                            "不要继续扫描；如果任务过大，请调用 create_tasks 拆分后收尾，"
+                            "或调用 finish（action=blocked）说明剩余工作。")
 
                     # 完全相同参数的重复调用检测：给打转的模型一个止损信号
                     repeat_calls[(name, args_json or "")] += 1
@@ -650,13 +659,13 @@ class LLMClient:
                     log.debug("工具结果 [%d] %s：%s", turn, name, result[:200].replace("\n", " "))
                     self.messages.append(self._tool_result(call_id, result))
 
-                # 防死循环 2：代码生产类角色连续只读未动笔（含被拦截的重读）
-                # 累计达上限 → 强制熔断收尾。用 ctx.produces_code 判定，单兵
-                # （current_role 为空串）也覆盖，PM/QA（False）不误伤。
+                # 防死循环 2：代码生产类角色连续只读/扫描未产生文件改动
+                # （含被拦截的重读）累计达上限 → 强制熔断收尾。用 ctx.produces_code
+                # 判定，单兵也覆盖；PM/QA（False）不误伤。run_command 不重置计数。
                 if produces_code and consecutive_read_turns >= 20:
                     forced_reason = (
-                        f"检测到只读死循环：已连续 {consecutive_read_turns} 轮仅读取文件"
-                        "而未做任何改动，强制熔断收尾")
+                        f"检测到只读死循环：已连续 {consecutive_read_turns} 次只读/扫描工具调用"
+                        "而未产生任何文件改动，强制熔断收尾")
                     break
 
             if forced_reason:

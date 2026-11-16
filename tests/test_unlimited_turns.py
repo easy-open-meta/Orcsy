@@ -146,11 +146,59 @@ def test_read_loop_still_guarded_under_unlimited() -> None:
     print("ok: -1 模式下同文件重读死循环被护栏提前熔断（文案无 -1 误导）")
 
 
+def test_read_command_alternation_still_guarded() -> None:
+    """read_file 与扫描类 run_command 交替调用也不能绕过只读熔断。
+
+    回归背景：run_command 曾被当作写操作重置连续只读计数，模型只要在
+    read_file 之间穿插 PowerShell 扫描命令就能无限空转（实际事故）。
+    """
+    import tempfile
+
+    class _ReadCommandLoopLLM(LLMClient):
+        def __init__(self, cfg: LLMConfig) -> None:
+            super().__init__(cfg)
+            self.n = 0
+
+        def _step_openai(self, use_tools: bool):  # type: ignore[override]
+            self.n += 1
+            self.usage["turns"] = self.n
+            if self.n % 2:
+                name = "read_file"
+                args = json.dumps({"path": "target.py"})
+            else:
+                name = "run_command"
+                args = json.dumps({"command": ["echo", "scan"]})
+            return (
+                {"role": "assistant", "content": None,
+                 "tool_calls": [{"id": f"c{self.n}", "type": "function",
+                                 "function": {"name": name, "arguments": args}}]},
+                [(f"c{self.n}", name, args)], "",
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "target.py").write_text("x = 1\n", encoding="utf-8")
+        ctx = ToolContext(root=Path(tmp), produces_code=True,
+                          enabled_tools=frozenset({"read_file", "run_command", "finish"}))
+        client = _ReadCommandLoopLLM(LLMConfig(
+            api_key="k", base_url="http://localhost:9", model="m"))
+        client.reset("sys")
+        try:
+            resp = client.run_task_loop("loop", ctx, max_turns=-1)
+        except FinishSignal as sig:
+            resp = finish_response(sig.payload)
+        assert client.usage["turns"] < 60, \
+            f"read_file + run_command 交替也应被熔断，实际 {client.usage['turns']} 轮"
+        assert resp.action == "blocked", (resp.action, resp.summary)
+        assert "只读死循环" in (resp.notes or ""), resp.notes
+    print("ok: read_file/run_command 交替空转被只读熔断")
+
+
 def main() -> int:
     test_unlimited_not_capped_at_120()
     test_finite_max_turns_still_caps()
     test_stop_event_breaks_unlimited()
     test_read_loop_still_guarded_under_unlimited()
+    test_read_command_alternation_still_guarded()
     print("\nmax_turns=-1 真正不限轮数全部测试通过 ✅")
     return 0
 

@@ -565,26 +565,42 @@ class ProjectAgent:
             for t, _, _ in wave:
                 self._mark_in_progress(t)
 
-            wave_outputs: list[tuple[Task, str, TaskResult]] = []
-            if len(wave) == 1:
-                t, mid, ex = wave[0]
-                wave_outputs.append(self._run_member_task(t, mid, ex, guide, skills))
-            else:
-                with ThreadPoolExecutor(max_workers=len(wave)) as pool:
-                    futs = [
-                        pool.submit(self._run_member_task, t, mid, ex, guide, skills)
-                        for t, mid, ex in wave
-                    ]
-                    for fut in as_completed(futs):
-                        wave_outputs.append(fut.result())
-
-            for t, _mid, res in wave_outputs:
+            def _finalize_wave_item(t: Task, res: TaskResult) -> None:
+                """单个并行任务一结束就回写，不等待同波其他任务。"""
+                nonlocal total_claimed
                 self._write_back_result(t, res)
                 self._cleanup_session_bus(t)
                 self._release_claim(t)
                 self._record_health(t, res)
                 results.append(res)
                 total_claimed += 1
+
+            if len(wave) == 1:
+                t, mid, ex = wave[0]
+                _t, _mid, res = self._run_member_task(t, mid, ex, guide, skills)
+                _finalize_wave_item(t, res)
+            else:
+                with ThreadPoolExecutor(max_workers=len(wave)) as pool:
+                    futs = {
+                        pool.submit(self._run_member_task, t, mid, ex, guide, skills):
+                            (t, mid, ex)
+                        for t, mid, ex in wave
+                    }
+                    for fut in as_completed(futs):
+                        t, mid, ex = futs[fut]
+                        try:
+                            _t, _mid, res = fut.result()
+                        except Exception as e:  # noqa: BLE001 — 单任务异常不能拖垮同波其他任务
+                            self.log.exception("任务 %s 并行执行出现未预期异常", t.id)
+                            res = TaskResult(
+                                task_id=t.id, outcome="blocked",
+                                role=getattr(ex, "team_role", ""),
+                                agent_name=getattr(ex, "agent_name", ""))
+                            res.llm_error = str(e)
+                            res.notes = f"并行执行异常：{e}"
+                        # 完成即回写：某任务长时间运行时，已完成的兄弟任务
+                        # 不应继续显示 in_progress，也不应阻塞下游依赖。
+                        _finalize_wave_item(t, res)
 
             # 单兵模式若未启用小组链式流转：正常按 max_tasks_per_cycle 循环即可；
             # 小组模式关闭 chain_within_cycle 时只推进 1 波次
