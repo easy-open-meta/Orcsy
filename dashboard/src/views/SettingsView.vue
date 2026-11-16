@@ -209,42 +209,42 @@ const defaultToolCategories = [
   {
     key: 'file_ops',
     label: '文件操作与编辑',
-    icon: '📁',
+    icon: 'folder',
     description: '读取、创建、编辑、重命名及删除工作区代码和文本文件',
     tools: ['read_file', 'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'list_dir'],
   },
   {
     key: 'code_search',
     label: '代码搜索与定位',
-    icon: '🔍',
+    icon: 'search',
     description: '按通配符模式查找文件以及跨文件正则搜索内容',
     tools: ['find_files', 'grep'],
   },
   {
     key: 'command_exec',
     label: '终端命令执行',
-    icon: '💻',
+    icon: 'terminal',
     description: '在项目根目录执行白名单内的构建、测试、检查与系统命令',
     tools: ['run_command'],
   },
   {
     key: 'task_collab',
     label: '任务管理与协议',
-    icon: '⚡',
+    icon: 'task_alt',
     description: '拆解多阶段子任务并在任务完成或受阻时给出结构化答复',
     tools: ['create_tasks', 'finish'],
   },
   {
     key: 'subagent',
     label: '子代理并发协同',
-    icon: '👥',
+    icon: 'group',
     description: '派生只读子代理并行探索多个模块/目录，单轮拿到汇总结论',
     tools: ['delegate_explore'],
   },
   {
     key: 'external_net',
     label: '网络与外部知识',
-    icon: '🌐',
+    icon: 'language',
     description: '查阅专业技能库文档、抓取公网页面正文与镜像源延迟测速',
     tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
   },
@@ -254,63 +254,63 @@ const defaultCommandCategories = [
   {
     key: 'python',
     label: 'Python 生态',
-    icon: '🐍',
+    icon: 'code',
     description: 'Python 解释器、包管理与测试/Lint 工具',
     commands: ['python*', 'py', 'pip*', 'pytest', 'uv', 'uvx', 'poetry', 'tox', 'ruff', 'mypy', 'black', 'flake8'],
   },
   {
     key: 'node',
     label: 'Node / 前端',
-    icon: '📦',
+    icon: 'javascript',
     description: 'Node 运行时、包管理器与前端构建/测试工具',
     commands: ['node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'tsc', 'eslint', 'prettier', 'vitest', 'jest'],
   },
   {
     key: 'compiled',
     label: 'Rust / Go / .NET / Java',
-    icon: '⚙️',
+    icon: 'build',
     description: '系统级与强类型后端编译型语言工具链',
     commands: ['cargo', 'go', 'dotnet', 'gradle*', 'mvn', 'java', 'javac'],
   },
   {
     key: 'cpp',
     label: 'C / C++ 构建',
-    icon: '🔨',
+    icon: 'construction',
     description: 'C/C++ 编译器、构建工具与测试套件',
     commands: ['make', 'cmake', 'ctest', 'ninja', 'gcc', 'g++', 'clang', 'clang++', 'msbuild'],
   },
   {
     key: 'vcs',
     label: '版本控制',
-    icon: '🌿',
+    icon: 'account_tree',
     description: 'Git 代码仓库与分支版本管理',
     commands: ['git'],
   },
   {
     key: 'package_managers',
     label: '包管理器',
-    icon: '📥',
+    icon: 'inventory_2',
     description: '系统级包管理器（缺工具链时按需环境引导，受审批约束）',
     commands: ['winget*', 'choco', 'scoop', 'brew', 'apt*', 'apt-get', 'dnf', 'nvm'],
   },
   {
     key: 'system_shell',
     label: '系统 Shell / 实用工具',
-    icon: '💻',
+    icon: 'terminal',
     description: '系统 Shell、网络下载与归档解压',
     commands: ['powershell', 'pwsh', 'curl', 'tar', 'setx'],
   },
   {
     key: 'windows_probe',
     label: 'Windows 探测与排障',
-    icon: '🪟',
+    icon: 'desktop_windows',
     description: 'Windows 环境排障、进程查看与文件探测（只读/信息性）',
     commands: ['where', 'cmd', 'dir', 'type', 'echo', 'set', 'tasklist', 'systeminfo', 'findstr', 'more', 'ver', 'hostname', 'whoami'],
   },
   {
     key: 'posix_probe',
     label: 'POSIX 只读探测与统计',
-    icon: '🐧',
+    icon: 'data_object',
     description: '跨平台/Unix 常用只读与文本统计命令（只读无害）',
     commands: ['ls', 'cat', 'wc', 'head', 'tail', 'grep', 'sort', 'uniq', 'cut', 'tr', 'diff', 'stat', 'du', 'df', 'pwd', 'printf', 'date', 'sleep', 'uname', 'which', 'id', 'basename', 'dirname', 'touch', 'md5sum', 'sha256sum', 'printenv'],
   },
@@ -1533,7 +1533,7 @@ const providerOptions = [
           <NCard size="small" class="scard">
             <template #header><i class="ms">group</i> 多模型项目小组 (Team Profiles)</template>
             <div class="team-banner" style="background: rgba(91, 140, 255, 0.08); border: 1px solid rgba(91, 140, 255, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text);">
-              <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;">💡 多模型 Agent 项目小组模式 (Team) 配置说明</div>
+              <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;"><i class="ms sm">lightbulb</i> 多模型 Agent 项目小组模式 (Team) 配置说明</div>
               <div>
                 系统采用<b>「全局角色预设池 + 项目小队自由进驻」</b>的双层架构：
                 <ul style="margin: 4px 0 0 16px; padding: 0;">
@@ -1562,7 +1562,7 @@ const providerOptions = [
                     <NButton size="tiny" secondary :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)">获取模型列表</NButton>
                     <NButton size="tiny" secondary :loading="profileTestingId === pid" @click="testProfileModel(pid)">测试连接</NButton>
                     <NButton size="tiny" quaternary type="error" @click="removeProfile(pid)">删除</NButton>
-                    <span style="font-size: 12px; color: var(--dim)">{{ editingProfileId === pid ? '▲ 收起' : '▼ 编辑' }}</span>
+                    <span style="font-size: 12px; color: var(--dim)"><i class="ms sm">{{ editingProfileId === pid ? 'expand_less' : 'edit' }}</i> {{ editingProfileId === pid ? '收起' : '编辑' }}</span>
                   </div>
                 </div>
 
@@ -1969,7 +1969,7 @@ const providerOptions = [
                 <div class="group-card">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">⚡</span>
+                      <span class="group-icon"><i class="ms sm">bolt</i></span>
                       <span class="group-title">子代理并发预算</span>
                       <span class="group-desc">限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；撞 429 自动对半降并发，成功后逐步爬回。</span>
                     </div>
@@ -2027,13 +2027,13 @@ const providerOptions = [
                 <div class="group-card guide-card" style="background: rgba(0, 128, 255, 0.04); border: 1px dashed rgba(0, 128, 255, 0.3);">
                   <div class="group-header" style="border-bottom: none; padding: 10px 14px;">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🧭</span>
+                      <span class="group-icon"><i class="ms sm">explore</i></span>
                       <span class="group-title">本地开发服务与浏览器自动化扩展</span>
                       <span class="group-desc">包含 dev_server_* 服务管理（3工具）、http_request 接口调试（1工具）与 Chromium 浏览器自动化（10工具）</span>
                     </div>
                     <div class="group-ops">
                       <NButton size="small" type="primary" secondary @click="toolsTab = 'debug'">
-                        进入本地调试配置 ({{ debugActiveCount }} 项启用) →
+                        进入本地调试配置 ({{ debugActiveCount }} 项启用) <i class="ms sm">arrow_forward</i>
                       </NButton>
                     </div>
                   </div>
@@ -2093,7 +2093,7 @@ const providerOptions = [
                 <div class="group-card" style="margin-bottom: 12px;">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🚀</span>
+                      <span class="group-icon"><i class="ms sm">rocket_launch</i></span>
                       <span class="group-title">后台开发服务管理 (dev_server)</span>
                       <span class="group-desc">支持任务中后台常驻启动 dev server（自动端口与就绪等待），任务结束自动清理</span>
                     </div>
@@ -2123,7 +2123,7 @@ const providerOptions = [
                 <div class="group-card" style="margin-bottom: 12px;">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🌐</span>
+                      <span class="group-icon"><i class="ms sm">language</i></span>
                       <span class="group-title">本地 HTTP API 调试 (http_request)</span>
                       <span class="group-desc">支持对本地或内网开发服务发起 HTTP 请求，调试 REST/GraphQL 接口（受下方主机白名单约束）</span>
                     </div>
@@ -2147,7 +2147,7 @@ const providerOptions = [
                 <div class="group-card" style="margin-bottom: 12px;">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🧭</span>
+                      <span class="group-icon"><i class="ms sm">explore</i></span>
                       <span class="group-title">本地 Chromium 浏览器调试 (browser)</span>
                       <span class="group-desc">驱动本地 Chrome/Edge 浏览器，支持访问页面、点击输入、截图与监听控制台/网络日志</span>
                     </div>
@@ -2244,7 +2244,7 @@ const providerOptions = [
                 <label class="checkline stack" style="margin: 0; padding: 0; border: none; background: none;">
                   <div style="display:flex;align-items:center;gap:8px">
                     <NSwitch v-model:value="gitCommitAndMergeDraft" />
-                    <span style="font-weight: 600; font-size: 13px; color: var(--text);">🌿 任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
+                    <span style="font-weight: 600; font-size: 13px; color: var(--text);"><i class="ms sm">account_tree</i> 任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
                   </div>
                   <span class="hint" style="margin-top: 6px;">默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。</span>
                 </label>
@@ -2296,7 +2296,8 @@ const providerOptions = [
         <div class="mcat-head">
           <span class="mcat-name">{{ cat.label }}</span>
           <NTag size="tiny" :bordered="false" :type="cat.kind === 'proxy' ? 'info' : 'default'">
-            {{ cat.kind === 'proxy' ? `可应用 → ${cat.env_var}` : '下载源' }}</NTag>
+            <template v-if="cat.kind === 'proxy'"><i class="ms sm">arrow_forward</i> 可应用 {{ cat.env_var }}</template>
+            <template v-else>下载源</template></NTag>
           <NButton size="tiny" quaternary :loading="mirrorTestingCat === cat.key"
                    :disabled="mirrorTesting" @click="testMirrors(cat.key)">只测这类</NButton>
         </div>

@@ -91,7 +91,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
     "pm": {
         "role": "pm",
         "label": "项目经理 (PM)",
-        "icon": "👑",
+        "icon": "workspace_premium",
         "description": "负责对用户下发的需求进行深度分析、子任务拆分与前后端依赖编排",
         "produces_code": False,
         "default_max_turns": 20,
@@ -106,7 +106,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
     "backend": {
         "role": "backend",
         "label": "后端开发工程师",
-        "icon": "⚙️",
+        "icon": "terminal",
         "description": "负责后端服务架构、接口路由、数据库与业务逻辑编码及单元测试",
         "produces_code": True,
         "default_max_turns": 40,
@@ -118,7 +118,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
     "frontend": {
         "role": "frontend",
         "label": "前端开发工程师",
-        "icon": "🎨",
+        "icon": "palette",
         "description": "负责前端页面组件、状态管理、接口联调与构建校验",
         "produces_code": True,
         "default_max_turns": 40,
@@ -130,7 +130,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
     "qa": {
         "role": "qa",
         "label": "测试工程师 (QA)",
-        "icon": "🧪",
+        "icon": "science",
         "description": "负责项目前后端联调验证与 E2E 测试，拥有新建 Bug 任务至项目列表权限",
         "produces_code": False,
         "default_max_turns": 35,
@@ -146,7 +146,7 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
     "custom": {
         "role": "custom",
         "label": "自定义专职角色",
-        "icon": "🧩",
+        "icon": "extension",
         "description": "用户自定义扩展专职 Agent 角色（如架构师、运维、数据库工程师等）",
         "produces_code": True,
         "default_max_turns": 40,
@@ -1121,7 +1121,7 @@ def resolve_team_member(
         "id": member.id,
         "role": eff_role,
         "name": name,
-        "icon": role_meta.get("icon", "🤖"),
+        "icon": role_meta.get("icon", "smart_toy"),
         "description": description,
         "enabled": member.enabled,
         "profile": member.profile,
