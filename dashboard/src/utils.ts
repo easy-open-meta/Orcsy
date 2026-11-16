@@ -22,20 +22,48 @@ export function relTime(s: string | undefined | null): string {
   return s
 }
 
-// token 数量的厂商风格展示：1000448 → "1M"，131072 → "131K"。
-// M 用十进制（1e6）换算并保留一位小数，与厂商控制台的 "1M/2M" 口径一致，
+// token 数量的展示：默认英文厂商风格（1000448 → "1M"，131072 → "131K"）；
+// unit='zh' 时改用中文大数单位（131072 → "13.1万"，1.2e8 → "1.2亿"）。
+// M/B 用十进制（1e6/1e9）换算并保留一位小数，与厂商控制台的 "1M/2M" 口径一致，
 // 避免 999424 这类值被二进制换算成 "977K" 的困惑。
-export function fmtTokens(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v) || v <= 0) return ''
-  if (v < 1000) return String(Math.round(v))
+export type TokenUnit = 'en' | 'zh'
+
+function _round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+function _fmtEn(v: number): string {
+  if (v >= 1e9) return `${_round1(v / 1e9)}B`
   if (v >= 1e6) {
-    const m = Math.round((v / 1e6) * 10) / 10
-    return `${m}M`
+    const n = _round1(v / 1e6)
+    return n >= 1000 ? `${_round1(v / 1e9)}B` : `${n}M`
   }
   // 整千按十进制（128000 → 128K）；非整千的二进制整值按 /1024（32768 → 32K）
-  if (v % 1000 === 0) return `${Math.round(v / 1000)}K`
-  if (v % 1024 === 0) return `${Math.round(v / 1024)}K`
-  return `${Math.round(v / 1000)}K`
+  let n: number
+  if (v % 1000 === 0) n = Math.round(v / 1000)
+  else if (v % 1024 === 0) n = Math.round(v / 1024)
+  else n = Math.round(v / 1000)
+  return n >= 1000 ? `${_round1(v / 1e6)}M` : `${n}K`
+}
+
+function _fmtZh(v: number): string {
+  if (v >= 1e12) return `${_round1(v / 1e12)}万亿`
+  if (v >= 1e8) {
+    const n = _round1(v / 1e8)
+    return n >= 10000 ? `${_round1(v / 1e12)}万亿` : `${n}亿`
+  }
+  if (v >= 1e4) {
+    const n = _round1(v / 1e4)
+    return n >= 10000 ? `${_round1(v / 1e8)}亿` : `${n}万`
+  }
+  return String(Math.round(v))
+}
+
+export function fmtTokens(v: number | null | undefined,
+                          unit: TokenUnit = 'en'): string {
+  if (v == null || !Number.isFinite(v) || v <= 0) return ''
+  if (v < 1000) return String(Math.round(v))
+  return unit === 'zh' ? _fmtZh(v) : _fmtEn(v)
 }
 
 // 运行日志的展示结构：一条日志 = 首行（时间戳开头）+ 若干续行（异常堆栈、

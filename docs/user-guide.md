@@ -677,17 +677,13 @@ Shows only the managed project cards (6 per page, paginated with lazy rendering)
 
 ### 9.4 Settings tab
 
-An accordion menu of sections on the left (click to expand; the right side shows only the selected section), from top to bottom:
+A two-level menu on the left (click a category to expand; the right side shows only the selected item), grouped by purpose:
 
-1. **🤖 LLM Access**: model, key, endpoint, parameters;
-2. **👥 Multi-Model Team**: dedicated models and presets for PM / Backend / Frontend / QA roles, plus each role's responsibility prompt template (referenced by project teams);
-3. **⏱ Scheduler & dashboard**: interval, parallelism, port, log retention, login password;
-4. **🔔 Notifications**: sound, system notification;
-5. **🛡 Data masking**: mask passwords/keys locally before sending them to the model provider (high-confidence rules on by default, key-value enhanced rules, custom regex);
-6. **🔍 Task review (Review Agent)**: review model binding, rework limit, test-command and squash-commit switches;
-7. **🛠 Agent tools & permissions**: approval mode, timeout, tool switches, command whitelist, environment variables, PATH auto-fix;
-8. **🪞 Mirror management & speed test**: test, apply fastest, add/disable mirrors;
-9. **⚙️ App**: autostart, auto-update check, update source, manual package import.
+1. **🤖 Models & team**: LLM access, multi-model Team, task review (Review Agent);
+2. **⏱ Runtime & cost**: scheduler & dashboard (interval, parallelism, port, log retention, login password), budget & cost, circuit breaker & recovery;
+3. **🛡 Data & compliance**: data masking, run ledger, audit log;
+4. **🛠 Tools & network**: Agent tools & permissions (approval mode, tool switches, command whitelist, environment variables, PATH auto-fix), mirror management & speed test, egress allowlist;
+5. **🔔 Notifications & app**: notifications, app (autostart, auto-update check, update source, manual package import).
 
 ### 9.5 Skills tab
 
@@ -1064,6 +1060,34 @@ Enable or tune it under **Settings → Circuit breaker & recovery** (on by defau
 - Once tripped, the project stops **claiming new tasks**; running tasks may finish, and the project card shows "Tripped" with the reason;
 - By default you must click **Resume** manually; enabling "auto-resume after window" clears the pause once the window has elapsed;
 - Budget exhaustion, task edits (`stale_lease`) and manual stops **do not count** as failures.
+
+### 10.19 Write audit log
+
+The read-only **Settings → Audit log** view shows recent write operations:
+
+- **Covered**: login success/failure, logout, task CRUD/reorder/stop, settings saves, project CRUD, commit confirmation, discard, Issues pulls, approvals, skills/mirrors/updates, circuit-breaker resume, and API-key writes;
+- **Each entry**: time, action, actor (`user` / `api_key:<hash prefix>` / `local`), IP, target, result;
+- Only summaries are recorded (status code, key names) — **never passwords, API keys, repo tokens or task bodies**;
+- The full log lives in `logs/audit.jsonl` under the data directory; it rotates at 5MB and keeps the latest 5 files;
+- Direct edits to `config.yaml` or task files bypass the dashboard and therefore are not audited (Git/filesystem remain the source of truth).
+
+### 10.20 Egress allowlist
+
+Every HTTP request the application itself makes goes through the egress allowlist: model calls, Issue sync, mirror speed tests, web fetches, update checks and update-package downloads. Configure it under **Settings → Tools & network → Egress allowlist**, or in the `egress` section of `config.yaml`:
+
+```yaml
+egress:
+  mode: allowlist      # allowlist (default) | off (troubleshooting only: allow all, no deny audit)
+  extra_hosts: []      # extra hosts, e.g. api.example.com / *.example.com / host:8443
+  audit: true          # write logs/audit.jsonl on deny (action=egress.deny)
+```
+
+- **Automatic entries**: model endpoints, Issue repos (including `api_base`), mirrors (built-in plus custom/disabled lists) and the update source are derived from configuration, so changing models or adding projects needs no extra host names;
+- **Loopback** (`127.0.0.1` / `localhost` / `::1`) is not egress and is always allowed — local dev servers, browser CDP and test stubs keep working;
+- **Extra hosts**: third-party documentation sites used by `web_fetch`, intranet proxies, etc. Add them under `extra_hosts` or as tags in Settings. `*.example.com` matches both the apex and subdomains; `:port` restricts a host to that port;
+- **On denial**: model/Issue/update paths report "blocked by egress allowlist" with a fix hint; mirror speed tests mark that source unreachable; `web_fetch` returns the hint to the model; every denial is audited;
+- **Subprocesses are not intercepted**: `npm` / `pip` / `git` started via `run_command` can reach the network outside the application layer; mirrors/proxy environment variables and the run ledger provide the constraints. The docs make no "zero outbound requests" claim;
+- **Troubleshooting**: temporarily set `mode: off` (allow all, no deny audit), then switch back to `allowlist`. The settings page shows the derived host count, process-wide allow/deny counters and recent denials.
 
 ## 11. Data, backup, and migration
 

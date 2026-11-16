@@ -1,38 +1,118 @@
 <script setup lang="ts">
-import { NCollapse, NCollapseItem, NButton, NCard, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
+import { NButton, NCard, NDynamicTags, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
 import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
-import { api, type MirrorRowT, type ModelInfo } from '../api'
+import { api, type AuditEntryT, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
 import { cmpVersion, fmtTokens } from '../utils'
 import { miIcon } from '../mi'
 
 const message = () => window.$message
 
-// ---- 功能分区手风琴：左侧分区菜单，右侧只渲染当前分区（懒加载，未点开不挂载） ----
+// ---- 功能分区：左侧「一级分类 → 子项」菜单，右侧只渲染当前分区（懒加载） ----
 // key 与 settingsSection 联动（跨视图跳转定位，如看板「设置」按钮直达对应分区）
-const SECTIONS = [
-  { key: 'llm', label: '大模型接入' },
-  { key: 'profiles', label: '多模型项目小组 (Team)' },
-  { key: 'sched', label: '调度与看板' },
-  { key: 'notify', label: '提醒设置' },
-  { key: 'masking', label: '数据脱敏' },
-  { key: 'runlog', label: '运行台账' },
-  { key: 'budget', label: '预算与成本' },
-  { key: 'resilience', label: '熔断与恢复' },
-  { key: 'review', label: '任务审查（Review Agent）' },
-  { key: 'tools', label: 'Agent 工具与访问权限' },
-  { key: 'mirrors', label: '镜像源管理与测速选源' },
-  { key: 'app', label: '应用' },
-] as const
-const activeSection = computed(() => settingsSection.value)
-function onSectionChange(v: string | number | (string | number)[] | null): void {
-  // NCollapse 单开形态回调数组/单值/null（再点已展开项收起）；取第一个有效 key。
-  // 收起（null）保持当前分区：右侧必须始终有内容可看
-  const k = Array.isArray(v) ? v[0] : v
-  if (k) settingsSection.value = String(k)
+interface SettingItem { key: string; label: string; icon: string; desc: string }
+interface SettingGroup { key: string; label: string; icon: string; items: SettingItem[] }
+
+const SETTING_GROUPS: SettingGroup[] = [
+  {
+    key: 'model', label: '模型与团队', icon: 'smart_toy',
+    items: [
+      { key: 'llm', label: '大模型接入', icon: 'smart_toy',
+        desc: 'OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。' },
+      { key: 'profiles', label: '多模型项目小组 (Team)', icon: 'group',
+        desc: '配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。' },
+      { key: 'review', label: '任务审查（Review Agent）', icon: 'rate_review',
+        desc: '独立模型合并前审查任务成果；未配置审查模型时审查未启用。' },
+    ],
+  },
+  {
+    key: 'runtime', label: '运行与成本', icon: 'schedule',
+    items: [
+      { key: 'sched', label: '调度与看板', icon: 'schedule',
+        desc: '扫描间隔、并行数保存后立即生效；看板端口下次启动生效。' },
+      { key: 'budget', label: '预算与成本', icon: 'savings',
+        desc: '任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。' },
+      { key: 'resilience', label: '熔断与恢复', icon: 'health_and_safety',
+        desc: '连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。' },
+    ],
+  },
+  {
+    key: 'data', label: '数据与合规', icon: 'security',
+    items: [
+      { key: 'masking', label: '数据脱敏', icon: 'security',
+        desc: '密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。' },
+      { key: 'runlog', label: '运行台账', icon: 'receipt_long',
+        desc: '每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。' },
+      { key: 'audit', label: '审计日志', icon: 'history',
+        desc: '登录、任务/项目/设置变更、提交确认与 API Key 写调用留痕；只读，不记录密钥与正文。' },
+    ],
+  },
+  {
+    key: 'tools', label: '工具与网络', icon: 'handyman',
+    items: [
+      { key: 'tools', label: 'Agent 工具与访问权限', icon: 'handyman',
+        desc: '全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。' },
+      { key: 'mirrors', label: '镜像源管理与测速选源', icon: 'sync_alt',
+        desc: 'Agent 装环境/拉依赖前测速，哪个快用哪个。' },
+      { key: 'egress', label: '出网白名单', icon: 'lan',
+        desc: '应用自身 HTTP（模型/Issue/镜像/更新/网页抓取）只允许白名单主机；拒绝写审计。' },
+    ],
+  },
+  {
+    key: 'app', label: '通知与应用', icon: 'notifications',
+    items: [
+      { key: 'notify', label: '提醒设置', icon: 'notifications',
+        desc: '任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。' },
+      { key: 'app', label: '应用', icon: 'settings',
+        desc: '更新源、自更新检查、看板登录密码与开机自启动。' },
+    ],
+  },
+]
+
+const SECTION_GROUP: Record<string, string> = Object.fromEntries(
+  SETTING_GROUPS.flatMap(g => g.items.map(it => [it.key, g.key])))
+const openGroups = reactive<Record<string, boolean>>({})
+
+// 移动端：分类下拉 + 子项胶囊（窄屏不渲染整棵手风琴，避免菜单吃掉半屏）
+const mobileGroup = ref(groupOfSection(settingsSection.value))
+const groupOptions = SETTING_GROUPS.map(g => ({ label: g.label, value: g.key }))
+const mobileGroupItems = computed(() =>
+  SETTING_GROUPS.find(g => g.key === mobileGroup.value)?.items || [])
+
+watch(mobileGroup, (key) => {
+  const group = SETTING_GROUPS.find(g => g.key === key)
+  if (!group) return
+  if (!group.items.some(it => it.key === settingsSection.value)) {
+    settingsSection.value = group.items[0].key
+  }
+})
+
+function groupOfSection(key: string): string {
+  return SECTION_GROUP[key] || SETTING_GROUPS[0].key
 }
-const sectionLabel = computed(() =>
-  SECTIONS.find(s => s.key === settingsSection.value)?.label ?? '')
+
+function toggleGroup(key: string): void {
+  const wasOpen = !!openGroups[key]
+  for (const k of Object.keys(openGroups)) openGroups[k] = false
+  if (!wasOpen) openGroups[key] = true
+}
+
+function selectSection(key: string): void {
+  settingsSection.value = key
+  const g = groupOfSection(key)
+  if (!openGroups[g]) {
+    for (const k of Object.keys(openGroups)) openGroups[k] = false
+    openGroups[g] = true
+  }
+}
+
+// 跨视图定位 / 刷新后恢复：自动展开当前分区所属分类
+watch(() => settingsSection.value, (key) => {
+  const g = groupOfSection(key)
+  mobileGroup.value = g
+  for (const k of Object.keys(openGroups)) openGroups[k] = false
+  openGroups[g] = true
+}, { immediate: true })
 
 // ---- 草稿模式：首份数据到后回填一次，之后轮询不覆盖未保存的输入 ----
 const draft = reactive({
@@ -49,6 +129,10 @@ const draft = reactive({
   // 熔断停机（V1-R4）：rate 用百分比展示，保存时 /100
   res_enabled: true, res_consec: 3, res_window: 120,
   res_rate_pct: 60, res_samples: 5, res_auto: false,
+  // 统一出口白名单（V1-R6）：extra_hosts 只填主机名（可带端口 / *.通配）
+  egress_mode: 'allowlist' as 'allowlist' | 'off',
+  egress_extra: [] as string[],
+  egress_audit: true,
 })
 // ---- 任务审查（Review Agent）草稿：模型绑定 + 返工次数 + 测试命令 + squash ----
 const reviewDraft = reactive({
@@ -125,42 +209,42 @@ const defaultToolCategories = [
   {
     key: 'file_ops',
     label: '文件操作与编辑',
-    icon: '📁',
+    icon: 'folder',
     description: '读取、创建、编辑、重命名及删除工作区代码和文本文件',
     tools: ['read_file', 'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'list_dir'],
   },
   {
     key: 'code_search',
     label: '代码搜索与定位',
-    icon: '🔍',
+    icon: 'search',
     description: '按通配符模式查找文件以及跨文件正则搜索内容',
     tools: ['find_files', 'grep'],
   },
   {
     key: 'command_exec',
     label: '终端命令执行',
-    icon: '💻',
+    icon: 'terminal',
     description: '在项目根目录执行白名单内的构建、测试、检查与系统命令',
     tools: ['run_command'],
   },
   {
     key: 'task_collab',
     label: '任务管理与协议',
-    icon: '⚡',
+    icon: 'task_alt',
     description: '拆解多阶段子任务并在任务完成或受阻时给出结构化答复',
     tools: ['create_tasks', 'finish'],
   },
   {
     key: 'subagent',
     label: '子代理并发协同',
-    icon: '👥',
+    icon: 'group',
     description: '派生只读子代理并行探索多个模块/目录，单轮拿到汇总结论',
     tools: ['delegate_explore'],
   },
   {
     key: 'external_net',
     label: '网络与外部知识',
-    icon: '🌐',
+    icon: 'language',
     description: '查阅专业技能库文档、抓取公网页面正文与镜像源延迟测速',
     tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
   },
@@ -170,63 +254,63 @@ const defaultCommandCategories = [
   {
     key: 'python',
     label: 'Python 生态',
-    icon: '🐍',
+    icon: 'code',
     description: 'Python 解释器、包管理与测试/Lint 工具',
     commands: ['python*', 'py', 'pip*', 'pytest', 'uv', 'uvx', 'poetry', 'tox', 'ruff', 'mypy', 'black', 'flake8'],
   },
   {
     key: 'node',
     label: 'Node / 前端',
-    icon: '📦',
+    icon: 'javascript',
     description: 'Node 运行时、包管理器与前端构建/测试工具',
     commands: ['node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'tsc', 'eslint', 'prettier', 'vitest', 'jest'],
   },
   {
     key: 'compiled',
     label: 'Rust / Go / .NET / Java',
-    icon: '⚙️',
+    icon: 'build',
     description: '系统级与强类型后端编译型语言工具链',
     commands: ['cargo', 'go', 'dotnet', 'gradle*', 'mvn', 'java', 'javac'],
   },
   {
     key: 'cpp',
     label: 'C / C++ 构建',
-    icon: '🔨',
+    icon: 'construction',
     description: 'C/C++ 编译器、构建工具与测试套件',
     commands: ['make', 'cmake', 'ctest', 'ninja', 'gcc', 'g++', 'clang', 'clang++', 'msbuild'],
   },
   {
     key: 'vcs',
     label: '版本控制',
-    icon: '🌿',
+    icon: 'account_tree',
     description: 'Git 代码仓库与分支版本管理',
     commands: ['git'],
   },
   {
     key: 'package_managers',
     label: '包管理器',
-    icon: '📥',
+    icon: 'inventory_2',
     description: '系统级包管理器（缺工具链时按需环境引导，受审批约束）',
     commands: ['winget*', 'choco', 'scoop', 'brew', 'apt*', 'apt-get', 'dnf', 'nvm'],
   },
   {
     key: 'system_shell',
     label: '系统 Shell / 实用工具',
-    icon: '💻',
+    icon: 'terminal',
     description: '系统 Shell、网络下载与归档解压',
     commands: ['powershell', 'pwsh', 'curl', 'tar', 'setx'],
   },
   {
     key: 'windows_probe',
     label: 'Windows 探测与排障',
-    icon: '🪟',
+    icon: 'desktop_windows',
     description: 'Windows 环境排障、进程查看与文件探测（只读/信息性）',
     commands: ['where', 'cmd', 'dir', 'type', 'echo', 'set', 'tasklist', 'systeminfo', 'findstr', 'more', 'ver', 'hostname', 'whoami'],
   },
   {
     key: 'posix_probe',
     label: 'POSIX 只读探测与统计',
-    icon: '🐧',
+    icon: 'data_object',
     description: '跨平台/Unix 常用只读与文本统计命令（只读无害）',
     commands: ['ls', 'cat', 'wc', 'head', 'tail', 'grep', 'sort', 'uniq', 'cut', 'tr', 'diff', 'stat', 'du', 'df', 'pwd', 'printf', 'date', 'sleep', 'uname', 'which', 'id', 'basename', 'dirname', 'touch', 'md5sum', 'sha256sum', 'printenv'],
   },
@@ -509,6 +593,9 @@ watch(() => store.state, (s) => {
   draft.res_rate_pct = Math.round((s.resilience_cfg?.max_failure_rate ?? 0.6) * 100)
   draft.res_samples = s.resilience_cfg?.min_samples ?? 5
   draft.res_auto = s.resilience_cfg?.auto_resume ?? false
+  draft.egress_mode = (s.egress_cfg?.mode as 'allowlist' | 'off') ?? 'allowlist'
+  draft.egress_extra = [...(s.egress_cfg?.extra_hosts ?? [])]
+  draft.egress_audit = s.egress_cfg?.audit ?? true
   syncProfilesDraft(s.agent_profiles)
 })
 
@@ -913,6 +1000,23 @@ async function saveResilience(): Promise<void> {
   void import('../store').then(m => m.refresh(true))
 }
 
+// ---- 出网白名单（V1-R6）：保存后立即生效；off 仅用于排障 ----
+const egressSaving = shallowRef(false)
+async function saveEgress(): Promise<void> {
+  egressSaving.value = true
+  try {
+    await api.config({ egress: {
+      mode: draft.egress_mode,
+      extra_hosts: draft.egress_extra,
+      audit: draft.egress_audit,
+    } })
+    message()?.('出网白名单已保存并立即生效')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { egressSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+const egressStatus = computed(() => store.state?.egress_status)
+
 const pausedProjects = computed(() =>
   (store.state?.projects || []).filter(p => p.health?.paused))
 
@@ -923,6 +1027,27 @@ async function resumeProject(name: string): Promise<void> {
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
+
+// ---- 写操作审计（V1-R5）：只读最近记录 ----
+const auditEntries = ref<AuditEntryT[]>([])
+const auditLoading = shallowRef(false)
+const auditAction = shallowRef('')
+const auditActor = shallowRef('')
+
+async function loadAudit(): Promise<void> {
+  auditLoading.value = true
+  try {
+    const r = await api.audit({
+      limit: 300, action: auditAction.value.trim(), actor: auditActor.value.trim(),
+    })
+    auditEntries.value = r.entries || []
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { auditLoading.value = false }
+}
+
+watch(() => settingsSection.value, (s) => {
+  if (s === 'audit') void loadAudit()
+}, { immediate: true })
 
 // ---- 目录迁移：迁移中锁定台账设置与回放，每秒轮询进度 ----
 const mig = computed(() => store.state?.runlog_migration)
@@ -1327,58 +1452,32 @@ const providerOptions = [
 <template>
   <div class="settings" v-if="store.state">
     <div class="layout">
+      <!-- 移动端：分类下拉 + 子项胶囊（窄屏隐藏左侧手风琴，省出纵向空间） -->
+      <div class="mobile-menu">
+        <NSelect v-model:value="mobileGroup" :options="groupOptions" size="small" />
+        <div class="mchips">
+          <button v-for="it in mobileGroupItems" :key="it.key" type="button"
+                  class="mchip" :class="{ active: settingsSection === it.key }"
+                  @click="selectSection(it.key)">{{ it.label }}</button>
+        </div>
+      </div>
       <!-- 左：功能分区手风琴（单开；key 与 settingsSection 联动支持跨页定位） -->
       <aside class="menu">
-        <NCollapse :expanded-names="activeSection" :accordion="true" @update:expanded-names="onSectionChange">
-          <NCollapseItem name="llm">
-            <template #header><i class="ms">smart_toy</i> 大模型接入</template>
-            <div class="menu-desc" v-if="activeSection === 'llm'">OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。</div>
-          </NCollapseItem>
-          <NCollapseItem name="profiles">
-            <template #header><i class="ms">group</i>  多模型项目小组 (Team)</template>
-            <div class="menu-desc" v-if="activeSection === 'profiles'">配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。</div>
-          </NCollapseItem>
-          <NCollapseItem name="sched">
-            <template #header><i class="ms">schedule</i>  调度与看板</template>
-            <div class="menu-desc" v-if="activeSection === 'sched'">扫描间隔、并行数保存后立即生效；看板端口下次启动生效。</div>
-          </NCollapseItem>
-          <NCollapseItem name="notify">
-            <template #header><i class="ms">notifications</i>  提醒设置</template>
-            <div class="menu-desc" v-if="activeSection === 'notify'">任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。</div>
-          </NCollapseItem>
-          <NCollapseItem name="masking">
-            <template #header><i class="ms">security</i>  数据脱敏</template>
-            <div class="menu-desc" v-if="activeSection === 'masking'">密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。</div>
-          </NCollapseItem>
-          <NCollapseItem name="runlog">
-            <template #header><i class="ms">receipt_long</i>  运行台账</template>
-            <div class="menu-desc" v-if="activeSection === 'runlog'">每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。</div>
-          </NCollapseItem>
-          <NCollapseItem name="budget">
-            <template #header><i class="ms">savings</i>  预算与成本</template>
-            <div class="menu-desc" v-if="activeSection === 'budget'">任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。</div>
-          </NCollapseItem>
-          <NCollapseItem name="resilience">
-            <template #header><i class="ms">health_and_safety</i>  熔断与恢复</template>
-            <div class="menu-desc" v-if="activeSection === 'resilience'">连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。</div>
-          </NCollapseItem>
-          <NCollapseItem name="review">
-            <template #header><i class="ms">rate_review</i>  任务审查（Review Agent）</template>
-            <div class="menu-desc" v-if="activeSection === 'review'">独立模型合并前审查任务成果；未配置审查模型时审查未启用。</div>
-          </NCollapseItem>
-          <NCollapseItem name="tools">
-            <template #header><i class="ms">handyman</i>  Agent 工具与访问权限</template>
-            <div class="menu-desc" v-if="activeSection === 'tools'">全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。</div>
-          </NCollapseItem>
-          <NCollapseItem name="mirrors">
-            <template #header><i class="ms">sync_alt</i>  镜像源管理与测速选源</template>
-            <div class="menu-desc" v-if="activeSection === 'mirrors'">Agent 装环境/拉依赖前测速，哪个快用哪个。</div>
-          </NCollapseItem>
-          <NCollapseItem name="app">
-            <template #header><i class="ms">settings</i> ️ 应用</template>
-            <div class="menu-desc" v-if="activeSection === 'app'">更新源、自更新检查、看板登录密码与开机自启动。</div>
-          </NCollapseItem>
-        </NCollapse>
+        <div v-for="g in SETTING_GROUPS" :key="g.key" class="mgroup">
+          <button type="button" class="mgroup-head" :class="{ open: openGroups[g.key] }"
+                  @click="toggleGroup(g.key)">
+            <i class="ms">{{ g.icon }}</i>
+            <span class="mgroup-label">{{ g.label }}</span>
+            <i class="ms mchev">{{ openGroups[g.key] ? 'expand_less' : 'expand_more' }}</i>
+          </button>
+          <div v-show="openGroups[g.key]" class="mchildren">
+            <button v-for="it in g.items" :key="it.key" type="button"
+                    class="mchild" :class="{ active: settingsSection === it.key }"
+                    :title="it.desc" @click="selectSection(it.key)">
+              <i class="ms">{{ it.icon }}</i><span>{{ it.label }}</span>
+            </button>
+          </div>
+        </div>
       </aside>
       <!-- 右：当前分区内容（v-if 懒加载，未选中不挂载不轮询开销） -->
       <section class="content">
@@ -1432,9 +1531,9 @@ const providerOptions = [
         </div>
         <div v-if="settingsSection === 'profiles'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">group</i> 多模型 Agent 项目小组与角色预设池 (Team Profiles)</template>
+            <template #header><i class="ms">group</i> 多模型项目小组 (Team Profiles)</template>
             <div class="team-banner" style="background: rgba(91, 140, 255, 0.08); border: 1px solid rgba(91, 140, 255, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text);">
-              <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;">💡 多模型 Agent 项目小组模式 (Team) 配置说明</div>
+              <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;"><i class="ms sm">lightbulb</i> 多模型 Agent 项目小组模式 (Team) 配置说明</div>
               <div>
                 系统采用<b>「全局角色预设池 + 项目小队自由进驻」</b>的双层架构：
                 <ul style="margin: 4px 0 0 16px; padding: 0;">
@@ -1463,7 +1562,7 @@ const providerOptions = [
                     <NButton size="tiny" secondary :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)">获取模型列表</NButton>
                     <NButton size="tiny" secondary :loading="profileTestingId === pid" @click="testProfileModel(pid)">测试连接</NButton>
                     <NButton size="tiny" quaternary type="error" @click="removeProfile(pid)">删除</NButton>
-                    <span style="font-size: 12px; color: var(--dim)">{{ editingProfileId === pid ? '▲ 收起' : '▼ 编辑' }}</span>
+                    <span style="font-size: 12px; color: var(--dim)"><i class="ms sm">{{ editingProfileId === pid ? 'expand_less' : 'edit' }}</i> {{ editingProfileId === pid ? '收起' : '编辑' }}</span>
                   </div>
                 </div>
 
@@ -1743,6 +1842,34 @@ const providerOptions = [
             <div class="sfoot"><NButton type="primary" :loading="resilienceSaving" @click="saveResilience">保存熔断设置</NButton></div>
           </NCard>
         </div>
+        <div v-if="settingsSection === 'audit'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">history</i> 审计日志</template>
+            <div class="frow">
+              <div class="f1"><label>动作过滤（如 task / project / auth）</label>
+                <NInput v-model:value="auditAction" placeholder="留空 = 全部" /></div>
+              <div class="f1"><label>操作者过滤（user / api_key / local）</label>
+                <NInput v-model:value="auditActor" placeholder="留空 = 全部" /></div>
+              <div class="f1" style="justify-content:flex-end">
+                <NButton type="primary" secondary :loading="auditLoading" @click="loadAudit">刷新</NButton>
+              </div>
+            </div>
+            <div class="audit-list">
+              <div v-for="(e, i) in auditEntries" :key="i" class="audit-row">
+                <span class="audit-time">{{ (e.ts || '').slice(5, 19).replace('T', ' ') }}</span>
+                <span class="audit-action">{{ e.action }}</span>
+                <span class="audit-actor">{{ e.actor }}<template v-if="e.ip"> · {{ e.ip }}</template></span>
+                <span class="audit-target">{{ e.target }}</span>
+                <NTag size="tiny" :bordered="false"
+                      :type="e.result === 'ok' ? 'success' : 'error'">{{ e.result }}</NTag>
+              </div>
+              <div v-if="!auditLoading && !auditEntries.length" class="hint">暂无审计记录</div>
+            </div>
+            <div class="hint">
+              只展示最近记录；完整日志在数据目录 `logs/audit.jsonl`。参数只记摘要，不记密码、API Key 或任务正文。
+            </div>
+          </NCard>
+        </div>
         <div v-if="settingsSection === 'review'">
           <NCard size="small" class="scard">
             <template #header><i class="ms">rate_review</i> 任务审查（Review Agent）</template>
@@ -1842,7 +1969,7 @@ const providerOptions = [
                 <div class="group-card">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">⚡</span>
+                      <span class="group-icon"><i class="ms sm">bolt</i></span>
                       <span class="group-title">子代理并发预算</span>
                       <span class="group-desc">限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；撞 429 自动对半降并发，成功后逐步爬回。</span>
                     </div>
@@ -1900,13 +2027,13 @@ const providerOptions = [
                 <div class="group-card guide-card" style="background: rgba(0, 128, 255, 0.04); border: 1px dashed rgba(0, 128, 255, 0.3);">
                   <div class="group-header" style="border-bottom: none; padding: 10px 14px;">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🧭</span>
+                      <span class="group-icon"><i class="ms sm">explore</i></span>
                       <span class="group-title">本地开发服务与浏览器自动化扩展</span>
                       <span class="group-desc">包含 dev_server_* 服务管理（3工具）、http_request 接口调试（1工具）与 Chromium 浏览器自动化（10工具）</span>
                     </div>
                     <div class="group-ops">
                       <NButton size="small" type="primary" secondary @click="toolsTab = 'debug'">
-                        进入本地调试配置 ({{ debugActiveCount }} 项启用) →
+                        进入本地调试配置 ({{ debugActiveCount }} 项启用) <i class="ms sm">arrow_forward</i>
                       </NButton>
                     </div>
                   </div>
@@ -1923,10 +2050,11 @@ const providerOptions = [
                 <span class="hint">
                   按语言和技术生态细分管理默认放行的命令。关闭的命令从默认白名单移除（Agent 调 run_command 会被直接拦截）。
                 </span>
-                <div style="display:flex; gap:8px; align-items:center;">
+                <div class="cmd-actions">
                   <NButton size="tiny" secondary @click="toggleAllCommands(true)">全部放行</NButton>
                   <NButton size="tiny" secondary @click="toggleAllCommands(false)">全部禁用</NButton>
-                  <NInput v-model:value="cmdSearch" size="small" placeholder="过滤命令（如 pytest、npm）..." clearable style="width: 220px;" />
+                  <NInput v-model:value="cmdSearch" size="small" class="cmd-search"
+                          placeholder="过滤命令（如 pytest、npm）..." clearable />
                 </div>
               </div>
 
@@ -1965,7 +2093,7 @@ const providerOptions = [
                 <div class="group-card" style="margin-bottom: 12px;">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🚀</span>
+                      <span class="group-icon"><i class="ms sm">rocket_launch</i></span>
                       <span class="group-title">后台开发服务管理 (dev_server)</span>
                       <span class="group-desc">支持任务中后台常驻启动 dev server（自动端口与就绪等待），任务结束自动清理</span>
                     </div>
@@ -1995,7 +2123,7 @@ const providerOptions = [
                 <div class="group-card" style="margin-bottom: 12px;">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🌐</span>
+                      <span class="group-icon"><i class="ms sm">language</i></span>
                       <span class="group-title">本地 HTTP API 调试 (http_request)</span>
                       <span class="group-desc">支持对本地或内网开发服务发起 HTTP 请求，调试 REST/GraphQL 接口（受下方主机白名单约束）</span>
                     </div>
@@ -2019,7 +2147,7 @@ const providerOptions = [
                 <div class="group-card" style="margin-bottom: 12px;">
                   <div class="group-header">
                     <div class="group-title-wrap">
-                      <span class="group-icon">🧭</span>
+                      <span class="group-icon"><i class="ms sm">explore</i></span>
                       <span class="group-title">本地 Chromium 浏览器调试 (browser)</span>
                       <span class="group-desc">驱动本地 Chrome/Edge 浏览器，支持访问页面、点击输入、截图与监听控制台/网络日志</span>
                     </div>
@@ -2116,7 +2244,7 @@ const providerOptions = [
                 <label class="checkline stack" style="margin: 0; padding: 0; border: none; background: none;">
                   <div style="display:flex;align-items:center;gap:8px">
                     <NSwitch v-model:value="gitCommitAndMergeDraft" />
-                    <span style="font-weight: 600; font-size: 13px; color: var(--text);">🌿 任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
+                    <span style="font-weight: 600; font-size: 13px; color: var(--text);"><i class="ms sm">account_tree</i> 任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
                   </div>
                   <span class="hint" style="margin-top: 6px;">默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。</span>
                 </label>
@@ -2168,7 +2296,8 @@ const providerOptions = [
         <div class="mcat-head">
           <span class="mcat-name">{{ cat.label }}</span>
           <NTag size="tiny" :bordered="false" :type="cat.kind === 'proxy' ? 'info' : 'default'">
-            {{ cat.kind === 'proxy' ? `可应用 → ${cat.env_var}` : '下载源' }}</NTag>
+            <template v-if="cat.kind === 'proxy'"><i class="ms sm">arrow_forward</i> 可应用 {{ cat.env_var }}</template>
+            <template v-else>下载源</template></NTag>
           <NButton size="tiny" quaternary :loading="mirrorTestingCat === cat.key"
                    :disabled="mirrorTesting" @click="testMirrors(cat.key)">只测这类</NButton>
         </div>
@@ -2200,6 +2329,52 @@ const providerOptions = [
       <div class="sfoot">
         <NButton type="primary" :loading="mirrorsSaving" :disabled="!mirrorsDirty"
                  @click="saveMirrors">保存镜像源配置</NButton>
+      </div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'egress'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">lan</i> 出网白名单</template>
+      <div class="frow">
+        <div class="f2"><label>模式</label>
+          <NSelect v-model:value="draft.egress_mode" :options="[
+            { label: 'allowlist — 只允许白名单主机（默认）', value: 'allowlist' },
+            { label: 'off — 全部放行（仅排障用）', value: 'off' },
+          ]" />
+        </div>
+        <div class="f1"><label>拒绝时写审计</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <NSwitch v-model:value="draft.egress_audit" />
+            <span class="hint">logs/audit.jsonl · action=egress.deny</span>
+          </div>
+        </div>
+      </div>
+      <div class="frow">
+        <div class="f1"><label>额外放行主机（extra_hosts）</label>
+          <NDynamicTags v-model:value="draft.egress_extra" :max="30"
+                        placeholder="api.example.com（可带 :端口；*.example.com 含子域）" />
+          <div class="hint tool-foot">
+            模型 / Issue / 镜像 / 更新源主机按各自配置自动放行，无需在此重复；
+            网页抓取要访问的文档站需在此添加。回环地址始终放行；Agent 子进程
+            （npm / pip / git）的出网不在应用层拦截范围。
+          </div>
+        </div>
+      </div>
+      <div class="hint tool-foot">
+        已推导白名单（{{ (egressStatus?.derived_hosts || []).length }} 个）：
+        {{ (egressStatus?.derived_hosts || []).join('、') || '（无）' }}
+      </div>
+      <div v-if="egressStatus" class="hint tool-foot">
+        运行计数：放行 {{ egressStatus.allowed }} 次 / 拒绝 {{ egressStatus.denied }} 次
+        <template v-if="egressStatus.last_denied.length">
+          ；最近拒绝：{{ egressStatus.last_denied.map(d => `${d.host}（${d.purpose}，${d.ts}）`).join('；') }}
+        </template>
+        <template v-if="egressStatus.runtime_hosts.length">
+          ；运行时放行（更新包 CDN）：{{ egressStatus.runtime_hosts.map(h => h.host).join('、') }}
+        </template>
+      </div>
+      <div class="sfoot">
+        <NButton type="primary" :loading="egressSaving" @click="saveEgress">保存出网白名单</NButton>
       </div>
           </NCard>
         </div>
@@ -2260,15 +2435,65 @@ const providerOptions = [
 .tools-tabs :deep(.n-tabs-tab-wrapper) { min-width: 46%; }
 .tools-tabs :deep(.n-tabs-tab) { justify-content: center; width: 100%; }
 /* 左手风琴分区 + 右内容区：窄屏自动竖排 */
+.mobile-menu { display: none; }
 .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; align-items: start; }
-@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
-.menu { position: sticky; top: 14px; }
-.menu :deep(.n-collapse-item__header) { font-size: 13.5px; }
-.menu :deep(.n-collapse-item__content-inner) { padding-top: 0; }
-.menu-desc { font-size: 12px; color: var(--faint); cursor: pointer; }
-.menu-desc:hover { color: var(--dim); }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  .menu { display: none; }
+  /* 工具/命令分组：标题说明占满整行，操作区换到下一行，避免标签与开关
+     挤在右列把说明压成竖条 */
+  .group-header { align-items: flex-start; }
+  .group-title-wrap { flex: 1 0 100%; }
+  .group-ops { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  /* 四个工具分类 Tab 横排放不下带计数的长标签：窄屏一项一行 */
+  .tools-tabs :deep(.n-tabs-tab-wrapper) { min-width: 100%; }
+  .tools-tabs :deep(.n-tabs-tab) { justify-content: flex-start; white-space: normal; }
+  .tools-tabs :deep(.n-tabs-tab__label) { white-space: normal; }
+  /* 命令白名单操作行：按钮与过滤框换行，输入框占满整行 */
+  .cmd-actions { width: 100%; flex-wrap: wrap; }
+  .cmd-actions .cmd-search { width: 100%; }
+  .mobile-menu { display: flex; flex-direction: column; gap: 8px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+    background: var(--card); }
+  .mchips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+  .mchip { flex: none; border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 12px; background: none; color: var(--dim); font: inherit;
+    font-size: 12.5px; white-space: nowrap; cursor: pointer; }
+  .mchip.active { border-color: var(--acc, #5b8cff);
+    color: var(--acc, #5b8cff); background: rgba(91, 140, 255, 0.12); }
+}
+.menu { position: sticky; top: 14px; border: 1px solid var(--line);
+  border-radius: 10px; padding: 6px; background: var(--card); }
+.mgroup + .mgroup { border-top: 1px solid var(--line); }
+.mgroup-head { width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 10px 8px; border: 0; border-radius: 6px; background: none;
+  color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600;
+  text-align: left; cursor: pointer; }
+.mgroup-head:hover { background: rgba(128, 140, 180, 0.12); }
+.mgroup-head.open { color: var(--acc, #5b8cff); }
+.mgroup-head .ms { font-size: 18px; }
+.mgroup-label { flex: 1; }
+.mchev { color: var(--faint); font-size: 18px; }
+.mchildren { display: flex; flex-direction: column; gap: 2px;
+  padding: 0 4px 6px 20px; }
+.mchild { display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 7px 8px; border: 0; border-radius: 6px; background: none;
+  color: var(--dim); font: inherit; font-size: 12.8px; text-align: left;
+  cursor: pointer; }
+.mchild:hover { background: rgba(128, 140, 180, 0.12); color: var(--text); }
+.mchild.active { background: rgba(91, 140, 255, 0.14);
+  color: var(--acc, #5b8cff); font-weight: 600; }
+.mchild .ms { font-size: 16px; }
 .content { min-width: 0; }
 .content .scard { margin-bottom: 0; }
+/* 卡片标题过长（如 Team Profiles）时换行，窄屏不撑破卡片 */
+.content .scard :deep(.n-card-header__main) {
+  flex-wrap: wrap; line-height: 1.35; word-break: break-word;
+}
+/* 窄屏防网格/弹性子项被长标题或输入框撑破 */
+.layout, .layout > *, .mobile-menu, .mchips,
+.content > div, .content .scard, .content .group-card,
+.frow > div, .duo > div { min-width: 0; }
 .modelspec { font-size: 12px; color: var(--dim); margin: -4px 0 8px; }
 .hint { font-size: 12px; color: var(--faint); font-weight: 400; }
 .frow { display: flex; gap: 10px; margin-bottom: 10px; }
@@ -2282,6 +2507,16 @@ const providerOptions = [
   font-size: 12.5px; padding: 4px 2px; border-bottom: 1px dashed var(--line); }
 .budget-row:last-child { border-bottom: none; }
 .budget-name { flex: 1; color: var(--text); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.audit-list { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px;
+  max-height: 460px; overflow: auto; }
+.audit-row { display: flex; gap: 10px; align-items: center; font-size: 12px;
+  padding: 5px 2px; border-bottom: 1px dashed var(--line); }
+.audit-row:last-child { border-bottom: none; }
+.audit-time { color: var(--faint); font-family: Consolas, monospace; flex: none; }
+.audit-action { color: #6f9dff; font-family: Consolas, monospace; min-width: 130px; }
+.audit-actor { color: var(--dim); min-width: 150px; }
+.audit-target { flex: 1; color: var(--text); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .frow label, .checkline { font-size: 12.5px; color: var(--dim); }
 .f1 { flex: 1; } .f14 { flex: 1.4; } .f2 { flex: 2; } .f0 { flex: none; }
@@ -2404,6 +2639,15 @@ const providerOptions = [
   min-width: 0;
   text-align: right;
 }
+/* 窄屏：工具行改上下排列，描述占满整行（否则 460px 网格 + 右侧窄列会把
+   文字挤成一列字，行高被拉得很长） */
+@media (max-width: 860px) {
+  .group-items-grid { grid-template-columns: 1fr; }
+  .tool-card-item { flex-direction: column; align-items: stretch; gap: 5px; }
+  .tool-card-left { flex-wrap: wrap; }
+  .tool-card-right { text-align: left; }
+  .tool-card-right .tool-desc { display: block; line-height: 1.55; }
+}
 .risk-tag {
   font-size: 11px;
   padding: 0 4px;
@@ -2414,6 +2658,8 @@ const providerOptions = [
   gap: 8px;
   padding: 10px 12px;
 }
+.cmd-actions { display: flex; gap: 8px; align-items: center; }
+.cmd-search { width: 220px; }
 .cmd-chip-card {
   display: inline-flex;
   align-items: center;

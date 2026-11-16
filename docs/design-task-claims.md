@@ -81,6 +81,7 @@ sha256(JSON{
 | 心跳 | 执行线程每 30s 更新 `heartbeat_at`；心跳失败停止，TTL 自然过期 |
 | TTL | 默认 900s；过期租约可被下一次扫描回收 |
 | 校验 | `verify(task_id, fingerprint, claim_id)`：租约存在 + claim 匹配 + 未过期 + 指纹一致 |
+| 直调兼容 | `task.claim_id` 为空（测试/库式直接调用 executor，绕过调度器认领）时跳过校验；生产扫描链路一定先 acquire，正常任务不会缺 claim_id |
 | 释放 | 任务回写完成后释放；异常路径靠 TTL 兜底 |
 | 清理 | 进程启动时清理过期租约，不触碰续跑标记 |
 

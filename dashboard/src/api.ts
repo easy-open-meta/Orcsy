@@ -373,6 +373,13 @@ export interface AppStateT {
     min_samples: number
     auto_resume: boolean
   }
+  /** 统一出口白名单（V1-R6）：配置 + 当前策略状态 */
+  egress_cfg?: {
+    mode: string
+    extra_hosts: string[]
+    audit: boolean
+  }
+  egress_status?: EgressStatusT
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
   /** 可开关工具目录（名称+中文描述+所属组；finish 为协议工具不在其中） */
@@ -634,6 +641,29 @@ export interface RunLogMigrationT {
   error: string
 }
 
+/** 写操作审计（V1-R5） */
+export interface AuditEntryT {
+  ts: string
+  action: string
+  actor: string
+  ip: string
+  target: string
+  result: string
+  detail: string
+}
+
+/** 统一出口白名单（V1-R6）：当前策略 + 进程内放行/拒绝计数 */
+export interface EgressStatusT {
+  mode: string
+  audit: boolean
+  extra_hosts: string[]
+  derived_hosts: string[]
+  runtime_hosts: { host: string; purpose: string; ts: string }[]
+  allowed: number
+  denied: number
+  last_denied: { ts: string; host: string; purpose: string }[]
+}
+
 export const api = {
   /** 全量状态；summary=true 移动端轻量摘要（省略日志尾部与归档，省流量省电） */
   state: (summary = false): Promise<AppStateT> =>
@@ -674,6 +704,16 @@ export const api = {
     get('/api/runlog/migration') as Promise<{ ok: boolean; migration: RunLogMigrationT }>,
   retryRunlogMigration: () =>
     post('/api/runlog/migration/retry', {}) as Promise<{ ok: boolean; migration: RunLogMigrationT }>,
+  /** 统一出口白名单：当前策略与运行计数（只读） */
+  egress: () => get('/api/egress') as Promise<{ ok: boolean; egress: EgressStatusT }>,
+  /** 写操作审计（V1-R5）：最近记录，支持 action/actor 过滤 */
+  audit: (p: { limit?: number; action?: string; actor?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (p.limit) qs.set('limit', String(p.limit))
+    if (p.action) qs.set('action', p.action)
+    if (p.actor) qs.set('actor', p.actor)
+    return get(`/api/audit?${qs.toString()}`) as Promise<{ ok: boolean; entries: AuditEntryT[] }>
+  },
   taskSave: (p: {
     project: string; id: string; title: string; priority: string; status: string
     labels: string[]; assignee: string; description: string; depends_on?: string[]

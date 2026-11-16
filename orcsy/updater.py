@@ -35,6 +35,7 @@ from urllib.parse import urlparse
 import httpx
 
 from . import USER_AGENT
+from .egress import EgressDenied, allow_runtime_host, check as egress_check
 from .issues import detect_repo
 
 
@@ -78,6 +79,11 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
     params = {"access_token": token} if token else None
     api_base = str(update_cfg.get("api_base") or "").rstrip("/")
     url = f"{api_base or info['origin']}/api/v1/repos/{info['owner']}/{info['repo']}/releases/latest"
+
+    try:
+        egress_check(url, purpose="update_check")
+    except EgressDenied as e:
+        raise UpdateError(str(e)) from e
 
     last_err: Exception | None = None
     resp = None
@@ -151,6 +157,12 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
     digest = str(asset.get("digest") or "")
     if digest.lower().startswith("sha256:"):
         result["sha256_value"] = digest.split(":", 1)[1].strip().lower()
+    # 更新包/校验文件可能落在 CDN 主机（与发布 API 不同域）。这些地址来自
+    # 已放行的发布 API 响应，按运行时白名单放行（本进程内有效），避免用户
+    # 每换一次 CDN 就要手工补 egress.extra_hosts
+    for asset_url in (result["download_url"], result["sha256_url"]):
+        if asset_url:
+            allow_runtime_host(asset_url, purpose="update_asset")
     return result
 
 
@@ -165,6 +177,10 @@ def download_installer(download_url: str, dest_dir: Path,
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / filename
+    try:
+        egress_check(download_url, purpose="update_download")
+    except EgressDenied as e:
+        raise UpdateError(str(e)) from e
     # 环回地址绕过系统代理（Shadowsocks/Clash 类工具会把 127.0.0.1 的下载
     # 送进隧道导致超时）；外部地址仍尊重系统代理设置
     trust_env = urlparse(download_url).hostname not in ("127.0.0.1", "localhost", "::1")
