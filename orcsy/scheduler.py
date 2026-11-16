@@ -17,6 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
+from .audit import init_audit_log
 from .budget import configure as configure_budget, init_budget_store
 from .claims import claims_state_dir
 from .resilience import (configure as configure_resilience,
@@ -56,6 +57,8 @@ class Scheduler:
         # 运行台账（V1-R1）：按配置锚定目录/保留期；已初始化则复用（避免
         # 迁移进行中被第二次 force 重建导致重复迁移）
         init_run_store(config)
+        # 写操作审计（V1-R5）：与 orcsy.log 同目录
+        init_audit_log(config)
         # 预算硬闸：模块级配置 + 当日用量存储（与租约同 state/ 目录）
         configure_budget(config.budget)
         init_budget_store(config)

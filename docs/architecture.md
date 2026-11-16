@@ -70,6 +70,7 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/claims.py` | 可信层 | 任务指纹、TTL 租约（心跳/文件锁）、断点续跑标记与提交前二次校验 |
 | `orcsy/budget.py` | 可信层 | token/成本预算硬闸、项目当日累计与预算软停判断 |
 | `orcsy/resilience.py` | 可信层 | 连续失败/窗口失败率熔断、项目暂停与人工/自动恢复 |
+| `orcsy/audit.py` | 可信层 | 写操作审计 JSONL、轮转、尾部查询与敏感信息脱敏 |
 | `orcsy/subagent.py` | 编排层 | 并发只读子代理扇出（fan-out）探索引擎 |
 | `orcsy/masking.py` | 核心逻辑 | 发往模型厂商前的内存级敏感数据正则脱敏与写盘还原闭环 |
 | `orcsy/concurrency.py`| 基础设施 | 进程级大模型请求 AIMD（加性增/乘性减）自适应并发配额控制器 |

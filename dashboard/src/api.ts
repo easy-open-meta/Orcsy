@@ -634,6 +634,17 @@ export interface RunLogMigrationT {
   error: string
 }
 
+/** 写操作审计（V1-R5） */
+export interface AuditEntryT {
+  ts: string
+  action: string
+  actor: string
+  ip: string
+  target: string
+  result: string
+  detail: string
+}
+
 export const api = {
   /** 全量状态；summary=true 移动端轻量摘要（省略日志尾部与归档，省流量省电） */
   state: (summary = false): Promise<AppStateT> =>
@@ -674,6 +685,14 @@ export const api = {
     get('/api/runlog/migration') as Promise<{ ok: boolean; migration: RunLogMigrationT }>,
   retryRunlogMigration: () =>
     post('/api/runlog/migration/retry', {}) as Promise<{ ok: boolean; migration: RunLogMigrationT }>,
+  /** 写操作审计（V1-R5）：最近记录，支持 action/actor 过滤 */
+  audit: (p: { limit?: number; action?: string; actor?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (p.limit) qs.set('limit', String(p.limit))
+    if (p.action) qs.set('action', p.action)
+    if (p.actor) qs.set('actor', p.actor)
+    return get(`/api/audit?${qs.toString()}`) as Promise<{ ok: boolean; entries: AuditEntryT[] }>
+  },
   taskSave: (p: {
     project: string; id: string; title: string; priority: string; status: string
     labels: string[]; assignee: string; description: string; depends_on?: string[]

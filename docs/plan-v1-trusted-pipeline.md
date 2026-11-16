@@ -183,7 +183,9 @@
 > R3 预算硬闸（任务级 token/成本 + 项目日窗软停）已实施，设计见
 > [`docs/design-budget-guard.md`](design-budget-guard.md)；
 > R4 熔断停机（连续失败/窗口失败率 → 项目暂停与人工恢复）已实施，设计见
-> [`docs/design-circuit-breaker.md`](design-circuit-breaker.md)。
+> [`docs/design-circuit-breaker.md`](design-circuit-breaker.md)；
+> R5 写操作审计已实施，设计见 [`docs/design-audit.md`](design-audit.md)；
+> R6 统一出口白名单待实施。
 > 本小节的解释性文字保留，作为后续 R2~R6 的契约依据。
 
 **落盘位置**：默认在配置目录下（`<配置目录>/runs/<project>/<run_id>/`），**不写进受管仓库**。理由：

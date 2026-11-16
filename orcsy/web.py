@@ -97,6 +97,7 @@ import json
 import os
 import re
 import secrets
+import hashlib
 import shutil
 import socket
 import subprocess
@@ -197,6 +198,7 @@ from .tools import (
     validate_tools_map,
 )
 from .usage import get_usage_store, init_usage_store
+from .audit import get_audit_log, init_audit_log
 from .budget import (configure as configure_budget, get_budget_store,
                      init_budget_store)
 from .claims import claims_state_dir
@@ -213,6 +215,38 @@ AUTH_COOKIE = "orcsy_session"
 SESSION_TTL = 7 * 24 * 3600
 # 「记住我」会话有效期：手机远程访问场景息屏/切网频繁，短会话极易掉登录
 SESSION_TTL_REMEMBER = 30 * 24 * 3600
+
+# 写操作审计动作映射（V1-R5）：只记改变状态的 POST，GET 只记 API Key 使用
+_POST_AUDIT_ACTIONS = {
+    "/api/logout": "auth.logout",
+    "/api/task": "task.save",
+    "/api/task/status": "task.status",
+    "/api/task/reorder": "task.reorder",
+    "/api/task/stop": "task.stop",
+    "/api/task/delete": "task.delete",
+    "/api/task/delete-batch": "task.delete_batch",
+    "/api/task/clear": "task.clear",
+    "/api/config": "settings.save",
+    "/api/project": "project.save",
+    "/api/project/delete": "project.delete",
+    "/api/project/commit": "project.commit",
+    "/api/project/discard": "project.discard",
+    "/api/project/git-init": "project.git_init",
+    "/api/project/issues-sync": "project.issues_sync",
+    "/api/project/resume": "project.resume",
+    "/api/approval": "approval.respond",
+    "/api/skill": "skill.save",
+    "/api/skill/remove": "skill.remove",
+    "/api/skill/enabled": "skill.toggle",
+    "/api/skill/import": "skill.import",
+    "/api/skill/import-batch": "skill.import_batch",
+    "/api/mirror/apply": "mirror.apply",
+    "/api/app-autostart": "app.autostart",
+    "/api/app-restart": "app.restart",
+    "/api/update/apply": "update.apply",
+    "/api/update/install": "update.install",
+    "/api/runlog/migration/retry": "runlog.migration_retry",
+}
 
 # 浏览目录时忽略的噪音项
 _DIR_IGNORE = {"$Recycle.Bin", "System Volume Information", "Windows", "AppData",
@@ -426,6 +460,7 @@ class AppState:
         # 运行台账（V1-R1）：看板读取与调度写入共用同一单例；
         # 已初始化时复用（迁移进行中不能被第二次 force 重建）
         init_run_store(config)
+        init_audit_log(config)
         # 预算硬闸：模块配置 + 当日用量存储（与租约同 state/ 目录）
         configure_budget(config.budget)
         init_budget_store(config)
@@ -1263,6 +1298,17 @@ class AppState:
         st = get_resilience_store().resume(name, by="manual")
         log.warning("项目 %s 已由看板人工恢复熔断", name)
         return {"ok": True, "health": st}
+
+    def audit_list(self, params: dict) -> dict:
+        """写操作审计（V1-R5）：只读最近记录，支持 action/actor 过滤。"""
+        try:
+            limit = int(params.get("limit") or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        entries = get_audit_log().tail(
+            limit=limit, action=str(params.get("action") or ""),
+            actor=str(params.get("actor") or ""))
+        return {"ok": True, "entries": entries}
 
     def make_dir(self, data: dict) -> dict:
         """在指定位置创建新文件夹（目录选择器「新建项目」流程用）。"""
@@ -2249,6 +2295,7 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def _json(self, obj: dict, code: int = 200,
               extra_headers: list[tuple[str, str]] | None = None) -> None:
+        self._last_json_status = int(code)
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -2305,6 +2352,66 @@ class WebHandler(BaseHTTPRequestHandler):
         k = self.headers.get("X-API-Key", "").strip()
         return k if k else None
 
+    # ---- 写操作审计（V1-R5） ----
+
+    def _client_ip(self) -> str:
+        try:
+            return get_client_ip(self.client_address[0], self.headers,
+                                 self.state.config.web.trusted_proxies)
+        except Exception:  # noqa: BLE001 — 审计不能影响请求
+            return ""
+
+    def _actor_identity(self) -> str:
+        """审计主体：API Key 只记哈希前缀；会话用户记 user；免鉴权记 local。"""
+        for raw in (self._api_key(), self._bearer_token()):
+            if raw and self.state.is_valid_api_key(raw):
+                tag = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+                return f"api_key:{tag}"
+        bearer = self._bearer_token()
+        if bearer and self.state.token_valid(bearer):
+            return "user"
+        cookie = self._cookie_token()
+        if cookie and self.state.token_valid(cookie):
+            return "user"
+        if not self.state.auth_enabled:
+            return "local"
+        return "anonymous"
+
+    def _audit(self, action: str, *, target: str = "", result: str = "ok",
+               detail: object = None, actor: str | None = None) -> None:
+        try:
+            get_audit_log().record(
+                action, actor=actor or self._actor_identity(),
+                ip=self._client_ip(), target=target, result=result,
+                detail=detail)
+        except Exception:  # noqa: BLE001 — 审计失败不影响业务
+            log.warning("审计写入失败（忽略）：%s", action, exc_info=True)
+
+    @staticmethod
+    def _audit_target(body: dict) -> str:
+        project = str(body.get("project") or body.get("name")
+                      or body.get("original_name") or "").strip()
+        obj = str(body.get("id") or body.get("file")
+                  or body.get("run_id") or "").strip()
+        if project and obj:
+            return f"{project}/{obj}"
+        return project or obj
+
+    def _audit_post(self, path: str, body: dict) -> None:
+        action = _POST_AUDIT_ACTIONS.get(path)
+        if not action:
+            return
+        status = int(getattr(self, "_last_json_status", 200) or 200)
+        if status == 401:
+            return  # 未认证请求由登录/失败日志覆盖，避免噪音
+        result = "ok" if status < 400 else "error"
+        detail: dict = {"status": status}
+        if path in ("/api/config", "/api/task", "/api/project"):
+            detail["keys"] = sorted(str(k) for k in body.keys())
+        self._audit(action, target=self._audit_target(body),
+                    result=result, detail=detail,
+                    actor=getattr(self, "_audit_actor", None))
+
     def _authorized(self) -> bool:
         """三模鉴权判定：未开鉴权放行；或通过 Bearer / X-API-Key / Cookie 任一凭据认证。"""
         if not self.state.auth_enabled:
@@ -2338,9 +2445,14 @@ class WebHandler(BaseHTTPRequestHandler):
         result = self.state.login(str(body.get("password") or ""),
                                   client_ip=client_ip, remember=remember)
         if not result.get("ok"):
+            self._audit("auth.login", actor="anonymous", target="password",
+                        result="fail",
+                        detail={"reason": result.get("message", "密码错误")})
             return self._json(
                 {"ok": False, "message": result.get("message", "密码错误")}, 401)
         token = result.get("token")
+        self._audit("auth.login", actor="user", target="session", result="ok",
+                    detail={"remember": remember})
         if token:
             # Cookie 与 Bearer Token 双轨（移动端远程访问）：iOS Safari 等移动
             # 浏览器在反代/切网/息屏场景极易丢 Cookie，前端把响应体里的 token
@@ -2456,6 +2568,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "message": str(e)}, 400)
         elif path == "/api/runlog/migration":
             self._json(self.state.runlog_migration_status())
+        elif path == "/api/audit":
+            self._json(self.state.audit_list(self._query_params()))
         else:
             self._json({"error": "not found"}, 404)
 
@@ -2550,10 +2664,13 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        body: dict = {}
+        self._last_json_status = 200
         try:
             # 先读净请求体再鉴权：401 拒掉时若留下未读的 body，keep-alive
             # 连接上的下一个请求会把残留字节当请求行解析（协议失步 → 连接重置）
             body = self._read_body()
+            self._audit_actor = self._actor_identity()
             # 鉴权守卫：仅登录接口放行（401 走 _json，keep-alive 的 Content-Length 不缺）
             if path != "/api/login" and not self._authorized():
                 return self._deny()
@@ -2679,6 +2796,8 @@ class WebHandler(BaseHTTPRequestHandler):
                         "latest_task": e.latest_task}, 409)
         except (ValueError, OSError) as e:
             self._json({"ok": False, "message": str(e)}, 400)
+        finally:
+            self._audit_post(path, body)
 
     def _html(self) -> None:
         body = _load_page().encode("utf-8")
