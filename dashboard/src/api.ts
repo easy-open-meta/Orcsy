@@ -219,6 +219,8 @@ export interface ProjectT {
     target_version?: string | null
   }
   is_git_repo: boolean
+  /** 含 gitlink/嵌套 Git 仓库时列出路径；该模式回退主工作区串行执行 */
+  nested_gitlinks?: string[]
   guide_file_path: string
   guide_exists: boolean
   tasks: TaskT[]

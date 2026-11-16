@@ -379,6 +379,10 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <NTag size="small" :type="p.is_git_repo ? 'default' : 'warning'" :bordered="false">
               {{ p.is_git_repo ? 'git' : '非 git' }}
             </NTag>
+            <NTag v-if="p.nested_gitlinks?.length" size="small" type="info" :bordered="false"
+                  :title="`含嵌套 Git 仓库：${p.nested_gitlinks.join('、')}；已回退主工作区串行模式，改动需在子仓库内提交`">
+              嵌套仓库 ({{ p.nested_gitlinks.length }})
+            </NTag>
             <NTag v-if="p.budget_paused" size="small" type="warning" :bordered="false"
                   title="项目今日 token 预算已用尽，暂停领取新任务；调高预算或等次日恢复">
               预算暂停

@@ -72,6 +72,33 @@ class Git:
         )
         return proc.returncode == 0
 
+    def gitlinks(self) -> list[str]:
+        """返回仓库中的 gitlink 路径（mode 160000：子模块或未注册的嵌套仓库）。
+
+        用 `-z` 避免中文/空格路径被 git 加引号；gitlink 的目录内容不在父仓库
+        对象库里，worktree 检出后只会得到空目录。
+        """
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "ls-files", "-s", "-z"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        if proc.returncode != 0:
+            raise GitError(
+                "git ls-files -s -z 失败："
+                + proc.stderr.decode("utf-8", errors="replace").strip())
+        out: list[str] = []
+        for rec in proc.stdout.decode("utf-8", errors="replace").split("\x00"):
+            if not rec:
+                continue
+            meta, _, path = rec.partition("\t")
+            parts = meta.split()
+            if len(parts) >= 3 and parts[0] == "160000" and path:
+                out.append(path)
+        return out
+
     def current_branch(self) -> str:
         # git branch --show-current 在空仓库（尚未产生任何 commit）也能正确返回当前分支名（如 main）
         proc = subprocess.run(

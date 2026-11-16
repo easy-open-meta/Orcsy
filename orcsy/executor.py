@@ -156,9 +156,30 @@ class TaskExecutor:
         )
         self.git = self.worktree_mgr.git
         self.is_git_repo = self.worktree_mgr.is_git_repo()
+        # 嵌套 Git 仓库 / 未注册子模块（gitlink，mode 160000）：父仓库 worktree
+        # 检出后这些目录是空的，Agent 既读不到源码，改动也无法随父仓库合并落地。
+        # 兼容策略：自动回退主工作区模式（不使用 worktree、串行执行），让改动
+        # 直接落在真实的子仓库工作区；最终由人工在对应子仓库提交。
+        self.gitlinks: list[str] = []
+        if self.is_git_repo:
+            try:
+                self.gitlinks = self.git.gitlinks()
+            except GitError as e:
+                get_logger(f"executor.{project.name}").warning(
+                    "探测 gitlink 失败（按普通仓库处理）：%s", e)
+        if self.gitlinks:
+            self.worktree_isolation = False
+            self.per_task_worktree = False
+            self.worktree_mgr.worktree_isolation = False
+            self.worktree_mgr.per_task_worktree = False
         self.worktree = self.worktree_mgr.default_worktree
         self.worktree_git = Git(self.worktree)
         self.log = get_logger(f"executor.{project.name}")
+        if self.gitlinks:
+            self.log.warning(
+                "检测到嵌套 Git 仓库/gitlink（%s）：该结构无法用 worktree 隔离，"
+                "已回退主工作区串行模式；改动需在各子仓库内单独提交",
+                ", ".join(self.gitlinks))
 
     def probe_git_repo(self) -> bool:
         """实时探测项目目录是否已是 git 仓库，并回写 is_git_repo 缓存。"""
@@ -560,7 +581,8 @@ class TaskExecutor:
                                          permission_mode=self.permission_mode,
                                          tool_map=tool_map,
                                          in_worktree=use_worktree,
-                                         architecture=architecture)
+                                         architecture=architecture,
+                                         nested_repos=self.gitlinks)
         if self.extra_system_prompt:
             sys_prompt = sys_prompt.rstrip() + "\n\n" + self.extra_system_prompt
         client.reset(sys_prompt)
@@ -876,8 +898,49 @@ class TaskExecutor:
                                        else "stage_land"),
                         review_verdict=getattr(review, "verdict", ""))
 
+    def _workspace_diff(self) -> str:
+        """主工作区 + 嵌套 Git 仓库的合并 diff/状态（工作区模式审查与台账用）。
+
+        父仓库的 `git diff` 只显示 gitlink 指针，不包含子仓库文件改动；
+        这里把每个嵌套仓库的 `status --short` 与 `git diff` 一并拼上，供审查
+        Agent 看到真实改动。异常一律降级为空片段，不影响主流程。
+        """
+        parts: list[str] = []
+        if self.is_git_repo:
+            try:
+                parent = self.git.run("diff", "HEAD") or ""
+                if parent.strip():
+                    parts.append(parent)
+            except GitError:
+                pass
+        for rel in self.gitlinks:
+            repo = Path(self.project.path) / rel
+            if not (repo / ".git").exists():
+                continue
+            try:
+                status = Git(repo).run("status", "--short") or ""
+                diff = Git(repo).run("diff") or ""
+                if status.strip() or diff.strip():
+                    parts.append(
+                        f"### nested repo: {rel}\n"
+                        + (status.strip() + "\n" if status.strip() else "")
+                        + diff)
+            except GitError as e:
+                parts.append(f"### nested repo: {rel}\n（读取改动失败：{e}）")
+        return "\n\n".join(p for p in parts if p.strip())
+
+    def _note_nested_repo_commit(self, task: Task) -> None:
+        """工作区模式任务完成后提醒：嵌套仓库改动需在各自仓库内提交。"""
+        if not self.gitlinks:
+            return
+        append_progress(
+            task.path,
+            "📦 嵌套 Git 仓库改动已保留在主工作区（"
+            + "、".join(self.gitlinks)
+            + "）；Orcsy 不自动提交子仓库，请在对应目录内分别 git add/commit")
+
     def _record_workspace_diff(self) -> None:
-        """工作区模式（未开启 worktree/提交合并）的改动证据：git diff HEAD。
+        """工作区模式（未开启 worktree/提交合并）的改动证据：父仓库 + 嵌套仓库 diff。
 
         该模式没有 WIP 提交与 merge，改动直接落在主工作区等待人工把关；
         run 仍然要留下 diff，否则「回放」只剩事件没有内容。
@@ -886,7 +949,7 @@ class TaskExecutor:
         if rec is None or not self.is_git_repo:
             return
         try:
-            diff = self.git.run("diff", "HEAD") or ""
+            diff = self._workspace_diff()
             if diff.strip():
                 rec.artifact("diff.patch", diff)
             rec.event("merge", mode="workspace")
@@ -1075,6 +1138,7 @@ class TaskExecutor:
                 return self._mark_stale_claim(task, result, reason)
             review = self._skipped_review(skip_reason)
             self._record_workspace_diff()
+            self._note_nested_repo_commit(task)
             return "done", review
         append_progress(task.path, "🔍 独立审查开始（合并前）")
         from .task_model import set_task_file_review_pending
@@ -1088,6 +1152,7 @@ class TaskExecutor:
             if not ok:
                 return self._mark_stale_claim(task, result, reason)
             self._record_workspace_diff()
+            self._note_nested_repo_commit(task)
             return "done", review
         return "blocked", review
 
@@ -1095,12 +1160,7 @@ class TaskExecutor:
         """工作区模式（未开启提交合并或非 git 项目）的审查执行：根为项目目录。"""
         from .review import review_task
         skills = self._load_skills_for_review()
-        diff = ""
-        if self.is_git_repo:
-            try:
-                diff = self.git.run("diff")
-            except GitError:
-                diff = ""
+        diff = self._workspace_diff() if self.is_git_repo else ""
         return review_task(
             self.project, task, self.project.path,
             "", "", diff, self.review_llm,

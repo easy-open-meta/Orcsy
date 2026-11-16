@@ -1108,6 +1108,20 @@ egress:
 - The task detail shows each upstream dependency's status (done/in progress/blocked/deleted) and result summary;
 - Click the task ID/title to open that task (archived tasks open read-only); the parent requirement/source task is also clickable.
 
+### 10.22 Nested Git repositories (gitlinks / unregistered submodules)
+
+Some parent repos record subdirectories as gitlinks (mode `160000`) without a `.gitmodules` file (e.g. `caresy-api` / `caresy-web` in caresy). A `git worktree` checkout leaves those directories empty, and changes cannot be carried by the parent merge — the task can look “done” while the code never reaches the main workspace.
+
+Orcsy detects this layout and switches to a compatible mode:
+
+- Projects with gitlinks **do not use worktree isolation**; tasks run directly in the main workspace and edit the real nested working trees;
+- The project runs **serially** to prevent concurrent edits to the same nested repo;
+- The run ledger/review combine the parent gitlink pointer with each nested repo's `git status/diff`, so the diff is not empty;
+- On completion Orcsy reminds you that changes stay in the main workspace and must be committed inside each nested repo;
+- Recommended order: commit inside each nested repo first, then commit the parent gitlink pointer (the dashboard's pending-commit page can commit the parent).
+
+Limitations: no worktree isolation/parallelism in this mode; nested and parent repos are committed and pushed separately. New projects should use proper submodules or separate managed projects instead.
+
 ## 11. Data, backup, and migration
 
 ### 11.1 Where data lives

@@ -470,6 +470,8 @@ class ProjectAgent:
                 and self.team_cfg is not None
                 and self.team_cfg.execution_mode == "parallel_worktree"
                 and self.executor.probe_git_repo()
+                # 含 gitlink/嵌套仓库的项目已回退主工作区模式，必须串行
+                and not getattr(self.executor, "gitlinks", None)
             )
             wave: list[tuple[Task, str, TaskExecutor]] = []
             if not can_parallel:

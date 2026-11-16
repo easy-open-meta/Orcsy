@@ -231,6 +231,7 @@ def build_system_prompt(
     tool_map: dict | None = None,
     in_worktree: bool | None = None,
     architecture: str = "",
+    nested_repos: list[str] | None = None,
 ) -> str:
     """组装系统提示词：角色 → 项目指引 → 技能索引 → 工作环境 → 输出协议。
 
@@ -240,6 +241,7 @@ def build_system_prompt(
     「本机工具」节——模型无需浪费轮数自己探测命令在哪。
     in_worktree：是否运行在隔离 worktree 内（默认跟随 is_git_repo；只读 PM/QA 为 False）。
     architecture：项目根 ARCHITECTURE.md 的内容（Phase 1 架构黑板报，空 = 未建立）。
+    nested_repos：项目中的 gitlink/嵌套仓库路径；非空时说明已回退主工作区模式。
     """
     guide = guide_content.strip()
     if len(guide) > guide_max_chars:
@@ -263,6 +265,16 @@ def build_system_prompt(
                else "该项目不是 git 仓库，不需要考虑版本控制。\n")
         )
 
+    nested_note = ""
+    if nested_repos:
+        nested_note = (
+            f"\n## 嵌套 Git 仓库\n\n"
+            f"本项目包含嵌套 Git 仓库（gitlink）：{', '.join(nested_repos)}。"
+            f"它们的内容不在父仓库对象库中，因此任务直接在项目主工作区执行（不做 "
+            f"worktree 隔离），并串行推进。请直接修改这些子目录中的文件；"
+            f"不要试图执行 `git commit` / `git push`，最终由人工在各子仓库内提交。\n"
+        )
+
     return (
         f"# 角色\n\n"
         f"你是「{project.name}」项目的开发 Agent，负责按任务清单完成功能开发与 bug 修复。\n\n"
@@ -272,6 +284,7 @@ def build_system_prompt(
         f"{_architecture_section(architecture)}"
         f"{_skills_section(skills, tools)}"
         f"{workspace}\n"
+        f"{nested_note}"
         f"{_tools_section(tool_map)}"
         f"{_subagent_section(tools)}"
         f"{_permissions_section(permission_mode)}\n"

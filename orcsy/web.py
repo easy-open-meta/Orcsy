@@ -855,6 +855,8 @@ class AppState:
                 # 实时探测而非会话缓存：用户可能事后手动 init git，5s 轮询
                 # 也能看到最新状态（探测带 .git 存在性预判，开销可忽略）
                 "is_git_repo": is_git,
+                # 含 gitlink/嵌套仓库时已回退主工作区串行模式（见 design-nested-repo-compat）
+                "nested_gitlinks": list(getattr(agent.executor, "gitlinks", [])),
                 "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),
                 "tasks": all_tasks,
