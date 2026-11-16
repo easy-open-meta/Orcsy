@@ -200,6 +200,8 @@ from .usage import get_usage_store, init_usage_store
 from .budget import (configure as configure_budget, get_budget_store,
                      init_budget_store)
 from .claims import claims_state_dir
+from .resilience import (configure as configure_resilience,
+                         get_resilience_store, init_resilience_store)
 from .runlog import apply_runlog_config, get_run_store, init_run_store
 
 log = get_logger("web")
@@ -427,6 +429,9 @@ class AppState:
         # 预算硬闸：模块配置 + 当日用量存储（与租约同 state/ 目录）
         configure_budget(config.budget)
         init_budget_store(config)
+        # 熔断停机（V1-R4）：配置 + 项目健康状态
+        configure_resilience(config.resilience)
+        init_resilience_store(config)
         # 镜像源运行时（测速边车与 config.yaml 同目录；与 Scheduler 各持一份，
         # 数据经边车文件天然共享）
         self.mirror_runtime = mirror_runtime_for(config)
@@ -734,6 +739,10 @@ class AppState:
             budget_today = {}
         bcfg = self.config.budget
         b_limit = int(bcfg.max_tokens_per_project_per_day or 0)
+        try:
+            health = get_resilience_store().snapshot()
+        except Exception:  # noqa: BLE001 — 熔断状态异常不影响看板
+            health = {}
 
         def _budget_paused(name: str) -> bool:
             if not bcfg.enabled or b_limit <= 0:
@@ -766,6 +775,8 @@ class AppState:
                 # 不依赖执行侧 Agent 实例（看板 Agent 不参与扫描）
                 "budget_paused": _budget_paused(name),
                 "budget_today": budget_today.get(name) or {},
+                # 熔断状态（V1-R4）：paused / 原因 / 连续失败 / 窗口失败率
+                "health": health.get(name) or {"paused": False},
                 "tasks_dir": p.tasks_dir,
                 "guide_file": p.guide_file,
                 "max_tasks_per_cycle": p.max_tasks_per_cycle,
@@ -906,6 +917,16 @@ class AppState:
                 "prices": {k: dict(v) for k, v in self.config.budget.prices.items()},
             },
             "budget_today": budget_today,
+            # 熔断停机（V1-R4）：阈值配置 + 各项目健康状态（health 挂在项目上）
+            "resilience_cfg": {
+                "enabled": self.config.resilience.enabled,
+                "max_consecutive_failures":
+                    self.config.resilience.max_consecutive_failures,
+                "window_minutes": self.config.resilience.window_minutes,
+                "max_failure_rate": self.config.resilience.max_failure_rate,
+                "min_samples": self.config.resilience.min_samples,
+                "auto_resume": self.config.resilience.auto_resume,
+            },
             # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
             # finish 也进目录——前端把它渲染成「常开且禁用」的展示行，
             # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
@@ -1231,6 +1252,17 @@ class AppState:
         except (ValueError, RuntimeError, OSError) as e:
             raise ValueError(str(e)) from e
         return {"ok": True, "migration": state}
+
+    def resume_project(self, data: dict) -> dict:
+        """人工恢复熔断暂停的项目（V1-R4）。"""
+        name = str(data.get("project") or "").strip()
+        if not name:
+            raise ValueError("project 不能为空")
+        if name not in self.agents:
+            raise ValueError(f"项目不存在：{name}")
+        st = get_resilience_store().resume(name, by="manual")
+        log.warning("项目 %s 已由看板人工恢复熔断", name)
+        return {"ok": True, "health": st}
 
     def make_dir(self, data: dict) -> dict:
         """在指定位置创建新文件夹（目录选择器「新建项目」流程用）。"""
@@ -1566,6 +1598,9 @@ class AppState:
         # 预算硬闸：限额与单价表热生效
         configure_budget(new_cfg.budget)
         init_budget_store(new_cfg, force=True)
+        # 熔断阈值热生效；状态文件位置不变
+        configure_resilience(new_cfg.resilience)
+        init_resilience_store(new_cfg, force=True)
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
         self.agents = self._build_agents(new_cfg)
@@ -2578,6 +2613,11 @@ class WebHandler(BaseHTTPRequestHandler):
                 try:
                     self._json(self.state.manual_commit_project(body))
                 except (ValueError, GitError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/project/resume":
+                try:
+                    self._json(self.state.resume_project(body))
+                except (ValueError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/project/diff":
                 try:

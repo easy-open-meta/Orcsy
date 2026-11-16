@@ -153,6 +153,17 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
   void import('../store').then(m => m.refresh(true))
 }
 
+// ---- 熔断恢复（V1-R4）：人工解除项目暂停 ----
+async function resumePaused(name: string): Promise<void> {
+  try {
+    await api.resumeProject(name)
+    window.$message?.(`项目 ${name} 已恢复`, 'success')
+  } catch (e: any) {
+    window.$message?.(e.message, 'error')
+  }
+  void import('../store').then(m => m.refresh(true))
+}
+
 function clickTask(project: string, t: TaskT): void {
   if (t.status === 'open') {
     ui.taskDlg = { project, id: t.id }
@@ -363,6 +374,12 @@ async function quickAdd(p: ProjectT): Promise<void> {
                   title="项目今日 token 预算已用尽，暂停领取新任务；调高预算或等次日恢复">
               预算暂停
             </NTag>
+            <NTag v-if="p.health?.paused" size="small" type="error" :bordered="false"
+                  :title="p.health?.pause_reason || '项目已熔断暂停'">
+              已熔断
+            </NTag>
+            <NButton v-if="p.health?.paused" size="tiny" type="warning" secondary
+                     @click="resumePaused(p.name)">恢复</NButton>
             <NButton size="tiny" quaternary class="git-refresh" :loading="gitRefreshing === p.name"
                      title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
                      @click="refreshGit(p)"><i class="ms sm">refresh</i></NButton>

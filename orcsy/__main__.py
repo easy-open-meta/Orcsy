@@ -61,6 +61,14 @@ budget:                      # 预算硬闸：超限停止执行；默认关闭
   # prices:                          # 每百万 tokens 的人民币单价
   #   deepseek-chat: {prompt: 1.0, completion: 2.0}
 
+resilience:                  # 熔断停机：连续失败/窗口失败率触发项目暂停
+  enabled: true
+  max_consecutive_failures: 3      # 连续失败次数；0 = 不按此规则
+  window_minutes: 120              # 失败率统计窗口（分钟）
+  max_failure_rate: 0.6            # 窗口内失败率阈值；0 = 不按此规则
+  min_samples: 5                   # 窗口内最少样本数
+  auto_resume: false               # true = 窗口结束后自动恢复（默认人工恢复）
+
 web:
   host: 127.0.0.1            # 看板监听地址；手机远程访问改为 0.0.0.0（绑定全部网卡，
                              # 需先设置 auth_password 或 api_keys），启动后终端会打印

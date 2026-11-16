@@ -18,6 +18,7 @@ const SECTIONS = [
   { key: 'masking', label: '数据脱敏' },
   { key: 'runlog', label: '运行台账' },
   { key: 'budget', label: '预算与成本' },
+  { key: 'resilience', label: '熔断与恢复' },
   { key: 'review', label: '任务审查（Review Agent）' },
   { key: 'tools', label: 'Agent 工具与访问权限' },
   { key: 'mirrors', label: '镜像源管理与测速选源' },
@@ -45,6 +46,9 @@ const draft = reactive({
   // 预算硬闸：0 = 不限制；单价表在 config.yaml 维护
   budget_enabled: false, budget_task_tokens: 0, budget_day_tokens: 0,
   budget_task_cost: 0,
+  // 熔断停机（V1-R4）：rate 用百分比展示，保存时 /100
+  res_enabled: true, res_consec: 3, res_window: 120,
+  res_rate_pct: 60, res_samples: 5, res_auto: false,
 })
 // ---- 任务审查（Review Agent）草稿：模型绑定 + 返工次数 + 测试命令 + squash ----
 const reviewDraft = reactive({
@@ -499,6 +503,12 @@ watch(() => store.state, (s) => {
   draft.budget_task_tokens = s.budget_cfg?.max_tokens_per_task ?? 0
   draft.budget_day_tokens = s.budget_cfg?.max_tokens_per_project_per_day ?? 0
   draft.budget_task_cost = s.budget_cfg?.max_cost_per_task_cny ?? 0
+  draft.res_enabled = s.resilience_cfg?.enabled ?? true
+  draft.res_consec = s.resilience_cfg?.max_consecutive_failures ?? 3
+  draft.res_window = s.resilience_cfg?.window_minutes ?? 120
+  draft.res_rate_pct = Math.round((s.resilience_cfg?.max_failure_rate ?? 0.6) * 100)
+  draft.res_samples = s.resilience_cfg?.min_samples ?? 5
+  draft.res_auto = s.resilience_cfg?.auto_resume ?? false
   syncProfilesDraft(s.agent_profiles)
 })
 
@@ -881,6 +891,36 @@ async function saveBudget(): Promise<void> {
     message()?.('预算设置已保存并立即生效')
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { budgetSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+
+// ---- 熔断停机（V1-R4）：保存后立即生效；触发后需人工恢复 ----
+const resilienceSaving = shallowRef(false)
+async function saveResilience(): Promise<void> {
+  resilienceSaving.value = true
+  try {
+    await api.config({ resilience: {
+      enabled: draft.res_enabled,
+      max_consecutive_failures: draft.res_consec,
+      window_minutes: draft.res_window,
+      max_failure_rate: (draft.res_rate_pct || 0) / 100,
+      min_samples: draft.res_samples,
+      auto_resume: draft.res_auto,
+    } })
+    message()?.('熔断设置已保存并立即生效')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { resilienceSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+
+const pausedProjects = computed(() =>
+  (store.state?.projects || []).filter(p => p.health?.paused))
+
+async function resumeProject(name: string): Promise<void> {
+  try {
+    await api.resumeProject(name)
+    message()?.(`项目 ${name} 已恢复`, 'success')
+  } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
 
@@ -1318,6 +1358,10 @@ const providerOptions = [
             <template #header><i class="ms">savings</i>  预算与成本</template>
             <div class="menu-desc" v-if="activeSection === 'budget'">任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。</div>
           </NCollapseItem>
+          <NCollapseItem name="resilience">
+            <template #header><i class="ms">health_and_safety</i>  熔断与恢复</template>
+            <div class="menu-desc" v-if="activeSection === 'resilience'">连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。</div>
+          </NCollapseItem>
           <NCollapseItem name="review">
             <template #header><i class="ms">rate_review</i>  任务审查（Review Agent）</template>
             <div class="menu-desc" v-if="activeSection === 'review'">独立模型合并前审查任务成果；未配置审查模型时审查未启用。</div>
@@ -1661,6 +1705,42 @@ const providerOptions = [
               <div v-if="!Object.keys(store.state.budget_today || {}).length" class="hint">今日暂无用量记录</div>
             </div>
             <div class="sfoot"><NButton type="primary" :loading="budgetSaving" @click="saveBudget">保存预算设置</NButton></div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'resilience'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">health_and_safety</i> 熔断与恢复</template>
+            <label class="checkline">
+              <NSwitch v-model:value="draft.res_enabled" />
+              启用熔断停机
+              <span class="hint">连续失败或窗口失败率超阈值时，项目暂停领取新任务；正在跑的任务允许收尾。默认需要人工恢复，避免自动重启掩盖系统性故障。</span>
+            </label>
+            <div class="frow">
+              <div class="f1"><label>连续失败阈值（0 = 不按此规则）</label>
+                <NInputNumber v-model:value="draft.res_consec" :min="0" :max="100" /></div>
+              <div class="f1"><label>失败率统计窗口（分钟）</label>
+                <NInputNumber v-model:value="draft.res_window" :min="1" :max="1440" /></div>
+            </div>
+            <div class="frow">
+              <div class="f1"><label>窗口失败率阈值（%，0 = 不按此规则）</label>
+                <NInputNumber v-model:value="draft.res_rate_pct" :min="0" :max="100" /></div>
+              <div class="f1"><label>窗口最少样本数</label>
+                <NInputNumber v-model:value="draft.res_samples" :min="1" :max="1000" /></div>
+            </div>
+            <label class="checkline">
+              <NSwitch v-model:value="draft.res_auto" />
+              窗口结束后自动恢复
+              <span class="hint">默认关闭：熔断后必须人工点「恢复」。开启后暂停满一个窗口自动恢复一次（清空旧失败记录）。</span>
+            </label>
+            <label style="margin-top:6px">当前暂停的项目</label>
+            <div class="budget-today">
+              <div v-for="p in pausedProjects" :key="p.name" class="budget-row">
+                <span class="budget-name">{{ p.name }} · {{ p.health?.pause_reason || '已暂停' }}</span>
+                <NButton size="tiny" type="warning" @click="resumeProject(p.name)">恢复</NButton>
+              </div>
+              <div v-if="!pausedProjects.length" class="hint">当前没有暂停的项目</div>
+            </div>
+            <div class="sfoot"><NButton type="primary" :loading="resilienceSaving" @click="saveResilience">保存熔断设置</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'review'">

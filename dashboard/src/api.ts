@@ -111,6 +111,17 @@ export interface ProjectT {
     total_tokens?: number
     cost_cny?: number
   }
+  /** 熔断状态（V1-R4） */
+  health?: {
+    paused?: boolean
+    pause_reason?: string
+    paused_by?: string
+    paused_at?: number
+    consecutive_failures?: number
+    window_samples?: number
+    window_failures?: number
+    failure_rate?: number
+  }
   tasks_dir: string
   guide_file: string
   max_tasks_per_cycle: number
@@ -353,6 +364,15 @@ export interface AppStateT {
     total_tokens?: number
     cost_cny?: number
   }>
+  /** 熔断停机（V1-R4）：阈值配置；各项目状态在 ProjectT.health */
+  resilience_cfg?: {
+    enabled: boolean
+    max_consecutive_failures: number
+    window_minutes: number
+    max_failure_rate: number
+    min_samples: number
+    auto_resume: boolean
+  }
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
   /** 可开关工具目录（名称+中文描述+所属组；finish 为协议工具不在其中） */
@@ -680,6 +700,9 @@ export const api = {
     }>,
   gitInitProject: (p: { name: string }) =>
     post('/api/project/git-init', p) as Promise<{ ok: boolean; message: string }>,
+  /** 人工恢复熔断暂停的项目（V1-R4） */
+  resumeProject: (name: string) =>
+    post('/api/project/resume', { project: name }) as Promise<{ ok: boolean; health: Record<string, any> }>,
   taskStatus: (project: string, id: string, status: string) =>
     post('/api/task/status', { project, id, status }),
   /** 拖拽排序落盘：ids 为拖拽后该项目的完整任务顺序 */

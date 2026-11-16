@@ -287,6 +287,21 @@ class BudgetConfig:
 
 
 @dataclass
+class ResilienceConfig:
+    """熔断停机（V1-R4）：连续失败/窗口失败率触发项目级暂停。
+
+    auto_resume=false（默认）时必须人工在看板恢复，避免自动重启掩盖系统性故障。
+    """
+
+    enabled: bool = True
+    max_consecutive_failures: int = 3   # 0 = 不按连续失败触发
+    window_minutes: int = 120           # 失败率统计窗口
+    max_failure_rate: float = 0.6       # 0 = 不按失败率触发
+    min_samples: int = 5                # 窗口内最少样本数
+    auto_resume: bool = False
+
+
+@dataclass
 class WebConfig:
     """Web 可视化看板配置。"""
 
@@ -595,6 +610,7 @@ class AppConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     runlog: RunLogConfig = field(default_factory=RunLogConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
+    resilience: ResilienceConfig = field(default_factory=ResilienceConfig)
     web: WebConfig = field(default_factory=WebConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
@@ -1207,6 +1223,33 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         prices=prices,
     )
 
+    res_raw = raw.get("resilience") or {}
+    if not isinstance(res_raw, dict):
+        raise ValueError("resilience 配置必须是字典（键值对）。")
+    try:
+        r_consec = int(res_raw.get("max_consecutive_failures", 3) or 0)
+        r_window = int(res_raw.get("window_minutes", 120) or 0)
+        r_rate = float(res_raw.get("max_failure_rate", 0.6) or 0)
+        r_samples = int(res_raw.get("min_samples", 5) or 0)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"resilience 阈值必须是数字：{e}") from e
+    if not (0 <= r_consec <= 100):
+        raise ValueError("resilience.max_consecutive_failures 应为 0~100")
+    if not (1 <= r_window <= 1440):
+        raise ValueError("resilience.window_minutes 应为 1~1440")
+    if not (0 <= r_rate <= 1):
+        raise ValueError("resilience.max_failure_rate 应为 0~1")
+    if not (1 <= r_samples <= 1000):
+        raise ValueError("resilience.min_samples 应为 1~1000")
+    resilience = ResilienceConfig(
+        enabled=bool(res_raw.get("enabled", True)),
+        max_consecutive_failures=r_consec,
+        window_minutes=r_window,
+        max_failure_rate=r_rate,
+        min_samples=r_samples,
+        auto_resume=bool(res_raw.get("auto_resume", False)),
+    )
+
     web_raw = raw.get("web") or {}
     api_keys_in = web_raw.get("api_keys")
     api_keys: list[str] = []
@@ -1536,7 +1579,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 p_task_llm, p_review_llm, context=f"项目 {p_name} 的 review")
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
-                    runlog=runlog, budget=budget, web=web,
+                    runlog=runlog, budget=budget, resilience=resilience, web=web,
                     update=update, tools=tools, commands=commands, env=env,
                     permissions=permissions, notify=notify, masking=masking_cfg,
                     mirrors=mirrors,
@@ -1644,6 +1687,15 @@ def save_config(cfg: AppConfig) -> None:
             "max_tokens_per_project_per_day": cfg.budget.max_tokens_per_project_per_day,
             "max_cost_per_task_cny": cfg.budget.max_cost_per_task_cny,
             "prices": {k: dict(v) for k, v in cfg.budget.prices.items()},
+        },
+        # 熔断停机（V1-R4）：整体写回
+        "resilience": {
+            "enabled": cfg.resilience.enabled,
+            "max_consecutive_failures": cfg.resilience.max_consecutive_failures,
+            "window_minutes": cfg.resilience.window_minutes,
+            "max_failure_rate": cfg.resilience.max_failure_rate,
+            "min_samples": cfg.resilience.min_samples,
+            "auto_resume": cfg.resilience.auto_resume,
         },
         "web": {
             "host": cfg.web.host, "port": cfg.web.port,

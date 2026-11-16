@@ -1055,6 +1055,16 @@ budget:
     deepseek-chat: {prompt: 1.0, completion: 2.0}
 ```
 
+### 10.18 Circuit breaker and recovery
+
+Enable or tune it under **Settings → Circuit breaker & recovery** (on by default), or in the `resilience` section of `config.yaml`:
+
+- **Consecutive failure threshold**: pause the project after N consecutive failures (default 3);
+- **Window failure rate**: pause when the failure rate in the last N minutes exceeds a threshold with enough samples (default 120 minutes / 60% / at least 5 samples);
+- Once tripped, the project stops **claiming new tasks**; running tasks may finish, and the project card shows "Tripped" with the reason;
+- By default you must click **Resume** manually; enabling "auto-resume after window" clears the pause once the window has elapsed;
+- Budget exhaustion, task edits (`stale_lease`) and manual stops **do not count** as failures.
+
 ## 11. Data, backup, and migration
 
 ### 11.1 Where data lives
