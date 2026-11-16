@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orcsy.config import LLMConfig
 from orcsy.llm import LLMClient, TaskStopped, finish_response
+from orcsy.task_model import Task
 from orcsy.tools import FinishSignal, ToolContext
 
 
@@ -193,12 +194,54 @@ def test_read_command_alternation_still_guarded() -> None:
     print("ok: read_file/run_command 交替空转被只读熔断")
 
 
+def test_doc_task_gets_higher_read_threshold() -> None:
+    """docs/analysis 标签任务允许更多只读调研（60 次），但仍会熔断。"""
+    import tempfile
+
+    class _ReadLoopLLM(LLMClient):
+        def __init__(self, cfg: LLMConfig) -> None:
+            super().__init__(cfg)
+            self.n = 0
+
+        def _step_openai(self, use_tools: bool):  # type: ignore[override]
+            self.n += 1
+            self.usage["turns"] = self.n
+            args = json.dumps({"path": "target.py"})
+            return (
+                {"role": "assistant", "content": None,
+                 "tool_calls": [{"id": f"c{self.n}", "type": "function",
+                                 "function": {"name": "read_file", "arguments": args}}]},
+                [(f"c{self.n}", "read_file", args)], "",
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "target.py").write_text("x = 1\n", encoding="utf-8")
+        task = Task(id="DOC-1", path=Path(tmp) / "DOC-1.md", labels=["docs"])
+        ctx = ToolContext(root=Path(tmp), current_task=task, produces_code=True,
+                          enabled_tools=frozenset({"read_file", "finish"}))
+        client = _ReadLoopLLM(LLMConfig(
+            api_key="k", base_url="http://localhost:9", model="m"))
+        client.reset("sys")
+        try:
+            resp = client.run_task_loop("loop", ctx, max_turns=-1)
+        except FinishSignal as sig:
+            resp = finish_response(sig.payload)
+        assert client.usage["turns"] > 20, \
+            f"docs 任务不应在 20 次就被误杀，实际 {client.usage['turns']} 轮"
+        assert client.usage["turns"] < 80, \
+            f"docs 任务仍应有 60 次熔断上限，实际 {client.usage['turns']} 轮"
+        assert resp.action == "blocked"
+        assert "只读死循环" in (resp.notes or ""), resp.notes
+    print("ok: docs/analysis 任务使用更高只读阈值（60 次）")
+
+
 def main() -> int:
     test_unlimited_not_capped_at_120()
     test_finite_max_turns_still_caps()
     test_stop_event_breaks_unlimited()
     test_read_loop_still_guarded_under_unlimited()
     test_read_command_alternation_still_guarded()
+    test_doc_task_gets_higher_read_threshold()
     print("\nmax_turns=-1 真正不限轮数全部测试通过 ✅")
     return 0
 

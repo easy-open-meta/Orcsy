@@ -500,7 +500,17 @@ class LLMClient:
         repeat_calls: Counter[tuple[str, str]] = Counter()  # (工具, 参数) → 次数
         file_read_counts: Counter[str] = Counter()         # path -> 累计读取次数（防死循环）
         consecutive_read_turns = 0                         # 连续只读/扫描未产生文件改动的次数
-        read_warning_sent = False                          # 本轮连续只读是否已发过 10 次警告
+        read_warning_sent = False                          # 本轮连续只读是否已发过警告
+        # 文档/分析类任务天然需要更多只读调研（如 90+ 页面 CRUD 矩阵），
+        # 用更高的阈值避免正常文档任务被代码任务的 20 次阈值误杀；
+        # 最终仍会强制收尾，只是给模型更充分的收集与落盘空间。
+        task_obj = getattr(ctx, "current_task", None)
+        task_labels = {str(x).strip().lower()
+                       for x in (getattr(task_obj, "labels", None) or [])}
+        doc_task = bool(task_labels & {"docs", "doc", "documentation",
+                                       "analysis", "research", "design"})
+        read_warn_at = 30 if doc_task else 10
+        read_break_at = 60 if doc_task else 20
         forced_reason = ""       # 非空 = 因卡住/轮数耗尽强制收尾（而非 finish）
 
         while unlimited or turn < max_turns:
@@ -636,7 +646,7 @@ class LLMClient:
                         except Exception:  # noqa: BLE001 — 台账旁路
                             pass
 
-                    if produces_code and consecutive_read_turns >= 10 and not read_warning_sent:
+                    if produces_code and consecutive_read_turns >= read_warn_at and not read_warning_sent:
                         read_warning_sent = True
                         result += (
                             f"\n\n🚨 警告：你已连续 {consecutive_read_turns} 次调用只读/扫描工具"
@@ -662,7 +672,7 @@ class LLMClient:
                 # 防死循环 2：代码生产类角色连续只读/扫描未产生文件改动
                 # （含被拦截的重读）累计达上限 → 强制熔断收尾。用 ctx.produces_code
                 # 判定，单兵也覆盖；PM/QA（False）不误伤。run_command 不重置计数。
-                if produces_code and consecutive_read_turns >= 20:
+                if produces_code and consecutive_read_turns >= read_break_at:
                     forced_reason = (
                         f"检测到只读死循环：已连续 {consecutive_read_turns} 次只读/扫描工具调用"
                         "而未产生任何文件改动，强制熔断收尾")
@@ -700,7 +710,11 @@ class LLMClient:
                     return self._finish_response(self._parse_finish_args(args_json))
         except LLMError:
             pass
-        return AgentResponse.fallback(f"{forced_reason}，模型未给出结论")
+        return AgentResponse(
+            action="blocked", summary="", files_changed=[],
+            commit_message="",
+            notes=(f"强制收尾（{forced_reason}）：模型未在收尾轮给出 finish 结论；"
+                   "请检查任务规模，必要时拆分后重新入队"))
 
     @staticmethod
     def _parse_finish_args(args_json: str | dict) -> dict:
