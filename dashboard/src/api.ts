@@ -82,6 +82,8 @@ export interface TaskT {
   review_pending?: boolean
   /** 累计审查不通过轮数（0 = 从未不通过） */
   review_round?: number
+  /** 受阻原因：budget_exceeded / stale_lease */
+  block_reason?: string
   /** 看板拖拽排序的手动序号；null = 未手动排过（显示回退 状态→优先级→id） */
   order: number | null
   /** 前置依赖任务 ID 列表 */
@@ -100,6 +102,26 @@ export interface ProjectT {
   name: string
   path: string
   enabled: boolean
+  /** 预算软停：true = 项目当日 token 预算用尽，暂停领取新任务 */
+  budget_paused?: boolean
+  budget_today?: {
+    date?: string
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    cost_cny?: number
+  }
+  /** 熔断状态（V1-R4） */
+  health?: {
+    paused?: boolean
+    pause_reason?: string
+    paused_by?: string
+    paused_at?: number
+    consecutive_failures?: number
+    window_samples?: number
+    window_failures?: number
+    failure_rate?: number
+  }
   tasks_dir: string
   guide_file: string
   max_tasks_per_cycle: number
@@ -318,6 +340,46 @@ export interface AppStateT {
     custom_patterns: string[]
   }
   logging: { retention_days: number; max_total_mb: number }
+  /** 运行台账（V1-R1）：dir 为空 = 配置文件同级 runs/ */
+  runlog?: {
+    enabled: boolean
+    dir: string
+    retention_days: number
+    max_total_mb: number
+  }
+  /** 目录迁移进度：state=running 时前端锁定台账设置与回放按钮 */
+  runlog_migration?: RunLogMigrationT
+  /** 预算硬闸：限额/单价 + 各项目今日用量 */
+  budget_cfg?: {
+    enabled: boolean
+    max_tokens_per_task: number
+    max_tokens_per_project_per_day: number
+    max_cost_per_task_cny: number
+    prices: Record<string, { prompt?: number; completion?: number }>
+  }
+  budget_today?: Record<string, {
+    date?: string
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    cost_cny?: number
+  }>
+  /** 熔断停机（V1-R4）：阈值配置；各项目状态在 ProjectT.health */
+  resilience_cfg?: {
+    enabled: boolean
+    max_consecutive_failures: number
+    window_minutes: number
+    max_failure_rate: number
+    min_samples: number
+    auto_resume: boolean
+  }
+  /** 统一出口白名单（V1-R6）：配置 + 当前策略状态 */
+  egress_cfg?: {
+    mode: string
+    extra_hosts: string[]
+    audit: boolean
+  }
+  egress_status?: EgressStatusT
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
   /** 可开关工具目录（名称+中文描述+所属组；finish 为协议工具不在其中） */
@@ -528,6 +590,80 @@ async function get(path: string): Promise<any> {
   throw new Error(NET_ERR)
 }
 
+/** 运行台账（V1-R1）：一次任务执行的结构化留痕 */
+export interface RunSummaryT {
+  run_id: string
+  project: string
+  task_id: string
+  role: string
+  agent_name: string
+  model: string
+  started_at: string
+  finished_at: string
+  outcome: string
+  exit_reason: string
+  event_count: number
+  review_verdict: string
+  commit: string
+  tokens: { prompt_tokens?: number; completion_tokens?: number }
+}
+
+export interface RunEventT {
+  seq: number
+  ts: string
+  type: string
+  actor: string
+  data: Record<string, any>
+}
+
+export interface RunDetailT {
+  ok: boolean
+  meta: Record<string, any>
+  events: RunEventT[]
+  event_total: number
+  offset: number
+  artifacts: { name: string; size: number }[]
+}
+
+/** 运行台账目录迁移（V1-R1）：后台线程状态与进度 */
+export interface RunLogMigrationT {
+  state: 'idle' | 'running' | 'done' | 'failed'
+  old_root: string
+  new_root: string
+  total_runs: number
+  done_runs: number
+  total_bytes: number
+  done_bytes: number
+  current: string
+  percent: number
+  started_at: string
+  finished_at: string
+  error: string
+}
+
+/** 写操作审计（V1-R5） */
+export interface AuditEntryT {
+  ts: string
+  action: string
+  actor: string
+  ip: string
+  target: string
+  result: string
+  detail: string
+}
+
+/** 统一出口白名单（V1-R6）：当前策略 + 进程内放行/拒绝计数 */
+export interface EgressStatusT {
+  mode: string
+  audit: boolean
+  extra_hosts: string[]
+  derived_hosts: string[]
+  runtime_hosts: { host: string; purpose: string; ts: string }[]
+  allowed: number
+  denied: number
+  last_denied: { ts: string; host: string; purpose: string }[]
+}
+
 export const api = {
   /** 全量状态；summary=true 移动端轻量摘要（省略日志尾部与归档，省流量省电） */
   state: (summary = false): Promise<AppStateT> =>
@@ -544,6 +680,40 @@ export const api = {
   scan: () => post('/api/scan', {}),
   taskFull: (project: string, id: string) =>
     get(`/api/task?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`),
+  /** 运行台账：某项目/某任务的 run 列表（只读回放） */
+  runs: (p: { project?: string; task_id?: string; limit?: number }) => {
+    const qs = new URLSearchParams()
+    if (p.project) qs.set('project', p.project)
+    if (p.task_id) qs.set('task_id', p.task_id)
+    if (p.limit) qs.set('limit', String(p.limit))
+    return get(`/api/runs?${qs.toString()}`) as Promise<{ ok: boolean; runs: RunSummaryT[] }>
+  },
+  runDetail: (project: string, runId: string, offset = 0, limit = 2000) =>
+    get(`/api/runs/detail?project=${encodeURIComponent(project)}`
+      + `&run_id=${encodeURIComponent(runId)}&offset=${offset}&limit=${limit}`) as Promise<RunDetailT>,
+  runArtifact: async (project: string, runId: string, name: string): Promise<string> => {
+    const path = `/api/runs/artifact?project=${encodeURIComponent(project)}`
+      + `&run_id=${encodeURIComponent(runId)}&name=${encodeURIComponent(name)}`
+    const r = await fetch(path, { headers: authHeaders() })
+    handle401(r, path)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    return r.text()
+  },
+  /** 运行台账目录迁移进度（迁移中每秒轮询） */
+  runlogMigration: () =>
+    get('/api/runlog/migration') as Promise<{ ok: boolean; migration: RunLogMigrationT }>,
+  retryRunlogMigration: () =>
+    post('/api/runlog/migration/retry', {}) as Promise<{ ok: boolean; migration: RunLogMigrationT }>,
+  /** 统一出口白名单：当前策略与运行计数（只读） */
+  egress: () => get('/api/egress') as Promise<{ ok: boolean; egress: EgressStatusT }>,
+  /** 写操作审计（V1-R5）：最近记录，支持 action/actor 过滤 */
+  audit: (p: { limit?: number; action?: string; actor?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (p.limit) qs.set('limit', String(p.limit))
+    if (p.action) qs.set('action', p.action)
+    if (p.actor) qs.set('actor', p.actor)
+    return get(`/api/audit?${qs.toString()}`) as Promise<{ ok: boolean; entries: AuditEntryT[] }>
+  },
   taskSave: (p: {
     project: string; id: string; title: string; priority: string; status: string
     labels: string[]; assignee: string; description: string; depends_on?: string[]
@@ -570,6 +740,9 @@ export const api = {
     }>,
   gitInitProject: (p: { name: string }) =>
     post('/api/project/git-init', p) as Promise<{ ok: boolean; message: string }>,
+  /** 人工恢复熔断暂停的项目（V1-R4） */
+  resumeProject: (name: string) =>
+    post('/api/project/resume', { project: name }) as Promise<{ ok: boolean; health: Record<string, any> }>,
   taskStatus: (project: string, id: string, status: string) =>
     post('/api/task/status', { project, id, status }),
   /** 拖拽排序落盘：ids 为拖拽后该项目的完整任务顺序 */

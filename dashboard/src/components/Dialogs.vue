@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
-import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode } from '../api'
+import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode, type RunDetailT, type RunSummaryT } from '../api'
 import { isMobile, viewportHeight } from '../mobile'
+import { miIcon } from '../mi'
 import { beginRestartWait, navigateTo, refresh, ui, store } from '../store'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
@@ -55,6 +56,8 @@ const pDraft = reactive({
 
 const teamMemberKeyTouched = reactive<Record<string, boolean>>({})
 const gitIniting = shallowRef(false)
+// 项目小组卡片默认收起以节省弹窗高度，点击头部展开/收起
+const teamCardOpen = ref(false)
 
 const roleSelectOptions = [
   { label: '项目经理 (PM)', value: 'pm' },
@@ -161,7 +164,7 @@ const defaultProjectToolCategories = [
   {
     key: 'task_collab',
     label: '任务管理与协议',
-    icon: 'bolt',
+    icon: 'task_alt',
     tools: ['create_tasks', 'finish'],
   },
   {
@@ -173,13 +176,13 @@ const defaultProjectToolCategories = [
   {
     key: 'local_debug',
     label: '本地开发服务与 API',
-    icon: '🚀',
+    icon: 'rocket_launch',
     tools: ['dev_server_start', 'dev_server_logs', 'dev_server_stop', 'http_request'],
   },
   {
     key: 'browser_auto',
     label: 'Chromium 浏览器自动化',
-    icon: '🧭',
+    icon: 'explore',
     tools: [
       'browser_navigate', 'browser_snapshot', 'browser_click',
       'browser_type', 'browser_wait', 'browser_screenshot',
@@ -395,6 +398,7 @@ watch(() => ui.projectDlg, (dlg) => {
   }
 
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
+  teamCardOpen.value = false   // 每次打开弹窗都先收起，避免小组配置占满首屏
 })
 
 // ---- 专属模型绑定：拉取列表 / 测试连接（未填字段回退全局 llm 配置） ----
@@ -744,6 +748,78 @@ const tDraft = reactive({
 })
 // 409 冲突后「保留我的修改」重试标记：下次 saveTask 带 force_overwrite=true
 const tForceOverwrite = shallowRef(false)
+
+// ---- 运行台账（V1-R1）：任务详情内的运行记录与回放（只读） ----
+const runList = ref<RunSummaryT[]>([])
+const runLoading = ref(false)
+const runOpen = ref('')
+const runDetail = ref<RunDetailT | null>(null)
+const runDetailLoading = ref(false)
+const runArtifact = ref('')
+const runArtifactName = ref('')
+const runError = ref('')
+// 目录迁移期间锁定回放（迁移线程可能正移动当前 run 的目录）
+const runlogBusy = computed(() => store.state?.runlog_migration?.state === 'running')
+
+async function loadRuns(): Promise<void> {
+  const dlg = ui.taskDlg
+  if (!dlg?.id) { runList.value = []; return }
+  runLoading.value = true
+  try {
+    const r = await api.runs({ project: dlg.project, task_id: dlg.id, limit: 20 })
+    runList.value = r.runs || []
+  } catch {
+    runList.value = []
+  } finally {
+    runLoading.value = false
+  }
+}
+
+async function toggleRun(r: RunSummaryT): Promise<void> {
+  if (runlogBusy.value) return
+  if (runOpen.value === r.run_id) {
+    runOpen.value = ''; runDetail.value = null; runArtifact.value = ''
+    return
+  }
+  runOpen.value = r.run_id
+  runArtifact.value = ''; runArtifactName.value = ''
+  runDetail.value = null
+  runError.value = ''
+  runDetailLoading.value = true
+  try {
+    runDetail.value = await api.runDetail(r.project || ui.taskDlg?.project || '', r.run_id)
+  } catch (e: any) {
+    runError.value = String(e?.message || e)
+  } finally {
+    runDetailLoading.value = false
+  }
+}
+
+async function viewRunArtifact(r: RunSummaryT, name: string): Promise<void> {
+  if (runlogBusy.value) return
+  try {
+    runArtifactName.value = name
+    runArtifact.value = await api.runArtifact(r.project || ui.taskDlg?.project || '', r.run_id, name)
+  } catch (e: any) {
+    runArtifact.value = `读取失败：${e?.message || e}`
+  }
+}
+
+function runEventLine(e: { type: string; data: Record<string, any> }): string {
+  const d = e.data || {}
+  switch (e.type) {
+    case 'progress': return String(d.line || '')
+    case 'tool_call': return `${d.name || '?'}${d.ok ? '' : '（失败）'}${d.intercepted ? '（拦截）' : ''} ${d.ms || 0}ms ${d.preview || ''}`
+    case 'model_call': return `${d.model || ''} ${d.prompt_tokens || 0}+${d.completion_tokens || 0} tokens`
+    case 'review_verdict': return `${d.verdict || ''} ${d.summary || ''}`
+    case 'review_start': return `model=${d.model || ''} round=${d.round || 0}`
+    case 'commit': return `${d.hash || ''} @ ${d.branch || ''}`
+    case 'merge': return `${d.mode || ''} ${d.review_verdict || ''}`
+    case 'run_end': return `${d.outcome || ''} / ${d.exit_reason || ''}`
+    case 'run_start': return `${d.role || ''} ${d.model || ''}`
+    default: return JSON.stringify(d).slice(0, 120)
+  }
+}
 const PRI_OPTIONS = ['P0', 'P1', 'P2', 'P3', 'P4']
 const priOptions = computed(() => {
   const opts = PRI_OPTIONS.map(v => ({ label: v, value: v }))
@@ -774,7 +850,7 @@ const projectAssigneeOptions = computed(() => {
   if (p && p.team_members_effective && p.team_members_effective.length > 0) {
     for (const m of p.team_members_effective) {
       opts.push({
-        label: `${m.icon} ${m.name} (${m.role})`,
+        label: `${m.name} (${m.role})`,
         value: m.id,
       })
     }
@@ -873,6 +949,9 @@ watch(() => ui.taskDlg, async (dlg) => {
   tDraft.dep_state = ''
   tDraft.versionToken = ''
   tForceOverwrite.value = false
+  // 运行记录：重开对话框时清空，避免看到上一个任务的 run
+  runList.value = []; runOpen.value = ''; runDetail.value = null
+  runArtifact.value = ''; runArtifactName.value = ''; runError.value = ''
   // 打开即暂停草稿落盘（watch 填值期间不当作用户输入），填完再恢复
   draftPaused = true
   draftAvailable.value = false
@@ -906,6 +985,8 @@ watch(() => ui.taskDlg, async (dlg) => {
     const raw = draftKey.value ? localStorage.getItem(draftKey.value) : null
     draftAvailable.value = !!(raw && !tReadonly.value)
   } catch { draftAvailable.value = false }
+  // 运行台账：已有任务才拉取（新建任务尚无 run）
+  if (dlg.id) void loadRuns()
   await nextTick()
   draftPaused = false
 })
@@ -1289,19 +1370,32 @@ async function newFolder(): Promise<void> {
     <NInput v-model:value="pDraft.cmds" placeholder="python, pytest, npm, dotnet" />
     <!-- 多模型 Agent 项目小组模式切换 -->
     <div style="margin-top:12px; padding: 10px 12px; background: rgba(0,128,255,0.05); border: 1px solid rgba(0,128,255,0.25); border-radius: 8px;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <label class="checkline" style="margin:0; gap:8px;">
-          <NSwitch v-model:value="pDraft.team.enabled" />
-          <span style="font-weight:600; font-size:13px; color:var(--text)"><i class="ms sm">group</i> 多模型 Agent 项目小组模式 (Team)</span>
-        </label>
-        <NTag size="tiny" round :type="pDraft.team.enabled ? 'info' : 'default'">
-          {{ pDraft.team.enabled ? '小组协同模式已启用' : '传统单兵模式' }}
-        </NTag>
+      <div class="teamcard-head" role="button" tabindex="0" title="点击展开/收起小组配置"
+           :aria-expanded="teamCardOpen"
+           @click="teamCardOpen = !teamCardOpen"
+           @keydown.enter.prevent="teamCardOpen = !teamCardOpen"
+           @keydown.space.prevent="teamCardOpen = !teamCardOpen">
+        <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span style="display:inline-flex; flex:none;" @click.stop>
+            <NSwitch v-model:value="pDraft.team.enabled" />
+          </span>
+          <span class="teamcard-title"><i class="ms sm">group</i> 多模型 Agent 项目小组模式 (Team)</span>
+        </div>
+        <div class="teamcard-ops">
+          <NTag size="tiny" round :type="pDraft.team.enabled ? 'info' : 'default'">
+            {{ pDraft.team.enabled ? '小组协同模式已启用' : '传统单兵模式' }}
+          </NTag>
+          <i class="ms sm teamcard-chev">{{ teamCardOpen ? 'expand_less' : 'expand_more' }}</i>
+        </div>
       </div>
 
-      <template v-if="pDraft.team.enabled">
+      <template v-if="teamCardOpen">
+        <div v-if="!pDraft.team.enabled" class="hint" style="margin-top:8px">
+          小组模式当前关闭；开启上方开关后可配置并发策略、QA 回归轮数与成员名册。收起不影响已保存的配置。
+        </div>
+        <template v-if="pDraft.team.enabled">
         <div style="margin-top:8px; font-size:12px; color:var(--dim); line-height:1.6">
-          🛡 <b>工作区沙盒已强制启用</b>：所有写代码角色按任务在独立 Worktree 沙盒中编码，通过审查后安全合入主分支工作区（未提交状态），<b>默认不自动 commit 与 push</b>，最后提交完全由人工把关！
+          <i class="ms sm">security</i> <b>工作区沙盒已强制启用</b>：所有写代码角色按任务在独立 Worktree 沙盒中编码，通过审查后安全合入主分支工作区（未提交状态），<b>默认不自动 commit 与 push</b>，最后提交完全由人工把关！
         </div>
 
         <div v-if="editingProject && !editingProject.is_git_repo" style="margin-top:6px; display:flex; align-items:center; gap:8px;">
@@ -1402,6 +1496,7 @@ async function newFolder(): Promise<void> {
             </div>
           </div>
         </div>
+        </template>
       </template>
     </div>
 
@@ -1462,7 +1557,7 @@ async function newFolder(): Promise<void> {
           <NButton size="small" :loading="rFetching" @click="fetchReviewModels" style="margin-bottom:2px">获取模型列表</NButton>
         </div>
       </div>
-      <div class="hint" v-if="reviewModelConflict" style="color:#d03050">⚠ {{ reviewModelConflict }}</div>
+      <div class="hint" v-if="reviewModelConflict" style="color:#d03050"><i class="ms sm">warning</i> {{ reviewModelConflict }}</div>
       <div class="hint" v-else>审查模型必须与任务模型不同；返工轮数留空 = 跟随全局（当前 {{ store.state?.review_cfg?.max_review_rounds === -1 ? '不上限' : (store.state?.review_cfg?.max_review_rounds ?? 2) + ' 次' }}）。输入 -1 表示不设上限持续返工。</div>
     </template>
     <label style="margin-top:12px">访问权限（人工审批模式）</label>
@@ -1494,7 +1589,7 @@ async function newFolder(): Promise<void> {
         <div v-for="cat in projectToolCategories" :key="cat.key" class="pcat-group">
           <div class="pcat-head">
             <div style="display:flex;align-items:center;gap:6px">
-              <span><i class="ms sm">{{ cat.icon }}</i></span>
+              <span><i class="ms sm">{{ miIcon(cat.icon) || cat.icon }}</i></span>
               <span style="font-weight:600;font-size:12px;color:var(--text)">{{ cat.label }}</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px">
@@ -1637,7 +1732,7 @@ async function newFolder(): Promise<void> {
       <label>前置依赖任务（全部完成后本任务方可认领执行）</label>
       <NSelect v-model:value="tDraft.depends_on" multiple filterable :options="projectTaskOptions" :disabled="tReadonly" placeholder="选择依赖的前置任务（可选）..." />
       <div v-if="tDraft.parent_id" class="hint" style="margin-top: 4px;">
-        🔗 关联父需求/来源任务：{{ tDraft.parent_id }} {{ tDraft.qa_round ? `· 回归轮次 #${tDraft.qa_round}` : '' }}
+        <i class="ms sm">link</i> 关联父需求/来源任务：{{ tDraft.parent_id }} {{ tDraft.qa_round ? `· 回归轮次 #${tDraft.qa_round}` : '' }}
       </div>
     </div>
     <label>任务描述（Markdown 正文）</label>
@@ -1645,11 +1740,11 @@ async function newFolder(): Promise<void> {
     <div class="md-bar" v-if="isMobile && !tReadonly">
       <button type="button" @click="mdInsert('# ', '')">H1</button>
       <button type="button" @click="mdInsert('## ', '')">H2</button>
-      <button type="button" @click="mdInsert('- [ ] ', '')">☑ 待办</button>
-      <button type="button" @click="mdInsert('- ', '')">• 列表</button>
+      <button type="button" @click="mdInsert('- [ ] ', '')"><i class="ms sm">check_box</i> 待办</button>
+      <button type="button" @click="mdInsert('- ', '')"><i class="ms sm">format_list_bulleted</i> 列表</button>
       <button type="button" @click="mdInsert('**', '**')">B 粗体</button>
-      <button type="button" @click="mdInsert('`', '`')">‹code›</button>
-      <button type="button" @click="mdInsert('\n```\n', '\n```\n')">```</button>
+      <button type="button" title="行内代码" @click="mdInsert('`', '`')"><i class="ms sm">code</i></button>
+      <button type="button" title="代码块" @click="mdInsert('\n```\n', '\n```\n')"><i class="ms sm">integration_instructions</i></button>
     </div>
     <NInput ref="descInputRef" v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
     <!-- 结构化审查意见（从正文「## 审查结果」节解析）：severity 色标条目列表 -->
@@ -1664,6 +1759,59 @@ async function newFolder(): Promise<void> {
         </div>
       </div>
     </template>
+    <!-- 运行台账（V1-R1）：历史 run 列表 + 事件回放 + 工件查看（只读） -->
+    <div v-if="ui.taskDlg?.id" class="runsec">
+      <div class="runsec-head">
+        <label style="margin:0">运行记录</label>
+        <span class="hint" style="margin:0">{{ runList.length ? `${runList.length} 次` : '暂无' }}</span>
+        <NButton size="tiny" quaternary :loading="runLoading" :disabled="runlogBusy"
+                 @click="loadRuns">刷新</NButton>
+      </div>
+      <div v-if="runlogBusy" class="hint">
+        运行台账正在迁移目录，暂不可回放；迁移完成后自动恢复。
+      </div>
+      <div v-if="!runLoading && !runList.length" class="hint">
+        暂无运行记录：任务首次执行后生成；配置 runlog.enabled=false 时不记录。
+      </div>
+      <div v-for="r in runList" :key="r.run_id" class="runrow">
+        <div class="runrow-head clickable" :class="{ disabled: runlogBusy }"
+             @click="toggleRun(r)">
+          <span class="run-badge" :class="`o-${r.outcome || 'running'}`">{{ r.outcome || 'running' }}</span>
+          <span class="run-time">{{ (r.started_at || '').slice(5, 16).replace('T', ' ') }}</span>
+          <span class="run-meta">{{ r.role || r.agent_name || 'agent' }} · {{ r.event_count }} 事件{{ r.review_verdict ? ' · 审查 ' + r.review_verdict : '' }}</span>
+          <span class="run-toggle"><i class="ms sm">{{ runOpen === r.run_id ? 'expand_more' : 'chevron_right' }}</i></span>
+        </div>
+        <div v-if="runOpen === r.run_id" class="run-detail">
+          <div v-if="runDetailLoading" class="hint">加载中…</div>
+          <template v-else-if="runDetail">
+            <div v-if="runError" class="err">{{ runError }}</div>
+            <div class="hint">
+              exit: {{ runDetail.meta.exit_reason || '-' }} · tokens:
+              {{ runDetail.meta.tokens?.prompt_tokens || 0 }}+{{ runDetail.meta.tokens?.completion_tokens || 0 }}
+              <template v-if="runDetail.meta.commit"> · commit {{ runDetail.meta.commit }}</template>
+            </div>
+            <div class="run-actions">
+              <NButton v-for="a in runDetail.artifacts" :key="a.name" size="tiny" quaternary
+                       :disabled="runlogBusy"
+                       :type="runArtifactName === a.name ? 'primary' : 'default'"
+                       @click="viewRunArtifact(r, a.name)">{{ a.name }}</NButton>
+            </div>
+            <pre v-if="runArtifact" class="run-artifact">{{ runArtifact }}</pre>
+            <div v-if="runDetail.event_total > runDetail.events.length" class="hint">
+              仅显示前 {{ runDetail.events.length }} / {{ runDetail.event_total }} 条事件（可在 meta.json 查看完整计数）
+            </div>
+            <div class="run-events">
+              <div v-for="e in runDetail.events" :key="e.seq" class="run-event">
+                <span class="re-seq">{{ e.seq }}</span>
+                <span class="re-type">{{ e.type }}</span>
+                <span class="re-ts">{{ (e.ts || '').slice(11, 19) }}</span>
+                <span class="re-data">{{ runEventLine(e) }}</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
     <div class="dlg-actions" v-if="!isMobile">
       <NButton @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
       <NButton v-if="!tReadonly" type="primary" @click="saveTask(tForceOverwrite)">保存</NButton>
@@ -1677,13 +1825,13 @@ async function newFolder(): Promise<void> {
       首次打开需输入登录密码{{ cAuthRequired ? '（已开启访问鉴权）' : '（未开启鉴权可直接访问）' }}。</div>
     <!-- 仅监听 127.0.0.1：不渲染打不开的回环二维码，展示一键开启 + 手动指引 -->
     <div class="ep-guide" v-if="cAllLoopback && !cLoading">
-      <div class="ep-guide-title">⚠️ 手机现在还连不上：看板只监听了本机回环（127.0.0.1）</div>
+      <div class="ep-guide-title"><i class="ms sm">warning</i> 手机现在还连不上：看板只监听了本机回环（127.0.0.1）</div>
       <div class="ep-enable">
         <NCheckbox :checked="cEnableChecked" :disabled="cEnableBusy || cEnabled"
                    @update:checked="onEnableToggle">
           一键开放手机访问（自动改配置并重启应用）
         </NCheckbox>
-        <div class="ep-enable-note" v-if="cEnabled">✅ 已开放（配置已保存）{{ cEnableNote ? '——' + cEnableNote : '，应用重启中，请稍候…' }}</div>
+        <div class="ep-enable-note" v-if="cEnabled"><i class="ms sm">check_circle</i> 已开放（配置已保存）{{ cEnableNote ? '——' + cEnableNote : '，应用重启中，请稍候…' }}</div>
       </div>
       <div class="ep-guide-steps">
         <div>手动方式：打开 config.yaml（数据目录下），把 <code>web.host</code> 改为 <code>0.0.0.0</code>，
@@ -1857,6 +2005,14 @@ async function newFolder(): Promise<void> {
 .hint { font-size: 12px; color: var(--faint); margin-bottom: 8px; }
 .duo { display: flex; gap: 10px; }
 .duo > div { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+/* 项目小组卡片：整个头部可点击展开/收起，收起时只保留开关与状态标签 */
+.teamcard-head { display: flex; flex-wrap: wrap; justify-content: space-between;
+  align-items: center; gap: 8px 10px; cursor: pointer; user-select: none; }
+.teamcard-head:hover .teamcard-title { color: var(--acc, #5b8cff); }
+.teamcard-title { font-weight: 600; font-size: 13px; color: var(--text);
+  min-width: 0; }
+.teamcard-ops { display: flex; align-items: center; gap: 8px; flex: none; }
+.teamcard-chev { color: var(--faint); }
 label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .pathline { display: flex; gap: 8px; }
@@ -1994,6 +2150,38 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .ep-guide-hint { font-size: 11.5px; color: var(--dim); margin-top: 8px; word-break: break-all; }
 .ep-enable { margin: 6px 0 8px; }
 .ep-enable-note { font-size: 12.5px; color: var(--text); margin-top: 6px; word-break: break-all; }
+/* ---- 运行台账（V1-R1）：任务详情内的 run 列表与回放 ---- */
+.runsec { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.runsec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.runsec-head .hint { flex: 1; }
+.runrow { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+.runrow-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 12.5px; }
+.runrow-head:hover { background: rgba(128, 140, 180, 0.12); }
+.runrow-head.disabled { opacity: 0.55; cursor: not-allowed; }
+.run-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: rgba(128, 140, 180, 0.18); color: var(--dim); }
+.run-badge.o-done { background: rgba(64, 180, 120, 0.18); color: #4cbf87; }
+.run-badge.o-blocked { background: rgba(220, 120, 90, 0.18); color: #e08a6a; }
+.run-badge.o-cancelled { background: rgba(160, 160, 160, 0.18); color: var(--faint); }
+.run-badge.o-open { background: rgba(90, 140, 255, 0.18); color: #6f9dff; }
+.run-time { font-family: Consolas, monospace; color: var(--dim); }
+.run-meta { flex: 1; color: var(--faint); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.run-toggle { color: var(--faint); }
+.run-detail { padding: 8px 10px; border-top: 1px dashed var(--line); }
+.run-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.run-artifact { max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.22);
+  border-radius: 6px; padding: 8px; font: 11.5px/1.5 Consolas, monospace;
+  white-space: pre-wrap; word-break: break-all; margin: 0 0 8px; }
+.run-events { max-height: 260px; overflow: auto; border: 1px solid var(--line);
+  border-radius: 6px; }
+.run-event { display: flex; gap: 6px; padding: 3px 7px;
+  font: 11.5px/1.5 Consolas, monospace; border-bottom: 1px solid rgba(128, 140, 180, 0.1); }
+.run-event:last-child { border-bottom: none; }
+.re-seq { color: var(--faint); min-width: 26px; text-align: right; }
+.re-type { color: #6f9dff; min-width: 92px; }
+.re-ts { color: var(--faint); min-width: 58px; }
+.re-data { flex: 1; color: var(--text); word-break: break-all; }
 </style>
 
 <!-- NModal 瞬移到 body 后 scoped :deep() 够不到 NCard 内部节点：这两条须全局。

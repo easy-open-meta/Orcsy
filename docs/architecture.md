@@ -57,6 +57,7 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/tools_cmd.py` | 执行工具层 | 终端命令白名单执行、Windows 隐藏控制台、进程树管理与输出编码自愈 |
 | `orcsy/tools_task.py` | 执行工具层 | 任务拆单编排协议（create_tasks/DAG检测）、Bug 提单、PM指派与完成信号 |
 | `orcsy/tools_net.py` | 执行工具层 | SSRF 严格防护网页抓取、HTML 文本抽取、技能正文读取与镜像测速 |
+| `orcsy/egress.py` | 基础设施 | 统一出口白名单：应用自身 HTTP 的主机判定、拒绝审计与更新 CDN 运行时放行 |
 | `orcsy/worktree.py` | 隔离沙箱层 | Git Worktree 物理目录映射、独立分支检出、陈旧锁恢复与重置清理 |
 | `orcsy/task_service.py` | Web 服务层 | 看板侧任务文件 CRUD（创建/状态/排序/批量删除/清空/读取），纯函数不感知 HTTP |
 | `orcsy/git_service.py` | Web 服务层 | 人工把关提交（stage 分支复位）、diff 预览、改动丢弃、Git 初始化与新项目引导 |
@@ -66,6 +67,11 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/config.py` | 领域模型 | 数据类（AppConfig 等 21 个 dataclass）、YAML 加载反序列化与配置解析 |
 | `orcsy/task_model.py` | 领域模型 | 任务 Markdown 文件解析、frontmatter 状态机与任务依赖 DAG 环检测 |
 | `orcsy/review.py` | 编排层 | 独立模型合并前只读审查 Agent |
+| `orcsy/runlog.py` | 可信层 | 运行台账：run 事件流、diff/测试/审查/用量工件、保留期清理与目录迁移 |
+| `orcsy/claims.py` | 可信层 | 任务指纹、TTL 租约（心跳/文件锁）、断点续跑标记与提交前二次校验 |
+| `orcsy/budget.py` | 可信层 | token/成本预算硬闸、项目当日累计与预算软停判断 |
+| `orcsy/resilience.py` | 可信层 | 连续失败/窗口失败率熔断、项目暂停与人工/自动恢复 |
+| `orcsy/audit.py` | 可信层 | 写操作审计 JSONL、轮转、尾部查询与敏感信息脱敏 |
 | `orcsy/subagent.py` | 编排层 | 并发只读子代理扇出（fan-out）探索引擎 |
 | `orcsy/masking.py` | 核心逻辑 | 发往模型厂商前的内存级敏感数据正则脱敏与写盘还原闭环 |
 | `orcsy/concurrency.py`| 基础设施 | 进程级大模型请求 AIMD（加性增/乘性减）自适应并发配额控制器 |

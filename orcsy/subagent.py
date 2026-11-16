@@ -95,6 +95,9 @@ def _run_single_subagent(
         is_subagent=True,
         # 子代理是纯只读调研员：不产出代码，连续只读熔断不适用
         produces_code=False,
+        # 预算共享：子代理消耗计入父任务额度；超限由 tracker 标记，
+        # 父循环在下一次请求前停止（子代理异常被吞也不会漏掉）
+        budget_tracker=getattr(parent_ctx, "budget_tracker", None),
     )
 
     paths_hint = (
@@ -109,6 +112,7 @@ def _run_single_subagent(
     )
 
     client = LLMClient(llm_cfg)
+    client.budget = getattr(parent_ctx, "budget_tracker", None)
     client.reset(_SUBAGENT_SYSTEM_PROMPT)
 
     try:

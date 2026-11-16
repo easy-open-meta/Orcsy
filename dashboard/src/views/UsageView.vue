@@ -4,13 +4,29 @@
 import { NCard, NTag } from 'naive-ui'
 import { computed, ref } from 'vue'
 import { store } from '../store'
-import { fmtTokens } from '../utils'
+import { fmtTokens, type TokenUnit } from '../utils'
 
 const usage = computed(() => store.state?.usage)
 
+// tokens 单位口径：中文（万/亿）或英文（K/M/B）；选择写入 localStorage，
+// 只影响用量页展示，精确值仍在卡片副标题与 tooltip 中可见。
+const UNIT_KEY = 'orcsy-usage-unit'
+function loadUnit(): TokenUnit {
+  try {
+    const saved = localStorage.getItem(UNIT_KEY)
+    if (saved === 'en' || saved === 'zh') return saved
+  } catch { /* 隐私模式忽略 */ }
+  return 'zh'
+}
+const unit = ref<TokenUnit>(loadUnit())
+function setUnit(v: TokenUnit): void {
+  unit.value = v
+  try { localStorage.setItem(UNIT_KEY, v) } catch { /* 隐私模式忽略 */ }
+}
+
 // fmtTokens 对 0 返回空串（规格展示语义）；用量页要显式看到 0
 function fmt(v: number | undefined): string {
-  return fmtTokens(v) || String(v ?? 0)
+  return fmtTokens(v, unit.value) || String(v ?? 0)
 }
 function fmtFull(v: number | undefined): string {
   return (v ?? 0).toLocaleString('zh-CN')
@@ -97,6 +113,15 @@ const heat = computed(() => {
 
 <template>
   <div class="usage" v-if="store.state">
+    <div class="ubar">
+      <span class="uhint">tokens 单位</span>
+      <div class="useg" role="group" aria-label="tokens 单位">
+        <button type="button" :class="{ on: unit === 'zh' }"
+                :aria-pressed="unit === 'zh'" @click="setUnit('zh')">万 / 亿</button>
+        <button type="button" :class="{ on: unit === 'en' }"
+                :aria-pressed="unit === 'en'" @click="setUnit('en')">K / M / B</button>
+      </div>
+    </div>
     <div class="ucards">
       <div class="ucard"><div class="ulabel">总任务数</div>
         <div class="uval">{{ usage?.total.tasks ?? 0 }}</div>
@@ -201,7 +226,8 @@ const heat = computed(() => {
       <div v-else class="uempty">暂无用量数据。</div>
     </NCard>
 
-    <NCard title="🕘 最近任务记录" size="small" class="scard">
+    <NCard size="small" class="scard">
+      <template #header><i class="ms">history</i> 最近任务记录</template>
       <template #header-extra>
         <div class="rec-tabs">
           <button class="rtab" :class="{ on: recTab === 'all' }" @click="recTab = 'all'">
@@ -239,6 +265,17 @@ const heat = computed(() => {
 <style scoped>
 .usage { padding: 0 20px; max-width: 1080px; display: flex; flex-direction: column; gap: 14px; }
 .hint { font-size: 12px; color: var(--faint); font-weight: 400; }
+/* tokens 单位中英切换：中文万/亿 ↔ 英文 K/M/B */
+.ubar { display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  flex-wrap: wrap; margin-bottom: -4px; }
+.uhint { font-size: 12px; color: var(--faint); }
+.useg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--card); }
+.useg button { border: 0; border-radius: 12px; padding: 3px 10px; cursor: pointer;
+  background: transparent; color: var(--dim); font: inherit; font-size: 12px;
+  font-variant-numeric: tabular-nums; }
+.useg button:hover { color: var(--text); }
+.useg button.on { background: var(--primary, #3574f0); color: #fff; }
 .ucards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .ucard { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 14px 16px; }

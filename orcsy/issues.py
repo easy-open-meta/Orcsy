@@ -18,6 +18,7 @@ import httpx
 import yaml
 
 from . import USER_AGENT
+from .egress import EgressDenied, check as egress_check
 
 # 单次拉取的分页上限：3 页 × 每页 50 条，覆盖绝大多数手工同步场景
 _MAX_PAGES = 3
@@ -120,6 +121,10 @@ def _get_json(url: str, *, headers: dict[str, str] | None = None,
     host = urlparse(url).hostname or ""
     trust_env = host not in ("127.0.0.1", "localhost", "::1")  # 环回地址不走系统代理
     headers = {"User-Agent": USER_AGENT, **(headers or {})}
+    try:
+        egress_check(url, purpose="issues")
+    except EgressDenied as e:
+        raise IssueError(str(e)) from e
     last_err: Exception | None = None
     resp = None
     for attempt in range(3):

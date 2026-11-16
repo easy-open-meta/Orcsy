@@ -14,11 +14,13 @@ git 项目的执行流程：
 from __future__ import annotations
 
 import contextlib
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .approvals import args_preview, get_manager, requires_approval
+from .budget import BudgetExceeded, BudgetTracker, get_budget_config
 from .config import (
     LLMConfig,
     LocalDebugConfig,
@@ -58,6 +60,8 @@ class TaskResult:
     pushed: bool = False
     duration_seconds: float = 0.0
     llm_error: str = ""            # LLM/网络层面的错误（区别于业务 blocked）
+    # 受阻原因：budget_exceeded / stale_lease；空 = 普通业务受阻
+    block_reason: str = ""
     files_changed: list[str] = field(default_factory=list)
     turns: int = 0                 # Agent 工具循环轮数
     prompt_tokens: int = 0         # 输入 token 累计（各轮之和，含历史重发）
@@ -98,9 +102,12 @@ class TaskExecutor:
                  max_agent_turns: int | None = None,
                  extra_system_prompt: str = "",
                  merge_lock: object | None = None,
-                 skills_base: Path | None = None) -> None:
+                 skills_base: Path | None = None,
+                 claims: object | None = None) -> None:
         self.project = project
         self.llm = llm
+        # 任务指纹/租约（V1-R2）；None = 未启用（单元测试直构/兼容旧调用）
+        self.claims = claims
         self.commit_and_merge = bool(commit_and_merge)
         # worktree_isolation：默认跟随 commit_and_merge（单兵模式保持历史语义）；
         # 项目小组模式下可强制开启 True，在独立 worktree 中开发并仅落地主分支工作区（不默认 commit）
@@ -267,12 +274,46 @@ class TaskExecutor:
         # 强制停止注册：看板可随时置位，工具循环在轮次/工具边界响应
         controls = get_task_controls()
         stop_event = controls.begin(self.project.name, task.id)
+
+        # 运行台账（V1-R1）：本任务一个 run；旁路写入，初始化失败返回 None
+        recorder = None
+        try:
+            from .runlog import get_run_store
+            recorder = get_run_store().new_run(
+                self.project.name, task.id, role=self.team_role,
+                agent_name=self.agent_name, model=self.llm.model)
+            self._run_recorder = recorder
+        except Exception:  # noqa: BLE001 — 台账绝不能阻断任务
+            self.log.warning("运行台账初始化失败（忽略）", exc_info=True)
+            self._run_recorder = None
+
+        # 预算硬闸：启用时为本次任务建计量器（子代理共享）
+        budget_tracker = None
+        self._budget_tracker = None
+        try:
+            cfg = get_budget_config()
+            if cfg.enabled:
+                budget_tracker = BudgetTracker(self.project.name, task.id, config=cfg)
+                self._budget_tracker = budget_tracker
+        except Exception:  # noqa: BLE001 — 计量器初始化失败不阻断任务
+            self.log.warning("预算计量器初始化失败（忽略）", exc_info=True)
+
+        def _on_progress(line: str) -> None:
+            append_progress(task.path, line)
+            if recorder is not None:
+                try:
+                    recorder.progress(line)
+                except Exception:  # noqa: BLE001 — 台账旁路
+                    pass
+
         try:
             response = self._agent_loop(
                 task, guide_content, skills or [], usage_out=usage,
                 stop_event=stop_event,
                 created_bugs_out=created_bugs,
-                on_progress=lambda line: append_progress(task.path, line))
+                on_progress=_on_progress,
+                recorder=recorder,
+                budget_tracker=budget_tracker)
             sub_u = usage.pop("_subagent_usage", {})
             result.turns = int(usage.get("turns", 0)) + int(sub_u.get("turns", 0))
             result.prompt_tokens = int(usage.get("prompt_tokens", 0)) + int(sub_u.get("prompt_tokens", 0))
@@ -320,6 +361,20 @@ class TaskExecutor:
                 if use_worktree:
                     self._cleanup_worktree_changes(wt_path)
                 result.outcome = "blocked" if response.action == "blocked" else "cancelled"
+        except BudgetExceeded as e:
+            self.log.warning("任务 %s 触发预算硬闸（%s）：%s", task.id, e.scope, e)
+            sub_u = usage.get("_subagent_usage", {}) or {}
+            result.outcome = "blocked"
+            result.block_reason = "budget_exceeded"
+            result.notes = f"预算超限（{e.scope}）：{e}"
+            result.turns = int(usage.get("turns", 0)) + int(sub_u.get("turns", 0))
+            result.prompt_tokens = (int(usage.get("prompt_tokens", 0))
+                                    + int(sub_u.get("prompt_tokens", 0)))
+            result.completion_tokens = (int(usage.get("completion_tokens", 0))
+                                        + int(sub_u.get("completion_tokens", 0)))
+            append_progress(task.path, f"⛔ {result.notes}；worktree 成果保留，"
+                                       "已停止本次执行")
+            # 不清理 worktree：预算超限 ≠ 成果无效，保留供调高预算后续跑
         except LLMError as e:
             self.log.error("任务 %s 调用大模型失败：%s", task.id, e)
             result.llm_error = str(e)
@@ -379,6 +434,28 @@ class TaskExecutor:
                 notify_task_end(self.project.name, task.id, task.title, result.outcome)
             except Exception:  # noqa: BLE001 — 提醒是旁路，任何异常都吞掉
                 self.log.warning("任务提醒失败（可忽略）", exc_info=True)
+        # 运行台账收尾（V1-R1）：用量工件 + run_end；旁路失败不影响返回值
+        if recorder is not None:
+            try:
+                recorder.artifact("usage.json", json.dumps({
+                    "turns": result.turns,
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                    "model": self.llm.model,
+                    "role": self.team_role,
+                    "agent_name": self.agent_name,
+                }, ensure_ascii=False, indent=2))
+                recorder.finish(
+                    result.outcome, self._exit_reason(result),
+                    tokens={"prompt_tokens": result.prompt_tokens,
+                            "completion_tokens": result.completion_tokens},
+                    commit=str(getattr(result, "commit", "") or result.wip_commit or ""),
+                    review_verdict=str(getattr(result.review, "verdict", "") or ""))
+            except Exception:  # noqa: BLE001 — 台账旁路
+                self.log.warning("运行台账收尾失败（可忽略）", exc_info=True)
+            finally:
+                self._run_recorder = None
+        self._budget_tracker = None
         return result
 
     # ---- Agent 循环 ----
@@ -386,7 +463,9 @@ class TaskExecutor:
     def _agent_loop(self, task: Task, guide_content: str, skills: list[Skill],
                     on_progress=None, usage_out: dict | None = None,
                     stop_event=None,
-                    created_bugs_out: list[str] | None = None) -> AgentResponse:
+                    created_bugs_out: list[str] | None = None,
+                    recorder=None,
+                    budget_tracker=None) -> AgentResponse:
         use_worktree = self.is_git_repo and self.worktree_isolation and self.produces_code
         work_root = self._task_worktree(task) if use_worktree else self.project.path
         if use_worktree:
@@ -444,8 +523,14 @@ class TaskExecutor:
                           current_role=self.team_role,
                           produces_code=self.produces_code,
                           max_split_depth=self.max_split_depth,
-                          llm_config=self.llm)
+                          llm_config=self.llm,
+                          run_recorder=recorder,
+                          budget_tracker=budget_tracker)
         client = LLMClient(self.llm)
+        client.budget = budget_tracker
+        if recorder is not None:
+            # 台账事件出口：模型调用事件由 LLMClient 统一上报
+            client.event_sink = recorder.event
         sys_prompt = build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,
                                          permission_mode=self.permission_mode,
@@ -570,7 +655,9 @@ class TaskExecutor:
                 approval_gate=gate,
                 max_turns=(-1 if self.review_cfg.max_turns == -1 else max(1, self.review_cfg.max_turns)),
                 allow_test_commands=self.review_cfg.allow_test_commands,
-                extra_env=self.extra_env)
+                extra_env=self.extra_env,
+                run_recorder=self._rec(),
+                budget_tracker=getattr(self, "_budget_tracker", None))
         finally:
             pass
 
@@ -605,6 +692,182 @@ class TaskExecutor:
         except Exception:  # noqa: BLE001 — 台账是旁路
             self.log.warning("审查用量记录失败（可忽略）", exc_info=True)
 
+    # ---- 运行台账辅助（V1-R1；全部旁路，异常只告警） ----
+
+    @staticmethod
+    def _exit_reason(result: TaskResult) -> str:
+        """把结果收敛成稳定的 exit_reason（看板筛选与统计按此聚合）。"""
+        if getattr(result, "llm_error", ""):
+            return "llm_error"
+        if getattr(result, "block_reason", ""):
+            return str(result.block_reason)
+        outcome = str(getattr(result, "outcome", "") or "")
+        verdict = str(getattr(getattr(result, "review", None), "verdict", "") or "")
+        if outcome == "done":
+            return "completed"
+        if outcome == "cancelled":
+            return "stopped"
+        if outcome == "blocked":
+            if "stale_lease" in str(getattr(result, "notes", "") or ""):
+                return "stale_lease"
+            if verdict == "fail":
+                return "review_fail"
+            if verdict == "error":
+                return "review_error"
+            return "blocked"
+        if outcome == "open":
+            return "reassigned" if getattr(result, "reassigned_to", "") else "wait_retest"
+        return outcome or "unknown"
+
+    def _rec(self):
+        return getattr(self, "_run_recorder", None)
+
+    # ---- 任务指纹 / 租约（V1-R2）----
+
+    def _task_fingerprint(self, task: Task) -> str:
+        return self.claims.fingerprint(
+            task, model=getattr(self.llm, "model", ""),
+            agent_key=self.team_role or "")
+
+    def _verify_claim(self, task: Task) -> tuple[bool, str]:
+        """提交/落地前二次校验：租约仍属于本次认领且任务指纹未变。
+
+        没有 `claim_id` 表示调用方绕过了调度器认领（测试/库式直调 executor）：
+        没有可校验的认领上下文，放行以保持直调路径的兼容性。生产链路
+        （`ProjectAgent` 扫描）一定先 acquire 再执行，正常任务不会缺 claim_id。
+        """
+        if self.claims is None or not getattr(task, "claim_id", ""):
+            return True, ""
+        try:
+            return self.claims.verify(task.id, self._task_fingerprint(task),
+                                      getattr(task, "claim_id", ""))
+        except Exception as e:  # noqa: BLE001 — 校验失败按失效处理（宁可停）
+            return False, f"claim_check_error:{e}"
+
+    def _mark_stale_claim(self, task: Task, result: TaskResult,
+                          reason: str) -> tuple[str, object]:
+        msg = (f"stale_lease：{reason}（任务内容或占用者已变化），"
+               "本次不提交、不合并；worktree 成果保留供人工/重新入队处理")
+        self.log.warning("任务 %s 提交前校验失败：%s", task.id, reason)
+        result.outcome = "blocked"
+        result.block_reason = "stale_lease"
+        result.notes = (result.notes + "\n" if result.notes else "") + msg
+        append_progress(task.path, f"⛔ {msg}")
+        return "blocked", None
+
+    def _mark_review_resume(self, task: Task, result: TaskResult) -> None:
+        """WIP 提交已落，记录续跑标记（进程被杀后启动恢复可只补审查/合并）。"""
+        if self.claims is None:
+            return
+        try:
+            self.claims.mark_resume(
+                task.id, "review",
+                wip_commit=str(getattr(result, "wip_commit", "") or ""),
+                fingerprint=self._task_fingerprint(task))
+        except Exception:  # noqa: BLE001 — 续跑标记失败不阻断提交
+            self.log.warning("续跑标记写入失败（忽略）", exc_info=True)
+
+    def _clear_resume(self, task: Task) -> None:
+        if self.claims is None:
+            return
+        try:
+            self.claims.clear_resume(task.id)
+        except Exception:  # noqa: BLE001
+            self.log.warning("续跑标记清理失败（忽略）", exc_info=True)
+
+    def _mark_merged(self, task: Task, result: TaskResult) -> None:
+        """合并已完成：保留「merged」断点，直到状态回写成功才清除。
+
+        否则「合并后、回写前」崩溃会让任务重跑并可能重复提交。
+        """
+        if self.claims is None:
+            return
+        try:
+            self.claims.mark_resume(
+                task.id, "merged",
+                wip_commit=str(getattr(result, "wip_commit", "") or ""),
+                fingerprint=self._task_fingerprint(task))
+        except Exception:  # noqa: BLE001
+            self.log.warning("合并断点写入失败（忽略）", exc_info=True)
+
+    def _rec_event(self, kind: str, **data) -> None:
+        rec = self._rec()
+        if rec is None:
+            return
+        try:
+            rec.event(kind, **data)
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("运行台账事件写入失败（可忽略）：%s", kind)
+
+    def _record_commit_artifact(self, task: Task, result: TaskResult,
+                                wt_git: Git, base_branch: str) -> None:
+        """记录 WIP 提交与本次 diff；diff 计算失败不影响任务。"""
+        rec = self._rec()
+        if rec is None:
+            return
+        try:
+            commit = str(getattr(result, "wip_commit", "") or "")
+            rec.update_meta(commit=commit)
+            rec.event("commit", hash=commit, branch=self._task_branch(task))
+            diff = wt_git.run("diff", f"{base_branch}...HEAD") or ""
+            if diff.strip():
+                rec.artifact("diff.patch", diff)
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("提交事件/工件记录失败（可忽略）", exc_info=True)
+
+    def _record_review_artifact(self, review: object) -> None:
+        rec = self._rec()
+        if rec is None or review is None:
+            return
+        try:
+            issues = [
+                {"file": i.file, "line": i.line, "severity": i.severity,
+                 "message": i.message}
+                for i in getattr(review, "issues", []) or []
+            ]
+            payload = {
+                "verdict": getattr(review, "verdict", ""),
+                "summary": getattr(review, "summary", ""),
+                "model": getattr(review, "model", ""),
+                "turns": getattr(review, "turns", 0),
+                "prompt_tokens": getattr(review, "prompt_tokens", 0),
+                "completion_tokens": getattr(review, "completion_tokens", 0),
+                "error": getattr(review, "error", ""),
+                "issues": issues,
+                "issues_raw": getattr(review, "issues_raw", ""),
+            }
+            rec.artifact("review.json", json.dumps(payload, ensure_ascii=False, indent=2))
+            rec.update_meta(review_verdict=payload["verdict"])
+            rec.event("review_verdict", verdict=payload["verdict"],
+                      summary=payload["summary"], model=payload["model"],
+                      issues=len(issues))
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("审查工件记录失败（可忽略）", exc_info=True)
+
+    def _record_merge_event(self, merged: bool, review: object = None) -> None:
+        if not merged:
+            return
+        self._rec_event("merge", mode=("commit_and_merge" if self.commit_and_merge
+                                       else "stage_land"),
+                        review_verdict=getattr(review, "verdict", ""))
+
+    def _record_workspace_diff(self) -> None:
+        """工作区模式（未开启 worktree/提交合并）的改动证据：git diff HEAD。
+
+        该模式没有 WIP 提交与 merge，改动直接落在主工作区等待人工把关；
+        run 仍然要留下 diff，否则「回放」只剩事件没有内容。
+        """
+        rec = self._rec()
+        if rec is None or not self.is_git_repo:
+            return
+        try:
+            diff = self.git.run("diff", "HEAD") or ""
+            if diff.strip():
+                rec.artifact("diff.patch", diff)
+            rec.event("merge", mode="workspace")
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("工作区 diff 记录失败（可忽略）", exc_info=True)
+
     def _complete_with_review(self, task: Task, response: AgentResponse,
                               result: TaskResult) -> tuple[str, object]:
         """git 项目 action=completed 的完整路径：WIP 提交 → 审查门 → 安全合入/落地。
@@ -629,6 +892,11 @@ class TaskExecutor:
                     return self._merge_and_push(task, result, branch, wt_path=wt_path)
                 return self._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
 
+        # 提交前二次校验（V1-R2）：任务内容被改 / 租约易主 / TTL 过期 → 不提交
+        ok, reason = self._verify_claim(task)
+        if not ok:
+            return self._mark_stale_claim(task, result, reason)
+
         # 第一步提交（提交仅落在该任务的沙盒 worktree 分支内，绝不触碰主分支历史）
         committed = wt_git.commit(message)
         if not committed:
@@ -636,7 +904,8 @@ class TaskExecutor:
             # 沙盒分支上，只差审查/合并收尾。此时直接补走审查门，而不是误判
             # blocked 打断（审查 verdict=error 分支本身不清 worktree，WIP 提交
             # 都还在）。分支上没有领先提交的「真无改动」才按旧行为 blocked。
-            is_rework = bool(task and (task.review_round > 0 or task.review_pending))
+            is_rework = bool(task and (task.review_round > 0 or task.review_pending
+                                       or getattr(task, "resume_run", False)))
             if is_rework and wt_git.branch_exists(base_branch):
                 ahead = wt_git.run("rev-list", "--count", f"{base_branch}..HEAD")
                 try:
@@ -648,6 +917,8 @@ class TaskExecutor:
                         "任务 %s 为返工/补审恢复重跑（无新改动，但分支领先基线 %d 个提交），"
                         "直接进入审查门补审", task.id, ahead_n)
                     result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
+                    self._record_commit_artifact(task, result, wt_git, base_branch)
+                    self._mark_review_resume(task, result)
                     return self._run_review_gate(task, result, branch, wt_path,
                                                  base_branch, _finish_merge)
             if self.team_role == "qa":
@@ -659,6 +930,8 @@ class TaskExecutor:
             self._cleanup_worktree_changes(wt_path)
             return "blocked", None
         result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
+        self._record_commit_artifact(task, result, wt_git, base_branch)
+        self._mark_review_resume(task, result)
 
         return self._run_review_gate(task, result, branch, wt_path,
                                      base_branch, _finish_merge)
@@ -670,10 +943,16 @@ class TaskExecutor:
         if not active:
             self.log.info("审查门跳过（%s），安全合入", skip_reason)
             merged = _finish_merge()
+            self._rec_event("review_verdict", verdict="skipped", summary=skip_reason)
+            self._record_merge_event(merged)
+            if merged:
+                self._mark_merged(task, result)
             review = self._skipped_review(skip_reason)
             return ("done" if merged else "blocked"), review
 
         append_progress(task.path, "🔍 独立审查开始（合并前）")
+        self._rec_event("review_start", model=getattr(self.review_llm, "model", ""),
+                        round=getattr(task, "review_round", 0))
         from .task_model import set_task_file_review_pending
         set_task_file_review_pending(task.path, True)
         review = self._run_review(task, task.path, wt_path=wt_path,
@@ -681,9 +960,13 @@ class TaskExecutor:
         result.review = review
         set_task_file_review_pending(task.path, False)
         self._record_review_usage(task, review)
+        self._record_review_artifact(review)
 
         if review.verdict == "pass":
             merged = _finish_merge()
+            self._record_merge_event(merged, review)
+            if merged:
+                self._mark_merged(task, result)
             if not merged:
                 return "blocked", review
             return "done", review
@@ -762,7 +1045,11 @@ class TaskExecutor:
         """
         active, skip_reason = self._review_active()
         if not active:
+            ok, reason = self._verify_claim(task)
+            if not ok:
+                return self._mark_stale_claim(task, result, reason)
             review = self._skipped_review(skip_reason)
+            self._record_workspace_diff()
             return "done", review
         append_progress(task.path, "🔍 独立审查开始（合并前）")
         from .task_model import set_task_file_review_pending
@@ -772,6 +1059,10 @@ class TaskExecutor:
         set_task_file_review_pending(task.path, False)
         self._record_review_usage(task, review)
         if review.verdict == "pass":
+            ok, reason = self._verify_claim(task)
+            if not ok:
+                return self._mark_stale_claim(task, result, reason)
+            self._record_workspace_diff()
             return "done", review
         return "blocked", review
 
@@ -938,6 +1229,14 @@ class TaskExecutor:
                     parts.append(f"### [{s['id']}] {s['title']}{who}\n{s['summary']}\n")
                 upstream_block = "\n".join(parts) + "\n"
 
+        resume_block = ""
+        if getattr(task, "resume_run", False):
+            resume_block = (
+                "## 续跑说明\n\n"
+                "上次执行在提交/审查阶段被中断，worktree 中已保留上次的代码改动。\n"
+                "请先用 git status / git diff 检查现状，在现有改动基础上继续收尾；"
+                "不要从头重写，也不要丢弃已有成果。\n\n")
+
         return (
             f"# 当前任务\n\n"
             f"- 任务 ID：{task.id}\n"
@@ -946,6 +1245,7 @@ class TaskExecutor:
             f"- 类型：{task.kind}\n"
             f"- 负责角色：{task.assignee or self.team_role or '通用'}\n"
             f"- 标签：{', '.join(task.labels) if task.labels else '无'}\n\n"
+            f"{resume_block}"
             f"## 任务内容\n\n{task.description}\n\n"
             f"{upstream_block}"
             f"## 工作要求\n\n" + "\n".join(lines)

@@ -26,6 +26,9 @@ from .config import (
     resolve_review_llm,
     resolve_review_rounds,
 )
+from .budget import get_budget_config, project_budget_exhausted
+from .claims import ProjectClaims, claims_state_dir
+from .resilience import project_pause_status, record_task_result
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
 from .prompts import build_role_prompt_extra
@@ -41,6 +44,8 @@ from .task_model import (
     increment_task_file_review_round,
     parse_task_file,
     scan_tasks,
+    set_task_file_block_reason,
+    set_task_file_resume,
     set_task_file_review_pending,
     set_task_file_status,
 )
@@ -64,7 +69,8 @@ def parse_task_fresh(path: Path) -> Task:
     return parse_task_file(path)
 
 
-def recover_interrupted_tasks(project: ProjectConfig) -> list[str]:
+def recover_interrupted_tasks(project: ProjectConfig,
+                              claims: ProjectClaims | None = None) -> list[str]:
     """进程启动时恢复上次意外退出遗留的 in_progress 任务。
 
     强杀/断电等场景下任务文件停在 in_progress，而扫描只认 open——不处理
@@ -76,6 +82,9 @@ def recover_interrupted_tasks(project: ProjectConfig) -> list[str]:
     review_pending=true 的任务跳过：那是「已完成、WIP 提交已落、审查门未出
     结论」的残留——交给补审扫描只重跑审查，不整任务重跑（否则执行 Agent 的
     token 白烧一遍）。
+
+    V1-R2：若租约状态里有续跑标记（WIP 提交已落 / 审查阶段中断），保留
+    worktree 成果，写 resume_run=true 让下次执行续跑而不是从头重放。
     """
     tasks_dir = project.path / project.tasks_dir
     if not tasks_dir.is_dir():
@@ -94,12 +103,35 @@ def recover_interrupted_tasks(project: ProjectConfig) -> list[str]:
             last = _dt.datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         except OSError:
             last = "未知时间"
-        append_progress(
-            path,
-            f"**进程意外退出，任务被中断**（最后活动 {last}）。"
-            "已重置为待办重新执行；git 项目 worktree 里未提交的改动会在下次执行时重置丢弃。")
+        task_id = path.stem
+        resumed = False
+        if claims is not None:
+            try:
+                resumed = claims.has_resume(task_id)
+            except Exception:  # noqa: BLE001 — 租约状态读失败按普通中断处理
+                get_logger(f"agent.{project.name}").warning(
+                    "读取续跑标记失败（按普通中断处理）", exc_info=True)
+        if resumed:
+            set_task_file_resume(path, True)
+            append_progress(
+                path,
+                f"**进程意外退出，任务被中断**（最后活动 {last}）。"
+                "检测到中断前已产生 WIP 提交/审查成果：worktree 已保留，"
+                "重新入队后从现有成果继续，不从头重放。")
+        else:
+            set_task_file_resume(path, False)
+            append_progress(
+                path,
+                f"**进程意外退出，任务被中断**（最后活动 {last}）。"
+                "已重置为待办重新执行；git 项目 worktree 里未提交的改动会在下次执行时重置丢弃。")
+        if claims is not None:
+            try:
+                claims.release(task_id)
+            except Exception:  # noqa: BLE001 — 过期租约由 TTL 自然回收
+                get_logger(f"agent.{project.name}").warning(
+                    "释放中断任务租约失败（忽略）", exc_info=True)
         if set_task_file_status(path, "open"):
-            reset.append(path.stem)
+            reset.append(task_id)
     return reset
 
 
@@ -108,6 +140,7 @@ class ProjectAgent:
 
     def __init__(self, project: ProjectConfig, llm,
                  skills_base=None,
+                 state_dir=None,
                  tools: dict[str, bool] | None = None,
                  permission_mode: str = "full_access",
                  permission_timeout_minutes: int = 30,
@@ -123,6 +156,18 @@ class ProjectAgent:
                  global_tools: ToolsConfig | None = None) -> None:
         self.project = project
         self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
+        # 任务指纹/租约（V1-R2）：默认与 config.yaml 同级 state/，测试可传临时目录
+        self.claims = ProjectClaims(project, state_dir or claims_state_dir())
+        try:
+            self.claims.cleanup_expired()
+        except Exception:  # noqa: BLE001 — 清理失败不阻断启动（TTL 仍会拦截）
+            get_logger(f"agent.{project.name}").warning(
+                "清理过期租约失败（忽略）", exc_info=True)
+        # 预算软停状态：项目当日预算用尽时置位，供看板/日志解释
+        self.budget_paused = False
+        self.budget_day: dict = {}
+        # 熔断暂停（V1-R4）：项目级连续失败/失败率触发的停机原因
+        self.pause_reason = ""
         self.review_cfg = review_cfg or ReviewConfig()
         self.local_debug = local_debug or LocalDebugConfig()
         self.commit_and_merge = bool(commit_and_merge)
@@ -150,7 +195,8 @@ class ProjectAgent:
                                      review_llm=self.review_llm,
                                      local_debug=self.local_debug,
                                      commit_and_merge=commit_and_merge,
-                                     skills_base=skills_base)
+                                     skills_base=skills_base,
+                                     claims=self.claims)
         self.log = get_logger(f"agent.{project.name}")
 
         # 项目小组（多模型协同模式）初始化
@@ -224,6 +270,7 @@ class ProjectAgent:
                     extra_system_prompt=extra_sys,
                     merge_lock=self.merge_lock,
                     skills_base=skills_base,
+                    claims=self.claims,
                 )
 
     # ---- 对外 ----
@@ -272,13 +319,45 @@ class ProjectAgent:
         if member_id:
             with self._active_lock:
                 self.active_roles[task.id] = member_id
+        hb = None
+        claim_id = getattr(task, "claim_id", None)
+        if claim_id:
+            try:
+                hb = self.claims.start_heartbeat(task.id, claim_id)
+            except Exception:  # noqa: BLE001 — 心跳失败由 TTL 兜底
+                self.log.warning("任务 %s 租约心跳启动失败（忽略）", task.id, exc_info=True)
         try:
             res = executor.run_task(task, guide, skills)
             return task, member_id, res
         finally:
+            self.claims.stop_heartbeat(hb)
             if member_id:
                 with self._active_lock:
                     self.active_roles.pop(task.id, None)
+
+    def _release_claim(self, task: Task) -> None:
+        """任务已回写完毕：清续跑标记并释放租约（两步都失败不阻断调度）。"""
+        try:
+            set_task_file_resume(task.path, False)
+        except Exception:  # noqa: BLE001 — 已归档时文件可能已移走
+            pass
+        try:
+            self.claims.clear_resume(task.id)
+        except Exception:  # noqa: BLE001
+            self.log.warning("清理任务 %s 续跑标记失败（忽略）", task.id, exc_info=True)
+        try:
+            self.claims.release(task.id, getattr(task, "claim_id", None))
+        except Exception:  # noqa: BLE001 — 过期租约由 TTL 回收
+            self.log.warning("释放任务 %s 租约失败（忽略）", task.id, exc_info=True)
+
+    def _record_health(self, task: Task, result: TaskResult) -> None:
+        """把任务结果计入项目健康事件（V1-R4 熔断依据）。"""
+        try:
+            st = record_task_result(self.project.name, task.id, result)
+            if st.get("paused") and str(st.get("paused_by") or "") == "auto":
+                self.log.warning("项目触发熔断：%s", st.get("pause_reason"))
+        except Exception:  # noqa: BLE001 — 健康统计是旁路
+            self.log.warning("熔断健康事件记录失败（忽略）", exc_info=True)
 
     def scan_and_work(self) -> list[TaskResult]:
         """执行一轮扫描与任务处理（支持依赖就绪门控、小组波次并行与周期内链式推进）。"""
@@ -286,6 +365,33 @@ class ProjectAgent:
         if not self.project.path.is_dir():
             log.error("项目目录不存在：%s，跳过", self.project.path)
             return []
+
+        # 预算软停：项目当日 token 用尽 → 本轮不领取新任务；
+        # 正在执行的任务不受影响（由各自的任务级硬闸负责）
+        try:
+            exhausted, day = project_budget_exhausted(self.project.name)
+            self.budget_paused = bool(exhausted)
+            self.budget_day = day or {}
+            if exhausted:
+                log.warning("项目今日 token 预算已用尽（%s/%s），本轮不领取新任务",
+                            day.get("total_tokens"),
+                            get_budget_config().max_tokens_per_project_per_day)
+                return []
+        except Exception:  # noqa: BLE001 — 预算判断失败不阻断调度
+            log.warning("预算软停判断失败（忽略）", exc_info=True)
+            self.budget_paused = False
+
+        # 熔断停机（V1-R4）：项目处于暂停态时不领取新任务
+        try:
+            paused = project_pause_status(self.project.name)
+            self.pause_reason = str(paused.get("pause_reason") or "")
+            if paused.get("paused"):
+                log.warning("项目处于熔断暂停：%s（看板可人工恢复）",
+                            self.pause_reason or "未知原因")
+                return []
+        except Exception:  # noqa: BLE001 — 状态读取失败不阻塞调度
+            log.warning("熔断状态判断失败（忽略）", exc_info=True)
+            self.pause_reason = ""
 
         guide = self._load_guide()
         skills = self._load_skills()
@@ -303,6 +409,16 @@ class ProjectAgent:
 
         errors_written = False
         while total_claimed < step_limit:
+            # 本轮中途触发熔断（刚回写的失败）→ 立即停止领取后续任务
+            try:
+                paused = project_pause_status(self.project.name)
+                self.pause_reason = str(paused.get("pause_reason") or "")
+                if paused.get("paused"):
+                    log.warning("项目已熔断暂停，停止本轮后续派发：%s",
+                                self.pause_reason or "未知原因")
+                    break
+            except Exception:  # noqa: BLE001
+                log.warning("熔断状态复查失败（忽略）", exc_info=True)
             tasks, errors = scan_tasks(self.tasks_dir)
             if errors and not errors_written:
                 for t in errors:
@@ -360,6 +476,75 @@ class ProjectAgent:
                          len(tasks), len(wave),
                          ", ".join(f"{t.id}->{mid or 'default'}" for t, mid, _ in wave))
 
+            # 上次已完成合并但状态未回写（合并后崩溃）：直接归档，不重跑
+            pending_wave: list[tuple[Task, str, TaskExecutor]] = []
+            for t, mid, ex in wave:
+                try:
+                    info = self.claims.resume_info(t.id)
+                except Exception:  # noqa: BLE001 — 读状态失败按普通任务处理
+                    info = {}
+                if (str(info.get("stage") or "") != "merged"
+                        or not getattr(t, "resume_run", False)):
+                    pending_wave.append((t, mid, ex))
+                    continue
+                expected = str(info.get("fingerprint") or "")
+                if expected:
+                    try:
+                        actual = self.claims.fingerprint(
+                            t, model=getattr(ex.llm, "model", ""),
+                            agent_key=getattr(ex, "team_role", "") or "")
+                    except Exception:  # noqa: BLE001 — 读取失败按可归档处理
+                        actual = expected
+                    if actual != expected:
+                        bad = TaskResult(task_id=t.id, outcome="blocked",
+                                         role=ex.team_role, agent_name=ex.agent_name)
+                        bad.notes = ("stale_lease：任务在合并后、状态回写前被修改，"
+                                     "不再自动归档，请人工确认")
+                        bad.block_reason = "stale_lease"
+                        append_progress(t.path, f"⛔ {bad.notes}")
+                        self._write_back_result(t, bad)
+                        self._release_claim(t)
+                        results.append(bad)
+                        total_claimed += 1
+                        continue
+                res = TaskResult(task_id=t.id, outcome="done",
+                                 role=ex.team_role, agent_name=ex.agent_name)
+                res.summary = "上次执行已完成合并（崩溃恢复），直接归档"
+                res.review = ex._skipped_review("崩溃恢复：合并已完成")
+                set_task_file_resume(t.path, False)
+                self._write_back_result(t, res)
+                self._release_claim(t)
+                results.append(res)
+                total_claimed += 1
+                log.info("任务 %s 上次已完成合并，恢复时直接归档（不重复提交）", t.id)
+            wave = pending_wave
+            if not wave:
+                if total_claimed:
+                    continue
+                break
+
+            # V1-R2：认领前先拿租约（指纹绑定任务内容/依赖/模型），
+            # 已有活跃租约的任务跳过本轮，防止重复派发与重复提交
+            claimed_wave: list[tuple[Task, str, TaskExecutor]] = []
+            for t, mid, ex in wave:
+                try:
+                    fp = self.claims.fingerprint(
+                        t, model=getattr(ex.llm, "model", ""),
+                        agent_key=getattr(ex, "team_role", "") or "")
+                    claim_id = self.claims.acquire(t.id, fp)
+                except Exception:  # noqa: BLE001 — 租约异常按未认领处理（宁可不跑）
+                    log.warning("任务 %s 租约获取失败，跳过本轮", t.id, exc_info=True)
+                    claim_id = None
+                if not claim_id:
+                    log.info("任务 %s 已被活跃租约持有或指纹获取失败，跳过本轮", t.id)
+                    continue
+                t.claim_id = claim_id
+                claimed_wave.append((t, mid, ex))
+            wave = claimed_wave
+            if not wave:
+                log.info("本轮候选任务均被活跃租约持有，等待下一轮")
+                break
+
             for t, _, _ in wave:
                 self._mark_in_progress(t)
 
@@ -378,6 +563,8 @@ class ProjectAgent:
 
             for t, _mid, res in wave_outputs:
                 self._write_back_result(t, res)
+                self._release_claim(t)
+                self._record_health(t, res)
                 results.append(res)
                 total_claimed += 1
 
@@ -419,6 +606,8 @@ class ProjectAgent:
             result = self._review_pending_task(task)
             if result is not None:
                 self._write_back_result(task, result)
+                self._release_claim(task)
+                self._record_health(task, result)
                 results.append(result)
         return results
 
@@ -427,6 +616,28 @@ class ProjectAgent:
         ex = self.executor
         if self.team_enabled and task.assignee and task.assignee in self.member_executors:
             ex = self.member_executors[task.assignee]
+
+        # V1-R2：补审前校验指纹——WIP 提交后任务正文被改过，旧成果不能直接合并
+        if ex.claims is not None:
+            try:
+                info = ex.claims.resume_info(task.id)
+                expected = str(info.get("fingerprint") or "")
+                if expected:
+                    actual = ex.claims.fingerprint(
+                        task, model=getattr(ex.llm, "model", ""),
+                        agent_key=ex.team_role or "")
+                    if actual != expected:
+                        set_task_file_review_pending(task.path, False)
+                        msg = ("stale_lease：任务在等待审查期间被修改，"
+                               "旧 WIP 成果不再与当前任务一致，已阻断合并")
+                        append_progress(task.path, f"⛔ {msg}")
+                        bad = TaskResult(task_id=task.id, outcome="blocked",
+                                         role=ex.team_role, agent_name=ex.agent_name)
+                        bad.notes = msg
+                        bad.block_reason = "stale_lease"
+                        return bad
+            except Exception:  # noqa: BLE001 — 校验失败不阻断补审（保守放行）
+                self.log.warning("补审指纹校验失败（忽略）", exc_info=True)
 
         if ex.review_llm is None:
             # 审查已停用（如配置热重载清掉了模型）：放行归档，兜底清队
@@ -556,8 +767,16 @@ class ProjectAgent:
         from .task_model import _set_frontmatter_field
         self._set_status(task.path, "in_progress")
         _set_frontmatter_field(task.path, None, "requeue_seq", None)
+        # 清掉上次的受阻原因（预算/stale_lease），避免本轮成功后仍显示旧原因
+        set_task_file_block_reason(task.path, "")
 
     def _write_back_result(self, task: Task, result: TaskResult) -> None:
+        # 受阻原因（预算超限 / stale_lease）落 frontmatter，供看板与重入队判断
+        if getattr(result, "block_reason", ""):
+            try:
+                set_task_file_block_reason(task.path, result.block_reason)
+            except Exception:  # noqa: BLE001 — 原因写入失败不阻断回写
+                self.log.warning("写入 block_reason 失败（忽略）", exc_info=True)
         # 大模型基础设施错误（HTTP 429/500、网络超时等）：只标状态 + 进度留痕，
         # 不写结果节。结果节固定插在正文最前，把错误文本写进去会把任务原内容
         # 顶到下面——看板描述与文件开头看起来就像被错误信息覆盖了。

@@ -28,6 +28,7 @@ import httpx
 from . import USER_AGENT, masking
 from .concurrency import get_budget
 from .config import LLMConfig
+from .egress import EgressDenied, check as egress_check
 from .logging_setup import get_logger
 from .masking import MaskingSession
 from .tools import (
@@ -164,6 +165,10 @@ def list_models(provider: str, base_url: str, api_key: str,
     # -1（不超时）对拉取列表没有意义：按 30s 兜底
     list_timeout = (30 if int(timeout_seconds) <= 0
                     else min(max(timeout_seconds, 5), 30))
+    try:
+        egress_check(url, purpose="model_list")
+    except EgressDenied as e:
+        raise LLMError(str(e)) from e
     try:
         resp = httpx.get(url, headers=headers, timeout=list_timeout)
     except httpx.HTTPError as e:
@@ -401,6 +406,20 @@ class LLMClient:
         # 时还原原文；映射仅存内存，任务循环结束即清除（masking.configure
         # 关闭总开关时 mask_payload 内部零开销透传）
         self._masking = MaskingSession()
+        # 运行台账事件出口（V1-R1）：executor 注入 RunRecorder.event 的适配
+        # 函数；None = 未启用台账。台账是旁路，异常一律吞掉，不影响任务。
+        self.event_sink = None
+        # 预算硬闸：executor/review 注入 BudgetTracker；None = 不限制
+        self.budget = None
+
+    def _emit(self, kind: str, **data) -> None:
+        sink = getattr(self, "event_sink", None)
+        if sink is None:
+            return
+        try:
+            sink(kind, **data)
+        except Exception:  # noqa: BLE001 — 留痕失败绝不能打断模型调用
+            log.warning("运行台账事件写入失败（忽略）：%s", kind, exc_info=True)
 
     def _acc_usage(self, data: dict, provider: str) -> None:
         u = data.get("usage") or {}
@@ -413,6 +432,11 @@ class LLMClient:
         self.usage["turns"] += 1
         self.usage["prompt_tokens"] += pt
         self.usage["completion_tokens"] += ct
+        self._emit("model_call", model=self.cfg.model, prompt_tokens=pt,
+                   completion_tokens=ct, turn=self.usage["turns"])
+        if self.budget is not None:
+            # 超限在这里抛 BudgetExceeded：executor 收敛为 blocked + 预算原因
+            self.budget.record(self.cfg.model, pt, ct)
 
     def reset(self, system_prompt: str) -> None:
         self.messages = [{"role": "system", "content": system_prompt}]
@@ -523,6 +547,12 @@ class LLMClient:
                 if name == "finish":
                     # finish 不还原：结论（summary/notes）会写进任务文件落盘，
                     # 占位符保持脱敏形态正是需求效果（密钥不落盘）
+                    rec = getattr(ctx, "run_recorder", None)
+                    if rec is not None:
+                        try:
+                            rec.tool_event("finish", ok=True, ms=0, preview="finish")
+                        except Exception:  # noqa: BLE001 — 台账旁路
+                            pass
                     raise FinishSignal(self._parse_finish_args(args_json))
                 # 写回还原（返回侧闭环）：模型把占位符当真实值引用时（复制密钥、
                 # 整文件回写等），dispatch 前还原原文——还原在参数日志之后，
@@ -566,13 +596,39 @@ class LLMClient:
                             )
                             log.warning("拦截重复读取文件 [%s]（第 %d 次）", p_target, file_read_counts[p_target])
 
+                tool_t0 = time.monotonic()
                 if intercepted is not None:
                     # 被拦截的重读同样计作一次只读轮（已在上面计入），这里只回
                     # 错误结果给模型；tool_call/tool_result 配对保持完整
                     log.debug("工具结果 [%d] %s（拦截）：%s", turn, name, intercepted[:120])
                     self.messages.append(self._tool_result(call_id, intercepted))
+                    rec = getattr(ctx, "run_recorder", None)
+                    if rec is not None:
+                        try:
+                            rec.tool_event(name, ok=False,
+                                           ms=int((time.monotonic() - tool_t0) * 1000),
+                                           preview=(args_json or "")[:120],
+                                           intercepted=True)
+                        except Exception:  # noqa: BLE001 — 台账旁路
+                            pass
                 else:
                     result = dispatch_tool(ctx, name, args_json)
+                    tool_ok = not result.startswith("错误")
+                    tool_ms = int((time.monotonic() - tool_t0) * 1000)
+                    rec = getattr(ctx, "run_recorder", None)
+                    if rec is not None:
+                        try:
+                            rec.tool_event(name, ok=tool_ok, ms=tool_ms,
+                                           preview=(args_json or "")[:120])
+                            if name == "run_command":
+                                cmd_args = json.loads(args_json) if isinstance(args_json, str) else (args_json or {})
+                                cmd_val = ((cmd_args or {}).get("command")
+                                           or (cmd_args or {}).get("cmd") or "")
+                                if isinstance(cmd_val, list):
+                                    cmd_val = " ".join(str(x) for x in cmd_val)
+                                rec.record_command_output(str(cmd_val), result)
+                        except Exception:  # noqa: BLE001 — 台账旁路
+                            pass
 
                     if produces_code and consecutive_read_turns == 10:
                         result += (
@@ -838,6 +894,15 @@ class LLMClient:
             "（已完成的进度不受影响）。")
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
+        # 出网白名单（V1-R6）：模型调用也必须经统一出口；拒绝按 LLMError
+        # 冒泡（executor 会转 blocked，任务正文不被消费）
+        try:
+            egress_check(url, purpose="model_chat")
+        except EgressDenied as e:
+            raise LLMError(str(e)) from e
+        # 预算前置校验：已超限不再发请求（含子代理触发的超限）
+        if self.budget is not None:
+            self.budget.precheck()
         # 出站脱敏（数据脱敏唯一网络出口）：只动 payload 副本不碰 self.messages
         # ——本地历史保留原文（护栏计数、上下文裁剪依赖原文），重发历史幂等；
         # 关闭总开关时零开销透传。日志只记命中次数，绝不记脱敏内容

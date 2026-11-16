@@ -14,9 +14,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
 
-from orcsy.config import LLMConfig, ProjectConfig
+from orcsy.config import AppConfig, LLMConfig, ProjectConfig
 from orcsy.executor import TaskExecutor
 from orcsy.git_ops import Git
+from orcsy.runlog import init_run_store
 from orcsy.task_model import parse_task_file
 
 
@@ -119,6 +120,9 @@ def main() -> int:
         ]
 
         llm_cfg = LLMConfig(api_key="fake", base_url="http://localhost:9", model="fake")
+        # 运行台账锚定到本次临时目录（V1-R1）：任务结束后核对 run 证据链
+        run_store = init_run_store(
+            AppConfig(source_path=tmp / "config.yaml"), force=True)
         executor = TaskExecutor(proj_cfg, llm_cfg)
         # 注入替身
         executor.run_task.__globals__["LLMClient"] = FakeLLMClient
@@ -148,6 +152,21 @@ def main() -> int:
         assert any("app.py" in ln for ln in dirty_outside_tasks), (
             f"修复应作为待人工提交的改动留在工作区：{dirty_outside_tasks}")
 
+        # 运行台账（V1-R1）：一次任务产生且仅产生一个可回放的 run
+        runs = run_store.list_runs("sample-app", task.id)
+        assert len(runs) == 1, runs
+        run = run_store.load_run("sample-app", runs[0]["run_id"])
+        assert run["meta"]["outcome"] == "done", run["meta"]
+        assert run["meta"]["exit_reason"] == "completed", run["meta"]
+        types = [e["type"] for e in run["events"]]
+        for need in ("run_start", "progress", "merge", "run_end"):
+            assert need in types, (need, types)
+        names = {a["name"] for a in run["artifacts"]}
+        assert {"meta.json", "events.jsonl", "diff.patch", "usage.json"} <= names, names
+        diff_bytes = run_store.read_artifact(
+            "sample-app", runs[0]["run_id"], "diff.patch")[0]
+        assert "stranger" in diff_bytes.decode("utf-8", "replace"), "diff 工件应含本次改动"
+
         # worktree 已清理
         wt = proj_cfg.path / ".worktree-arranger"
         assert not wt.exists(), "worktree 应已移除"
@@ -167,6 +186,8 @@ def main() -> int:
         print("\n全部断言通过 ✅")
         return 0
     finally:
+        import orcsy.runlog as _rl
+        _rl._STORE = None       # 还原单例，避免污染同进程其它测试
         shutil.rmtree(tmp, ignore_errors=True)
 
 

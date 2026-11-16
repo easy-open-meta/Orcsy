@@ -47,6 +47,36 @@ logging:
   retention_days: 7          # 日志保留天数：写满 N 天归档进 logs/archive/，超过 N 天的旧日志清理；0 关闭
   max_total_mb: 200          # 日志总占用上限（MB）：活动日志+滚动备份+归档合计超限即从最旧删起；0 不限制
 
+runlog:                      # 运行台账：每个任务一个 run 目录（事件流 / diff / 测试 / 审查 / 用量）
+  enabled: true              # 关闭后不写台账（看板回放为空），不影响任务执行
+  # dir: ""                  # 自定义目录；留空 = 配置文件同级 runs/（不写入受管仓库；看板「设置 → 运行台账」亦可修改）
+  retention_days: 30         # 保留天数；0 = 不按时间清理
+  max_total_mb: 500          # 总占用上限（MB）：超限从最旧 run 删起；0 = 不限制
+
+budget:                      # 预算硬闸：超限停止执行；默认关闭
+  enabled: false
+  max_tokens_per_task: 0             # 单任务上限（prompt+completion tokens）；0 = 不限制
+  max_tokens_per_project_per_day: 0  # 单项目当日上限（本地自然日）；0 = 不限制
+  max_cost_per_task_cny: 0           # 单任务成本上限（元）；需在 prices 配单价才生效
+  # prices:                          # 每百万 tokens 的人民币单价
+  #   deepseek-chat: {prompt: 1.0, completion: 2.0}
+
+resilience:                  # 熔断停机：连续失败/窗口失败率触发项目暂停
+  enabled: true
+  max_consecutive_failures: 3      # 连续失败次数；0 = 不按此规则
+  window_minutes: 120              # 失败率统计窗口（分钟）
+  max_failure_rate: 0.6            # 窗口内失败率阈值；0 = 不按此规则
+  min_samples: 5                   # 窗口内最少样本数
+  auto_resume: false               # true = 窗口结束后自动恢复（默认人工恢复）
+
+egress:                      # 统一出口白名单：应用自身发起的 HTTP 只允许白名单主机
+  mode: allowlist            # allowlist（默认）| off（排障用，全部放行且不写拒绝审计）
+  extra_hosts: []            # 追加主机：网页抓取、内网代理等（如 api.example.com / *.example.com）
+                             # 模型/Issue/镜像/更新源主机按各自配置自动放行，无需重复填写；
+                             # 回环地址（127.0.0.1/localhost）不是出网，始终放行；
+                             # Agent 子进程（npm/pip/git）的出网不在应用层拦截范围
+  audit: true                # 拒绝时写 logs/audit.jsonl（action=egress.deny）
+
 web:
   host: 127.0.0.1            # 看板监听地址；手机远程访问改为 0.0.0.0（绑定全部网卡，
                              # 需先设置 auth_password 或 api_keys），启动后终端会打印
