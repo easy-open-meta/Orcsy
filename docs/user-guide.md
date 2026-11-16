@@ -1089,6 +1089,25 @@ egress:
 - **Subprocesses are not intercepted**: `npm` / `pip` / `git` started via `run_command` can reach the network outside the application layer; mirrors/proxy environment variables and the run ledger provide the constraints. The docs make no "zero outbound requests" claim;
 - **Troubleshooting**: temporarily set `mode: off` (allow all, no deny audit), then switch back to `allowlist`. The settings page shows the derived host count, process-wide allow/deny counters and recent denials.
 
+### 10.21 Team memory (Phase 1)
+
+**Architecture blackboard `ARCHITECTURE.md`**
+- Lives in the project root: core layers, module boundaries, technology choices, shared data models and key routes;
+- Injected read-only into every task prompt (first 3000 chars) so all roles share the same project picture; omitted when the file does not exist;
+- The PM creates/updates it with `update_architecture(mode="replace")` on first decomposition; developers append a short note (≤200 chars) after major API/schema changes with `mode="append"`; small changes need no update;
+- The tool can only write `ARCHITECTURE.md` — it does not give PM/QA arbitrary file-write access.
+
+**Requirement-batch shared clipboard**
+- PM subtasks, developers, QA and bug-fix tasks under the same `parent_id` tree share one batch;
+- Developers use `session_share(key, value)` for temporary ports, test accounts, dynamic JWTs or temporary DSNs;
+- QA reads them with `session_read(key)` (empty key lists available keys without values) instead of guessing from logs;
+- Data lives under `<data dir>/state/session_bus/`, never in task files or Git; it is deleted when the whole batch is archived/terminated, with a 7-day TTL fallback;
+- Only put temporary runtime state there — no long-lived secrets or large blobs.
+
+**One-click dependency results**
+- The task detail shows each upstream dependency's status (done/in progress/blocked/deleted) and result summary;
+- Click the task ID/title to open that task (archived tasks open read-only); the parent requirement/source task is also clickable.
+
 ## 11. Data, backup, and migration
 
 ### 11.1 Where data lives
@@ -1101,6 +1120,7 @@ egress:
 | Usage ledger | `%APPDATA%\Orcsy\logs\usage.jsonl` | `./orcsy-data/logs/usage.jsonl` | `/var/lib/orcsy/logs/usage.jsonl` |
 | Run ledger | `%APPDATA%\Orcsy\runs\` | `./orcsy-data/runs/` | `/var/lib/orcsy/runs/` |
 | Task fingerprints / leases | `%APPDATA%\Orcsy\state\` | `./orcsy-data/state/` | `/var/lib/orcsy/state/` |
+| Requirement-batch clipboard | `%APPDATA%\Orcsy\state\session_bus\` | `./orcsy-data/state/session_bus/` | `/var/lib/orcsy/state/session_bus/` |
 | Tasks | Each project's `tasks\` | `./projects/<project>/tasks/` | `/srv/orcsy-projects/<project>/tasks/` |
 | Project guide | Each project's `AGENT.md` | `./projects/<project>/AGENT.md` | `/srv/orcsy-projects/<project>/AGENT.md` |
 

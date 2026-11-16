@@ -34,7 +34,7 @@ from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
 from .logging_setup import get_logger
 from .mirrors import decorate_skill_body
-from .prompts import build_system_prompt
+from .prompts import ARCHITECTURE_FILE, build_system_prompt
 from .skills import Skill, skill_bodies
 from .task_control import get_task_controls
 from .task_model import Task, append_progress
@@ -511,6 +511,20 @@ class TaskExecutor:
         except Exception:
             self.log.warning("初始化调试会话失败（可忽略）", exc_info=True)
 
+        # 批次共享剪贴板（Phase 1）：同一父需求下的跨角色临时状态。
+        # 无 claims（单元测试直构）或无状态目录时不注入，工具会明确报错。
+        session_bus = None
+        try:
+            state_dir = getattr(self.claims, "state_dir", None) if self.claims is not None else None
+            if state_dir is not None:
+                from .session_bus import SessionBus
+                session_bus = SessionBus(
+                    self.project, state_dir, task,
+                    tasks_dir=Path(task.path).parent,
+                    actor=self.team_role or self.agent_name or "agent")
+        except Exception:  # noqa: BLE001 — 共享剪贴板是旁路
+            self.log.warning("初始化批次共享剪贴板失败（忽略）", exc_info=True)
+
         ctx = ToolContext(root=work_root,
                           allowed_commands=self.allowed_commands,
                           skills=bodies, enabled_tools=enabled,
@@ -518,6 +532,7 @@ class TaskExecutor:
                           stop_event=stop_event, extra_env=self.extra_env,
                           mirror_runtime=self.mirror_runtime,
                           current_task=task,
+                          session_bus=session_bus,
                           session=session,
                           team_roles=self.team_roles,
                           current_role=self.team_role,
@@ -531,11 +546,21 @@ class TaskExecutor:
         if recorder is not None:
             # 台账事件出口：模型调用事件由 LLMClient 统一上报
             client.event_sink = recorder.event
+        # 架构黑板报（Phase 1）：读当前工作根（worktree/项目根）的 ARCHITECTURE.md，
+        # 只读注入系统提示词；文件不存在则本节为空，不占上下文。
+        architecture = ""
+        try:
+            arch_path = Path(work_root) / ARCHITECTURE_FILE
+            if arch_path.is_file():
+                architecture = arch_path.read_text(encoding="utf-8")[:20000]
+        except OSError as e:
+            self.log.debug("读取架构黑板报失败（忽略）：%s", e)
         sys_prompt = build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,
                                          permission_mode=self.permission_mode,
                                          tool_map=tool_map,
-                                         in_worktree=use_worktree)
+                                         in_worktree=use_worktree,
+                                         architecture=architecture)
         if self.extra_system_prompt:
             sys_prompt = sys_prompt.rstrip() + "\n\n" + self.extra_system_prompt
         client.reset(sys_prompt)

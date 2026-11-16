@@ -280,6 +280,8 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
         <p>登录、任务/项目/设置变更、提交确认、审批与 API Key 写调用写入 <code>logs/audit.jsonl</code>；看板可筛选查看，参数只记摘要，密码、密钥与任务正文不落盘；日志 5MB 轮转保留 5 份。</p></div>
       <div class="fcard"><div class="ico">🚦</div><h3>统一出口白名单</h3>
         <p>模型调用、Issue 拉取、镜像测速、网页抓取、更新检查全部经 <code>egress</code> 判定：模型/Issue/镜像/更新源主机自动放行，额外主机在设置页追加；白名单外拒绝并写审计。回环调试不受影响；子进程出网不承诺拦截。</p></div>
+      <div class="fcard"><div class="ico">🧠</div><h3>团队记忆（Phase 1）</h3>
+        <p><code>ARCHITECTURE.md</code> 架构黑板报开工自动注入，PM 首次梳理、开发重大接口变更后追加；同需求批次用 <code>session_share</code> / <code>session_read</code> 传递临时端口与测试凭证，验收后自动清除；任务详情可一键查看前置成果并跳转。</p></div>
       <div class="fcard"><div class="ico">🔒</div><h3>真实执行，安全禁锢</h3>
         <p>文件工具锁死在项目根内（路径穿越直接拒绝）、命令白名单、工具轮数上限、上下文成本自动裁剪——放开手让它跑，也出不了圈。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>三档访问权限 + 人工审批</h3>

@@ -235,6 +235,20 @@ const defaultToolCategories = [
     tools: ['create_tasks', 'finish'],
   },
   {
+    key: 'session_bus',
+    label: '批次共享状态',
+    icon: 'share',
+    description: '同一需求批次内跨角色传递临时端口、测试账号、动态凭证等运行态信息',
+    tools: ['session_share', 'session_read'],
+  },
+  {
+    key: 'project_memory',
+    label: '项目架构记忆',
+    icon: 'account_tree',
+    description: '维护 ARCHITECTURE.md 全局架构黑板报：PM 首次梳理、开发重大接口变更后追加',
+    tools: ['update_architecture'],
+  },
+  {
     key: 'subagent',
     label: '子代理并发协同',
     icon: 'group',

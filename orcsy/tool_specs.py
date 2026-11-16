@@ -114,6 +114,12 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "dev_server": (
         "dev_server_start", "dev_server_logs", "dev_server_stop",
     ),
+    "team_memory": (
+        "session_share", "session_read",
+    ),
+    "project_memory": (
+        "update_architecture",
+    ),
 }
 
 # 默认关闭的工具集合（本地调试相关工具 + 小组协作专属工具；未显式启用时默认关闭，保持单兵模式洁净）
@@ -150,6 +156,20 @@ TOOL_CATEGORIES: list[dict] = [
         "icon": "task_alt",
         "description": "拆解多阶段子任务、角色直派、Bug 报告并在任务完成或受阻时给出结构化答复",
         "tools": ["create_tasks", "report_bug", "reassign_task", "finish"],
+    },
+    {
+        "key": "session_bus",
+        "label": "批次共享状态",
+        "icon": "share",
+        "description": "同一需求批次内跨角色传递临时端口、测试账号、动态凭证等运行态信息",
+        "tools": ["session_share", "session_read"],
+    },
+    {
+        "key": "project_memory",
+        "label": "项目架构记忆",
+        "icon": "account_tree",
+        "description": "维护 ARCHITECTURE.md 全局架构黑板报：PM 首次梳理、开发重大接口变更后追加",
+        "tools": ["update_architecture"],
     },
     {
         "key": "subagent",

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
-import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode, type RunDetailT, type RunSummaryT } from '../api'
+import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode, type RunDetailT, type RunSummaryT, type TaskDepT } from '../api'
 import { isMobile, viewportHeight } from '../mobile'
 import { miIcon } from '../mi'
-import { beginRestartWait, navigateTo, refresh, ui, store } from '../store'
+import { beginRestartWait, navigateTo, openTaskView, refresh, ui, store } from '../store'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
 // bridge 兼容两种用法：message('文本') 默认 info；message.success('文本') 等——
@@ -166,6 +166,18 @@ const defaultProjectToolCategories = [
     label: '任务管理与协议',
     icon: 'task_alt',
     tools: ['create_tasks', 'finish'],
+  },
+  {
+    key: 'session_bus',
+    label: '批次共享状态',
+    icon: 'share',
+    tools: ['session_share', 'session_read'],
+  },
+  {
+    key: 'project_memory',
+    label: '项目架构记忆',
+    icon: 'account_tree',
+    tools: ['update_architecture'],
   },
   {
     key: 'external_net',
@@ -748,6 +760,29 @@ const tDraft = reactive({
 })
 // 409 冲突后「保留我的修改」重试标记：下次 saveTask 带 force_overwrite=true
 const tForceOverwrite = shallowRef(false)
+// Phase 1：前置依赖概览（状态 / 是否归档 / 成果摘要），数据来自 /api/task
+const depTasks = ref<TaskDepT[]>([])
+
+type DepTagType = 'success' | 'warning' | 'default' | 'error' | 'info'
+function depTag(d: TaskDepT): { type: DepTagType; label: string } {
+  if (d.missing) return { type: 'error', label: '已删除' }
+  const map: Record<string, { type: DepTagType; label: string }> = {
+    done: { type: 'success', label: '已完成' },
+    open: { type: 'info', label: '待执行' },
+    in_progress: { type: 'warning', label: '执行中' },
+    blocked: { type: 'error', label: '受阻' },
+    cancelled: { type: 'default', label: '已取消' },
+  }
+  return map[d.status] || { type: 'default', label: d.status || '未知' }
+}
+function depSummary(text: string): string {
+  const s = (text || '').replace(/\s+/g, ' ').trim()
+  return s.length > 180 ? s.slice(0, 180) + '…' : s
+}
+function openDependency(id: string): void {
+  const project = ui.taskDlg?.project
+  if (project && id) openTaskView(project, id)
+}
 
 // ---- 运行台账（V1-R1）：任务详情内的运行记录与回放（只读） ----
 const runList = ref<RunSummaryT[]>([])
@@ -948,6 +983,7 @@ watch(() => ui.taskDlg, async (dlg) => {
   tDraft.qa_round = 0
   tDraft.dep_state = ''
   tDraft.versionToken = ''
+  depTasks.value = []
   tForceOverwrite.value = false
   // 运行记录：重开对话框时清空，避免看到上一个任务的 run
   runList.value = []; runOpen.value = ''; runDetail.value = null
@@ -968,11 +1004,27 @@ watch(() => ui.taskDlg, async (dlg) => {
       tDraft.parent_id = t.parent_id || ''
       tDraft.qa_round = t.qa_round || 0
       tDraft.dep_state = t.dep_state || ''
+      // 首屏先用缓存拼出依赖概览（API 返回后覆盖为带成果摘要的完整数据）
+      depTasks.value = (t.depends_on || []).map((id: string) => {
+        const d = p?.tasks.find(x => x.id === id) || p?.archived.find(x => x.id === id)
+        return {
+          id, title: d?.title || '', status: d?.status || 'missing',
+          assignee: d?.assignee || '', archived: !!p?.archived.find(x => x.id === id),
+          missing: !d, summary: '', qa_round: d?.qa_round || 0,
+          parent_id: d?.parent_id || '',
+        }
+      })
     }
     try {
       const r = await api.taskFull(dlg.project, dlg.id)
+      // 归档任务可能不在 /api/state 的最近归档缓存里：标题/优先级/指派一并从全文补齐
+      if (r.title) tDraft.title = r.title
+      if (r.priority) tDraft.priority = r.priority
+      if (r.assignee) tDraft.assignee = r.assignee
+      if (r.labels) tDraft.labels = r.labels.join(', ')
       if (r.description) tDraft.description = r.description
       if (r.depends_on) tDraft.depends_on = [...r.depends_on]
+      if (r.dep_tasks) depTasks.value = r.dep_tasks
       if (r.parent_id) tDraft.parent_id = r.parent_id
       if (r.qa_round) tDraft.qa_round = r.qa_round
       if (r.error) tDraft.err = `注意：任务文件解析有问题 —— ${r.error}`
@@ -1732,7 +1784,21 @@ async function newFolder(): Promise<void> {
       <label>前置依赖任务（全部完成后本任务方可认领执行）</label>
       <NSelect v-model:value="tDraft.depends_on" multiple filterable :options="projectTaskOptions" :disabled="tReadonly" placeholder="选择依赖的前置任务（可选）..." />
       <div v-if="tDraft.parent_id" class="hint" style="margin-top: 4px;">
-        <i class="ms sm">link</i> 关联父需求/来源任务：{{ tDraft.parent_id }} {{ tDraft.qa_round ? `· 回归轮次 #${tDraft.qa_round}` : '' }}
+        <i class="ms sm">link</i> 关联父需求/来源任务：
+        <button type="button" class="deplink" @click="openDependency(tDraft.parent_id)">
+          <i class="ms sm">open_in_new</i>{{ tDraft.parent_id }}
+        </button>
+        {{ tDraft.qa_round ? `· 回归轮次 #${tDraft.qa_round}` : '' }}
+      </div>
+      <div v-if="depTasks.length" class="deplist">
+        <div class="deplist-head">前置任务成果（点击任务打开详情）</div>
+        <div v-for="d in depTasks" :key="d.id" class="depitem">
+          <NTag size="tiny" :bordered="false" :type="depTag(d).type">{{ depTag(d).label }}</NTag>
+          <button type="button" class="deplink" :disabled="d.missing" @click="openDependency(d.id)">
+            <i class="ms sm">open_in_new</i>{{ d.id }}<template v-if="d.title"> · {{ d.title }}</template>
+          </button>
+          <span v-if="d.summary" class="depsum" :title="d.summary">{{ depSummary(d.summary) }}</span>
+        </div>
       </div>
     </div>
     <label>任务描述（Markdown 正文）</label>
@@ -2168,6 +2234,18 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .run-meta { flex: 1; color: var(--faint); overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .run-toggle { color: var(--faint); }
+/* Phase 1：任务详情里的前置任务概览与跳转 */
+.deplist { margin-top: 6px; border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; background: rgba(128, 140, 180, 0.05); }
+.deplist-head { font-size: 11.5px; color: var(--faint); margin-bottom: 4px; }
+.depitem { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 3px 0; }
+.deplink { border: 0; background: none; padding: 0; color: var(--acc, #5b8cff);
+  font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+.deplink:disabled { color: var(--faint); cursor: default; }
+.deplink .ms { font-size: 13px; margin-right: 2px; vertical-align: -2px; }
+.depsum { flex-basis: 100%; font-size: 11.5px; color: var(--dim);
+  white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .run-detail { padding: 8px 10px; border-top: 1px dashed var(--line); }
 .run-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .run-artifact { max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.22);

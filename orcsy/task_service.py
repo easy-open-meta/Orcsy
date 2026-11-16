@@ -20,12 +20,14 @@ import re
 from pathlib import Path
 
 from .logging_setup import get_logger
+from .session_bus import cleanup_if_finished
 from .task_model import (
     _next_requeue_seq,
     _set_frontmatter_field,
     detect_dependency_cycle,
     parse_task_file,
     priority_rank,
+    read_dependency_overview,
     set_task_file_order,
 )
 
@@ -291,6 +293,16 @@ def set_task_status(agents: dict, data: dict) -> dict:
                                str(_next_requeue_seq(path.parent)))
     else:
         _set_frontmatter_field(path, None, "requeue_seq", None)
+    # Phase 1：人工把批次内最后一个任务标为 done/cancelled 时同步销毁共享剪贴板
+    if status in ("done", "cancelled"):
+        try:
+            agent = agents.get(project)
+            if agent is not None and getattr(agent, "claims", None) is not None:
+                t = parse_task_file(path)
+                cleanup_if_finished(agent.project, agent.claims.state_dir, t,
+                                    tasks_dir=agent.tasks_dir)
+        except Exception:  # noqa: BLE001 — 清理旁路
+            log.warning("按批次清理共享剪贴板失败（忽略）", exc_info=True)
     log.info("Web 修改任务状态 %s/%s -> %s", project, task_id, status)
     return {"ok": True}
 
@@ -301,7 +313,15 @@ def delete_task(agents: dict, data: dict) -> dict:
     path = task_path(agents, project, task_id)
     if not path.exists():
         raise ValueError(f"任务不存在：{task_id}")
+    t = parse_task_file(path)
     path.unlink()
+    try:  # 删除后批次可能已无未完成任务：回收共享剪贴板
+        agent = agents.get(project)
+        if agent is not None and getattr(agent, "claims", None) is not None:
+            cleanup_if_finished(agent.project, agent.claims.state_dir, t,
+                                tasks_dir=agent.tasks_dir)
+    except Exception:  # noqa: BLE001 — 清理旁路
+        log.warning("删除任务后清理共享剪贴板失败（忽略）", exc_info=True)
     log.info("Web 删除任务 %s/%s", project, task_id)
     return {"ok": True}
 
@@ -380,11 +400,14 @@ def get_task(agents: dict, params: dict) -> dict:
     if t.error:
         return {"ok": True, "id": task_id, "title": t.title, "archived": archived,
                 "priority": "P2", "labels": [], "assignee": "",
-                "depends_on": [], "description": "", "error": t.error,
+                "depends_on": [], "dep_tasks": [], "description": "", "error": t.error,
                 "version_token": ""}
     return {"ok": True, "id": t.id, "title": t.title, "priority": t.priority,
             "status": t.status, "labels": t.labels, "assignee": t.assignee,
-            "depends_on": list(t.depends_on), "parent_id": t.parent_id,
+            "depends_on": list(t.depends_on),
+            # Phase 1：前序依赖概览（状态/归档/成果摘要），供任务详情一键查看/跳转
+            "dep_tasks": read_dependency_overview(agent.tasks_dir, t.depends_on),
+            "parent_id": t.parent_id,
             "qa_round": t.qa_round,
             "description": t.description, "archived": archived,
             # 版本快照：编辑保存时回传 base_version 触发乐观锁比对

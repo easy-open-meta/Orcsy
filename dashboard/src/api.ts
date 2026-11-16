@@ -98,6 +98,19 @@ export interface TaskT {
   dep_total_count?: number
 }
 
+/** 任务详情里的前置依赖概览（Phase 1）：状态/归档/成果摘要 */
+export interface TaskDepT {
+  id: string
+  title: string
+  status: string
+  assignee: string
+  archived: boolean
+  missing: boolean
+  summary: string
+  qa_round: number
+  parent_id: string
+}
+
 export interface ProjectT {
   name: string
   path: string
@@ -679,7 +692,23 @@ export const api = {
   logout: () => post('/api/logout', {}),
   scan: () => post('/api/scan', {}),
   taskFull: (project: string, id: string) =>
-    get(`/api/task?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`),
+    get(`/api/task?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`) as Promise<{
+      ok: boolean
+      id: string
+      title: string
+      priority: string
+      status: string
+      labels: string[]
+      assignee: string
+      depends_on: string[]
+      dep_tasks?: TaskDepT[]
+      parent_id: string
+      qa_round: number
+      description: string
+      archived: boolean
+      version_token: string
+      error?: string
+    }>,
   /** 运行台账：某项目/某任务的 run 列表（只读回放） */
   runs: (p: { project?: string; task_id?: string; limit?: number }) => {
     const qs = new URLSearchParams()

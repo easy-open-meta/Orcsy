@@ -58,6 +58,8 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/tools_task.py` | 执行工具层 | 任务拆单编排协议（create_tasks/DAG检测）、Bug 提单、PM指派与完成信号 |
 | `orcsy/tools_net.py` | 执行工具层 | SSRF 严格防护网页抓取、HTML 文本抽取、技能正文读取与镜像测速 |
 | `orcsy/egress.py` | 基础设施 | 统一出口白名单：应用自身 HTTP 的主机判定、拒绝审计与更新 CDN 运行时放行 |
+| `orcsy/session_bus.py` | 基础设施 | Phase 1 需求批次共享剪贴板：批次解析、KV 存储、生命周期清理与 TTL |
+| `orcsy/tools_memory.py` | 执行工具层 | `update_architecture`：只写项目根 ARCHITECTURE.md 的架构黑板报工具 |
 | `orcsy/worktree.py` | 隔离沙箱层 | Git Worktree 物理目录映射、独立分支检出、陈旧锁恢复与重置清理 |
 | `orcsy/task_service.py` | Web 服务层 | 看板侧任务文件 CRUD（创建/状态/排序/批量删除/清空/读取），纯函数不感知 HTTP |
 | `orcsy/git_service.py` | Web 服务层 | 人工把关提交（stage 分支复位）、diff 预览、改动丢弃、Git 初始化与新项目引导 |

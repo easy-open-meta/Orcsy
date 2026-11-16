@@ -163,6 +163,12 @@ class ProjectAgent:
         except Exception:  # noqa: BLE001 — 清理失败不阻断启动（TTL 仍会拦截）
             get_logger(f"agent.{project.name}").warning(
                 "清理过期租约失败（忽略）", exc_info=True)
+        try:  # Phase 1：进程被杀残留的批次共享剪贴板按 TTL 兜底回收
+            from .session_bus import prune_expired
+            prune_expired(self.claims.state_dir)
+        except Exception:  # noqa: BLE001 — 清理旁路
+            get_logger(f"agent.{project.name}").warning(
+                "清理过期批次共享剪贴板失败（忽略）", exc_info=True)
         # 预算软停状态：项目当日预算用尽时置位，供看板/日志解释
         self.budget_paused = False
         self.budget_day: dict = {}
@@ -335,6 +341,15 @@ class ProjectAgent:
                 with self._active_lock:
                     self.active_roles.pop(task.id, None)
 
+    def _cleanup_session_bus(self, task: Task) -> None:
+        """任务终态回写后检查批次：整批无未完成任务则物理删除共享剪贴板。"""
+        try:
+            from .session_bus import cleanup_if_finished
+            cleanup_if_finished(self.project, self.claims.state_dir, task,
+                                tasks_dir=self.tasks_dir)
+        except Exception:  # noqa: BLE001 — 清理旁路
+            self.log.warning("清理批次共享剪贴板失败（忽略）", exc_info=True)
+
     def _release_claim(self, task: Task) -> None:
         """任务已回写完毕：清续跑标记并释放租约（两步都失败不阻断调度）。"""
         try:
@@ -503,6 +518,7 @@ class ProjectAgent:
                         bad.block_reason = "stale_lease"
                         append_progress(t.path, f"⛔ {bad.notes}")
                         self._write_back_result(t, bad)
+                        self._cleanup_session_bus(t)
                         self._release_claim(t)
                         results.append(bad)
                         total_claimed += 1
@@ -513,6 +529,7 @@ class ProjectAgent:
                 res.review = ex._skipped_review("崩溃恢复：合并已完成")
                 set_task_file_resume(t.path, False)
                 self._write_back_result(t, res)
+                self._cleanup_session_bus(t)
                 self._release_claim(t)
                 results.append(res)
                 total_claimed += 1
@@ -563,6 +580,7 @@ class ProjectAgent:
 
             for t, _mid, res in wave_outputs:
                 self._write_back_result(t, res)
+                self._cleanup_session_bus(t)
                 self._release_claim(t)
                 self._record_health(t, res)
                 results.append(res)
@@ -606,6 +624,7 @@ class ProjectAgent:
             result = self._review_pending_task(task)
             if result is not None:
                 self._write_back_result(task, result)
+                self._cleanup_session_bus(task)
                 self._release_claim(task)
                 self._record_health(task, result)
                 results.append(result)

@@ -40,6 +40,7 @@ MUTATING_TOOLS = frozenset({
     "create_tasks",   # 拆分任务会写任务文件并关闭原任务，按写操作对待
     "report_bug",     # 测试工程师新建 Bug 任务至项目任务队列
     "reassign_task",  # 项目经理直接指派任务责任角色
+    "update_architecture",  # 写项目根 ARCHITECTURE.md（框架黑板报）
     "dev_server_start",
     "browser_click", "browser_type", "browser_eval",
 })

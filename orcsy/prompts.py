@@ -18,6 +18,11 @@ from .tools import _path_key
 
 log = get_logger("prompts")
 
+# 项目架构黑板报（Phase 1）：项目根目录下的轻量全局架构备忘录。
+# 所有角色任务启动时只读注入前 N 字符；PM 首次梳理、开发在重大接口变更后追加。
+ARCHITECTURE_FILE = "ARCHITECTURE.md"
+ARCHITECTURE_MAX_CHARS = 3000
+
 OUTPUT_CONTRACT_HEADER = """\
 ## 工作方式与结束协议（必须严格遵守）
 
@@ -43,7 +48,7 @@ _FINISH_PROTOCOL = """\
 def _output_contract(enabled: frozenset[str] | None = None) -> str:
     """按启用工具集动态生成工作方式与资源约定。
 
-    enabled=None（全启用）时文案覆盖全部 14 个工具；被禁用的工具不出现在
+    enabled=None（全启用）时文案覆盖全部工具；被禁用的工具不出现在
     提示词里——模型反复尝试调用一个 schema 里不存在的工具纯属浪费轮次。
     """
     def on(name: str) -> bool:
@@ -69,6 +74,10 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
         clauses.append("reassign_task 将单一小任务直接指派给具体角色")
     if on("report_bug"):
         clauses.append("report_bug 在联调发现缺陷时新建 Bug 修复任务")
+    if on("session_share") and on("session_read"):
+        clauses.append("session_share / session_read 在同一需求批次内传递临时端口与测试凭证")
+    if on("update_architecture"):
+        clauses.append("update_architecture 维护项目架构黑板报")
     if on("dev_server_start"):
         clauses.append("dev_server_* 管理后台开发服务")
     if on("http_request"):
@@ -102,6 +111,11 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
             "明显做不完，即用 create_tasks 拆成可独立验证的子任务（每个带明确验收"
             "命令），再 finish(action=split)。拆分前把已验证的现状写进子任务描述，"
             "避免后续任务重做或误判已有文件损坏。")
+    if on("session_share") and on("session_read"):
+        bullets.append(
+            "- 跨角色传递**临时运行态**（本地服务端口、测试账号、动态 JWT、临时 DSN）"
+            "用 session_share 写入本需求批次剪贴板，下游用 session_read 读取；"
+            "不要写进任务文件/代码/提交，也不要放长期密钥。需求验收或终止后自动清除。")
     if on("dev_server_start") or on("browser_navigate") or on("http_request"):
         bullets.append(
             "- 本地调试流程：先用 dev_server_start 启动被测服务（命令中使用 {PORT} 自动分配端口并等待就绪），"
@@ -120,6 +134,27 @@ def _read_text(path: Path, max_chars: int) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def _architecture_section(content: str) -> str:
+    """项目架构黑板报：只读注入前 3000 字符，并给出轻量维护协议。"""
+    text = (content or "").strip()
+    if not text:
+        return ""
+    if len(text) > ARCHITECTURE_MAX_CHARS:
+        text = text[:ARCHITECTURE_MAX_CHARS].rstrip() + (
+            f"\n\n…（黑板报过长，已截断至前 {ARCHITECTURE_MAX_CHARS} 字符；"
+            f"完整内容见项目根 {ARCHITECTURE_FILE}）")
+    return (
+        f"# 项目架构黑板报（{ARCHITECTURE_FILE}）\n\n"
+        f"以下是本项目维护的全局系统架构备忘录，用于保持小队成员对项目全貌的共识：\n\n"
+        f"<architecture>\n{text}\n</architecture>\n\n"
+        f"维护约定（仅在确有架构级变化时更新，避免流水账）：\n"
+        f"- PM 首次拆解系统需求时创建/更新：核心分层、模块边界、关键技术选型、公共数据模型；\n"
+        f"- 开发角色完成重大接口、数据表或模块边界变更后，追加不超过 200 字的增量"
+        f"（关键路由、数据模型、文件导引）；普通小改动不要改黑板报；\n"
+        f"- 只写长期有效的架构事实，不写本次任务的执行日志、临时端口或调试过程。\n\n"
+    )
 
 
 def _skills_section(skills: list[Skill] | None,
@@ -193,6 +228,7 @@ def build_system_prompt(
     permission_mode: str | None = None,
     tool_map: dict | None = None,
     in_worktree: bool | None = None,
+    architecture: str = "",
 ) -> str:
     """组装系统提示词：角色 → 项目指引 → 技能索引 → 工作环境 → 输出协议。
 
@@ -201,6 +237,7 @@ def build_system_prompt(
     tool_map：任务启动扫描的本机工具地图（tools + extra_dirs），非空时追加
     「本机工具」节——模型无需浪费轮数自己探测命令在哪。
     in_worktree：是否运行在隔离 worktree 内（默认跟随 is_git_repo；只读 PM/QA 为 False）。
+    architecture：项目根 ARCHITECTURE.md 的内容（Phase 1 架构黑板报，空 = 未建立）。
     """
     guide = guide_content.strip()
     if len(guide) > guide_max_chars:
@@ -230,6 +267,7 @@ def build_system_prompt(
         f"# Development Guide (AGENT.md)\n\n"
         f"以下是该项目的开发指引，是你在本项目工作的最高行为准则，必须遵守：\n\n"
         f"<agent_guide>\n{guide}\n</agent_guide>\n\n"
+        f"{_architecture_section(architecture)}"
         f"{_skills_section(skills, tools)}"
         f"{workspace}\n"
         f"{_tools_section(tool_map)}"
@@ -284,6 +322,8 @@ def build_role_prompt_extra(
             f"{roster_text}\n\n"
             "### 工作流程与要求\n"
             "1. 先摸清项目架构与代码现状：对于跨模块或中大型需求，**优先调用 `delegate_explore` 派生 2~4 个只读子代理并发摸底**（如分别并行调研后端数据层、前端页面结构、现有测试规范），单轮内即可拿到完整报告；局部细节亦可用 `list_dir` / `find_files` / `read_file` / `grep` 核验。\n"
+            "   摸底后若项目根 `ARCHITECTURE.md` 不存在或与现状明显不符，**先调用 `update_architecture(mode=\"replace\", content=...)` 创建/更新架构黑板报**"
+            "（核心分层、模块边界、关键技术选型、公共数据模型，控制在 2000 字以内）；已有且准确则不要重复改写。\n"
             "2. 若任务体量小且职责单一（如单一端小修复），直接调用 `reassign_task(assignee=..., note=...)` 转派给对应角色，再调用 `finish(action=\"split\", ...)` 交接。\n"
             "3. 若任务涉及多端协作或体量较大，调用 `create_tasks` 拆分为 **2~6 个**职责清晰、可独立验收的子任务：\n"
             "   - **每条子任务必须指定 `assignee`**（严格使用上述列表里的角色 ID）；\n"
@@ -301,7 +341,7 @@ def build_role_prompt_extra(
             "你在本项目中担任**测试工程师（QA）**，负责前后端集成联调测试与质量验收。\n\n"
             "### 联调闭环流程\n"
             f"1. {write_rule}\n"
-            "2. 先结合任务描述与「上游前置任务交付摘要」了解已开发的功能与接口。\n"
+            "2. 先结合任务描述与「上游前置任务交付摘要」了解已开发的功能与接口；若上游开发通过 `session_share` 共享了服务端口、测试账号或动态凭证，先用 `session_read` 读取（key 留空可列出所有可用键），不要靠日志正则猜。\n"
             "3. 运行测试与联调验证：可用 `dev_server_start`（命令带 `{PORT}`）后台拉起后端与前端服务，再用 `http_request` 校验接口返回，并用 `browser_navigate` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_console` / `browser_network` 验证页面交互与零报错。\n"
             "4. **若发现缺陷**：整理清晰的复现步骤、期望结果、实际现象与调试证据，调用 `report_bug` 新建 Bug 任务并精确指派给 `backend` 或 `frontend`（或对应负责角色）；然后先关闭临时开发服务（`dev_server_stop`），再调用 `finish(action=\"wait_retest\", summary=\"发现 N 个 Bug 已派发修复，等待回归\")`。\n"
             "5. **若全部验收通过且无 Bug**：清理临时开发服务后，调用 `finish(action=\"completed\", summary=...)`。"
@@ -313,7 +353,11 @@ def build_role_prompt_extra(
             "1. 若存在「上游前置任务交付摘要」，务必先对齐前置任务暴露的接口路径、数据结构与文件路径。**需要同时摸清多个模块/目录时优先调用 `delegate_explore` 派生 2~4 个只读子代理并发探索**，单轮拿到汇总报告，避免串行翻阅。\n"
             "2. **严禁只读打转**：探索阅读不应超过 3~5 轮。一旦确认了接口定义或数据表结构，**必须立即调用 `edit_file` 或 `write_file` 落地代码**，严禁在不同文件之间反复重读打转！\n"
             "3. 在完成代码修改并跑通对应单元/构建检查后，调用 `finish(action=\"completed\", ...)`。\n"
-            "4. 请在 `finish.summary` 与 `finish.notes` 中清晰说明新增/修改的核心文件、接口路由或启动验证方式，方便下游开发与 QA 无缝联调。"
+            "4. 请在 `finish.summary` 与 `finish.notes` 中清晰说明新增/修改的核心文件、接口路由或启动验证方式，方便下游开发与 QA 无缝联调。\n"
+            "5. 若本次改动涉及**重大接口、数据表结构或模块边界**，调用 `update_architecture(mode=\"append\", content=...)` 在项目根 `ARCHITECTURE.md` 追加不超过 200 字的增量"
+            "（关键路由、数据模型、文件导引）；普通小改动不要修改黑板报。\n"
+            "6. 若本次启动了本地服务、生成了测试账号或动态凭证，用 `session_share` 把端口/账号共享到本需求批次剪贴板，"
+            "供 QA 联调直接读取；不要写进任务文件、代码或提交，也不要共享长期密钥。"
         )
 
     if extra_prompt and extra_prompt.strip():
