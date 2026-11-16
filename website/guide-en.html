@@ -1919,6 +1919,18 @@ migration</h2>
 <td><code>/var/lib/orcsy/logs/usage.jsonl</code></td>
 </tr>
 <tr>
+<td>Run ledger</td>
+<td><code>%APPDATA%\Orcsy\runs\</code></td>
+<td><code>./orcsy-data/runs/</code></td>
+<td><code>/var/lib/orcsy/runs/</code></td>
+</tr>
+<tr>
+<td>Task fingerprints / leases</td>
+<td><code>%APPDATA%\Orcsy\state\</code></td>
+<td><code>./orcsy-data/state/</code></td>
+<td><code>/var/lib/orcsy/state/</code></td>
+</tr>
+<tr>
 <td>Tasks</td>
 <td>Each project's <code>tasks\</code></td>
 <td><code>./projects/&lt;project&gt;/tasks/</code></td>
@@ -1986,7 +1998,11 @@ with backoff; only after that does it mark blocked;</li>
 <li>The AI decided it lacks information or needs a human decision;</li>
 <li>An approval was rejected or timed out;</li>
 <li>A test command is missing or the toolchain is not installed;</li>
-<li>A merge conflict.</li>
+<li>A merge conflict;</li>
+<li>The task was edited while it was running (<code>stale_lease</code>):
+the pre-commit check detected a change to the body, dependencies or model
+and skipped the commit; after confirming your change, click
+<strong>Requeue</strong>.</li>
 </ul>
 <p>What to do:</p>
 <ol type="1">
@@ -2006,6 +2022,13 @@ Will tasks be lost if I shut down or kill the process?</h3>
 <p>Task files are not lost. Execution progress is written into the
 task's <strong>## Execution progress</strong> section in real time. An
 interrupted task is reset to open on the next launch and re-queued.</p>
+<p>If the interruption happened <strong>after a WIP commit or after the
+merge completed</strong>, Orcsy keeps the worktree and a resume
+checkpoint, so the next run continues from the existing result (the task
+is marked as resumed) instead of replaying the work or creating a
+duplicate commit. If the interruption happened while the Agent was still
+editing code (no WIP commit yet), uncommitted changes are discarded as
+before and the task runs again from scratch.</p>
 <h3 id="125-dependency-downloads-fail-on-a-slow-network">12.5 Dependency
 downloads fail on a slow network</h3>
 <p>Try, in order:</p>

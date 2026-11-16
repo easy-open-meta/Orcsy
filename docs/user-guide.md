@@ -1045,6 +1045,8 @@ terminal also prints the LAN addresses plus a **scan-to-connect QR code**.
 | Skills | `%APPDATA%\Orcsy\skills\` | `./orcsy-data/skills/` | `/var/lib/orcsy/skills/` |
 | Logs | `%APPDATA%\Orcsy\logs\` | `./orcsy-data/logs/` | `/var/lib/orcsy/logs/` |
 | Usage ledger | `%APPDATA%\Orcsy\logs\usage.jsonl` | `./orcsy-data/logs/usage.jsonl` | `/var/lib/orcsy/logs/usage.jsonl` |
+| Run ledger | `%APPDATA%\Orcsy\runs\` | `./orcsy-data/runs/` | `/var/lib/orcsy/runs/` |
+| Task fingerprints / leases | `%APPDATA%\Orcsy\state\` | `./orcsy-data/state/` | `/var/lib/orcsy/state/` |
 | Tasks | Each project's `tasks\` | `./projects/<project>/tasks/` | `/srv/orcsy-projects/<project>/tasks/` |
 | Project guide | Each project's `AGENT.md` | `./projects/<project>/AGENT.md` | `/srv/orcsy-projects/<project>/AGENT.md` |
 
@@ -1090,7 +1092,8 @@ Open the task and read **Agent result** plus the run log. Common causes:
 - The AI decided it lacks information or needs a human decision;
 - An approval was rejected or timed out;
 - A test command is missing or the toolchain is not installed;
-- A merge conflict.
+- A merge conflict;
+- The task was edited while it was running (`stale_lease`): the pre-commit check detected a change to the body, dependencies or model and skipped the commit; after confirming your change, click **Requeue**.
 
 What to do:
 
@@ -1105,6 +1108,8 @@ No. After the approval timeout (default 30 minutes) it is automatically rejected
 ### 12.4 Will tasks be lost if I shut down or kill the process?
 
 Task files are not lost. Execution progress is written into the task's **## Execution progress** section in real time. An interrupted task is reset to open on the next launch and re-queued.
+
+If the interruption happened **after a WIP commit or after the merge completed**, Orcsy keeps the worktree and a resume checkpoint, so the next run continues from the existing result (the task is marked as resumed) instead of replaying the work or creating a duplicate commit. If the interruption happened while the Agent was still editing code (no WIP commit yet), uncommitted changes are discarded as before and the task runs again from scratch.
 
 ### 12.5 Dependency downloads fail on a slow network
 

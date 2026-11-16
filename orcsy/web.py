@@ -197,6 +197,7 @@ from .tools import (
     validate_tools_map,
 )
 from .usage import get_usage_store, init_usage_store
+from .claims import claims_state_dir
 from .runlog import apply_runlog_config, get_run_store, init_run_store
 
 log = get_logger("web")
@@ -1538,6 +1539,7 @@ class AppState:
         return {p.name: ProjectAgent(p, resolve_llm(cfg.llm, p.llm,
                                                     context=f"项目 {p.name} 的 llm"),
                                      skills_base=self.skills_dir,
+                                     state_dir=claims_state_dir(cfg),
                                      tools=resolve_tools(cfg.tools, p.tools),
                                      permission_mode=resolve_permission_mode(cfg.permissions, p),
                                      permission_timeout_minutes=cfg.permissions.timeout_minutes,

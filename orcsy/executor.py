@@ -99,9 +99,12 @@ class TaskExecutor:
                  max_agent_turns: int | None = None,
                  extra_system_prompt: str = "",
                  merge_lock: object | None = None,
-                 skills_base: Path | None = None) -> None:
+                 skills_base: Path | None = None,
+                 claims: object | None = None) -> None:
         self.project = project
         self.llm = llm
+        # 任务指纹/租约（V1-R2）；None = 未启用（单元测试直构/兼容旧调用）
+        self.claims = claims
         self.commit_and_merge = bool(commit_and_merge)
         # worktree_isolation：默认跟随 commit_and_merge（单兵模式保持历史语义）；
         # 项目小组模式下可强制开启 True，在独立 worktree 中开发并仅落地主分支工作区（不默认 commit）
@@ -669,6 +672,8 @@ class TaskExecutor:
         if outcome == "cancelled":
             return "stopped"
         if outcome == "blocked":
+            if "stale_lease" in str(getattr(result, "notes", "") or ""):
+                return "stale_lease"
             if verdict == "fail":
                 return "review_fail"
             if verdict == "error":
@@ -680,6 +685,68 @@ class TaskExecutor:
 
     def _rec(self):
         return getattr(self, "_run_recorder", None)
+
+    # ---- 任务指纹 / 租约（V1-R2）----
+
+    def _task_fingerprint(self, task: Task) -> str:
+        return self.claims.fingerprint(
+            task, model=getattr(self.llm, "model", ""),
+            agent_key=self.team_role or "")
+
+    def _verify_claim(self, task: Task) -> tuple[bool, str]:
+        """提交/落地前二次校验：租约仍属于本次认领且任务指纹未变。"""
+        if self.claims is None:
+            return True, ""
+        try:
+            return self.claims.verify(task.id, self._task_fingerprint(task),
+                                      getattr(task, "claim_id", ""))
+        except Exception as e:  # noqa: BLE001 — 校验失败按失效处理（宁可停）
+            return False, f"claim_check_error:{e}"
+
+    def _mark_stale_claim(self, task: Task, result: TaskResult,
+                          reason: str) -> tuple[str, object]:
+        msg = (f"stale_lease：{reason}（任务内容或占用者已变化），"
+               "本次不提交、不合并；worktree 成果保留供人工/重新入队处理")
+        self.log.warning("任务 %s 提交前校验失败：%s", task.id, reason)
+        result.outcome = "blocked"
+        result.notes = (result.notes + "\n" if result.notes else "") + msg
+        append_progress(task.path, f"⛔ {msg}")
+        return "blocked", None
+
+    def _mark_review_resume(self, task: Task, result: TaskResult) -> None:
+        """WIP 提交已落，记录续跑标记（进程被杀后启动恢复可只补审查/合并）。"""
+        if self.claims is None:
+            return
+        try:
+            self.claims.mark_resume(
+                task.id, "review",
+                wip_commit=str(getattr(result, "wip_commit", "") or ""),
+                fingerprint=self._task_fingerprint(task))
+        except Exception:  # noqa: BLE001 — 续跑标记失败不阻断提交
+            self.log.warning("续跑标记写入失败（忽略）", exc_info=True)
+
+    def _clear_resume(self, task: Task) -> None:
+        if self.claims is None:
+            return
+        try:
+            self.claims.clear_resume(task.id)
+        except Exception:  # noqa: BLE001
+            self.log.warning("续跑标记清理失败（忽略）", exc_info=True)
+
+    def _mark_merged(self, task: Task, result: TaskResult) -> None:
+        """合并已完成：保留「merged」断点，直到状态回写成功才清除。
+
+        否则「合并后、回写前」崩溃会让任务重跑并可能重复提交。
+        """
+        if self.claims is None:
+            return
+        try:
+            self.claims.mark_resume(
+                task.id, "merged",
+                wip_commit=str(getattr(result, "wip_commit", "") or ""),
+                fingerprint=self._task_fingerprint(task))
+        except Exception:  # noqa: BLE001
+            self.log.warning("合并断点写入失败（忽略）", exc_info=True)
 
     def _rec_event(self, kind: str, **data) -> None:
         rec = self._rec()
@@ -783,6 +850,11 @@ class TaskExecutor:
                     return self._merge_and_push(task, result, branch, wt_path=wt_path)
                 return self._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
 
+        # 提交前二次校验（V1-R2）：任务内容被改 / 租约易主 / TTL 过期 → 不提交
+        ok, reason = self._verify_claim(task)
+        if not ok:
+            return self._mark_stale_claim(task, result, reason)
+
         # 第一步提交（提交仅落在该任务的沙盒 worktree 分支内，绝不触碰主分支历史）
         committed = wt_git.commit(message)
         if not committed:
@@ -790,7 +862,8 @@ class TaskExecutor:
             # 沙盒分支上，只差审查/合并收尾。此时直接补走审查门，而不是误判
             # blocked 打断（审查 verdict=error 分支本身不清 worktree，WIP 提交
             # 都还在）。分支上没有领先提交的「真无改动」才按旧行为 blocked。
-            is_rework = bool(task and (task.review_round > 0 or task.review_pending))
+            is_rework = bool(task and (task.review_round > 0 or task.review_pending
+                                       or getattr(task, "resume_run", False)))
             if is_rework and wt_git.branch_exists(base_branch):
                 ahead = wt_git.run("rev-list", "--count", f"{base_branch}..HEAD")
                 try:
@@ -803,6 +876,7 @@ class TaskExecutor:
                         "直接进入审查门补审", task.id, ahead_n)
                     result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
                     self._record_commit_artifact(task, result, wt_git, base_branch)
+                    self._mark_review_resume(task, result)
                     return self._run_review_gate(task, result, branch, wt_path,
                                                  base_branch, _finish_merge)
             if self.team_role == "qa":
@@ -815,6 +889,7 @@ class TaskExecutor:
             return "blocked", None
         result.wip_commit = wt_git.run("rev-parse", "--short", "HEAD")
         self._record_commit_artifact(task, result, wt_git, base_branch)
+        self._mark_review_resume(task, result)
 
         return self._run_review_gate(task, result, branch, wt_path,
                                      base_branch, _finish_merge)
@@ -828,6 +903,8 @@ class TaskExecutor:
             merged = _finish_merge()
             self._rec_event("review_verdict", verdict="skipped", summary=skip_reason)
             self._record_merge_event(merged)
+            if merged:
+                self._mark_merged(task, result)
             review = self._skipped_review(skip_reason)
             return ("done" if merged else "blocked"), review
 
@@ -846,6 +923,8 @@ class TaskExecutor:
         if review.verdict == "pass":
             merged = _finish_merge()
             self._record_merge_event(merged, review)
+            if merged:
+                self._mark_merged(task, result)
             if not merged:
                 return "blocked", review
             return "done", review
@@ -924,6 +1003,9 @@ class TaskExecutor:
         """
         active, skip_reason = self._review_active()
         if not active:
+            ok, reason = self._verify_claim(task)
+            if not ok:
+                return self._mark_stale_claim(task, result, reason)
             review = self._skipped_review(skip_reason)
             self._record_workspace_diff()
             return "done", review
@@ -935,6 +1017,9 @@ class TaskExecutor:
         set_task_file_review_pending(task.path, False)
         self._record_review_usage(task, review)
         if review.verdict == "pass":
+            ok, reason = self._verify_claim(task)
+            if not ok:
+                return self._mark_stale_claim(task, result, reason)
             self._record_workspace_diff()
             return "done", review
         return "blocked", review
@@ -1102,6 +1187,14 @@ class TaskExecutor:
                     parts.append(f"### [{s['id']}] {s['title']}{who}\n{s['summary']}\n")
                 upstream_block = "\n".join(parts) + "\n"
 
+        resume_block = ""
+        if getattr(task, "resume_run", False):
+            resume_block = (
+                "## 续跑说明\n\n"
+                "上次执行在提交/审查阶段被中断，worktree 中已保留上次的代码改动。\n"
+                "请先用 git status / git diff 检查现状，在现有改动基础上继续收尾；"
+                "不要从头重写，也不要丢弃已有成果。\n\n")
+
         return (
             f"# 当前任务\n\n"
             f"- 任务 ID：{task.id}\n"
@@ -1110,6 +1203,7 @@ class TaskExecutor:
             f"- 类型：{task.kind}\n"
             f"- 负责角色：{task.assignee or self.team_role or '通用'}\n"
             f"- 标签：{', '.join(task.labels) if task.labels else '无'}\n\n"
+            f"{resume_block}"
             f"## 任务内容\n\n{task.description}\n\n"
             f"{upstream_block}"
             f"## 工作要求\n\n" + "\n".join(lines)

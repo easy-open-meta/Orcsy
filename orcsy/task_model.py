@@ -71,6 +71,9 @@ class Task:
     # 审查不通过累计轮数（frontmatter review_round: N）；达到生效返工上限
     # 转 blocked 等人工。通过后保留作审计
     review_round: int = 0
+    # 续跑标记（frontmatter resume_run: true）：上次进程在 WIP 提交/审查阶段
+    # 被强杀，worktree 与提交仍在；重新认领时保留成果继续，而不是从头重跑
+    resume_run: bool = False
     # 项目小组协同与 DAG 依赖字段（均可选，老任务缺省取默认值）
     depends_on: list[str] = field(default_factory=list)  # 前置任务 ID 列表；全部进入 done/ 后才可领取
     parent_id: str = ""      # 所属父需求或触发当前 Bug 的 QA 任务 ID
@@ -153,6 +156,9 @@ def parse_task_file(path: Path) -> Task:
     elif isinstance(rr_raw, str) and rr_raw.strip().isdigit():
         review_round = int(rr_raw.strip())
 
+    # 续跑标记：缺失/非法按 false（旧任务文件天然兼容）
+    resume_run = bool(meta.get("resume_run", False))
+
     # 前置依赖任务 ID 列表：支持列表或逗号分隔字符串，去重保序
     depends_on: list[str] = []
     deps_raw = meta.get("depends_on")
@@ -208,6 +214,7 @@ def parse_task_file(path: Path) -> Task:
         requeue_seq=requeue_seq,
         review_pending=review_pending,
         review_round=review_round,
+        resume_run=resume_run,
         depends_on=depends_on,
         parent_id=parent_id,
         split_depth=split_depth,
@@ -335,6 +342,12 @@ def set_task_file_review_pending(path: Path, pending: bool) -> bool:
     """
     return _set_frontmatter_field(path, None, "review_pending",
                                   "true" if pending else None)
+
+
+def set_task_file_resume(path: Path, resume: bool) -> bool:
+    """改写/清除 frontmatter 的 resume_run 标记（V1-R2 断点续跑）。"""
+    return _set_frontmatter_field(path, None, "resume_run",
+                                  "true" if resume else None)
 
 
 def increment_task_file_review_round(path: Path) -> int:
@@ -693,6 +706,7 @@ __all__ = [
     "set_task_file_assignee",
     "set_task_file_dependencies",
     "set_task_file_order",
+    "set_task_file_resume",
     "set_task_file_review_pending",
     "set_task_file_status",
 ]

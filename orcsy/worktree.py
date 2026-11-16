@@ -136,7 +136,8 @@ class WorktreeManager:
         else:
             base_branch = main_branch
 
-        is_rework = bool(task and (task.review_round > 0 or task.review_pending))
+        is_rework = bool(task and (task.review_round > 0 or task.review_pending
+                                   or getattr(task, "resume_run", False)))
 
         if target_path.exists() and (target_path / ".git").exists():
             if not self.per_task_worktree:

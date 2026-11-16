@@ -17,6 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
+from .claims import claims_state_dir
 from .config import (
     AppConfig,
     resolve_commands,
@@ -59,6 +60,7 @@ class Scheduler:
             ProjectAgent(p, resolve_llm(config.llm, p.llm,
                                         context=f"项目 {p.name} 的 llm"),
                          skills_base=self.skills_dir,
+                         state_dir=claims_state_dir(config),
                          tools=resolve_tools(config.tools, p.tools),
                          permission_mode=resolve_permission_mode(config.permissions, p),
                          permission_timeout_minutes=config.permissions.timeout_minutes,
@@ -104,7 +106,7 @@ class Scheduler:
         reset: list[str] = []
         for agent in self.agents:
             try:
-                ids = recover_interrupted_tasks(agent.project)
+                ids = recover_interrupted_tasks(agent.project, claims=agent.claims)
             except Exception:  # noqa: BLE001 — 恢复失败不能阻止启动
                 agent.log.exception("中断任务恢复检查失败")
                 continue
@@ -166,6 +168,7 @@ class Scheduler:
             ProjectAgent(p, resolve_llm(cfg.llm, p.llm,
                                         context=f"项目 {p.name} 的 llm"),
                          skills_base=self.skills_dir,
+                         state_dir=claims_state_dir(cfg),
                          tools=resolve_tools(cfg.tools, p.tools),
                          permission_mode=resolve_permission_mode(cfg.permissions, p),
                          permission_timeout_minutes=cfg.permissions.timeout_minutes,

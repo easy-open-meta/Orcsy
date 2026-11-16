@@ -66,6 +66,8 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/config.py` | 领域模型 | 数据类（AppConfig 等 21 个 dataclass）、YAML 加载反序列化与配置解析 |
 | `orcsy/task_model.py` | 领域模型 | 任务 Markdown 文件解析、frontmatter 状态机与任务依赖 DAG 环检测 |
 | `orcsy/review.py` | 编排层 | 独立模型合并前只读审查 Agent |
+| `orcsy/runlog.py` | 可信层 | 运行台账：run 事件流、diff/测试/审查/用量工件、保留期清理与目录迁移 |
+| `orcsy/claims.py` | 可信层 | 任务指纹、TTL 租约（心跳/文件锁）、断点续跑标记与提交前二次校验 |
 | `orcsy/subagent.py` | 编排层 | 并发只读子代理扇出（fan-out）探索引擎 |
 | `orcsy/masking.py` | 核心逻辑 | 发往模型厂商前的内存级敏感数据正则脱敏与写盘还原闭环 |
 | `orcsy/concurrency.py`| 基础设施 | 进程级大模型请求 AIMD（加性增/乘性减）自适应并发配额控制器 |

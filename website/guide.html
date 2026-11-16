@@ -1600,6 +1600,18 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 <td><code>/var/lib/orcsy/logs/usage.jsonl</code></td>
 </tr>
 <tr>
+<td>运行台账</td>
+<td><code>%APPDATA%\Orcsy\runs\</code></td>
+<td><code>./orcsy-data/runs/</code></td>
+<td><code>/var/lib/orcsy/runs/</code></td>
+</tr>
+<tr>
+<td>任务指纹/租约</td>
+<td><code>%APPDATA%\Orcsy\state\</code></td>
+<td><code>./orcsy-data/state/</code></td>
+<td><code>/var/lib/orcsy/state/</code></td>
+</tr>
+<tr>
 <td>任务</td>
 <td>各项目 <code>tasks\</code></td>
 <td><code>./projects/&lt;项目&gt;/tasks/</code></td>
@@ -1658,7 +1670,8 @@ Orcsy，会提示「已有看板在运行」，先关掉旧的。</li>
 <li>AI 判断信息不足、需要人工决策；</li>
 <li>审批被拒绝或超时；</li>
 <li>测试命令不存在或环境缺少工具链；</li>
-<li>合并冲突。</li>
+<li>合并冲突；</li>
+<li>任务在执行期间被修改（<code>stale_lease</code>）：提交前二次校验发现正文/依赖/模型已变化，本次不提交；确认改动后点「重新入队」。</li>
 </ul>
 <p>处理：</p>
 <ol type="1">
@@ -1673,6 +1686,10 @@ Orcsy，会提示「已有看板在运行」，先关掉旧的。</li>
 强杀进程，任务会丢吗</h3>
 <p>不会丢任务文件。执行进度会实时写进任务文件的「##
 执行进度」；意外中断的任务在下次启动时会被重置回待办，重新排队。</p>
+<p>如果中断发生在<strong>已经产生 WIP
+提交或已经完成合并</strong>之后，系统会保留 worktree
+和断点标记，下次从现有成果继续（任务会被标记为续跑），不会从头重跑，也不会重复提交；如果中断发生在写代码阶段（还没有
+WIP 提交），未提交的改动会按原有逻辑丢弃后重跑。</p>
 <h3 id="125-国内网络拉依赖失败">12.5 国内网络拉依赖失败</h3>
 <p>按顺序尝试：</p>
 <ol type="1">
