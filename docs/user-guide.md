@@ -673,7 +673,7 @@ Toolbar buttons:
 
 ### 9.3 Projects tab
 
-Shows only the managed project cards (6 per page, paginated with lazy rendering); card actions match the dashboard: open folder, new task, AGENT.md, pull Issues, settings, remove. Project cards also show the review-gate status (Review on / Review off / Review model conflict). The task list is collapsed by default — click the “Task list” row to expand/collapse it (empty lists expand to show a hint too), saving card height.
+Shows only the managed project cards (6 per page, paginated with lazy rendering); card actions match the dashboard: open folder, new task, AGENT.md, pull Issues, settings, remove. Project cards also show the review-gate status (Review on / Review off / Review model conflict). The task list is collapsed by default — click the “Task list” row to expand/collapse it (empty lists expand to show a hint too), saving card height. The “Archived” list keeps its own expand/collapse and is not affected by the task-list toggle.
 
 ### 9.4 Settings tab
 

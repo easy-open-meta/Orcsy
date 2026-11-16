@@ -551,6 +551,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
                        :page="curPage(p)" :page-count="totalPages(p)"
                        @update:page="(pg: number) => onTaskPageChange(p, pg)" />
         </div>
+        </template>
 
         <details v-if="p.archived.length" class="arch">
           <summary>已归档（{{ p.archived.length }}）· 点击查看详情</summary>
@@ -563,7 +564,6 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <div class="t-meta">{{ t.id }}</div>
           </div>
         </details>
-        </template>
       </NCard>
     </div>
 
