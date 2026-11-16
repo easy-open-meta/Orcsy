@@ -445,7 +445,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
         <button type="button" class="tasklist-toggle" :aria-expanded="isTaskListOpen(p)"
                 :title="isTaskListOpen(p) ? '收起任务列表' : '展开任务列表'"
                 @click="toggleTaskList(p)">
-          <i class="ms sm">{{ isTaskListOpen(p) ? 'expand_less' : 'expand_more' }}</i>
+          <i class="ms sm tasklist-chev" :class="{ open: isTaskListOpen(p) }">{{ isTaskListOpen(p) ? 'expand_less' : 'expand_more' }}</i>
           <span class="tasklist-title">任务列表</span>
           <span class="tasklist-count">
             待办 {{ p.tasks.length }}<template v-if="p.parse_errors.length"> · 异常 {{ p.parse_errors.length }}</template><template v-if="p.archived.length"> · 归档 {{ p.archived.length }}</template>
@@ -554,7 +554,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </template>
 
         <details v-if="p.archived.length" class="arch">
-          <summary>已归档（{{ p.archived.length }}）· 点击查看详情</summary>
+          <summary>
+            <span class="arch-title">已归档</span>
+            <span class="arch-count">{{ p.archived.length }} 个任务</span>
+            <span class="arch-hint" />
+          </summary>
           <div v-for="t in [...p.archived].reverse()" :key="t.id" class="task">
             <div class="t-main clickable" title="点击查看任务详情（只读）" @click="openTaskView(p.name, t.id)">
               <NTag size="small" :color="{ color: PRI_COLOR[t.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ t.priority }}</NTag>
@@ -595,6 +599,8 @@ async function quickAdd(p: ProjectT): Promise<void> {
   color: var(--text); font: inherit; font-size: 12.5px; text-align: left;
   cursor: pointer; }
 .tasklist-toggle:hover { border-color: var(--acc, #5b8cff); }
+.tasklist-chev { color: var(--faint); transition: color .15s ease; }
+.tasklist-chev.open { color: var(--acc, #5b8cff); }
 .tasklist-title { font-weight: 600; white-space: nowrap; }
 .tasklist-count { color: var(--faint); font-size: 11.5px; min-width: 0; }
 .tasklist-hint { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
@@ -618,7 +624,23 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .ops-row { display: flex; gap: 6px; margin-top: 6px; }
 .card-footer-ops { display: flex; gap: 6px 8px; margin-top: 6px; flex-wrap: wrap; padding-right: 14px; align-items: center; }
 .card-footer-ops .del-btn { margin-right: 4px; }
-.arch { margin-top: 10px; font-size: 13px; }
-.arch summary { cursor: pointer; color: var(--dim); }
+.arch { margin-top: 8px; font-size: 13px; }
+/* 归档折叠条：与「任务列表」折叠条同款盒子/字号/箭头（expand_more↔expand_less） */
+.arch summary { display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px;
+  background: rgba(128, 140, 180, 0.07); color: var(--text);
+  font-size: 12.5px; }
+.arch summary::before { content: 'expand_more'; font-family: 'Material Icons Round';
+  font-size: 16px; line-height: 1; margin-right: 0; color: var(--faint);
+  vertical-align: middle; -webkit-font-feature-settings: 'liga';
+  font-feature-settings: 'liga'; transition: transform .15s ease; }
+.arch[open] > summary::before { transform: rotate(180deg); color: var(--acc, #5b8cff); }
+.arch summary:hover { border-color: var(--acc, #5b8cff); }
+.arch-title { font-weight: 600; white-space: nowrap; }
+.arch-count { color: var(--faint); font-size: 11.5px; }
+.arch-hint { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+.arch-hint::after { content: '展开'; }
+.arch[open] > summary .arch-hint::after { content: '收起'; }
+.arch > .task { margin-top: 8px; }
 .pager { display: flex; justify-content: center; margin-top: 18px; }
 </style>
