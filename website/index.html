@@ -270,6 +270,16 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
         <p>一个任务一个 <code>.md</code> 文件，优先级、状态、角色指派与 <code>depends_on</code> 依赖关系都写在 frontmatter 里；Git 友好、可版本化，支持有向无环图依赖就绪调度与环依赖死锁拦截。</p></div>
       <div class="fcard"><div class="ico">🔍</div><h3>独立审查 Agent（合并前把关）</h3>
         <p>任务完成先提交到工作分支，由<b>另一个模型</b>只读审查：对照验收标准抽查实现、可实际跑测试验证；通过才放行合并，不通过带着问题清单自动返工（次数可调，返工通过后可选 <code>--squash</code> 收敛提交），杜绝「自己审自己」。</p></div>
+      <div class="fcard"><div class="ico">🔁</div><h3>幂等派发与断点续跑</h3>
+        <p>任务指纹 + TTL/心跳租约，同一任务不会被重复认领；提交前二次校验，运行中任务正文/依赖/模型被改会阻断提交并标 <code>stale_lease</code>；WIP 提交或合并阶段崩溃后自动续跑，不重复提交。</p></div>
+      <div class="fcard"><div class="ico">💰</div><h3>预算硬闸</h3>
+        <p>单任务 token / 成本上限，加上项目当日上限；超限立即停止并保留 worktree 成果，项目预算用尽后暂停领取新任务；看板「预算与成本」可调，单价按模型配置（元/百万 tokens）。</p></div>
+      <div class="fcard"><div class="ico">🛑</div><h3>熔断停机</h3>
+        <p>连续失败或窗口失败率超阈值时项目自动暂停领取新任务，看板显示可解释原因并支持一键恢复；预算超限、任务被改写、人工停止不计入失败。默认人工恢复，避免自动重启掩盖系统性故障。</p></div>
+      <div class="fcard"><div class="ico">🧾</div><h3>写操作审计</h3>
+        <p>登录、任务/项目/设置变更、提交确认、审批与 API Key 写调用写入 <code>logs/audit.jsonl</code>；看板可筛选查看，参数只记摘要，密码、密钥与任务正文不落盘；日志 5MB 轮转保留 5 份。</p></div>
+      <div class="fcard"><div class="ico">🚦</div><h3>统一出口白名单</h3>
+        <p>模型调用、Issue 拉取、镜像测速、网页抓取、更新检查全部经 <code>egress</code> 判定：模型/Issue/镜像/更新源主机自动放行，额外主机在设置页追加；白名单外拒绝并写审计。回环调试不受影响；子进程出网不承诺拦截。</p></div>
       <div class="fcard"><div class="ico">🔒</div><h3>真实执行，安全禁锢</h3>
         <p>文件工具锁死在项目根内（路径穿越直接拒绝）、命令白名单、工具轮数上限、上下文成本自动裁剪——放开手让它跑，也出不了圈。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>三档访问权限 + 人工审批</h3>

@@ -17,6 +17,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
+from .audit import init_audit_log
+from .budget import configure as configure_budget, init_budget_store
+from .claims import claims_state_dir
+from .egress import init_egress
+from .resilience import (configure as configure_resilience,
+                         init_resilience_store)
 from .config import (
     AppConfig,
     resolve_commands,
@@ -52,6 +58,16 @@ class Scheduler:
         # 运行台账（V1-R1）：按配置锚定目录/保留期；已初始化则复用（避免
         # 迁移进行中被第二次 force 重建导致重复迁移）
         init_run_store(config)
+        # 写操作审计（V1-R5）：与 orcsy.log 同目录
+        init_audit_log(config)
+        # 统一出口白名单（V1-R6）：模型/Issue/镜像/更新源主机按配置推导
+        init_egress(config)
+        # 预算硬闸：模块级配置 + 当日用量存储（与租约同 state/ 目录）
+        configure_budget(config.budget)
+        init_budget_store(config)
+        # 熔断停机（V1-R4）：配置 + 项目健康状态（与租约同 state/ 目录）
+        configure_resilience(config.resilience)
+        init_resilience_store(config)
         # 镜像源运行时（测速结果边车与 config.yaml 同目录）：executor 的
         # speedtest_mirrors 工具与 env-setup 技能动态优选段共用
         self.mirror_runtime = mirror_runtime_for(config)
@@ -59,6 +75,7 @@ class Scheduler:
             ProjectAgent(p, resolve_llm(config.llm, p.llm,
                                         context=f"项目 {p.name} 的 llm"),
                          skills_base=self.skills_dir,
+                         state_dir=claims_state_dir(config),
                          tools=resolve_tools(config.tools, p.tools),
                          permission_mode=resolve_permission_mode(config.permissions, p),
                          permission_timeout_minutes=config.permissions.timeout_minutes,
@@ -104,7 +121,7 @@ class Scheduler:
         reset: list[str] = []
         for agent in self.agents:
             try:
-                ids = recover_interrupted_tasks(agent.project)
+                ids = recover_interrupted_tasks(agent.project, claims=agent.claims)
             except Exception:  # noqa: BLE001 — 恢复失败不能阻止启动
                 agent.log.exception("中断任务恢复检查失败")
                 continue
@@ -141,6 +158,9 @@ class Scheduler:
         """
         with self._agents_lock:
             self.config = new_config
+            # 预算/熔断配置热生效（模块级读取）
+            configure_budget(new_config.budget)
+            configure_resilience(new_config.resilience)
             self.skills_dir = skills_base(new_config)
             self.mirror_runtime = mirror_runtime_for(new_config)
             self._agents_stale = True
@@ -166,6 +186,7 @@ class Scheduler:
             ProjectAgent(p, resolve_llm(cfg.llm, p.llm,
                                         context=f"项目 {p.name} 的 llm"),
                          skills_base=self.skills_dir,
+                         state_dir=claims_state_dir(cfg),
                          tools=resolve_tools(cfg.tools, p.tools),
                          permission_mode=resolve_permission_mode(cfg.permissions, p),
                          permission_timeout_minutes=cfg.permissions.timeout_minutes,

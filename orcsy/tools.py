@@ -155,6 +155,8 @@ class ToolContext:
     # 运行台账写入句柄（orcsy.runlog.RunRecorder）：工具循环把工具调用与
     # 测试输出记进当前 run；None = 未启用台账（测试直构/关闭配置）
     run_recorder: object | None = None
+    # 预算计量器（orcsy.budget.BudgetTracker）：子代理共享父任务额度
+    budget_tracker: object | None = None
 
     def __post_init__(self) -> None:
         self.root = self.root.resolve()

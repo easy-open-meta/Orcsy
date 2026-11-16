@@ -184,7 +184,7 @@ onMounted(() => {
     if (cmpVersion(s.version, pending.target) === 0) {
       clearPendingUpdate()
       ui.restarting = false
-      window.$message?.(`✅ 已成功更新到 v${s.version}`, 'success')
+      window.$message?.(`已成功更新到 v${s.version}`, 'success')
     }
     // 版本还没到目标（安装仍在进行）：继续等轮询带回新版本
   })
