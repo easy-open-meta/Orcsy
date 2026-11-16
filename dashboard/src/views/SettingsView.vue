@@ -17,6 +17,7 @@ const SECTIONS = [
   { key: 'notify', label: '提醒设置' },
   { key: 'masking', label: '数据脱敏' },
   { key: 'runlog', label: '运行台账' },
+  { key: 'budget', label: '预算与成本' },
   { key: 'review', label: '任务审查（Review Agent）' },
   { key: 'tools', label: 'Agent 工具与访问权限' },
   { key: 'mirrors', label: '镜像源管理与测速选源' },
@@ -41,6 +42,9 @@ const draft = reactive({
   interval: 300, parallel: 1, port: 5116, retention: 7, max_total_mb: 200,
   // 运行台账（V1-R1）：开关 + 保留期 + 占用上限 + 自定义目录（留空 = 默认）
   runlog_enabled: true, runlog_retention: 30, runlog_max_mb: 500, runlog_dir: '',
+  // 预算硬闸：0 = 不限制；单价表在 config.yaml 维护
+  budget_enabled: false, budget_task_tokens: 0, budget_day_tokens: 0,
+  budget_task_cost: 0,
 })
 // ---- 任务审查（Review Agent）草稿：模型绑定 + 返工次数 + 测试命令 + squash ----
 const reviewDraft = reactive({
@@ -491,6 +495,10 @@ watch(() => store.state, (s) => {
   draft.runlog_retention = s.runlog?.retention_days ?? 30
   draft.runlog_max_mb = s.runlog?.max_total_mb ?? 500
   draft.runlog_dir = s.runlog?.dir ?? ''
+  draft.budget_enabled = s.budget_cfg?.enabled ?? false
+  draft.budget_task_tokens = s.budget_cfg?.max_tokens_per_task ?? 0
+  draft.budget_day_tokens = s.budget_cfg?.max_tokens_per_project_per_day ?? 0
+  draft.budget_task_cost = s.budget_cfg?.max_cost_per_task_cny ?? 0
   syncProfilesDraft(s.agent_profiles)
 })
 
@@ -857,6 +865,23 @@ async function saveRunlog(): Promise<void> {
 
 function pickRunlogDir(): void {
   openDirBrowser(draft.runlog_dir || '', (p) => { draft.runlog_dir = p }, 'dir')
+}
+
+// ---- 预算硬闸：保存后立即生效 ----
+const budgetSaving = shallowRef(false)
+async function saveBudget(): Promise<void> {
+  budgetSaving.value = true
+  try {
+    await api.config({ budget: {
+      enabled: draft.budget_enabled,
+      max_tokens_per_task: draft.budget_task_tokens,
+      max_tokens_per_project_per_day: draft.budget_day_tokens,
+      max_cost_per_task_cny: draft.budget_task_cost,
+    } })
+    message()?.('预算设置已保存并立即生效')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { budgetSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
 }
 
 // ---- 目录迁移：迁移中锁定台账设置与回放，每秒轮询进度 ----
@@ -1289,6 +1314,10 @@ const providerOptions = [
             <template #header><i class="ms">receipt_long</i>  运行台账</template>
             <div class="menu-desc" v-if="activeSection === 'runlog'">每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。</div>
           </NCollapseItem>
+          <NCollapseItem name="budget">
+            <template #header><i class="ms">savings</i>  预算与成本</template>
+            <div class="menu-desc" v-if="activeSection === 'budget'">任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。</div>
+          </NCollapseItem>
           <NCollapseItem name="review">
             <template #header><i class="ms">rate_review</i>  任务审查（Review Agent）</template>
             <div class="menu-desc" v-if="activeSection === 'review'">独立模型合并前审查任务成果；未配置审查模型时审查未启用。</div>
@@ -1600,6 +1629,38 @@ const providerOptions = [
             </div>
             <div class="sfoot"><NButton type="primary" :loading="runlogSaving"
                                         :disabled="runlogBusy" @click="saveRunlog">保存运行台账设置</NButton></div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'budget'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">savings</i> 预算与成本</template>
+            <label class="checkline">
+              <NSwitch v-model:value="draft.budget_enabled" />
+              启用预算硬闸
+              <span class="hint">超限立即停止本次执行（任务标记为受阻，原因 budget_exceeded），保留 worktree 成果；项目当日用尽后暂停领取新任务。默认关闭。</span>
+            </label>
+            <div class="frow">
+              <div class="f1"><label>单任务 token 上限（prompt + completion，0 = 不限制）</label>
+                <NInputNumber v-model:value="draft.budget_task_tokens" :min="0" :max="1000000000" /></div>
+              <div class="f1"><label>项目当日 token 上限（本地自然日，0 = 不限制）</label>
+                <NInputNumber v-model:value="draft.budget_day_tokens" :min="0" :max="10000000000" /></div>
+              <div class="f1"><label>单任务成本上限（元，需在 config.yaml 的 budget.prices 配单价）</label>
+                <NInputNumber v-model:value="draft.budget_task_cost" :min="0" :max="1000000000" /></div>
+            </div>
+            <div class="hint">
+              成本只对配置了单价的模型计算（`budget.prices: {模型名: {prompt: 元/百万, completion: 元/百万}}`，单价表当前在 config.yaml 维护）。
+              预算超限不是失败：任务停在受阻，调高预算后重新入队即可续跑。
+            </div>
+            <label style="margin-top:6px">各项目今日用量</label>
+            <div class="budget-today">
+              <div v-for="(v, k) in (store.state.budget_today || {})" :key="k" class="budget-row">
+                <span class="budget-name">{{ k }}</span>
+                <span>{{ fmtTokens(v.total_tokens || 0) }} tokens</span>
+                <span>¥{{ (v.cost_cny || 0).toFixed(4) }}</span>
+              </div>
+              <div v-if="!Object.keys(store.state.budget_today || {}).length" class="hint">今日暂无用量记录</div>
+            </div>
+            <div class="sfoot"><NButton type="primary" :loading="budgetSaving" @click="saveBudget">保存预算设置</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'review'">
@@ -2135,6 +2196,13 @@ const providerOptions = [
 .pathline { display: flex; gap: 8px; align-items: center; }
 .migbox { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
   margin-bottom: 10px; background: rgba(91, 140, 255, 0.06); }
+.budget-today { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
+  max-height: 220px; overflow: auto; margin-bottom: 8px; }
+.budget-row { display: flex; gap: 14px; justify-content: space-between;
+  font-size: 12.5px; padding: 4px 2px; border-bottom: 1px dashed var(--line); }
+.budget-row:last-child { border-bottom: none; }
+.budget-name { flex: 1; color: var(--text); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
 .frow label, .checkline { font-size: 12.5px; color: var(--dim); }
 .f1 { flex: 1; } .f14 { flex: 1.4; } .f2 { flex: 2; } .f0 { flex: none; }
 .btnrow { display: flex; gap: 8px; }

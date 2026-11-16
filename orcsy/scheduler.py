@@ -17,6 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .agent import ProjectAgent, recover_interrupted_tasks
+from .budget import configure as configure_budget, init_budget_store
 from .claims import claims_state_dir
 from .config import (
     AppConfig,
@@ -53,6 +54,9 @@ class Scheduler:
         # 运行台账（V1-R1）：按配置锚定目录/保留期；已初始化则复用（避免
         # 迁移进行中被第二次 force 重建导致重复迁移）
         init_run_store(config)
+        # 预算硬闸：模块级配置 + 当日用量存储（与租约同 state/ 目录）
+        configure_budget(config.budget)
+        init_budget_store(config)
         # 镜像源运行时（测速结果边车与 config.yaml 同目录）：executor 的
         # speedtest_mirrors 工具与 env-setup 技能动态优选段共用
         self.mirror_runtime = mirror_runtime_for(config)
@@ -143,6 +147,8 @@ class Scheduler:
         """
         with self._agents_lock:
             self.config = new_config
+            # 预算配置热生效（任务级硬闸/项目软停读取模块级配置）
+            configure_budget(new_config.budget)
             self.skills_dir = skills_base(new_config)
             self.mirror_runtime = mirror_runtime_for(new_config)
             self._agents_stale = True

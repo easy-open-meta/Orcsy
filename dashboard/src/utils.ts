@@ -27,6 +27,7 @@ export function relTime(s: string | undefined | null): string {
 // 避免 999424 这类值被二进制换算成 "977K" 的困惑。
 export function fmtTokens(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v) || v <= 0) return ''
+  if (v < 1000) return String(Math.round(v))
   if (v >= 1e6) {
     const m = Math.round((v / 1e6) * 10) / 10
     return `${m}M`

@@ -179,7 +179,9 @@
 > 2026-11-16 追加：目录迁移（`last_root` / journal / 活跃 run 合并 / 进度与 UI 锁定），
 > 设计见 [`docs/design-runlog-dir-migration.md`](design-runlog-dir-migration.md)；
 > R2 任务指纹 / 租约 / 断点续跑 / 提交前二次校验已实施，设计见
-> [`docs/design-task-claims.md`](design-task-claims.md)。
+> [`docs/design-task-claims.md`](design-task-claims.md)；
+> R3 预算硬闸（任务级 token/成本 + 项目日窗软停）已实施，设计见
+> [`docs/design-budget-guard.md`](design-budget-guard.md)。
 > 本小节的解释性文字保留，作为后续 R2~R6 的契约依据。
 
 **落盘位置**：默认在配置目录下（`<配置目录>/runs/<project>/<run_id>/`），**不写进受管仓库**。理由：

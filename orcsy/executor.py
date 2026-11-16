@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .approvals import args_preview, get_manager, requires_approval
+from .budget import BudgetExceeded, BudgetTracker, get_budget_config
 from .config import (
     LLMConfig,
     LocalDebugConfig,
@@ -59,6 +60,8 @@ class TaskResult:
     pushed: bool = False
     duration_seconds: float = 0.0
     llm_error: str = ""            # LLM/网络层面的错误（区别于业务 blocked）
+    # 受阻原因：budget_exceeded / stale_lease；空 = 普通业务受阻
+    block_reason: str = ""
     files_changed: list[str] = field(default_factory=list)
     turns: int = 0                 # Agent 工具循环轮数
     prompt_tokens: int = 0         # 输入 token 累计（各轮之和，含历史重发）
@@ -284,6 +287,17 @@ class TaskExecutor:
             self.log.warning("运行台账初始化失败（忽略）", exc_info=True)
             self._run_recorder = None
 
+        # 预算硬闸：启用时为本次任务建计量器（子代理共享）
+        budget_tracker = None
+        self._budget_tracker = None
+        try:
+            cfg = get_budget_config()
+            if cfg.enabled:
+                budget_tracker = BudgetTracker(self.project.name, task.id, config=cfg)
+                self._budget_tracker = budget_tracker
+        except Exception:  # noqa: BLE001 — 计量器初始化失败不阻断任务
+            self.log.warning("预算计量器初始化失败（忽略）", exc_info=True)
+
         def _on_progress(line: str) -> None:
             append_progress(task.path, line)
             if recorder is not None:
@@ -298,7 +312,8 @@ class TaskExecutor:
                 stop_event=stop_event,
                 created_bugs_out=created_bugs,
                 on_progress=_on_progress,
-                recorder=recorder)
+                recorder=recorder,
+                budget_tracker=budget_tracker)
             sub_u = usage.pop("_subagent_usage", {})
             result.turns = int(usage.get("turns", 0)) + int(sub_u.get("turns", 0))
             result.prompt_tokens = int(usage.get("prompt_tokens", 0)) + int(sub_u.get("prompt_tokens", 0))
@@ -346,6 +361,20 @@ class TaskExecutor:
                 if use_worktree:
                     self._cleanup_worktree_changes(wt_path)
                 result.outcome = "blocked" if response.action == "blocked" else "cancelled"
+        except BudgetExceeded as e:
+            self.log.warning("任务 %s 触发预算硬闸（%s）：%s", task.id, e.scope, e)
+            sub_u = usage.get("_subagent_usage", {}) or {}
+            result.outcome = "blocked"
+            result.block_reason = "budget_exceeded"
+            result.notes = f"预算超限（{e.scope}）：{e}"
+            result.turns = int(usage.get("turns", 0)) + int(sub_u.get("turns", 0))
+            result.prompt_tokens = (int(usage.get("prompt_tokens", 0))
+                                    + int(sub_u.get("prompt_tokens", 0)))
+            result.completion_tokens = (int(usage.get("completion_tokens", 0))
+                                        + int(sub_u.get("completion_tokens", 0)))
+            append_progress(task.path, f"⛔ {result.notes}；worktree 成果保留，"
+                                       "已停止本次执行")
+            # 不清理 worktree：预算超限 ≠ 成果无效，保留供调高预算后续跑
         except LLMError as e:
             self.log.error("任务 %s 调用大模型失败：%s", task.id, e)
             result.llm_error = str(e)
@@ -426,6 +455,7 @@ class TaskExecutor:
                 self.log.warning("运行台账收尾失败（可忽略）", exc_info=True)
             finally:
                 self._run_recorder = None
+        self._budget_tracker = None
         return result
 
     # ---- Agent 循环 ----
@@ -434,7 +464,8 @@ class TaskExecutor:
                     on_progress=None, usage_out: dict | None = None,
                     stop_event=None,
                     created_bugs_out: list[str] | None = None,
-                    recorder=None) -> AgentResponse:
+                    recorder=None,
+                    budget_tracker=None) -> AgentResponse:
         use_worktree = self.is_git_repo and self.worktree_isolation and self.produces_code
         work_root = self._task_worktree(task) if use_worktree else self.project.path
         if use_worktree:
@@ -493,8 +524,10 @@ class TaskExecutor:
                           produces_code=self.produces_code,
                           max_split_depth=self.max_split_depth,
                           llm_config=self.llm,
-                          run_recorder=recorder)
+                          run_recorder=recorder,
+                          budget_tracker=budget_tracker)
         client = LLMClient(self.llm)
+        client.budget = budget_tracker
         if recorder is not None:
             # 台账事件出口：模型调用事件由 LLMClient 统一上报
             client.event_sink = recorder.event
@@ -623,7 +656,8 @@ class TaskExecutor:
                 max_turns=(-1 if self.review_cfg.max_turns == -1 else max(1, self.review_cfg.max_turns)),
                 allow_test_commands=self.review_cfg.allow_test_commands,
                 extra_env=self.extra_env,
-                run_recorder=self._rec())
+                run_recorder=self._rec(),
+                budget_tracker=getattr(self, "_budget_tracker", None))
         finally:
             pass
 
@@ -665,6 +699,8 @@ class TaskExecutor:
         """把结果收敛成稳定的 exit_reason（看板筛选与统计按此聚合）。"""
         if getattr(result, "llm_error", ""):
             return "llm_error"
+        if getattr(result, "block_reason", ""):
+            return str(result.block_reason)
         outcome = str(getattr(result, "outcome", "") or "")
         verdict = str(getattr(getattr(result, "review", None), "verdict", "") or "")
         if outcome == "done":
@@ -709,6 +745,7 @@ class TaskExecutor:
                "本次不提交、不合并；worktree 成果保留供人工/重新入队处理")
         self.log.warning("任务 %s 提交前校验失败：%s", task.id, reason)
         result.outcome = "blocked"
+        result.block_reason = "stale_lease"
         result.notes = (result.notes + "\n" if result.notes else "") + msg
         append_progress(task.path, f"⛔ {msg}")
         return "blocked", None

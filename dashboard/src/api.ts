@@ -82,6 +82,8 @@ export interface TaskT {
   review_pending?: boolean
   /** 累计审查不通过轮数（0 = 从未不通过） */
   review_round?: number
+  /** 受阻原因：budget_exceeded / stale_lease */
+  block_reason?: string
   /** 看板拖拽排序的手动序号；null = 未手动排过（显示回退 状态→优先级→id） */
   order: number | null
   /** 前置依赖任务 ID 列表 */
@@ -100,6 +102,15 @@ export interface ProjectT {
   name: string
   path: string
   enabled: boolean
+  /** 预算软停：true = 项目当日 token 预算用尽，暂停领取新任务 */
+  budget_paused?: boolean
+  budget_today?: {
+    date?: string
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    cost_cny?: number
+  }
   tasks_dir: string
   guide_file: string
   max_tasks_per_cycle: number
@@ -327,6 +338,21 @@ export interface AppStateT {
   }
   /** 目录迁移进度：state=running 时前端锁定台账设置与回放按钮 */
   runlog_migration?: RunLogMigrationT
+  /** 预算硬闸：限额/单价 + 各项目今日用量 */
+  budget_cfg?: {
+    enabled: boolean
+    max_tokens_per_task: number
+    max_tokens_per_project_per_day: number
+    max_cost_per_task_cny: number
+    prices: Record<string, { prompt?: number; completion?: number }>
+  }
+  budget_today?: Record<string, {
+    date?: string
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    cost_cny?: number
+  }>
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
   /** 可开关工具目录（名称+中文描述+所属组；finish 为协议工具不在其中） */

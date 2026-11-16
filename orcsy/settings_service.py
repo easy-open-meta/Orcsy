@@ -20,6 +20,7 @@ from .auth import hash_password, is_password_hashed, verify_password
 from .concurrency import configure_limiter
 from .config import (
     LOCAL_DEBUG_BROWSERS,
+    BudgetConfig,
     CommandsConfig,
     EnvConfig,
     GitConfig,
@@ -277,6 +278,38 @@ def save_settings(state: AppState, data: dict) -> dict:
         state.config.runlog.max_total_mb = mb
         state.config.runlog.dir = new_dir
         state.config.runlog.dir_explicit = dir_explicit
+
+    # 预算硬闸：分块保存；0 表示不限制
+    if "budget" in data:
+        b = data.get("budget") or {}
+        if not isinstance(b, dict):
+            raise ValueError("budget 必须是键值对字典")
+        try:
+            max_task = int(b.get("max_tokens_per_task",
+                                 state.config.budget.max_tokens_per_task) or 0)
+            max_day = int(b.get("max_tokens_per_project_per_day",
+                                state.config.budget.max_tokens_per_project_per_day) or 0)
+            max_cost = float(b.get("max_cost_per_task_cny",
+                                   state.config.budget.max_cost_per_task_cny) or 0)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"预算限额必须是数字：{e}") from e
+        if not (0 <= max_task <= 1_000_000_000):
+            raise ValueError("单任务 token 上限应为 0~1000000000")
+        if not (0 <= max_day <= 10_000_000_000):
+            raise ValueError("项目当日 token 上限应为 0~10000000000")
+        if not (0 <= max_cost <= 1_000_000_000):
+            raise ValueError("单任务成本上限应为 0~1000000000 元")
+        prices = state.config.budget.prices
+        if "prices" in b and isinstance(b.get("prices"), dict):
+            prices = {str(k): {str(pk): float(pv) for pk, pv in (pv or {}).items()}
+                      for k, pv in b["prices"].items()}
+        state.config.budget = BudgetConfig(
+            enabled=bool(b.get("enabled", state.config.budget.enabled)),
+            max_tokens_per_task=max_task,
+            max_tokens_per_project_per_day=max_day,
+            max_cost_per_task_cny=max_cost,
+            prices=prices,
+        )
 
     # 软件更新源：分块保存，只带 update 的请求不触碰其它配置
     if "update" in data:

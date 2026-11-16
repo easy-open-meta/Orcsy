@@ -74,6 +74,8 @@ class Task:
     # 续跑标记（frontmatter resume_run: true）：上次进程在 WIP 提交/审查阶段
     # 被强杀，worktree 与提交仍在；重新认领时保留成果继续，而不是从头重跑
     resume_run: bool = False
+    # 受阻原因（frontmatter block_reason）：budget_exceeded / stale_lease 等
+    block_reason: str = ""
     # 项目小组协同与 DAG 依赖字段（均可选，老任务缺省取默认值）
     depends_on: list[str] = field(default_factory=list)  # 前置任务 ID 列表；全部进入 done/ 后才可领取
     parent_id: str = ""      # 所属父需求或触发当前 Bug 的 QA 任务 ID
@@ -158,6 +160,7 @@ def parse_task_file(path: Path) -> Task:
 
     # 续跑标记：缺失/非法按 false（旧任务文件天然兼容）
     resume_run = bool(meta.get("resume_run", False))
+    block_reason = str(meta.get("block_reason") or "").strip()
 
     # 前置依赖任务 ID 列表：支持列表或逗号分隔字符串，去重保序
     depends_on: list[str] = []
@@ -215,6 +218,7 @@ def parse_task_file(path: Path) -> Task:
         review_pending=review_pending,
         review_round=review_round,
         resume_run=resume_run,
+        block_reason=block_reason,
         depends_on=depends_on,
         parent_id=parent_id,
         split_depth=split_depth,
@@ -348,6 +352,12 @@ def set_task_file_resume(path: Path, resume: bool) -> bool:
     """改写/清除 frontmatter 的 resume_run 标记（V1-R2 断点续跑）。"""
     return _set_frontmatter_field(path, None, "resume_run",
                                   "true" if resume else None)
+
+
+def set_task_file_block_reason(path: Path, reason: str) -> bool:
+    """写入/清除 frontmatter 的 block_reason（预算超限、stale_lease 等）。"""
+    return _set_frontmatter_field(path, None, "block_reason",
+                                  str(reason or "").strip() or None)
 
 
 def increment_task_file_review_round(path: Path) -> int:
@@ -704,6 +714,7 @@ __all__ = [
     "read_done_summaries",
     "scan_tasks",
     "set_task_file_assignee",
+    "set_task_file_block_reason",
     "set_task_file_dependencies",
     "set_task_file_order",
     "set_task_file_resume",

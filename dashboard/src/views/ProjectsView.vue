@@ -359,6 +359,10 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <NTag size="small" :type="p.is_git_repo ? 'default' : 'warning'" :bordered="false">
               {{ p.is_git_repo ? 'git' : '非 git' }}
             </NTag>
+            <NTag v-if="p.budget_paused" size="small" type="warning" :bordered="false"
+                  title="项目今日 token 预算已用尽，暂停领取新任务；调高预算或等次日恢复">
+              预算暂停
+            </NTag>
             <NButton size="tiny" quaternary class="git-refresh" :loading="gitRefreshing === p.name"
                      title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
                      @click="refreshGit(p)"><i class="ms sm">refresh</i></NButton>

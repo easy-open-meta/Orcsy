@@ -26,6 +26,7 @@ from .config import (
     resolve_review_llm,
     resolve_review_rounds,
 )
+from .budget import get_budget_config, project_budget_exhausted
 from .claims import ProjectClaims, claims_state_dir
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
@@ -42,6 +43,7 @@ from .task_model import (
     increment_task_file_review_round,
     parse_task_file,
     scan_tasks,
+    set_task_file_block_reason,
     set_task_file_resume,
     set_task_file_review_pending,
     set_task_file_status,
@@ -160,6 +162,9 @@ class ProjectAgent:
         except Exception:  # noqa: BLE001 — 清理失败不阻断启动（TTL 仍会拦截）
             get_logger(f"agent.{project.name}").warning(
                 "清理过期租约失败（忽略）", exc_info=True)
+        # 预算软停状态：项目当日预算用尽时置位，供看板/日志解释
+        self.budget_paused = False
+        self.budget_day: dict = {}
         self.review_cfg = review_cfg or ReviewConfig()
         self.local_debug = local_debug or LocalDebugConfig()
         self.commit_and_merge = bool(commit_and_merge)
@@ -349,6 +354,21 @@ class ProjectAgent:
             log.error("项目目录不存在：%s，跳过", self.project.path)
             return []
 
+        # 预算软停：项目当日 token 用尽 → 本轮不领取新任务；
+        # 正在执行的任务不受影响（由各自的任务级硬闸负责）
+        try:
+            exhausted, day = project_budget_exhausted(self.project.name)
+            self.budget_paused = bool(exhausted)
+            self.budget_day = day or {}
+            if exhausted:
+                log.warning("项目今日 token 预算已用尽（%s/%s），本轮不领取新任务",
+                            day.get("total_tokens"),
+                            get_budget_config().max_tokens_per_project_per_day)
+                return []
+        except Exception:  # noqa: BLE001 — 预算判断失败不阻断调度
+            log.warning("预算软停判断失败（忽略）", exc_info=True)
+            self.budget_paused = False
+
         guide = self._load_guide()
         skills = self._load_skills()
         results: list[TaskResult] = []
@@ -446,6 +466,7 @@ class ProjectAgent:
                                          role=ex.team_role, agent_name=ex.agent_name)
                         bad.notes = ("stale_lease：任务在合并后、状态回写前被修改，"
                                      "不再自动归档，请人工确认")
+                        bad.block_reason = "stale_lease"
                         append_progress(t.path, f"⛔ {bad.notes}")
                         self._write_back_result(t, bad)
                         self._release_claim(t)
@@ -577,6 +598,7 @@ class ProjectAgent:
                         bad = TaskResult(task_id=task.id, outcome="blocked",
                                          role=ex.team_role, agent_name=ex.agent_name)
                         bad.notes = msg
+                        bad.block_reason = "stale_lease"
                         return bad
             except Exception:  # noqa: BLE001 — 校验失败不阻断补审（保守放行）
                 self.log.warning("补审指纹校验失败（忽略）", exc_info=True)
@@ -709,8 +731,16 @@ class ProjectAgent:
         from .task_model import _set_frontmatter_field
         self._set_status(task.path, "in_progress")
         _set_frontmatter_field(task.path, None, "requeue_seq", None)
+        # 清掉上次的受阻原因（预算/stale_lease），避免本轮成功后仍显示旧原因
+        set_task_file_block_reason(task.path, "")
 
     def _write_back_result(self, task: Task, result: TaskResult) -> None:
+        # 受阻原因（预算超限 / stale_lease）落 frontmatter，供看板与重入队判断
+        if getattr(result, "block_reason", ""):
+            try:
+                set_task_file_block_reason(task.path, result.block_reason)
+            except Exception:  # noqa: BLE001 — 原因写入失败不阻断回写
+                self.log.warning("写入 block_reason 失败（忽略）", exc_info=True)
         # 大模型基础设施错误（HTTP 429/500、网络超时等）：只标状态 + 进度留痕，
         # 不写结果节。结果节固定插在正文最前，把错误文本写进去会把任务原内容
         # 顶到下面——看板描述与文件开头看起来就像被错误信息覆盖了。

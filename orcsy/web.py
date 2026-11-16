@@ -197,6 +197,8 @@ from .tools import (
     validate_tools_map,
 )
 from .usage import get_usage_store, init_usage_store
+from .budget import (configure as configure_budget, get_budget_store,
+                     init_budget_store)
 from .claims import claims_state_dir
 from .runlog import apply_runlog_config, get_run_store, init_run_store
 
@@ -422,6 +424,9 @@ class AppState:
         # 运行台账（V1-R1）：看板读取与调度写入共用同一单例；
         # 已初始化时复用（迁移进行中不能被第二次 force 重建）
         init_run_store(config)
+        # 预算硬闸：模块配置 + 当日用量存储（与租约同 state/ 目录）
+        configure_budget(config.budget)
+        init_budget_store(config)
         # 镜像源运行时（测速边车与 config.yaml 同目录；与 Scheduler 各持一份，
         # 数据经边车文件天然共享）
         self.mirror_runtime = mirror_runtime_for(config)
@@ -723,6 +728,18 @@ class AppState:
         """全量看板状态。summary=True 为移动端轻量摘要：剔除 60KB 日志尾部与
         归档任务列表（手机蜂窝网络下的轮询流量从 ~80KB 压到几 KB）。"""
         projects = []
+        try:
+            budget_today = get_budget_store().snapshot()
+        except Exception:  # noqa: BLE001 — 用量文件异常不影响看板
+            budget_today = {}
+        bcfg = self.config.budget
+        b_limit = int(bcfg.max_tokens_per_project_per_day or 0)
+
+        def _budget_paused(name: str) -> bool:
+            if not bcfg.enabled or b_limit <= 0:
+                return False
+            day = budget_today.get(name) or {}
+            return int(day.get("total_tokens") or 0) >= b_limit
         for name, agent in self.agents.items():
             p = agent.project
             open_tasks, errors = scan_tasks(agent.tasks_dir)
@@ -745,6 +762,10 @@ class AppState:
                 "name": name,
                 "path": str(p.path),
                 "enabled": p.enabled,
+                # 预算软停状态与今日用量：按当前配置与用量实时计算，
+                # 不依赖执行侧 Agent 实例（看板 Agent 不参与扫描）
+                "budget_paused": _budget_paused(name),
+                "budget_today": budget_today.get(name) or {},
                 "tasks_dir": p.tasks_dir,
                 "guide_file": p.guide_file,
                 "max_tasks_per_cycle": p.max_tasks_per_cycle,
@@ -875,6 +896,16 @@ class AppState:
             },
             # 目录迁移进度（前端据此锁定控件；迁移中每秒轮询专用端点）
             "runlog_migration": get_run_store().migration_status(),
+            # 预算硬闸：配置 + 各项目今日用量
+            "budget_cfg": {
+                "enabled": self.config.budget.enabled,
+                "max_tokens_per_task": self.config.budget.max_tokens_per_task,
+                "max_tokens_per_project_per_day":
+                    self.config.budget.max_tokens_per_project_per_day,
+                "max_cost_per_task_cny": self.config.budget.max_cost_per_task_cny,
+                "prices": {k: dict(v) for k, v in self.config.budget.prices.items()},
+            },
+            "budget_today": budget_today,
             # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
             # finish 也进目录——前端把它渲染成「常开且禁用」的展示行，
             # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
@@ -1088,6 +1119,8 @@ class AppState:
             # 审查门状态：任务卡片「待审查」徽标 + 审查轮数
             "review_pending": t.review_pending,
             "review_round": t.review_round,
+            # 受阻原因：budget_exceeded / stale_lease
+            "block_reason": t.block_reason,
             # 项目小组协同与 DAG 依赖字段
             "depends_on": list(t.depends_on),
             "parent_id": t.parent_id,
@@ -1530,6 +1563,9 @@ class AppState:
         masking.configure(new_cfg.masking)
         # 运行台账（V1-R1）：同目录只更新选项；改目录则后台迁移历史记录
         apply_runlog_config(new_cfg)
+        # 预算硬闸：限额与单价表热生效
+        configure_budget(new_cfg.budget)
+        init_budget_store(new_cfg, force=True)
         # agents 覆盖全部项目（含停用的，便于看板展示与编辑）；
         # 调度器只留启用的（reload_config 已按 enabled 过滤）
         self.agents = self._build_agents(new_cfg)

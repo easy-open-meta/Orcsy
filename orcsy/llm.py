@@ -404,6 +404,8 @@ class LLMClient:
         # 运行台账事件出口（V1-R1）：executor 注入 RunRecorder.event 的适配
         # 函数；None = 未启用台账。台账是旁路，异常一律吞掉，不影响任务。
         self.event_sink = None
+        # 预算硬闸：executor/review 注入 BudgetTracker；None = 不限制
+        self.budget = None
 
     def _emit(self, kind: str, **data) -> None:
         sink = getattr(self, "event_sink", None)
@@ -427,6 +429,9 @@ class LLMClient:
         self.usage["completion_tokens"] += ct
         self._emit("model_call", model=self.cfg.model, prompt_tokens=pt,
                    completion_tokens=ct, turn=self.usage["turns"])
+        if self.budget is not None:
+            # 超限在这里抛 BudgetExceeded：executor 收敛为 blocked + 预算原因
+            self.budget.record(self.cfg.model, pt, ct)
 
     def reset(self, system_prompt: str) -> None:
         self.messages = [{"role": "system", "content": system_prompt}]
@@ -884,6 +889,9 @@ class LLMClient:
             "（已完成的进度不受影响）。")
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
+        # 预算前置校验：已超限不再发请求（含子代理触发的超限）
+        if self.budget is not None:
+            self.budget.precheck()
         # 出站脱敏（数据脱敏唯一网络出口）：只动 payload 副本不碰 self.messages
         # ——本地历史保留原文（护栏计数、上下文裁剪依赖原文），重发历史幂等；
         # 关闭总开关时零开销透传。日志只记命中次数，绝不记脱敏内容

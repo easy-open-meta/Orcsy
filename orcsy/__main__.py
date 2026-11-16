@@ -53,6 +53,14 @@ runlog:                      # 运行台账：每个任务一个 run 目录（�
   retention_days: 30         # 保留天数；0 = 不按时间清理
   max_total_mb: 500          # 总占用上限（MB）：超限从最旧 run 删起；0 = 不限制
 
+budget:                      # 预算硬闸：超限停止执行；默认关闭
+  enabled: false
+  max_tokens_per_task: 0             # 单任务上限（prompt+completion tokens）；0 = 不限制
+  max_tokens_per_project_per_day: 0  # 单项目当日上限（本地自然日）；0 = 不限制
+  max_cost_per_task_cny: 0           # 单任务成本上限（元）；需在 prices 配单价才生效
+  # prices:                          # 每百万 tokens 的人民币单价
+  #   deepseek-chat: {prompt: 1.0, completion: 2.0}
+
 web:
   host: 127.0.0.1            # 看板监听地址；手机远程访问改为 0.0.0.0（绑定全部网卡，
                              # 需先设置 auth_password 或 api_keys），启动后终端会打印

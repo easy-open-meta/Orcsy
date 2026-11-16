@@ -268,6 +268,25 @@ class RunLogConfig:
 
 
 @dataclass
+class BudgetConfig:
+    """预算硬闸：token 与成本上限；0/空 = 不限制。
+
+    默认关闭，避免升级后突然拦任务。成本只在 prices 里配置了对应模型时计算。
+    """
+
+    enabled: bool = False
+    # 单任务上限：prompt + completion 总 tokens
+    max_tokens_per_task: int = 0
+    # 单项目当日上限（本地日期自然日）
+    max_tokens_per_project_per_day: int = 0
+    # 单任务成本上限（人民币）；需在 prices 中配置该模型单价
+    max_cost_per_task_cny: float = 0.0
+    # 单价表：模型名 → 每百万 tokens 的人民币单价
+    #   {"deepseek-chat": {"prompt": 1.0, "completion": 2.0}}
+    prices: dict[str, dict[str, float]] = field(default_factory=dict)
+
+
+@dataclass
 class WebConfig:
     """Web 可视化看板配置。"""
 
@@ -575,6 +594,7 @@ class AppConfig:
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     runlog: RunLogConfig = field(default_factory=RunLogConfig)
+    budget: BudgetConfig = field(default_factory=BudgetConfig)
     web: WebConfig = field(default_factory=WebConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
@@ -1149,6 +1169,44 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         max_total_mb=max(0, min(int(runlog_raw.get("max_total_mb", 500)), 100000)),
     )
 
+    budget_raw = raw.get("budget") or {}
+    if not isinstance(budget_raw, dict):
+        raise ValueError("budget 配置必须是字典（键值对）。")
+    try:
+        b_task = int(budget_raw.get("max_tokens_per_task", 0) or 0)
+        b_day = int(budget_raw.get("max_tokens_per_project_per_day", 0) or 0)
+        b_cost = float(budget_raw.get("max_cost_per_task_cny", 0) or 0)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"budget 限额必须是数字：{e}") from e
+    if not (0 <= b_task <= 1_000_000_000):
+        raise ValueError("budget.max_tokens_per_task 应为 0~1000000000")
+    if not (0 <= b_day <= 10_000_000_000):
+        raise ValueError("budget.max_tokens_per_project_per_day 应为 0~10000000000")
+    if not (0 <= b_cost <= 1_000_000_000):
+        raise ValueError("budget.max_cost_per_task_cny 应为 0~1000000000")
+    prices: dict[str, dict[str, float]] = {}
+    prices_raw = budget_raw.get("prices") or {}
+    if not isinstance(prices_raw, dict):
+        raise ValueError("budget.prices 必须是「模型名 → {prompt, completion}」字典")
+    for model_name, price in prices_raw.items():
+        if not isinstance(price, dict):
+            raise ValueError(f"budget.prices.{model_name} 必须是字典")
+        try:
+            p_prompt = float(price.get("prompt", 0) or 0)
+            p_completion = float(price.get("completion", 0) or 0)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"budget.prices.{model_name} 单价必须是数字：{e}") from e
+        if not (0 <= p_prompt <= 1_000_000 and 0 <= p_completion <= 1_000_000):
+            raise ValueError(f"budget.prices.{model_name} 单价超出合理范围")
+        prices[str(model_name)] = {"prompt": p_prompt, "completion": p_completion}
+    budget = BudgetConfig(
+        enabled=bool(budget_raw.get("enabled", False)),
+        max_tokens_per_task=b_task,
+        max_tokens_per_project_per_day=b_day,
+        max_cost_per_task_cny=b_cost,
+        prices=prices,
+    )
+
     web_raw = raw.get("web") or {}
     api_keys_in = web_raw.get("api_keys")
     api_keys: list[str] = []
@@ -1478,7 +1536,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 p_task_llm, p_review_llm, context=f"项目 {p_name} 的 review")
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
-                    runlog=runlog, web=web,
+                    runlog=runlog, budget=budget, web=web,
                     update=update, tools=tools, commands=commands, env=env,
                     permissions=permissions, notify=notify, masking=masking_cfg,
                     mirrors=mirrors,
@@ -1579,6 +1637,14 @@ def save_config(cfg: AppConfig) -> None:
                    **({"dir": cfg.runlog.dir} if cfg.runlog.dir else {}),
                    "retention_days": cfg.runlog.retention_days,
                    "max_total_mb": cfg.runlog.max_total_mb},
+        # 预算硬闸：整体写回，漏写会在看板任意保存时静默重置
+        "budget": {
+            "enabled": cfg.budget.enabled,
+            "max_tokens_per_task": cfg.budget.max_tokens_per_task,
+            "max_tokens_per_project_per_day": cfg.budget.max_tokens_per_project_per_day,
+            "max_cost_per_task_cny": cfg.budget.max_cost_per_task_cny,
+            "prices": {k: dict(v) for k, v in cfg.budget.prices.items()},
+        },
         "web": {
             "host": cfg.web.host, "port": cfg.web.port,
             "open_browser": cfg.web.open_browser,

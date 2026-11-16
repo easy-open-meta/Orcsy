@@ -1035,6 +1035,26 @@ terminal also prints the LAN addresses plus a **scan-to-connect QR code**.
 
 ---
 
+### 10.17 Budget and cost limits (Budget Guard)
+
+Enable it under **Settings → Budget & cost**, or in the `budget` section of `config.yaml` (off by default):
+
+- **Per-task token limit**: execution stops once prompt + completion reaches the limit;
+- **Per-task cost limit**: converted to CNY with the model prices in `budget.prices`; models without a price are not costed;
+- **Per-project daily limit**: accumulated per local calendar day; once exhausted the scheduler stops claiming new tasks for that project (running tasks may finish);
+- Exceeding a limit is not a failure: the task is marked **Blocked** with `block_reason: budget_exceeded`, the worktree is kept; raise the budget or wait for the next day, then click **Requeue** to resume;
+- Usage lives in `state/budget.json` and only counts model calls made after the budget was enabled;
+- Prices are CNY per million tokens:
+
+```yaml
+budget:
+  enabled: true
+  max_tokens_per_task: 300000
+  max_tokens_per_project_per_day: 5000000
+  prices:
+    deepseek-chat: {prompt: 1.0, completion: 2.0}
+```
+
 ## 11. Data, backup, and migration
 
 ### 11.1 Where data lives

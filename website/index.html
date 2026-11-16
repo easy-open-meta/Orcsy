@@ -272,6 +272,8 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
         <p>任务完成先提交到工作分支，由<b>另一个模型</b>只读审查：对照验收标准抽查实现、可实际跑测试验证；通过才放行合并，不通过带着问题清单自动返工（次数可调，返工通过后可选 <code>--squash</code> 收敛提交），杜绝「自己审自己」。</p></div>
       <div class="fcard"><div class="ico">🔁</div><h3>幂等派发与断点续跑</h3>
         <p>任务指纹 + TTL/心跳租约，同一任务不会被重复认领；提交前二次校验，运行中任务正文/依赖/模型被改会阻断提交并标 <code>stale_lease</code>；WIP 提交或合并阶段崩溃后自动续跑，不重复提交。</p></div>
+      <div class="fcard"><div class="ico">💰</div><h3>预算硬闸</h3>
+        <p>单任务 token / 成本上限，加上项目当日上限；超限立即停止并保留 worktree 成果，项目预算用尽后暂停领取新任务；看板「预算与成本」可调，单价按模型配置（元/百万 tokens）。</p></div>
       <div class="fcard"><div class="ico">🔒</div><h3>真实执行，安全禁锢</h3>
         <p>文件工具锁死在项目根内（路径穿越直接拒绝）、命令白名单、工具轮数上限、上下文成本自动裁剪——放开手让它跑，也出不了圈。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>三档访问权限 + 人工审批</h3>
