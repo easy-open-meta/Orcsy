@@ -521,11 +521,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
               </NTag>
               <NTag v-if="t.dep_state === 'waiting'" size="small" :bordered="false"
                     title="等待前置依赖任务完成">
-                ⏳ 等待前置 ({{ t.dep_done_count }}/{{ t.dep_total_count }})
+                <i class="ms sm">hourglass_top</i> 等待前置 ({{ t.dep_done_count }}/{{ t.dep_total_count }})
               </NTag>
               <NTag v-else-if="t.dep_state === 'upstream_blocked'" size="small" type="error" :bordered="false"
                     title="前置依赖任务存在受阻/取消">
-                ⚠ 前置受阻
+                <i class="ms sm">warning</i> 前置受阻
               </NTag>
               <NTag v-if="(t.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
                 <i class="ms sm">autorenew</i> 回归 #{{ t.qa_round }}
@@ -593,11 +593,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
       </div>
     <div v-else class="dash-empty">
       <div style="font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px;">
-        ☕ 当前没有正在执行任务的项目 · 调度器空闲中
+        <i class="ms sm">local_cafe</i> 当前没有正在执行任务的项目 · 调度器空闲中
       </div>
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center;">
         <span class="hint">全量项目与任务请在顶部「项目」页查看与管理</span>
-        <NButton size="small" secondary @click="navigateTo('projects')">前往「项目」页 →</NButton>
+        <NButton size="small" secondary @click="navigateTo('projects')">前往「项目」页 <i class="ms sm">arrow_forward</i></NButton>
       </div>
     </div>
 

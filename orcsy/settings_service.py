@@ -22,6 +22,7 @@ from .config import (
     LOCAL_DEBUG_BROWSERS,
     BudgetConfig,
     CommandsConfig,
+    EgressConfig,
     EnvConfig,
     GitConfig,
     LLMConfig,
@@ -30,6 +31,7 @@ from .config import (
     MirrorsConfig,
     NotifyConfig,
     PermissionsConfig,
+    ResilienceConfig,
     ReviewConfig,
     SchedulerConfig,
     SubagentConfig,
@@ -53,6 +55,7 @@ from .config import (
 from .config import (
     _coerce_llm as _coerce_llm_cfg,
 )
+from .egress import validate_extra_hosts
 from .logging_setup import get_logger
 
 if TYPE_CHECKING:
@@ -309,6 +312,61 @@ def save_settings(state: AppState, data: dict) -> dict:
             max_tokens_per_project_per_day=max_day,
             max_cost_per_task_cny=max_cost,
             prices=prices,
+        )
+
+    # 熔断停机（V1-R4）：分块保存；触发后项目暂停，默认人工恢复
+    if "resilience" in data:
+        r = data.get("resilience") or {}
+        if not isinstance(r, dict):
+            raise ValueError("resilience 必须是键值对字典")
+        try:
+            consec = int(r.get("max_consecutive_failures",
+                               state.config.resilience.max_consecutive_failures) or 0)
+            window = int(r.get("window_minutes",
+                               state.config.resilience.window_minutes) or 0)
+            rate = float(r.get("max_failure_rate",
+                               state.config.resilience.max_failure_rate) or 0)
+            samples = int(r.get("min_samples",
+                                state.config.resilience.min_samples) or 0)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"熔断阈值必须是数字：{e}") from e
+        if not (0 <= consec <= 100):
+            raise ValueError("连续失败阈值应为 0~100（0 = 不按此规则）")
+        if not (1 <= window <= 1440):
+            raise ValueError("失败率统计窗口应为 1~1440 分钟")
+        if not (0 <= rate <= 1):
+            raise ValueError("失败率阈值应为 0~1（0 = 不按此规则）")
+        if not (1 <= samples <= 1000):
+            raise ValueError("最小样本数应为 1~1000")
+        state.config.resilience = ResilienceConfig(
+            enabled=bool(r.get("enabled", state.config.resilience.enabled)),
+            max_consecutive_failures=consec,
+            window_minutes=window,
+            max_failure_rate=rate,
+            min_samples=samples,
+            auto_resume=bool(r.get("auto_resume",
+                                   state.config.resilience.auto_resume)),
+        )
+
+    # 统一出口白名单（V1-R6）：分块保存；extra_hosts 只收主机名（可带端口）
+    if "egress" in data:
+        eg = data.get("egress") or {}
+        if not isinstance(eg, dict):
+            raise ValueError("egress 必须是键值对字典")
+        mode = str(eg.get("mode", state.config.egress.mode) or "").strip().lower()
+        if mode not in ("allowlist", "off"):
+            raise ValueError("egress.mode 只能是 allowlist 或 off")
+        extra = state.config.egress.extra_hosts
+        if "extra_hosts" in eg:
+            try:
+                extra = validate_extra_hosts(eg.get("extra_hosts"),
+                                             context="出网白名单 extra_hosts")
+            except ValueError as e:
+                raise ValueError(str(e)) from e
+        state.config.egress = EgressConfig(
+            mode=mode,
+            extra_hosts=extra,
+            audit=bool(eg.get("audit", state.config.egress.audit)),
         )
 
     # 软件更新源：分块保存，只带 update 的请求不触碰其它配置

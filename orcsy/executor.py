@@ -730,8 +730,13 @@ class TaskExecutor:
             agent_key=self.team_role or "")
 
     def _verify_claim(self, task: Task) -> tuple[bool, str]:
-        """提交/落地前二次校验：租约仍属于本次认领且任务指纹未变。"""
-        if self.claims is None:
+        """提交/落地前二次校验：租约仍属于本次认领且任务指纹未变。
+
+        没有 `claim_id` 表示调用方绕过了调度器认领（测试/库式直调 executor）：
+        没有可校验的认领上下文，放行以保持直调路径的兼容性。生产链路
+        （`ProjectAgent` 扫描）一定先 acquire 再执行，正常任务不会缺 claim_id。
+        """
+        if self.claims is None or not getattr(task, "claim_id", ""):
             return True, ""
         try:
             return self.claims.verify(task.id, self._task_fingerprint(task),

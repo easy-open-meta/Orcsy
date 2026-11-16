@@ -28,6 +28,7 @@ from .config import (
 )
 from .budget import get_budget_config, project_budget_exhausted
 from .claims import ProjectClaims, claims_state_dir
+from .resilience import project_pause_status, record_task_result
 from .executor import TaskExecutor, TaskResult
 from .logging_setup import get_logger
 from .prompts import build_role_prompt_extra
@@ -165,6 +166,8 @@ class ProjectAgent:
         # 预算软停状态：项目当日预算用尽时置位，供看板/日志解释
         self.budget_paused = False
         self.budget_day: dict = {}
+        # 熔断暂停（V1-R4）：项目级连续失败/失败率触发的停机原因
+        self.pause_reason = ""
         self.review_cfg = review_cfg or ReviewConfig()
         self.local_debug = local_debug or LocalDebugConfig()
         self.commit_and_merge = bool(commit_and_merge)
@@ -347,6 +350,15 @@ class ProjectAgent:
         except Exception:  # noqa: BLE001 — 过期租约由 TTL 回收
             self.log.warning("释放任务 %s 租约失败（忽略）", task.id, exc_info=True)
 
+    def _record_health(self, task: Task, result: TaskResult) -> None:
+        """把任务结果计入项目健康事件（V1-R4 熔断依据）。"""
+        try:
+            st = record_task_result(self.project.name, task.id, result)
+            if st.get("paused") and str(st.get("paused_by") or "") == "auto":
+                self.log.warning("项目触发熔断：%s", st.get("pause_reason"))
+        except Exception:  # noqa: BLE001 — 健康统计是旁路
+            self.log.warning("熔断健康事件记录失败（忽略）", exc_info=True)
+
     def scan_and_work(self) -> list[TaskResult]:
         """执行一轮扫描与任务处理（支持依赖就绪门控、小组波次并行与周期内链式推进）。"""
         log = self.log
@@ -369,6 +381,18 @@ class ProjectAgent:
             log.warning("预算软停判断失败（忽略）", exc_info=True)
             self.budget_paused = False
 
+        # 熔断停机（V1-R4）：项目处于暂停态时不领取新任务
+        try:
+            paused = project_pause_status(self.project.name)
+            self.pause_reason = str(paused.get("pause_reason") or "")
+            if paused.get("paused"):
+                log.warning("项目处于熔断暂停：%s（看板可人工恢复）",
+                            self.pause_reason or "未知原因")
+                return []
+        except Exception:  # noqa: BLE001 — 状态读取失败不阻塞调度
+            log.warning("熔断状态判断失败（忽略）", exc_info=True)
+            self.pause_reason = ""
+
         guide = self._load_guide()
         skills = self._load_skills()
         results: list[TaskResult] = []
@@ -385,6 +409,16 @@ class ProjectAgent:
 
         errors_written = False
         while total_claimed < step_limit:
+            # 本轮中途触发熔断（刚回写的失败）→ 立即停止领取后续任务
+            try:
+                paused = project_pause_status(self.project.name)
+                self.pause_reason = str(paused.get("pause_reason") or "")
+                if paused.get("paused"):
+                    log.warning("项目已熔断暂停，停止本轮后续派发：%s",
+                                self.pause_reason or "未知原因")
+                    break
+            except Exception:  # noqa: BLE001
+                log.warning("熔断状态复查失败（忽略）", exc_info=True)
             tasks, errors = scan_tasks(self.tasks_dir)
             if errors and not errors_written:
                 for t in errors:
@@ -530,6 +564,7 @@ class ProjectAgent:
             for t, _mid, res in wave_outputs:
                 self._write_back_result(t, res)
                 self._release_claim(t)
+                self._record_health(t, res)
                 results.append(res)
                 total_claimed += 1
 
@@ -572,6 +607,7 @@ class ProjectAgent:
             if result is not None:
                 self._write_back_result(task, result)
                 self._release_claim(task)
+                self._record_health(task, result)
                 results.append(result)
         return results
 

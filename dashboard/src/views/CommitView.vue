@@ -223,7 +223,7 @@ async function submit(): Promise<void> {
   <div class="commitpage">
     <div class="chead">
       <div class="cleft">
-        <NButton size="small" quaternary @click="backToProjects">← 返回项目</NButton>
+        <NButton size="small" quaternary @click="backToProjects"><i class="ms sm">arrow_back</i> 返回项目</NButton>
         <span class="ctitle">人工把关提交 · {{ projectName || '（未知项目）' }}</span>
         <NTag v-if="files.length" size="small" type="info" :bordered="false">
           {{ files.length }} 个改动文件
@@ -292,7 +292,7 @@ async function submit(): Promise<void> {
             </template>
           </div>
           <div v-if="curMeta?.truncated" class="cdiff-trunc">
-            ⚠ 该文件改动较大（共 {{ curMeta.totalChars.toLocaleString() }} 字符），预览已截断；
+            <i class="ms sm">warning</i> 该文件改动较大（共 {{ curMeta.totalChars.toLocaleString() }} 字符），预览已截断；
             可点右上「下载补丁」查看完整 diff。
           </div>
           <div class="cdiff-body">
@@ -306,7 +306,7 @@ async function submit(): Promise<void> {
 
       <div class="cfoot">
         <div v-if="excludedList.length" class="exclude-note">
-          ⚠ 已排除 {{ excludedList.length }} 个文件不纳入本次提交（保留在工作区）：
+          <i class="ms sm">warning</i> 已排除 {{ excludedList.length }} 个文件不纳入本次提交（保留在工作区）：
           <span class="exclude-names">{{ excludedList.join('、') }}</span>
         </div>
         <div class="cfoot-row">
