@@ -1983,11 +1983,12 @@ process-wide allow/deny counters and recent denials.</li>
 <h3 id="1021-team-memory-phase-1">10.21 Team memory (Phase 1)</h3>
 <p><strong>Architecture blackboard <code>ARCHITECTURE.md</code></strong>:
 the project root keeps core layers, module boundaries, technology choices,
-shared data models and key routes; the first 3000 chars are injected
-read-only into every task prompt. The PM creates/updates it with
+shared data models and key routes; <strong>write the body in English to save
+tokens</strong> (keep API paths/identifiers as-is); the first 3000 chars are
+injected read-only into every task prompt. The PM creates/updates it with
 <code>update_architecture(mode="replace")</code> on first decomposition;
-developers append a ≤200-char note after major API/schema changes with
-<code>mode="append"</code>. The tool can only write that one file.</p>
+developers append a ≤200-char English note after major API/schema changes
+with <code>mode="append"</code>. The tool can only write that one file.</p>
 <p><strong>Requirement-batch shared clipboard</strong>: roles under the same
 <code>parent_id</code> tree share a batch. Developers use
 <code>session_share(key, value)</code> for temporary ports, test accounts,

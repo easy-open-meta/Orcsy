@@ -59,8 +59,10 @@ MEMORY_TOOLS: dict[str, tuple[str, dict, object]] = {
     "update_architecture": (
         "维护项目根 ARCHITECTURE.md（全局架构黑板报）。PM 首次拆解需求时用 "
         "mode=replace 写入核心分层/模块边界/技术选型/公共数据模型；开发角色完成"
-        "重大接口或数据表变更后用 mode=append 追加 ≤200 字的增量（关键路由、"
-        "数据模型、文件导引）。仅用于长期架构事实，不写任务日志/临时端口/调试过程。",
+        "重大接口或数据表变更后用 mode=append 追加简短增量（关键路由、"
+        "数据模型、文件导引，≤200 字符）。content 请用英文书写以节省 token"
+        "（代码路径/接口名/标识符保留原文）。仅用于长期架构事实，不写任务日志/"
+        "临时端口/调试过程。",
         {
             "type": "object",
             "properties": {

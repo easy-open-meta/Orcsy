@@ -43,6 +43,7 @@ def check_architecture_prompt() -> None:
         prompt = build_system_prompt(proj, "# guide", False, architecture=text)
         assert "项目架构黑板报（ARCHITECTURE.md）" in prompt
         assert "/api" in prompt and "维护约定" in prompt
+        assert "英文" in prompt, "黑板报维护约定必须要求英文书写以节省 token"
         absent = build_system_prompt(proj, "# guide", False)
         assert "<architecture>" not in absent
         long_text = "A" * (ARCHITECTURE_MAX_CHARS + 500)
@@ -52,8 +53,9 @@ def check_architecture_prompt() -> None:
         pm = build_role_prompt_extra("pm", "PM", {"backend": {"name": "后端", "role": "backend"}})
         dev = build_role_prompt_extra("backend", "后端", None)
         assert ARCHITECTURE_FILE in pm and "架构黑板报" in pm
-        assert "update_architecture" in pm
+        assert "update_architecture" in pm and "英文" in pm
         assert ARCHITECTURE_FILE in dev and "session_share" in dev
+        assert "英文" in dev
         qa = build_role_prompt_extra("qa", "QA", None)
         assert "session_read" in qa and "session_share" in qa
 

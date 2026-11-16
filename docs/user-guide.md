@@ -1092,9 +1092,9 @@ egress:
 ### 10.21 Team memory (Phase 1)
 
 **Architecture blackboard `ARCHITECTURE.md`**
-- Lives in the project root: core layers, module boundaries, technology choices, shared data models and key routes;
+- Lives in the project root: core layers, module boundaries, technology choices, shared data models and key routes; **write the body in English** (keep API paths/identifiers as-is) to save tokens;
 - Injected read-only into every task prompt (first 3000 chars) so all roles share the same project picture; omitted when the file does not exist;
-- The PM creates/updates it with `update_architecture(mode="replace")` on first decomposition; developers append a short note (≤200 chars) after major API/schema changes with `mode="append"`; small changes need no update;
+- The PM creates/updates it with `update_architecture(mode="replace")` on first decomposition; developers append a short English note (≤200 chars) after major API/schema changes with `mode="append"`; small changes need no update;
 - The tool can only write `ARCHITECTURE.md` — it does not give PM/QA arbitrary file-write access.
 
 **Requirement-batch shared clipboard**

@@ -36,8 +36,8 @@
   3. **只读低成本消费**：所有角色的任务启动时，系统自动抽取黑板报前 2000~4000 字符注入系统提示词作为全局参照，以极低 Token 成本维持小队成员对项目全貌的共识。
 
 > **实现状态（2026-11-17，Phase 1）**：已落地 `orcsy/prompts.py` 注入（前 3000 字符）、
-> `update_architecture` 专用工具（只写 `ARCHITECTURE.md`，PM replace / 开发 append）、
-> PM/开发角色维护协议与设置页「项目架构记忆」工具分类。设计见
+> `update_architecture` 专用工具（只写 `ARCHITECTURE.md`，PM replace / 开发 append，
+> **正文要求英文以节省 token**）、PM/开发角色维护协议与设置页「项目架构记忆」工具分类。设计见
 > [`docs/design-team-memory-phase1.md`](design-team-memory-phase1.md)。
 
 ### 2.2 需求批次临时共享剪贴板（Team Session State / Ephemeral Bus）

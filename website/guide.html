@@ -1614,7 +1614,7 @@ Agent 下轮直接看到）；返工次数默认 2 次（全局可调 1~10，项
 <li><strong>排障</strong>：临时把 <code>mode</code> 改为 <code>off</code>（全部放行且不写拒绝审计），定位后改回 <code>allowlist</code>。设置页会显示推导出的主机数、本次进程放行/拒绝计数与最近拒绝记录。</li>
 </ul>
 <h3 id="1021-团队记忆phase-1">10.21 团队记忆（Phase 1）</h3>
-<p><strong>架构黑板报 <code>ARCHITECTURE.md</code></strong>：项目根目录维护核心分层、模块边界、技术选型、公共数据模型与关键路由；每个任务启动时自动只读注入前 3000 字。PM 首次拆解时用 <code>update_architecture(mode="replace")</code> 创建/更新，开发完成重大接口或数据表变更后用 <code>mode="append"</code> 追加 ≤200 字；工具只允许写该文件，不开放任意文件权限。</p>
+<p><strong>架构黑板报 <code>ARCHITECTURE.md</code></strong>：项目根目录维护核心分层、模块边界、技术选型、公共数据模型与关键路由，<strong>正文统一用英文书写以节省 token</strong>（接口/路径/标识符保留原文）；每个任务启动时自动只读注入前 3000 字。PM 首次拆解时用 <code>update_architecture(mode="replace")</code> 创建/更新，开发完成重大接口或数据表变更后用 <code>mode="append"</code> 追加 ≤200 字符的英文增量；工具只允许写该文件，不开放任意文件权限。</p>
 <p><strong>需求批次共享剪贴板</strong>：同一 <code>parent_id</code> 需求树下的角色共用一个批次；开发用 <code>session_share(key, value)</code> 暂存临时端口、测试账号、动态 JWT、临时 DSN，QA 用 <code>session_read(key)</code> 直接读取（key 留空列出可用键）。数据存 <code>&lt;配置目录&gt;/state/session_bus/</code>，不写任务文件/不进 Git，批次验收或终止后自动删除，异常残留 7 天过期。</p>
 <p><strong>依赖成果一键查看</strong>：任务详情列出前置任务状态与成果摘要；点击任务 ID/标题打开该任务详情（归档只读），父需求/来源任务同样可跳转。</p>
 <h2 id="11-数据备份与迁移">11. 数据、备份与迁移</h2>
