@@ -22,6 +22,7 @@ from .config import (
     LOCAL_DEBUG_BROWSERS,
     BudgetConfig,
     CommandsConfig,
+    EgressConfig,
     EnvConfig,
     GitConfig,
     LLMConfig,
@@ -54,6 +55,7 @@ from .config import (
 from .config import (
     _coerce_llm as _coerce_llm_cfg,
 )
+from .egress import validate_extra_hosts
 from .logging_setup import get_logger
 
 if TYPE_CHECKING:
@@ -344,6 +346,27 @@ def save_settings(state: AppState, data: dict) -> dict:
             min_samples=samples,
             auto_resume=bool(r.get("auto_resume",
                                    state.config.resilience.auto_resume)),
+        )
+
+    # 统一出口白名单（V1-R6）：分块保存；extra_hosts 只收主机名（可带端口）
+    if "egress" in data:
+        eg = data.get("egress") or {}
+        if not isinstance(eg, dict):
+            raise ValueError("egress 必须是键值对字典")
+        mode = str(eg.get("mode", state.config.egress.mode) or "").strip().lower()
+        if mode not in ("allowlist", "off"):
+            raise ValueError("egress.mode 只能是 allowlist 或 off")
+        extra = state.config.egress.extra_hosts
+        if "extra_hosts" in eg:
+            try:
+                extra = validate_extra_hosts(eg.get("extra_hosts"),
+                                             context="出网白名单 extra_hosts")
+            except ValueError as e:
+                raise ValueError(str(e)) from e
+        state.config.egress = EgressConfig(
+            mode=mode,
+            extra_hosts=extra,
+            audit=bool(eg.get("audit", state.config.egress.audit)),
         )
 
     # 软件更新源：分块保存，只带 update 的请求不触碰其它配置

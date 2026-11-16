@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NCard, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
+import { NButton, NCard, NDynamicTags, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
 import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type AuditEntryT, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
@@ -54,6 +54,8 @@ const SETTING_GROUPS: SettingGroup[] = [
         desc: '全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。' },
       { key: 'mirrors', label: '镜像源管理与测速选源', icon: 'sync_alt',
         desc: 'Agent 装环境/拉依赖前测速，哪个快用哪个。' },
+      { key: 'egress', label: '出网白名单', icon: 'lan',
+        desc: '应用自身 HTTP（模型/Issue/镜像/更新/网页抓取）只允许白名单主机；拒绝写审计。' },
     ],
   },
   {
@@ -127,6 +129,10 @@ const draft = reactive({
   // 熔断停机（V1-R4）：rate 用百分比展示，保存时 /100
   res_enabled: true, res_consec: 3, res_window: 120,
   res_rate_pct: 60, res_samples: 5, res_auto: false,
+  // 统一出口白名单（V1-R6）：extra_hosts 只填主机名（可带端口 / *.通配）
+  egress_mode: 'allowlist' as 'allowlist' | 'off',
+  egress_extra: [] as string[],
+  egress_audit: true,
 })
 // ---- 任务审查（Review Agent）草稿：模型绑定 + 返工次数 + 测试命令 + squash ----
 const reviewDraft = reactive({
@@ -587,6 +593,9 @@ watch(() => store.state, (s) => {
   draft.res_rate_pct = Math.round((s.resilience_cfg?.max_failure_rate ?? 0.6) * 100)
   draft.res_samples = s.resilience_cfg?.min_samples ?? 5
   draft.res_auto = s.resilience_cfg?.auto_resume ?? false
+  draft.egress_mode = (s.egress_cfg?.mode as 'allowlist' | 'off') ?? 'allowlist'
+  draft.egress_extra = [...(s.egress_cfg?.extra_hosts ?? [])]
+  draft.egress_audit = s.egress_cfg?.audit ?? true
   syncProfilesDraft(s.agent_profiles)
 })
 
@@ -990,6 +999,23 @@ async function saveResilience(): Promise<void> {
   finally { resilienceSaving.value = false }
   void import('../store').then(m => m.refresh(true))
 }
+
+// ---- 出网白名单（V1-R6）：保存后立即生效；off 仅用于排障 ----
+const egressSaving = shallowRef(false)
+async function saveEgress(): Promise<void> {
+  egressSaving.value = true
+  try {
+    await api.config({ egress: {
+      mode: draft.egress_mode,
+      extra_hosts: draft.egress_extra,
+      audit: draft.egress_audit,
+    } })
+    message()?.('出网白名单已保存并立即生效')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { egressSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+const egressStatus = computed(() => store.state?.egress_status)
 
 const pausedProjects = computed(() =>
   (store.state?.projects || []).filter(p => p.health?.paused))
@@ -2302,6 +2328,52 @@ const providerOptions = [
       <div class="sfoot">
         <NButton type="primary" :loading="mirrorsSaving" :disabled="!mirrorsDirty"
                  @click="saveMirrors">保存镜像源配置</NButton>
+      </div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'egress'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">lan</i> 出网白名单</template>
+      <div class="frow">
+        <div class="f2"><label>模式</label>
+          <NSelect v-model:value="draft.egress_mode" :options="[
+            { label: 'allowlist — 只允许白名单主机（默认）', value: 'allowlist' },
+            { label: 'off — 全部放行（仅排障用）', value: 'off' },
+          ]" />
+        </div>
+        <div class="f1"><label>拒绝时写审计</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <NSwitch v-model:value="draft.egress_audit" />
+            <span class="hint">logs/audit.jsonl · action=egress.deny</span>
+          </div>
+        </div>
+      </div>
+      <div class="frow">
+        <div class="f1"><label>额外放行主机（extra_hosts）</label>
+          <NDynamicTags v-model:value="draft.egress_extra" :max="30"
+                        placeholder="api.example.com（可带 :端口；*.example.com 含子域）" />
+          <div class="hint tool-foot">
+            模型 / Issue / 镜像 / 更新源主机按各自配置自动放行，无需在此重复；
+            网页抓取要访问的文档站需在此添加。回环地址始终放行；Agent 子进程
+            （npm / pip / git）的出网不在应用层拦截范围。
+          </div>
+        </div>
+      </div>
+      <div class="hint tool-foot">
+        已推导白名单（{{ (egressStatus?.derived_hosts || []).length }} 个）：
+        {{ (egressStatus?.derived_hosts || []).join('、') || '（无）' }}
+      </div>
+      <div v-if="egressStatus" class="hint tool-foot">
+        运行计数：放行 {{ egressStatus.allowed }} 次 / 拒绝 {{ egressStatus.denied }} 次
+        <template v-if="egressStatus.last_denied.length">
+          ；最近拒绝：{{ egressStatus.last_denied.map(d => `${d.host}（${d.purpose}，${d.ts}）`).join('；') }}
+        </template>
+        <template v-if="egressStatus.runtime_hosts.length">
+          ；运行时放行（更新包 CDN）：{{ egressStatus.runtime_hosts.map(h => h.host).join('、') }}
+        </template>
+      </div>
+      <div class="sfoot">
+        <NButton type="primary" :loading="egressSaving" @click="saveEgress">保存出网白名单</NButton>
       </div>
           </NCard>
         </div>

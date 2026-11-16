@@ -28,6 +28,7 @@ import httpx
 from . import USER_AGENT, masking
 from .concurrency import get_budget
 from .config import LLMConfig
+from .egress import EgressDenied, check as egress_check
 from .logging_setup import get_logger
 from .masking import MaskingSession
 from .tools import (
@@ -164,6 +165,10 @@ def list_models(provider: str, base_url: str, api_key: str,
     # -1（不超时）对拉取列表没有意义：按 30s 兜底
     list_timeout = (30 if int(timeout_seconds) <= 0
                     else min(max(timeout_seconds, 5), 30))
+    try:
+        egress_check(url, purpose="model_list")
+    except EgressDenied as e:
+        raise LLMError(str(e)) from e
     try:
         resp = httpx.get(url, headers=headers, timeout=list_timeout)
     except httpx.HTTPError as e:
@@ -889,6 +894,12 @@ class LLMClient:
             "（已完成的进度不受影响）。")
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
+        # 出网白名单（V1-R6）：模型调用也必须经统一出口；拒绝按 LLMError
+        # 冒泡（executor 会转 blocked，任务正文不被消费）
+        try:
+            egress_check(url, purpose="model_chat")
+        except EgressDenied as e:
+            raise LLMError(str(e)) from e
         # 预算前置校验：已超限不再发请求（含子代理触发的超限）
         if self.budget is not None:
             self.budget.precheck()

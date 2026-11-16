@@ -185,7 +185,7 @@
 > R4 熔断停机（连续失败/窗口失败率 → 项目暂停与人工恢复）已实施，设计见
 > [`docs/design-circuit-breaker.md`](design-circuit-breaker.md)；
 > R5 写操作审计已实施，设计见 [`docs/design-audit.md`](design-audit.md)；
-> R6 统一出口白名单待实施。
+> R6 统一出口白名单已实施，设计见 [`docs/design-egress.md`](design-egress.md)。
 > 本小节的解释性文字保留，作为后续 R2~R6 的契约依据。
 
 **落盘位置**：默认在配置目录下（`<配置目录>/runs/<project>/<run_id>/`），**不写进受管仓库**。理由：
@@ -364,6 +364,14 @@ egress:
 ```
 
 **验收**：单测遍历 20 个 URL 断言 allow/deny；配置 DeepSeek 端点后 `llm` 请求通过、未配置的 `evil.example` 被拒且审计有记录；文档中删除「默认 0 次外网请求」这类不可验证表述。
+
+> **实现状态（2026-11-16，分支 `feat/trusted-pipeline-r6`）**：已落地
+> `orcsy/egress.py`（allowlist/off、通配与端口匹配、回环放行、拒绝审计、
+> 更新包 CDN 运行时放行），接入 `llm` / `issues` / `updater` / `mirrors` /
+> `tools_net` 五类出网点，新增 `GET /api/egress` 与设置页「出网白名单」分区；
+> 覆盖测试 `tests/test_egress.py`（20+ URL 矩阵、审计不落 token、各出网点
+> 拒绝且不发请求、CDN 运行时放行）。设计见
+> [`docs/design-egress.md`](design-egress.md)。
 
 ### 4.9 P2 预留：只读聚合契约
 

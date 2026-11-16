@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 
+from .egress import EgressDenied, check as egress_check
 from .logging_setup import get_logger
 from .mirrors import CATEGORY_BY_KEY, CATEGORY_KEYS
 
@@ -110,10 +111,12 @@ class _WebFetchReject(Exception):
 
 
 def _fetch_with_guard(client, url: str) -> tuple[int, str, bytearray, str, str]:
-    """手动重定向循环：每一跳都重过 SSRF 校验（含第 0 跳）。"""
+    """手动重定向循环：每一跳都重过出网白名单与 SSRF 校验（含第 0 跳）。"""
     import httpx
 
     for _hop in range(_MAX_REDIRECT_HOPS):
+        # 出网白名单（V1-R6）：重定向目标同样要过闸——否则白名单等同虚设
+        egress_check(url, purpose="web_fetch")
         _assert_public_url(url)
         with client.stream("GET", url) as resp:
             if resp.status_code in _REDIRECT_STATUSES:
@@ -166,6 +169,12 @@ def tool_web_fetch(ctx: ToolContext, args: dict) -> str:
         max_chars = max(1000, min(int(args.get("max_chars") or MAX_WEB_FETCH_CHARS), 100000))
     except (TypeError, ValueError):
         return "错误：max_chars 必须是整数"
+    # 出网白名单先于 SSRF 校验：未登记主机直接给出「如何加白」的提示，
+    # 不做 DNS 解析（重定向在 _fetch_with_guard 里逐跳复检）
+    try:
+        egress_check(url, purpose="web_fetch")
+    except EgressDenied as e:
+        return f"错误：{e}"
     try:
         _assert_public_url(url)
     except ValueError as e:

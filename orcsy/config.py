@@ -12,6 +12,8 @@ import yaml
 
 from .approvals import PERMISSION_MODES
 from .concurrency import configure_limiter
+from .egress import MODES as EGRESS_MODES
+from .egress import validate_extra_hosts
 from .issues import IssueError, normalize_repo
 from .mirrors import validate_mirrors
 from .tool_specs import DEFAULT_ALLOWED_COMMANDS, validate_commands_map, validate_tools_map
@@ -299,6 +301,19 @@ class ResilienceConfig:
     max_failure_rate: float = 0.6       # 0 = 不按失败率触发
     min_samples: int = 5                # 窗口内最少样本数
     auto_resume: bool = False
+
+
+@dataclass
+class EgressConfig:
+    """统一出口白名单（V1-R6）：应用自身 HTTP 只允许落到白名单主机。
+
+    模型/Issue/镜像/更新源主机从各自配置自动推导，无需重复填写；
+    extra_hosts 用于追加（网页抓取、企业内网代理等）。子进程出网不在本闸范围。
+    """
+
+    mode: str = "allowlist"             # allowlist | off（off 仅用于排障）
+    extra_hosts: list[str] = field(default_factory=list)
+    audit: bool = True                  # 拒绝时写 logs/audit.jsonl（egress.deny）
 
 
 @dataclass
@@ -611,6 +626,7 @@ class AppConfig:
     runlog: RunLogConfig = field(default_factory=RunLogConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     resilience: ResilienceConfig = field(default_factory=ResilienceConfig)
+    egress: EgressConfig = field(default_factory=EgressConfig)
     web: WebConfig = field(default_factory=WebConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
@@ -1250,6 +1266,24 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         auto_resume=bool(res_raw.get("auto_resume", False)),
     )
 
+    # 统一出口白名单（V1-R6）：mode/额外主机/拒绝审计开关
+    eg_raw = raw.get("egress") or {}
+    if not isinstance(eg_raw, dict):
+        raise ValueError("egress 配置必须是字典（键值对）。")
+    eg_mode = str(eg_raw.get("mode") or "allowlist").strip().lower()
+    if eg_mode not in EGRESS_MODES:
+        raise ValueError(f"egress.mode 只能是 {' / '.join(EGRESS_MODES)}（当前：{eg_mode}）")
+    try:
+        eg_extra = validate_extra_hosts(eg_raw.get("extra_hosts"),
+                                        context="egress.extra_hosts")
+    except ValueError as e:
+        raise ValueError(str(e)) from e
+    egress = EgressConfig(
+        mode=eg_mode,
+        extra_hosts=eg_extra,
+        audit=bool(eg_raw.get("audit", True)),
+    )
+
     web_raw = raw.get("web") or {}
     api_keys_in = web_raw.get("api_keys")
     api_keys: list[str] = []
@@ -1579,7 +1613,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                 p_task_llm, p_review_llm, context=f"项目 {p_name} 的 review")
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
-                    runlog=runlog, budget=budget, resilience=resilience, web=web,
+                    runlog=runlog, budget=budget, resilience=resilience,
+                    egress=egress, web=web,
                     update=update, tools=tools, commands=commands, env=env,
                     permissions=permissions, notify=notify, masking=masking_cfg,
                     mirrors=mirrors,
@@ -1696,6 +1731,12 @@ def save_config(cfg: AppConfig) -> None:
             "max_failure_rate": cfg.resilience.max_failure_rate,
             "min_samples": cfg.resilience.min_samples,
             "auto_resume": cfg.resilience.auto_resume,
+        },
+        # 统一出口白名单：整体写回，漏写会被看板任意保存静默重置
+        "egress": {
+            "mode": cfg.egress.mode,
+            "extra_hosts": list(cfg.egress.extra_hosts),
+            "audit": cfg.egress.audit,
         },
         "web": {
             "host": cfg.web.host, "port": cfg.web.port,

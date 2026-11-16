@@ -197,6 +197,14 @@ def speedtest_one(url: str, test_url: str = "",
       Windows 回环/弱网常见）重试两次，间隔 80ms。
     """
     target = test_url or url
+    # 出网白名单（V1-R6）：内置源与用户自定义源在启动时已按配置推导放行；
+    # 直接调用到未登记主机（如脚本自填）时按不可达处理，不抛异常打断批量测速
+    try:
+        from .egress import check as egress_check
+        egress_check(target, purpose="mirror_speedtest")
+    except Exception as e:  # noqa: BLE001 — EgressDenied 或导入异常都视为不可达
+        log.warning("镜像测速被出网白名单拒绝：%s（%s）", target, e)
+        return None
     for attempt in range(3):
         req = urllib.request.Request(target, headers={
             "User-Agent": "Orcsy-Mirror-Speedtest/1.0",

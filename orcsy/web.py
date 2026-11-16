@@ -202,6 +202,7 @@ from .audit import get_audit_log, init_audit_log
 from .budget import (configure as configure_budget, get_budget_store,
                      init_budget_store)
 from .claims import claims_state_dir
+from .egress import init_egress, snapshot as egress_snapshot
 from .resilience import (configure as configure_resilience,
                          get_resilience_store, init_resilience_store)
 from .runlog import apply_runlog_config, get_run_store, init_run_store
@@ -461,6 +462,8 @@ class AppState:
         # 已初始化时复用（迁移进行中不能被第二次 force 重建）
         init_run_store(config)
         init_audit_log(config)
+        # 统一出口白名单（V1-R6）：与 Scheduler 共用同一策略（幂等重建）
+        init_egress(config)
         # 预算硬闸：模块配置 + 当日用量存储（与租约同 state/ 目录）
         configure_budget(config.budget)
         init_budget_store(config)
@@ -962,6 +965,13 @@ class AppState:
                 "min_samples": self.config.resilience.min_samples,
                 "auto_resume": self.config.resilience.auto_resume,
             },
+            # 统一出口白名单（V1-R6）：配置 + 推导主机 + 运行计数/最近拒绝
+            "egress_cfg": {
+                "mode": self.config.egress.mode,
+                "extra_hosts": list(self.config.egress.extra_hosts),
+                "audit": self.config.egress.audit,
+            },
+            "egress_status": egress_snapshot(),
             # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
             # finish 也进目录——前端把它渲染成「常开且禁用」的展示行，
             # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
@@ -1280,6 +1290,10 @@ class AppState:
 
     def runlog_migration_status(self) -> dict:
         return {"ok": True, "migration": get_run_store().migration_status()}
+
+    def egress_status(self) -> dict:
+        """出网白名单当前策略与运行计数（只读，不含密钥）。"""
+        return {"ok": True, "egress": egress_snapshot()}
 
     def retry_runlog_migration(self) -> dict:
         try:
@@ -1639,6 +1653,8 @@ class AppState:
         # 任务结束提醒开关随配置刷新（看板保存后立即生效，无需重启）
         notify.configure(new_cfg.notify)
         masking.configure(new_cfg.masking)
+        # 出网白名单随配置热生效（模型/Issue/镜像/更新源主机重新推导）
+        init_egress(new_cfg)
         # 运行台账（V1-R1）：同目录只更新选项；改目录则后台迁移历史记录
         apply_runlog_config(new_cfg)
         # 预算硬闸：限额与单价表热生效
@@ -2568,6 +2584,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "message": str(e)}, 400)
         elif path == "/api/runlog/migration":
             self._json(self.state.runlog_migration_status())
+        elif path == "/api/egress":
+            self._json(self.state.egress_status())
         elif path == "/api/audit":
             self._json(self.state.audit_list(self._query_params()))
         else:

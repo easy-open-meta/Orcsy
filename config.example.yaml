@@ -53,6 +53,14 @@ resilience:                  # 熔断停机：连续失败/窗口失败率触发
   min_samples: 5                   # 窗口内最少样本数
   auto_resume: false               # true = 窗口结束后自动恢复（默认人工恢复）
 
+egress:                      # 统一出口白名单：应用自身发起的 HTTP 只允许白名单主机
+  mode: allowlist            # allowlist（默认）| off（排障用，全部放行且不写拒绝审计）
+  extra_hosts: []            # 追加主机：网页抓取、内网代理等（如 api.example.com / *.example.com）
+                             # 模型/Issue/镜像/更新源主机按各自配置自动放行，无需重复填写；
+                             # 回环地址（127.0.0.1/localhost）不是出网，始终放行；
+                             # Agent 子进程（npm/pip/git）的出网不在应用层拦截范围
+  audit: true                # 拒绝时写 logs/audit.jsonl（action=egress.deny）
+
 web:
   host: 127.0.0.1            # 看板监听地址；手机远程访问改为 0.0.0.0（绑定全部网卡，
                              # 需先设置 auth_password 或 api_keys），启动后终端会打印
