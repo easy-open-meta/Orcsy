@@ -124,6 +124,15 @@ function onTaskPageChange(p: ProjectT, pg: number): void {
   taskPage[p.name] = pg
 }
 
+// ---- 任务列表展开/收起：默认收起节省卡片高度；空列表同样可展开查看提示 ----
+const taskListOpen = reactive<Record<string, boolean>>({})
+function isTaskListOpen(p: ProjectT): boolean {
+  return !!taskListOpen[p.name]
+}
+function toggleTaskList(p: ProjectT): void {
+  taskListOpen[p.name] = !taskListOpen[p.name]
+}
+
 // ---- 项目启停：绑定类字段原样回传（后端把缺失键当「清除」处理） ----
 async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
   try {
@@ -433,6 +442,18 @@ async function quickAdd(p: ProjectT): Promise<void> {
           <NButton size="small" type="primary" :loading="adding" @click="quickAdd(p)">添加</NButton>
         </div>
 
+        <button type="button" class="tasklist-toggle" :aria-expanded="isTaskListOpen(p)"
+                :title="isTaskListOpen(p) ? '收起任务列表' : '展开任务列表'"
+                @click="toggleTaskList(p)">
+          <i class="ms sm">{{ isTaskListOpen(p) ? 'expand_less' : 'expand_more' }}</i>
+          <span class="tasklist-title">任务列表</span>
+          <span class="tasklist-count">
+            待办 {{ p.tasks.length }}<template v-if="p.parse_errors.length"> · 异常 {{ p.parse_errors.length }}</template><template v-if="p.archived.length"> · 归档 {{ p.archived.length }}</template>
+          </span>
+          <span class="tasklist-hint">{{ isTaskListOpen(p) ? '收起' : '展开' }}</span>
+        </button>
+
+        <template v-if="isTaskListOpen(p)">
         <div v-if="p.tasks.length || p.parse_errors.length" class="batchbar">
           <NCheckbox size="small" :checked="pageAllChecked(p)" :indeterminate="pageSomeChecked(p)"
                      @update:checked="(v: boolean) => checkAllPage(p, v)">全选本页</NCheckbox>
@@ -542,6 +563,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <div class="t-meta">{{ t.id }}</div>
           </div>
         </details>
+        </template>
       </NCard>
     </div>
 
@@ -566,6 +588,16 @@ async function quickAdd(p: ProjectT): Promise<void> {
 .counts { flex: none; font-size: 12px; color: var(--dim); }
 .quickadd { display: flex; gap: 6px; margin-bottom: 10px; }
 .quickadd .qpri { width: 88px; flex: none; }
+/* 任务列表折叠条：整行可点，空列表也显示；默认收起以节约卡片高度 */
+.tasklist-toggle { width: 100%; display: flex; align-items: center; gap: 8px;
+  margin: 0 0 8px; padding: 6px 9px; border: 1px solid var(--line);
+  border-radius: 8px; background: rgba(128, 140, 180, 0.07);
+  color: var(--text); font: inherit; font-size: 12.5px; text-align: left;
+  cursor: pointer; }
+.tasklist-toggle:hover { border-color: var(--acc, #5b8cff); }
+.tasklist-title { font-weight: 600; white-space: nowrap; }
+.tasklist-count { color: var(--faint); font-size: 11.5px; min-width: 0; }
+.tasklist-hint { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
 .tasks { display: flex; flex-direction: column; gap: 8px; }
 .batchbar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .batchbar-spacer { flex: 1; }
