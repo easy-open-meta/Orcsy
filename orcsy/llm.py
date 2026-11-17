@@ -501,16 +501,37 @@ class LLMClient:
         file_read_counts: Counter[str] = Counter()         # path -> 累计读取次数（防死循环）
         consecutive_read_turns = 0                         # 连续只读/扫描未产生文件改动的次数
         read_warning_sent = False                          # 本轮连续只读是否已发过警告
+        has_edit_progress = False                          # 本任务是否已产生过文件改动
+        read_guard_tripped = False                         # 只读预算耗尽后进入「落盘检查点」
+        read_guard_violations = 0                          # 检查点内仍尝试只读的次数
+        read_guard_notice_pending = False                  # 需要在本轮工具结果后追加检查点提示
+        # 落盘检查点内仍继续只读/扫描的容忍次数：超过后强制收尾，防止
+        # 模型对「禁止读取」指令完全无视导致新一轮无限扫描。
+        _READ_GUARD_MAX_VIOLATIONS = 5
         # 文档/分析类任务天然需要更多只读调研（如 90+ 页面 CRUD 矩阵），
         # 用更高的阈值避免正常文档任务被代码任务的 20 次阈值误杀；
         # 最终仍会强制收尾，只是给模型更充分的收集与落盘空间。
+        #
+        # 代码任务在「首次落盘前」也需要一轮真实的代码勘察（读控制器 / DTO /
+        # 既有测试写法后才动手），20 次连读会把这类正常开工误判成死循环
+        #（实际案例：backend 补齐 CRUD 测试，勘察 20 个不同文件即被熔断）。
+        # 因此采用两段阈值：首次写文件前给 30/60 的勘察预算；一旦产生过
+        # 文件改动，说明已进入实施阶段，恢复 10/20 的严格阈值——中途反复
+        # 只读打转仍会被快速熔断。
+        #
+        # 达到熔断阈值不再立刻杀任务：先进入「落盘检查点」，禁止继续读取并
+        # 要求模型立即写文件 / 拆分 / finish；连续无视仍会强制收尾。
         task_obj = getattr(ctx, "current_task", None)
         task_labels = {str(x).strip().lower()
                        for x in (getattr(task_obj, "labels", None) or [])}
         doc_task = bool(task_labels & {"docs", "doc", "documentation",
                                        "analysis", "research", "design"})
-        read_warn_at = 30 if doc_task else 10
-        read_break_at = 60 if doc_task else 20
+
+        def _read_thresholds() -> tuple[int, int]:
+            if doc_task or not has_edit_progress:
+                return 30, 60
+            return 10, 20
+
         forced_reason = ""       # 非空 = 因卡住/轮数耗尽强制收尾（而非 finish）
 
         while unlimited or turn < max_turns:
@@ -588,14 +609,34 @@ class LLMClient:
                 is_edit_op = name in ("write_file", "edit_file", "multi_edit",
                                       "delete_file", "move_file", "update_architecture")
                 if is_edit_op:
+                    has_edit_progress = True
                     consecutive_read_turns = 0
                     read_warning_sent = False
+                    read_guard_tripped = False
+                    read_guard_violations = 0
                 elif is_read_op:
                     consecutive_read_turns += 1
 
                 # 防死循环 1：同一文件重复读取硬拦截（超过 5 次直接拒绝，迫使模型基于已知上下文开工）
                 intercepted: str | None = None
-                if name == "read_file":
+                # 落盘检查点：只读预算耗尽后继续 read/list/find/grep/read_skill
+                # 一律拦截，给模型一次「不再收集、立即输出」的纠偏机会；若仍
+                # 无视，连续超过容忍次数后强制收尾。
+                if produces_code and read_guard_tripped and is_read_op:
+                    read_guard_violations += 1
+                    intercepted = (
+                        f"错误：只读/扫描预算已用尽（已连续 {consecutive_read_turns} 次"
+                        "只读/扫描调用而没有文件改动）。系统已暂停你的读取权限，"
+                        "本次调用未执行。请基于已收集信息立即行动："
+                        "调用 write_file / edit_file 落地已完成部分，"
+                        "或调用 create_tasks 拆分剩余工作，"
+                        "或调用 finish(action=blocked) 汇报剩余工作。"
+                        f"继续调用只读/扫描工具超过 {_READ_GUARD_MAX_VIOLATIONS} 次将强制收尾。"
+                    )
+                    log.warning(
+                        "只读检查点拦截 [%d] %s（第 %d 次违规）",
+                        turn, name, read_guard_violations)
+                if intercepted is None and name == "read_file":
                     p_target = ""
                     try:
                         p_args = json.loads(args_json) if isinstance(args_json, str) else (args_json or {})
@@ -646,7 +687,9 @@ class LLMClient:
                         except Exception:  # noqa: BLE001 — 台账旁路
                             pass
 
-                    if produces_code and consecutive_read_turns >= read_warn_at and not read_warning_sent:
+                    read_warn_at, _read_break_at = _read_thresholds()
+                    if produces_code and consecutive_read_turns >= read_warn_at \
+                            and not read_warning_sent:
                         read_warning_sent = True
                         result += (
                             f"\n\n🚨 警告：你已连续 {consecutive_read_turns} 次调用只读/扫描工具"
@@ -670,13 +713,36 @@ class LLMClient:
                     self.messages.append(self._tool_result(call_id, result))
 
                 # 防死循环 2：代码生产类角色连续只读/扫描未产生文件改动
-                # （含被拦截的重读）累计达上限 → 强制熔断收尾。用 ctx.produces_code
-                # 判定，单兵也覆盖；PM/QA（False）不误伤。run_command 不重置计数。
+                # （含被拦截的重读）累计达上限 → 进入「落盘检查点」，而不是
+                # 立即杀任务。检查点内继续只读会被硬拦截；连续无视超过容忍
+                # 次数才强制收尾。首次落盘前放宽到勘察阈值；一旦写过文件，
+                # 恢复严格阈值。
+                _read_warn_at, read_break_at = _read_thresholds()
                 if produces_code and consecutive_read_turns >= read_break_at:
-                    forced_reason = (
-                        f"检测到只读死循环：已连续 {consecutive_read_turns} 次只读/扫描工具调用"
-                        "而未产生任何文件改动，强制熔断收尾")
-                    break
+                    if not read_guard_tripped:
+                        read_guard_tripped = True
+                        read_guard_notice_pending = True
+                    if read_guard_violations >= _READ_GUARD_MAX_VIOLATIONS:
+                        forced_reason = (
+                            f"检测到只读死循环：已连续 {consecutive_read_turns} 次"
+                            "只读/扫描工具调用而未产生任何文件改动，且在只读"
+                            f"检查点内仍继续读取 {read_guard_violations} 次，"
+                            "强制熔断收尾")
+                        break
+
+            # 检查点提示放在本轮全部工具结果之后，避免插在 assistant/tool
+            # 消息中间破坏协议顺序。
+            if read_guard_notice_pending and not forced_reason:
+                read_guard_notice_pending = False
+                self.messages.append(self._user(
+                    f"🛑 只读/扫描预算已用尽（连续 {_read_thresholds()[1]} 次"
+                    "只读/扫描调用而没有文件改动）。从下一轮起禁止再调用"
+                    " read_file / list_dir / find_files / grep / read_skill；"
+                    "请基于已收集信息立即调用 write_file / edit_file 落地修改，"
+                    "或调用 create_tasks 拆分剩余工作，"
+                    "或调用 finish(action=blocked) 汇报剩余工作。"
+                    f"若继续只读/扫描超过 {_READ_GUARD_MAX_VIOLATIONS} 次将强制收尾。"
+                ))
 
             if forced_reason:
                 break

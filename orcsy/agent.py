@@ -451,7 +451,11 @@ class ProjectAgent:
             for task in tasks:
                 dep_info = evaluate_task_dependencies(task, all_statuses, done_ids)
                 if dep_info["dep_state"] != "ready":
-                    log.debug("任务 %s 依赖未就绪（%s），跳过", task.id, dep_info["dep_state"])
+                    blockers = "、".join(
+                        f"{d['id']}({d['status']})"
+                        for d in dep_info["blocking_deps"]) or "无"
+                    log.debug("任务 %s 依赖未就绪（%s），跳过（未满足：%s）",
+                              task.id, dep_info["dep_state"], blockers)
                     continue
                 picked = self._select_member_for_task(task)
                 if picked is None:

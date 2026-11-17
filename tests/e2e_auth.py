@@ -103,7 +103,8 @@ def main() -> int:
         code, _, _ = req(PORT, "/", read_body=False)
         assert code == 200, "SPA 壳应放行（登录界面由页内接管）"
         code, _, body = req(PORT, "/api/auth")
-        assert code == 200 and body == {"ok": True, "enabled": True, "authed": False}, body
+        assert code == 200 and body == {
+            "ok": True, "app": "orcsy", "enabled": True, "authed": False}, body
         print("ok: 未登录 401 守卫（GET/POST），/ 与 /api/auth 白名单放行")
 
         # 2. 登录：错密码 401，对密码 200 + HttpOnly 会话 Cookie
@@ -211,7 +212,8 @@ def main() -> int:
         code, _, body = req(PORT, "/api/config", {"web": {"auth_password": ""}}, cookie=ck)
         assert code == 200 and body["ok"] is True, body
         code, _, body = req(PORT, "/api/auth")
-        assert body == {"ok": True, "enabled": False, "authed": True}, body
+        assert body == {"ok": True, "app": "orcsy", "enabled": False,
+                        "authed": True}, body
         code, _, body = req(PORT, "/api/state")
         assert code == 200 and "projects" in body, "关闭鉴权后应免登录（回归兼容）"
         print("ok: 改密三态（更新/保持/清除），关闭鉴权后免登录")

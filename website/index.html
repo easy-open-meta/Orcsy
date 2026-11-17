@@ -238,11 +238,13 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <!-- ===== Hero ===== -->
 <div class="hero" id="top">
   <div class="wrap">
-    <span class="hero-badge">开源免费 · <b id="ver">v0.24.0</b> · Windows / Docker / Linux</span>
+    <span class="hero-badge">开源免费 · <b id="ver">v0.25.0</b> · Windows / Docker / Linux</span>
     <h1>让 AI Agent<br><span class="grad">按任务清单自动干活</span></h1>
+    <p class="sub" style="margin-top:10px;font-size:15px">全程<b>可信留痕</b>：独立审查门 · 预算/熔断 · 运行台账 · 人工把关提交</p>
     <p class="sub">Orcsy 是一个 <b>AI Agent 任务编排系统</b>：把需求与 Bug 写成 Markdown 任务清单，
-      支持单兵或<b>多模型 Agent 项目小组（PM、后端、前端、测试）</b>进驻协作；Agent 在独立 Git Worktree 沙盒中真实改代码、跑联调测试，改动安全落地主工作区，最终代码提交完全由人工把关——
-      全程由 <b>Web 看板</b>可视化掌控。</p>
+      支持单兵或<b>多模型 Agent 项目小组（PM、后端、前端、测试）</b>进驻协作；Agent 在独立 Git Worktree 沙盒中真实改代码、跑联调测试，改动经独立审查门后安全落地主工作区，最终代码提交完全由人工把关——
+      任务级运行台账全程留痕，由 <b>Web 看板</b>可视化掌控。</p>
+    <p class="hero-note"><b>v0.25.0</b>：嵌套 Git 仓库人工把关提交（子仓库先提交、父仓库最后记录指针）+ 托盘退出/重复实例修复。</p>
     <p class="hero-note">Windows 一键安装包 <code>orcsy-setup-*.exe</code> · 在线更新包 <code>orcsy-update-*.zip</code> · 也支持 <code>docker compose up</code> 与 systemd / 源码运行 · <a href="#download">⬇ 前往下载</a></p>
   </div>
 </div>
@@ -259,7 +261,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <div class="fcard"><div class="ico">👥</div><h3>多模型 Agent 项目小组（Project Team）</h3>
         <p>自由编排专业角色进驻项目：<b>👑 项目经理 PM</b>（只读摸底、拆解 DAG 任务或直派）、<b>⚙️ 后端 / 🎨 前端专职开发</b>（专注本端编码与单测）、<b>🧪 测试工程师 QA</b>（前后端真机联调与 Bug 提单）。同周期链式推进，下游自动继承上游接口契约。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>Worktree 沙盒隔离 + 人工把关最终提交</h3>
-        <p>所有写代码任务在独立 <code>.worktree-arranger/</code> 沙盒中编码，通过审查后仅增量合入主分支工作区（未提交态），<b>默认绝不擅自执行 git commit 与 push</b>，最后提交权 100% 留给人把关，杜绝代码互踩与脏提交。</p></div>
+        <p>所有写代码任务在独立 <code>.worktree-arranger/</code> 沙盒中编码，通过审查后仅增量合入主分支工作区（未提交态），<b>默认绝不擅自执行 git commit 与 push</b>，最后提交权 100% 留给人把关，杜绝代码互踩与脏提交。父仓库含 gitlink 嵌套仓库（如 caresy-api / caresy-web）时，提交页按仓库分组展示，子仓库先提交、父仓库最后记录指针。</p></div>
       <div class="fcard"><div class="ico">🌐</div><h3>本地 Chromium 浏览器与服务调试</h3>
         <p>纯 Python CDP 协议直连本地 Chrome / Edge 浏览器，进行页面结构化快照、按 ref 点击输入、截图落盘与控制台/网络日志监听；配合 <code>dev_server_*</code> 动态端口服务起停与 <code>http_request</code> 本地接口调试，构成完整联调闭环。</p></div>
       <div class="fcard"><div class="ico">🛠️</div><h3>工具能力与命令白名单三级分组</h3>
@@ -272,6 +274,8 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
         <p>任务完成先提交到工作分支，由<b>另一个模型</b>只读审查：对照验收标准抽查实现、可实际跑测试验证；通过才放行合并，不通过带着问题清单自动返工（次数可调，返工通过后可选 <code>--squash</code> 收敛提交），杜绝「自己审自己」。</p></div>
       <div class="fcard"><div class="ico">🔁</div><h3>幂等派发与断点续跑</h3>
         <p>任务指纹 + TTL/心跳租约，同一任务不会被重复认领；提交前二次校验，运行中任务正文/依赖/模型被改会阻断提交并标 <code>stale_lease</code>；WIP 提交或合并阶段崩溃后自动续跑，不重复提交。</p></div>
+      <div class="fcard"><div class="ico">🎬</div><h3>运行台账（RunLog）</h3>
+        <p>每个任务每轮执行都在 <code>runs/</code> 留下完整档案：事件流、代码 diff、测试输出、独立审查结论与 token 用量，看板任务详情可按 run <b>逐轮回放</b>；目录可迁移、按保留天数/容量自动清理，出问题随时追溯证据链。</p></div>
       <div class="fcard"><div class="ico">💰</div><h3>预算硬闸</h3>
         <p>单任务 token / 成本上限，加上项目当日上限；超限立即停止并保留 worktree 成果，项目预算用尽后暂停领取新任务；看板「预算与成本」可调，单价按模型配置（元/百万 tokens）。</p></div>
       <div class="fcard"><div class="ico">🛑</div><h3>熔断停机</h3>
@@ -291,7 +295,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <div class="fcard"><div class="ico">🧰</div><h3>缺环境自动装（env-setup）</h3>
         <p>遇到缺失的语言/工具链，Agent 按内置技能走「预检 → 幂等安装 → 会话修复 → 验证」闭环：包管理器优先，无代理网络自动切国内镜像直下（零管理员权限、用户级 PATH 即装即用）；安装命令同样要过人工审批。</p></div>
       <div class="fcard"><div class="ico">🖥️</div><h3>Web 可视化看板</h3>
-        <p>单文件页面零依赖：项目/任务/归档/进度/日志一屏掌握，活动项目动态过滤、<b>独立的人工把关提交页</b>（左侧改动文件清单 + 右侧 diff 对比，支持自动换行、补丁下载、排除/删除临时测试产物后一键确认 commit/push）、任务拖拽排序，模型接入、技能库、调度参数全部图形化配置；深浅双主题，5 秒自动刷新。</p></div>
+        <p>单文件页面零依赖：项目/任务/归档/进度/日志一屏掌握，活动项目动态过滤、<b>独立的人工把关提交页</b>（左侧改动文件清单 + 右侧 diff 对比，支持自动换行、补丁下载、排除/删除临时测试产物后一键确认 commit/push；嵌套 gitlink 仓库按仓库分组、子先父后提交）、任务拖拽排序，模型接入、技能库、调度参数全部图形化配置；深浅双主题，5 秒自动刷新。</p></div>
       <div class="fcard"><div class="ico">📊</div><h3>用量台账与热力图</h3>
         <p>「用量」页签统计总体、各项目及<b>按 Agent 角色（PM / 后端 / 前端 / 测试 / 审查）</b>的详细任务数/轮数/输入输出 tokens，近 12 周 GitHub 风格用量热力图，任务级台账持久化在 <code>usage.jsonl</code>，重启不丢。</p></div>
       <div class="fcard"><div class="ico">🐙</div><h3>仓库 Issues 一键转任务</h3>
@@ -327,6 +331,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
       <div class="step"><h4>4. 独立审查门把关</h4><p>改动先提交到沙盒分支，独立审查 Agent（与开发模型不同的第二个模型）对照验收标准只读核查、跑测试实测，通过才放行。</p></div>
       <div class="step"><h4>5. QA 前后端联调验收</h4><p>测试 Agent 拉起服务与本地浏览器真机测试，发现缺陷通过 <code>report_bug</code> 提单并自动挂靠回归依赖，修复后自动唤醒回归复测。</p></div>
       <div class="step"><h4>6. 安全落地与人工把关</h4><p>成果安全增量合入主分支工作区（未提交状态，不自动 commit/push），由人工最终检查 <code>git diff</code> 并亲自确认提交与推送！</p></div>
+      <div class="step"><h4>7. 台账留痕与回放</h4><p>每轮执行在运行台账留痕：事件流、diff、测试输出、审查结论与用量，看板可按 run 完整回放，出问题随时追溯。</p></div>
     </div>
   </div>
 </section>
@@ -349,7 +354,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
     <div class="pane on" id="p1">
       <p class="desc">下载 <code>orcsy-setup-&lt;版本&gt;-windows-amd64.exe</code> 按向导安装；配置首次启动自动生成，看板里填模型密钥即可。</p>
       <pre class="code"><span class="c"># 1. 运行安装包（可勾选「初始化示例任务」）</span>
-orcsy-setup-0.24.0-windows-amd64.exe
+orcsy-setup-0.25.0-windows-amd64.exe
 
 <span class="c"># 2. 打开看板（浏览器自动打开），在「项目与设置」页：</span>
 <span class="c">#    填写 llm.api_key / base_url / model（OpenAI 兼容协议，覆盖</span>

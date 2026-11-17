@@ -5,6 +5,7 @@ import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMod
 import { isMobile, viewportHeight } from '../mobile'
 import { miIcon } from '../mi'
 import { beginRestartWait, navigateTo, openTaskView, refresh, ui, store } from '../store'
+import { tNow as t, tFmt } from '../lang'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
 // bridge 兼容两种用法：message('文本') 默认 info；message.success('文本') 等——
@@ -60,11 +61,11 @@ const gitIniting = shallowRef(false)
 const teamCardOpen = ref(false)
 
 const roleSelectOptions = [
-  { label: '项目经理 (PM)', value: 'pm' },
-  { label: '后端开发工程师', value: 'backend' },
-  { label: '前端开发工程师', value: 'frontend' },
-  { label: '测试工程师 (QA)', value: 'qa' },
-  { label: '自定义专职角色', value: 'custom' },
+  { label: t('项目经理 (PM)'), value: 'pm' },
+  { label: t('后端开发工程师'), value: 'backend' },
+  { label: t('前端开发工程师'), value: 'frontend' },
+  { label: t('测试工程师 (QA)'), value: 'qa' },
+  { label: t('自定义专职角色'), value: 'custom' },
 ]
 
 function getMemberRoleIcon(role: string): string {
@@ -109,7 +110,7 @@ async function onGitInitProject(): Promise<void> {
   gitIniting.value = true
   try {
     const res = await api.gitInitProject({ name: pName })
-    message.success(res.message || '已成功初始化 Git 仓库')
+    message.success(res.message || t('已成功初始化 Git 仓库'))
     void refresh(true)
   } catch (e: any) {
     message.error(e.message)
@@ -145,55 +146,55 @@ const pDevServerGroupEnabled = computed({
 const defaultProjectToolCategories = [
   {
     key: 'file_ops',
-    label: '文件操作与编辑',
+    label: t('文件操作与编辑'),
     icon: 'folder',
     tools: ['read_file', 'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'list_dir'],
   },
   {
     key: 'code_search',
-    label: '代码搜索与定位',
+    label: t('代码搜索与定位'),
     icon: 'search',
     tools: ['find_files', 'grep'],
   },
   {
     key: 'command_exec',
-    label: '终端命令执行',
+    label: t('终端命令执行'),
     icon: 'terminal',
     tools: ['run_command'],
   },
   {
     key: 'task_collab',
-    label: '任务管理与协议',
+    label: t('任务管理与协议'),
     icon: 'task_alt',
     tools: ['create_tasks', 'finish'],
   },
   {
     key: 'session_bus',
-    label: '批次共享状态',
+    label: t('批次共享状态'),
     icon: 'share',
     tools: ['session_share', 'session_read'],
   },
   {
     key: 'project_memory',
-    label: '项目架构记忆',
+    label: t('项目架构记忆'),
     icon: 'account_tree',
     tools: ['update_architecture'],
   },
   {
     key: 'external_net',
-    label: '网络与外部知识',
+    label: t('网络与外部知识'),
     icon: 'language',
     tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
   },
   {
     key: 'local_debug',
-    label: '本地开发服务与 API',
+    label: t('本地开发服务与 API'),
     icon: 'rocket_launch',
     tools: ['dev_server_start', 'dev_server_logs', 'dev_server_stop', 'http_request'],
   },
   {
     key: 'browser_auto',
-    label: 'Chromium 浏览器自动化',
+    label: t('Chromium 浏览器自动化'),
     icon: 'explore',
     tools: [
       'browser_navigate', 'browser_snapshot', 'browser_click',
@@ -270,15 +271,15 @@ const repoPassPlaceholder = computed(() => {
 
 // ---------- 访问权限（人工审批）公共文案 ----------
 const PERM_LABEL: Record<string, string> = {
-  ask_on_change: '变更前询问',
-  autonomous: '自主模式',
-  full_access: '完全访问',
+  ask_on_change: t('变更前询问'),
+  autonomous: t('自主模式'),
+  full_access: t('完全访问'),
 }
 const permOptions = computed(() => [
-  { label: `跟随全局（当前：${PERM_LABEL[store.state?.permissions_cfg?.mode || 'full_access']}）`, value: '' },
-  { label: '变更前询问（文件/命令变更都询问）', value: 'ask_on_change' },
-  { label: '自主模式（仅高风险询问：删除/移动/执行命令）', value: 'autonomous' },
-  { label: '完全访问（不询问，减少确认次数）', value: 'full_access' },
+  { label: tFmt('跟随全局（当前：{p0}）', { p0: PERM_LABEL[store.state?.permissions_cfg?.mode || 'full_access'] }), value: '' },
+  { label: t('变更前询问（文件/命令变更都询问）'), value: 'ask_on_change' },
+  { label: t('自主模式（仅高风险询问：删除/移动/执行命令）'), value: 'autonomous' },
+  { label: t('完全访问（不询问，减少确认次数）'), value: 'full_access' },
 ])
 
 // ---------- 人工审批面板 ----------
@@ -301,7 +302,7 @@ async function respondApproval(id: string, approved: boolean): Promise<void> {
   responding.value = id
   try {
     await api.approvalRespond(id, approved, !!alwaysAllow[id])
-    message(approved ? '已批准，任务继续执行' : '已拒绝，模型将调整方案或按受阻收尾',
+    message(approved ? t('已批准，任务继续执行') : t('已拒绝，模型将调整方案或按受阻收尾'),
             approved ? 'success' : 'warning')
     delete alwaysAllow[id]
   } catch (e: any) { message(e.message, 'error') }
@@ -419,8 +420,8 @@ const pFetching = shallowRef(false)
 const pTesting = shallowRef(false)
 const pModelOptions = computed(() => pModels.value.map(m => ({ label: m.id, value: m.id })))
 const llProviderOptions = [
-  { label: '继承全局', value: '' },
-  { label: 'openai（兼容协议）', value: 'openai' },
+  { label: t('继承全局'), value: '' },
+  { label: t('openai（兼容协议）'), value: 'openai' },
   { label: 'anthropic', value: 'anthropic' },
 ]
 const effLlm = () => ({
@@ -436,7 +437,7 @@ async function fetchProjectModels(): Promise<void> {
   try {
     const r = await api.models(effLlm())
     pModels.value = r.models
-    message.success(`已获取 ${r.models.length} 个模型：在「模型」框下拉选择或输入`)
+    message.success(tFmt('已获取 {p0} 个模型：在「模型」框下拉选择或输入', { p0: r.models.length }))
   } catch (e: any) { message.error(e.message) }
   finally { pFetching.value = false }
 }
@@ -451,11 +452,11 @@ const repoPlatform = computed(() => {
   return hit ? hit.toUpperCase() : ''
 })
 const repoProviderOptions = [
-  { label: '自动识别（按 URL）', value: '' },
+  { label: t('自动识别（按 URL）'), value: '' },
   { label: 'GitHub', value: 'github' },
   { label: 'Gitee', value: 'gitee' },
-  { label: 'GitLab（含自托管）', value: 'gitlab' },
-  { label: 'Gitea（含自托管）', value: 'gitea' },
+  { label: t('GitLab（含自托管）'), value: 'gitlab' },
+  { label: t('Gitea（含自托管）'), value: 'gitea' },
 ]
 // 编辑对话框里回显上次自动拉取结果（状态来自 /api/state 的 issue_auto_pull）
 const repoAutoPullHint = computed(() => {
@@ -475,7 +476,7 @@ async function testProjectModel(): Promise<void> {
   pTesting.value = true
   try {
     const r = await api.testModel(eff)
-    message.success(r.message || '连接成功')
+    message.success(r.message || t('连接成功'))
   } catch (e: any) { message.error(e.message) }
   finally { pTesting.value = false }
 }
@@ -537,9 +538,9 @@ async function fetchMemberModels(m: any): Promise<void> {
         pModels.value.push(item)
       }
     }
-    message.success(`已为角色「${m.name || m.role || m.id}」获取 ${r.models.length} 个模型，可在专属模型下拉框选择`)
+    message.success(tFmt('已为角色「{p0}」获取 {p1} 个模型，可在专属模型下拉框选择', { p0: m.name || m.role || m.id, p1: r.models.length }))
   } catch (e: any) {
-    message.error(e.message || '获取模型列表失败')
+    message.error(e.message || t('获取模型列表失败'))
   } finally {
     memberFetchingId.value = null
   }
@@ -559,11 +560,11 @@ function getMemberRoleTemplate(role: string): string {
 function loadMemberTemplate(m: any): void {
   const tpl = getMemberRoleTemplate(m.role || m.id)
   if (!tpl) {
-    message.warning('未找到该角色的内置模版')
+    message.warning(t('未找到该角色的内置模版'))
     return
   }
   m.extra_prompt = tpl
-  message.success(`已为角色「${m.name || m.role || m.id}」载入内置模版`)
+  message.success(tFmt('已为角色「{p0}」载入内置模版', { p0: m.name || m.role || m.id }))
 }
 // 生效任务模型（项目绑定优先，回退全局）：审查模型与之同名即「自审自批」禁止
 const effTaskModel = computed(() => {
@@ -599,7 +600,7 @@ async function fetchReviewModels(): Promise<void> {
       model: pDraft.review_ll_model.trim() || store.state?.review_cfg?.model || '',
     })
     rModels.value = r.models
-    message.success(`已获取 ${r.models.length} 个模型：在「模型」框下拉选择或输入`)
+    message.success(tFmt('已获取 {p0} 个模型：在「模型」框下拉选择或输入', { p0: r.models.length }))
   } catch (e: any) { message.error(e.message) }
   finally { rFetching.value = false }
 }
@@ -732,7 +733,7 @@ async function saveProject(): Promise<void> {
         stack: pDraft.stack.trim(), run: pDraft.run.trim(), test: pDraft.test.trim(),
       }),
     })
-    message.success(ui.projectDlg.original ? '已修改项目' : '已新建项目')
+    message.success(ui.projectDlg.original ? t('已修改项目') : t('已新建项目'))
     ui.projectDlg = null
     navigateTo('projects')
   } catch (e: any) { pDraft.err = e.message }
@@ -747,7 +748,7 @@ const tVisible = computed({
 // 关闭时 ui.taskDlg 被置 null，computed 会立刻翻回非只读态，导致收起动画期间
 // 按钮/提示/标题闪变——打开时快照到 ref，动画期间保持最后状态
 const tReadonly = shallowRef(false)
-const tTitle = shallowRef('任务')
+const tTitle = shallowRef(t('任务'))
 const tDraft = reactive({
   id: '', idLocked: false, title: '', priority: 'P2',
   labels: '', assignee: '', description: '', err: '',
@@ -767,11 +768,11 @@ type DepTagType = 'success' | 'warning' | 'default' | 'error' | 'info'
 function depTag(d: TaskDepT): { type: DepTagType; label: string } {
   if (d.missing) return { type: 'error', label: '已删除' }
   const map: Record<string, { type: DepTagType; label: string }> = {
-    done: { type: 'success', label: '已完成' },
-    open: { type: 'info', label: '待执行' },
-    in_progress: { type: 'warning', label: '执行中' },
-    blocked: { type: 'error', label: '受阻' },
-    cancelled: { type: 'default', label: '已取消' },
+    done: { type: 'success', label: t('已完成') },
+    open: { type: 'info', label: t('待执行') },
+    in_progress: { type: 'warning', label: t('执行中') },
+    blocked: { type: 'error', label: t('受阻') },
+    cancelled: { type: 'default', label: t('已取消') },
   }
   return map[d.status] || { type: 'default', label: d.status || '未知' }
 }
@@ -872,7 +873,7 @@ const projectTaskOptions = computed(() => {
   return (activeTaskProject.value.tasks || [])
     .filter(t => t.id !== currentId)
     .map(t => ({
-      label: `[${t.priority}] ${t.title || t.id} (${t.status === 'done' ? '已完成' : t.status})`,
+      label: `[${t.priority}] ${t.title || t.id} (${t.status === 'done' ? t('已完成') : t.status})`,
       value: t.id,
     }))
 })
@@ -880,7 +881,7 @@ const projectTaskOptions = computed(() => {
 const projectAssigneeOptions = computed(() => {
   const p = activeTaskProject.value
   const opts: { label: string; value: string }[] = [
-    { label: '未指派（由 PM 拆解或自动认领）', value: '' },
+    { label: t('未指派（由 PM 拆解或自动认领）'), value: '' },
   ]
   if (p && p.team_members_effective && p.team_members_effective.length > 0) {
     for (const m of p.team_members_effective) {
@@ -891,10 +892,10 @@ const projectAssigneeOptions = computed(() => {
     }
   } else {
     opts.push(
-      { label: '项目经理 (pm)', value: 'pm' },
-      { label: '后端开发 (backend)', value: 'backend' },
-      { label: '前端开发 (frontend)', value: 'frontend' },
-      { label: '测试工程师 (qa)', value: 'qa' },
+      { label: t('项目经理 (pm)'), value: 'pm' },
+      { label: t('后端开发 (backend)'), value: 'backend' },
+      { label: t('前端开发 (frontend)'), value: 'frontend' },
+      { label: t('测试工程师 (qa)'), value: 'qa' },
     )
   }
   return opts
@@ -934,12 +935,12 @@ function restoreDraft(): void {
     if (typeof d.description === 'string') tDraft.description = d.description
     if (Array.isArray(d.depends_on)) tDraft.depends_on = d.depends_on
     draftAvailable.value = false
-    message.success('已恢复未保存的草稿')
+    message.success(t('已恢复未保存的草稿'))
   } catch { /* 草稿损坏按无草稿处理 */ }
 }
 function discardDraft(): void {
   clearDraft()
-  message.success('已丢弃草稿')
+  message.success(t('已丢弃草稿'))
 }
 // 弹窗内容变化防抖落草稿；首次加载（watch 里填值）不触发——用 pending 标记
 let draftPaused = true
@@ -1060,7 +1061,7 @@ async function saveTask(force = false): Promise<void> {
       ...(tDraft.versionToken && !force ? { base_version: tDraft.versionToken } : {}),
       ...(force ? { force_overwrite: true } : {}),
     })
-    message.success('任务已保存')
+    message.success(t('任务已保存'))
     clearDraft()
     ui.taskDlg = null
   } catch (e: any) {
@@ -1068,11 +1069,11 @@ async function saveTask(force = false): Promise<void> {
       tDraft.err = ''
       const latest = e.latestTask || {}
       window.$dialog?.warning({
-        title: '任务已被修改',
+        title: t('任务已被修改'),
         content: `${e.message}\n\n当前最新状态：[${latest.priority || '?'}] ${latest.title || latest.id || ''}`
-          + `（${latest.status || '?'}）。\n\n选择「保留我的修改」将覆盖最新内容；「采用最新状态」会放弃本页未保存的输入。`,
-        positiveText: '保留我的修改',
-        negativeText: '采用最新状态',
+          + tFmt('（{p0}）。\\n\\n选择「保留我的修改」将覆盖最新内容；「采用最新状态」会放弃本页未保存的输入。', { p0: latest.status || '?' }),
+        positiveText: t('保留我的修改'),
+        negativeText: t('采用最新状态'),
         onPositiveClick() { void saveTask(true) },
         onNegativeClick() {
           // 载入最新内容：放弃本页输入，以服务端最新为准
@@ -1141,7 +1142,7 @@ async function selectEndpoint(url: string): Promise<void> {
 
 function clickEndpoint(e: { name: string; url: string; active?: boolean }): void {
   if (e.active === false) {
-    message.warning('该地址未开放：可勾选上方「一键开放手机访问」自动改配置并重启。')
+    message.warning(t('该地址未开放：可勾选上方「一键开放手机访问」自动改配置并重启。'))
     return
   }
   void selectEndpoint(e.url)
@@ -1168,13 +1169,13 @@ function onEnableToggle(on: boolean): void {
   // 未配置登录密码时自动生成一个（沿用现有密码时留空 = 不改）
   const pwd = cPasswordConfigured.value ? '' : genPassword()
   window.$dialog?.warning({
-    title: '开放手机局域网访问？',
+    title: t('开放手机局域网访问？'),
     content: (cPasswordConfigured.value
       ? '看板将绑定全部网卡（web.host: 0.0.0.0），沿用现有登录密码。'
       : '看板将绑定全部网卡（web.host: 0.0.0.0），并设置访问密码：\n\n${pwd}\n\n请先复制保存该密码（手机登录要用；配置里只存密文，此弹窗关闭后不可再查看，重启后登录页会再提示一次）。'
-      + '\n\n配置保存后应用会自动重启（数秒离线），重启后重新打开本向导即可看到可扫码的局域网地址。'),
-    positiveText: '开启并自动重启',
-    negativeText: '取消',
+      + t('\n\n配置保存后应用会自动重启（数秒离线），重启后重新打开本向导即可看到可扫码的局域网地址。')),
+    positiveText: t('开启并自动重启'),
+    negativeText: t('取消'),
     onPositiveClick() { void doEnable(pwd) },
     onNegativeClick() { cEnableChecked.value = false },
     onClose() { cEnableChecked.value = false },
@@ -1202,14 +1203,14 @@ async function doEnable(pwd: string): Promise<void> {
     }
   } catch (e: any) {
     cEnableChecked.value = false
-    message.error(e.message || '开启失败')
+    message.error(e.message || t('开启失败'))
   } finally { cEnableBusy.value = false }
 }
 
 async function copyEndpoint(url: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(url)
-    message.success('已复制访问地址')
+    message.success(t('已复制访问地址'))
   } catch { message.error('复制失败，请长按地址手动复制') }
 }
 
@@ -1236,7 +1237,7 @@ async function saveGuide(): Promise<void> {
   if (!ui.guideDlg) return
   try {
     await api.guideSave(ui.guideDlg.project, gDraft.content)
-    message.success('指引已保存')
+    message.success(t('指引已保存'))
     ui.guideDlg = null
   } catch (e: any) { gDraft.err = e.message }
   void refresh(true)
@@ -1252,8 +1253,8 @@ const kDraft = reactive({
   name: '', description: '', scope: 'global', enabled: true, body: '', err: '',
 })
 const scopeOptions = computed(() => [
-  { label: '全局（所有项目生效）', value: 'global' },
-  ...(store.state?.projects || []).map(p => ({ label: `仅 ${p.name}`, value: p.name })),
+  { label: t('全局（所有项目生效）'), value: 'global' },
+  ...(store.state?.projects || []).map(p => ({ label: tFmt('仅 {p0}', { p0: p.name }), value: p.name })),
 ])
 watch(() => ui.skillDlg, async (dlg) => {
   if (!dlg) return
@@ -1282,7 +1283,7 @@ async function saveSkill(): Promise<void> {
       enabled: kDraft.enabled,
       body: kDraft.body,
     })
-    message.success(kDraft.original ? '技能已保存' : '技能已新建')
+    message.success(kDraft.original ? t('技能已保存') : t('技能已新建'))
     ui.skillDlg = null
   } catch (e: any) { kDraft.err = e.message }
   void refresh(true)
@@ -1341,7 +1342,7 @@ async function importChecked(): Promise<void> {
   importing.value = true
   try {
     const r = await api.skillImportBatch(checkedPaths.value)
-    message.success(r.message || '已导入')
+    message.success(r.message || t('已导入'))
     ui.skillScanDlg = false
   } catch (e: any) { scanErr.value = e.message }
   finally { importing.value = false }
@@ -1387,7 +1388,7 @@ async function newFolder(): Promise<void> {
   const sep = base.endsWith('\\') || base.endsWith('/') ? '' : '\\'
   try {
     const r = await api.mkdir(base + sep + name)
-    message.success('已创建 ' + r.path)
+    message.success(t('已创建 ') + r.path)
     bNewFolder.value = ''
     await browseTo(r.path)
   } catch (e: any) { message.error(e.message) }
@@ -1400,29 +1401,29 @@ async function newFolder(): Promise<void> {
           style="width: min(560px, 92vw)">
     <div class="err" v-if="pDraft.err">{{ pDraft.err }}</div>
     <div class="duo">
-      <div class="f1"><label>项目名（字母/数字/连字符）</label><NInput v-model:value="pDraft.name" placeholder="my-app" /></div>
-      <div class="f1"><label>每轮最多任务数</label><NInputNumber v-model:value="pDraft.max_tasks" :min="1" :max="50" /></div>
+      <div class="f1"><label>{{ t('项目名（字母/数字/连字符）') }}</label><NInput v-model:value="pDraft.name" placeholder="my-app" /></div>
+      <div class="f1"><label>{{ t('每轮最多任务数') }}</label><NInputNumber v-model:value="pDraft.max_tasks" :min="1" :max="50" /></div>
     </div>
-    <label>项目路径（本地目录）</label>
+    <label>{{ t('项目路径（本地目录）') }}</label>
     <div class="pathline">
       <NInput v-model:value="pDraft.path" placeholder="D:\Repos\my-app" />
-      <NButton @click="browsePath">选择…</NButton>
+      <NButton @click="browsePath">{{ t('选择…') }}</NButton>
     </div>
     <div class="duo">
-      <div class="f1"><label>任务目录（相对项目根）</label><NInput v-model:value="pDraft.tasks_dir" /></div>
-      <div class="f1"><label>指引文件</label><NInput v-model:value="pDraft.guide_file" /></div>
+      <div class="f1"><label>{{ t('任务目录（相对项目根）') }}</label><NInput v-model:value="pDraft.tasks_dir" /></div>
+      <div class="f1"><label>{{ t('指引文件') }}</label><NInput v-model:value="pDraft.guide_file" /></div>
     </div>
     <div class="duo">
-      <div class="f1"><label>工具循环轮数上限（-1 = 不设上限）</label>
+      <div class="f1"><label>{{ t('工具循环轮数上限（-1 = 不设上限）') }}</label>
         <NInputNumber v-model:value="pDraft.max_turns" :min="-1" :max="200"
-                      placeholder="40；填 -1 不设上限（靠 finish/强制停止兜底）" /></div>
-      <div class="f1"><label>工作分支（可选，默认当前分支）</label><NInput v-model:value="pDraft.branch" placeholder="main" /></div>
+                      :placeholder="t('40；填 -1 不设上限（靠 finish/强制停止兜底）')" /></div>
+      <div class="f1"><label>{{ t('工作分支（可选，默认当前分支）') }}</label><NInput v-model:value="pDraft.branch" placeholder="main" /></div>
     </div>
-    <label>命令白名单（逗号分隔，留空用默认：python/pytest/node/npm/git…）</label>
+    <label>{{ t('命令白名单（逗号分隔，留空用默认：python/pytest/node/npm/git…）') }}</label>
     <NInput v-model:value="pDraft.cmds" placeholder="python, pytest, npm, dotnet" />
     <!-- 多模型 Agent 项目小组模式切换 -->
     <div style="margin-top:12px; padding: 10px 12px; background: rgba(0,128,255,0.05); border: 1px solid rgba(0,128,255,0.25); border-radius: 8px;">
-      <div class="teamcard-head" role="button" tabindex="0" title="点击展开/收起小组配置"
+      <div class="teamcard-head" role="button" tabindex="0" :title="t('点击展开/收起小组配置')"
            :aria-expanded="teamCardOpen"
            @click="teamCardOpen = !teamCardOpen"
            @keydown.enter.prevent="teamCardOpen = !teamCardOpen"
@@ -1431,7 +1432,7 @@ async function newFolder(): Promise<void> {
           <span style="display:inline-flex; flex:none;" @click.stop>
             <NSwitch v-model:value="pDraft.team.enabled" />
           </span>
-          <span class="teamcard-title"><i class="ms sm">group</i> 多模型 Agent 项目小组模式 (Team)</span>
+          <span class="teamcard-title"><i class="ms sm">group</i> {{ t('多模型 Agent 项目小组模式 (Team)') }}</span>
         </div>
         <div class="teamcard-ops">
           <NTag size="tiny" round :type="pDraft.team.enabled ? 'info' : 'default'">
@@ -1451,31 +1452,31 @@ async function newFolder(): Promise<void> {
         </div>
 
         <div v-if="editingProject && !editingProject.is_git_repo" style="margin-top:6px; display:flex; align-items:center; gap:8px;">
-          <NTag size="small" type="warning">非 Git 目录</NTag>
-          <span style="font-size:12px; color:var(--text)">Worktree 沙盒隔离需在 Git 仓库运行：</span>
-          <NButton size="tiny" type="primary" secondary :loading="gitIniting" @click="onGitInitProject">一键初始化 Git 仓库</NButton>
+          <NTag size="small" type="warning">{{ t('非 Git 目录') }}</NTag>
+          <span style="font-size:12px; color:var(--text)">{{ t('Worktree 沙盒隔离需在 Git 仓库运行：') }}</span>
+          <NButton size="tiny" type="primary" secondary :loading="gitIniting" @click="onGitInitProject">{{ t('一键初始化 Git 仓库') }}</NButton>
         </div>
 
         <div class="duo" style="margin-top:8px">
-          <div class="f1"><label>并发策略</label>
+          <div class="f1"><label>{{ t('并发策略') }}</label>
             <NSelect v-model:value="pDraft.team.execution_mode" :options="[
               { label: '按任务独立 Worktree 安全并发 (推荐)', value: 'parallel_worktree' },
               { label: '项目内单任务串行互斥', value: 'sequential' },
             ]" />
           </div>
-          <div class="f1"><label>无 PM 时未指派任务兜底角色</label>
-            <NSelect v-model:value="pDraft.team.fallback_role" :options="pDraft.team.members.map(m => ({ label: `${m.name || m.id} (${m.role || m.id})`, value: m.id }))" clearable placeholder="留空则需手动指派" />
+          <div class="f1"><label>{{ t('无 PM 时未指派任务兜底角色') }}</label>
+            <NSelect v-model:value="pDraft.team.fallback_role" :options="pDraft.team.members.map(m => ({ label: `${m.name || m.id} (${m.role || m.id})`, value: m.id }))" clearable :placeholder="t('留空则需手动指派')" />
           </div>
         </div>
 
         <div class="duo" style="margin-top:6px">
-          <div class="f1"><label>QA 最大回归轮数（防死循环熔断）</label>
+          <div class="f1"><label>{{ t('QA 最大回归轮数（防死循环熔断）') }}</label>
             <NInputNumber v-model:value="pDraft.team.max_qa_rounds" :min="1" :max="10" />
           </div>
           <div class="f1" style="display:flex; flex-direction:column; justify-content:center;">
             <label class="checkline" style="margin-top:14px">
               <NSwitch size="small" v-model:value="pDraft.team.chain_within_cycle" />
-              <span style="font-size:12px">同周期链式推进（前置完成立即接棒下一阶段）</span>
+              <span style="font-size:12px">{{ t('同周期链式推进（前置完成立即接棒下一阶段）') }}</span>
             </label>
           </div>
         </div>
@@ -1483,8 +1484,8 @@ async function newFolder(): Promise<void> {
         <!-- 小组成员列表 -->
         <div style="margin-top:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <span style="font-weight:600; font-size:12px; color:var(--text)">小组成员名册与专属模型配置：</span>
-            <NButton size="tiny" quaternary type="primary" @click="addTeamMember">+ 添加成员</NButton>
+            <span style="font-weight:600; font-size:12px; color:var(--text)">{{ t('小组成员名册与专属模型配置：') }}</span>
+            <NButton size="tiny" quaternary type="primary" @click="addTeamMember">{{ t('+ 添加成员') }}</NButton>
           </div>
 
           <div style="display:flex; flex-direction:column; gap:8px;">
@@ -1497,24 +1498,24 @@ async function newFolder(): Promise<void> {
                   <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">id: {{ m.id }}</NTag>
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
-                  <NButton size="tiny" secondary :loading="memberFetchingId === m.id" @click="fetchMemberModels(m)">获取模型列表</NButton>
-                  <NButton size="tiny" quaternary type="error" @click="removeTeamMember(mIdx)">删除</NButton>
+                  <NButton size="tiny" secondary :loading="memberFetchingId === m.id" @click="fetchMemberModels(m)">{{ t('获取模型列表') }}</NButton>
+                  <NButton size="tiny" quaternary type="error" @click="removeTeamMember(mIdx)">{{ t('删除') }}</NButton>
                 </div>
               </div>
 
               <div v-if="m.enabled" class="tm-grid" style="margin-top:8px; display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                 <div>
-                  <label style="font-size:11px">引用全局预设</label>
-                  <NSelect size="small" v-model:value="m.profile" :options="globalProfileOptions" clearable placeholder="自定义配置" />
+                  <label style="font-size:11px">{{ t('引用全局预设') }}</label>
+                  <NSelect size="small" v-model:value="m.profile" :options="globalProfileOptions" clearable :placeholder="t('自定义配置')" />
                 </div>
                 <div>
-                  <label style="font-size:11px">角色类型</label>
+                  <label style="font-size:11px">{{ t('角色类型') }}</label>
                   <NSelect size="small" v-model:value="m.role" :options="roleSelectOptions" />
                 </div>
                 <div>
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
-                    <label style="font-size:11px; margin:0">专属模型覆盖 (留空继承预设/全局)</label>
-                    <NButton size="tiny" quaternary type="primary" :loading="memberFetchingId === m.id" @click="fetchMemberModels(m)" style="font-size:10px; padding:0 2px">获取模型列表</NButton>
+                    <label style="font-size:11px; margin:0">{{ t('专属模型覆盖 (留空继承预设/全局)') }}</label>
+                    <NButton size="tiny" quaternary type="primary" :loading="memberFetchingId === m.id" @click="fetchMemberModels(m)" style="font-size:10px; padding:0 2px">{{ t('获取模型列表') }}</NButton>
                   </div>
                   <NSelect size="small" v-model:value="m.ll_model"
                            :options="availableTeamModelOptions"
@@ -1523,7 +1524,7 @@ async function newFolder(): Promise<void> {
                            @update:value="(v: string | null) => { m.ll_model = v || '' }" />
                 </div>
                 <div>
-                  <label style="font-size:11px">API Key 覆盖</label>
+                  <label style="font-size:11px">{{ t('API Key 覆盖') }}</label>
                   <NInput size="small" v-model:value="m.ll_key" type="password" show-password-on="click"
                           :placeholder="m.ll_key_masked ? `已配置(${m.ll_key_masked})` : '留空继承'"
                           @update:value="teamMemberKeyTouched[m.id] = true" />
@@ -1532,17 +1533,17 @@ async function newFolder(): Promise<void> {
 
               <div v-if="m.enabled" style="margin-top:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
-                  <label style="font-size:11px; margin:0; color:var(--dim)">角色专属提示词覆盖 (选填)</label>
-                  <NButton size="tiny" quaternary type="primary" @click="loadMemberTemplate(m)" style="font-size:10px; padding:0 2px"><i class="ms sm">description</i> 载入内置模版</NButton>
+                  <label style="font-size:11px; margin:0; color:var(--dim)">{{ t('角色专属提示词覆盖 (选填)') }}</label>
+                  <NButton size="tiny" quaternary type="primary" @click="loadMemberTemplate(m)" style="font-size:10px; padding:0 2px"><i class="ms sm">description</i> {{ t('载入内置模版') }}</NButton>
                 </div>
                 <NInput size="small" v-model:value="m.extra_prompt" type="textarea" :rows="2" :autosize="{ minRows: 2, maxRows: 6 }"
-                        placeholder="留空继承全局预设提示词；亦可载入内置模版或填入本项目特定规范" />
+                        :placeholder="t('留空继承全局预设提示词；亦可载入内置模版或填入本项目特定规范')" />
               </div>
 
               <div v-if="m.enabled && (m.role === 'qa' || m.id === 'qa')" style="margin-top:6px;">
                 <label class="checkline" style="margin:0">
                   <NSwitch size="small" v-model:value="m.allow_test_scripts" />
-                  <span style="font-size:11.5px">允许 QA 编写自动化测试脚本并纳入提交</span>
+                  <span style="font-size:11.5px">{{ t('允许 QA 编写自动化测试脚本并纳入提交') }}</span>
                 </label>
               </div>
             </div>
@@ -1558,17 +1559,17 @@ async function newFolder(): Promise<void> {
     </label>
     <template v-if="pDraft.use_llm">
       <div class="duo" style="margin-top:6px">
-        <div class="f1"><label>协议 provider</label>
+        <div class="f1"><label>{{ t('协议 provider') }}</label>
           <NSelect v-model:value="pDraft.ll_provider" :options="llProviderOptions" /></div>
-        <div class="f2"><label>模型 model</label>
+        <div class="f2"><label>{{ t('模型 model') }}</label>
           <NSelect v-model:value="pDraft.ll_model" :options="pModelOptions" filterable tag clearable
                    :placeholder="'留空继承全局（当前 ' + (store.state?.llm.model || '-') + '）'"
                    @update:value="(v: string | null) => { pDraft.ll_model = v || '' }" /></div>
       </div>
       <div class="duo">
-        <div class="f1"><label>接口 base_url</label>
+        <div class="f1"><label>{{ t('接口 base_url') }}</label>
           <NInput v-model:value="pDraft.ll_base" :placeholder="(pDraft.ll_provider === 'anthropic' ? '填官方根地址即可（自动补 /v1）；' : '') + '留空继承全局（当前 ' + (store.state?.llm.base_url || '-') + '）'" /></div>
-        <div class="f1"><label>密钥 api_key</label>
+        <div class="f1"><label>{{ t('密钥 api_key') }}</label>
           <NInput v-model:value="pDraft.ll_key" type="password" show-password-on="click"
                   :placeholder="llKeyPlaceholder" @update:value="llKeyTouched = true" /></div>
       </div>
@@ -1576,9 +1577,9 @@ async function newFolder(): Promise<void> {
         Anthropic 协议：程序自动补 /v1（已含 /v1 则不重复）；多数兼容服务不提供 /models 列表端点，拉取 404 时直接手填模型名即可。
       </div>
       <div class="btnrow" style="margin-top:6px">
-        <NButton size="small" :loading="pFetching" @click="fetchProjectModels">获取模型列表</NButton>
-        <NButton size="small" :loading="pTesting" @click="testProjectModel">测试连接</NButton>
-        <span class="hint">未填写的字段自动继承全局「大模型接入」配置</span>
+        <NButton size="small" :loading="pFetching" @click="fetchProjectModels">{{ t('获取模型列表') }}</NButton>
+        <NButton size="small" :loading="pTesting" @click="testProjectModel">{{ t('测试连接') }}</NButton>
+        <span class="hint">{{ t('未填写的字段自动继承全局「大模型接入」配置') }}</span>
       </div>
     </template>
     <label class="checkline" style="margin-top:12px">
@@ -1587,53 +1588,53 @@ async function newFolder(): Promise<void> {
     </label>
     <template v-if="pDraft.use_review">
       <div class="duo" style="margin-top:6px">
-        <div class="f1"><label>协议 provider</label>
+        <div class="f1"><label>{{ t('协议 provider') }}</label>
           <NSelect v-model:value="pDraft.review_ll_provider" :options="llProviderOptions" /></div>
-        <div class="f2"><label>审查模型 model</label>
+        <div class="f2"><label>{{ t('审查模型 model') }}</label>
           <NSelect v-model:value="pDraft.review_ll_model" :options="rModelOptions" filterable tag clearable
                    :placeholder="'留空继承全局（当前 ' + (store.state?.review_cfg?.model || '未配置') + '）'"
                    @update:value="(v: string | null) => { pDraft.review_ll_model = v || '' }" /></div>
       </div>
       <div class="duo">
-        <div class="f1"><label>接口 base_url</label>
-          <NInput v-model:value="pDraft.review_ll_base" placeholder="留空继承全局审查模型配置" /></div>
-        <div class="f1"><label>密钥 api_key</label>
+        <div class="f1"><label>{{ t('接口 base_url') }}</label>
+          <NInput v-model:value="pDraft.review_ll_base" :placeholder="t('留空继承全局审查模型配置')" /></div>
+        <div class="f1"><label>{{ t('密钥 api_key') }}</label>
           <NInput v-model:value="pDraft.review_ll_key" type="password" show-password-on="click"
                   :placeholder="reviewKeyPlaceholder" @update:value="reviewKeyTouched = true" /></div>
       </div>
       <div class="duo">
-        <div class="f1"><label>返工审查轮数上限（-1 表示不上限）</label>
+        <div class="f1"><label>{{ t('返工审查轮数上限（-1 表示不上限）') }}</label>
           <NInputNumber v-model:value="pDraft.review_rounds" :min="-1" :max="10"
-                        placeholder="留空跟随全局（输入 -1 不设上限）" clearable /></div>
+                        :placeholder="t('留空跟随全局（输入 -1 不设上限）')" clearable /></div>
         <div class="f1 btnrow" style="align-items:flex-end">
-          <NButton size="small" :loading="rFetching" @click="fetchReviewModels" style="margin-bottom:2px">获取模型列表</NButton>
+          <NButton size="small" :loading="rFetching" @click="fetchReviewModels" style="margin-bottom:2px">{{ t('获取模型列表') }}</NButton>
         </div>
       </div>
       <div class="hint" v-if="reviewModelConflict" style="color:#d03050"><i class="ms sm">warning</i> {{ reviewModelConflict }}</div>
       <div class="hint" v-else>审查模型必须与任务模型不同；返工轮数留空 = 跟随全局（当前 {{ store.state?.review_cfg?.max_review_rounds === -1 ? '不上限' : (store.state?.review_cfg?.max_review_rounds ?? 2) + ' 次' }}）。输入 -1 表示不设上限持续返工。</div>
     </template>
-    <label style="margin-top:12px">访问权限（人工审批模式）</label>
+    <label style="margin-top:12px">{{ t('访问权限（人工审批模式）') }}</label>
     <NSelect v-model:value="pDraft.perm_mode" :options="permOptions" />
-    <div class="hint">询问 = 任务挂起等待看板顶栏「待审批」批准/拒绝；超时自动拒绝，任务不会永久挂起。</div>
+    <div class="hint">{{ t('询问 = 任务挂起等待看板顶栏「待审批」批准/拒绝；超时自动拒绝，任务不会永久挂起。') }}</div>
     <label class="checkline" style="margin-top:12px">
       <NSwitch v-model:value="pDraft.use_tools" />
       覆盖 Agent 工具开关（关闭=跟随全局「Agent 工具能力」配置）
     </label>
     <template v-if="pDraft.use_tools">
       <div style="margin:8px 0;padding:8px 10px;background:rgba(0,128,255,0.06);border-radius:6px;border:1px solid rgba(0,128,255,0.2)">
-        <div style="font-weight:600;font-size:12px;margin-bottom:6px">本地调试工具组快捷开关：</div>
+        <div style="font-weight:600;font-size:12px;margin-bottom:6px">{{ t('本地调试工具组快捷开关：') }}</div>
         <div style="display:flex;flex-wrap:wrap;gap:12px">
           <label class="checkline" style="display:inline-flex;align-items:center;gap:6px">
             <NSwitch size="small" v-model:value="pBrowserGroupEnabled" />
-            <span style="font-size:12px">浏览器调试 (browser)</span>
+            <span style="font-size:12px">{{ t('浏览器调试 (browser)') }}</span>
           </label>
           <label class="checkline" style="display:inline-flex;align-items:center;gap:6px">
             <NSwitch size="small" v-model:value="pDevServerGroupEnabled" />
-            <span style="font-size:12px">开发服务 (dev_server)</span>
+            <span style="font-size:12px">{{ t('开发服务 (dev_server)') }}</span>
           </label>
           <label class="checkline" style="display:inline-flex;align-items:center;gap:6px">
             <NSwitch size="small" v-model:value="pDraft.tools['http_request']" />
-            <span style="font-size:12px">本地 API (http_request)</span>
+            <span style="font-size:12px">{{ t('本地 API (http_request)') }}</span>
           </label>
         </div>
       </div>
@@ -1648,8 +1649,8 @@ async function newFolder(): Promise<void> {
               <NTag size="tiny" round :type="pGetGroupToolsCount(cat.tools).enabled === pGetGroupToolsCount(cat.tools).total ? 'success' : 'warning'">
                 {{ pGetGroupToolsCount(cat.tools).enabled }}/{{ pGetGroupToolsCount(cat.tools).total }}
               </NTag>
-              <NButton size="tiny" quaternary @click="pToggleToolsGroup(cat.tools, true)">全选</NButton>
-              <NButton size="tiny" quaternary @click="pToggleToolsGroup(cat.tools, false)">全关</NButton>
+              <NButton size="tiny" quaternary @click="pToggleToolsGroup(cat.tools, true)">{{ t('全选') }}</NButton>
+              <NButton size="tiny" quaternary @click="pToggleToolsGroup(cat.tools, false)">{{ t('全关') }}</NButton>
             </div>
           </div>
           <div class="pcat-items">
@@ -1665,13 +1666,13 @@ async function newFolder(): Promise<void> {
           </div>
         </div>
       </div>
-      <div class="hint" style="margin-top:4px">finish 为协议工具始终可用；其余开关保存后立即生效（下一轮任务按此执行）。</div>
+      <div class="hint" style="margin-top:4px">{{ t('finish 为协议工具始终可用；其余开关保存后立即生效（下一轮任务按此执行）。') }}</div>
     </template>
     <div style="margin-top:10px">
-      <label style="font-size:12px;font-weight:bold"><i class="ms sm">language</i> 额外允许的调试主机（局域网测试机 / 内部域名）</label>
+      <label style="font-size:12px;font-weight:bold"><i class="ms sm">language</i> {{ t('额外允许的调试主机（局域网测试机 / 内部域名）') }}</label>
       <NInput v-model:value="pDraft.debug_hosts_text" type="textarea" :rows="2"
-              placeholder="每行一个主机名或IP（如 192.168.1.50 或 dev.local，只追加，全局回环地址默认放行）" />
-      <div class="hint">该项目测试时允许额外访问的主机白名单；链路本地与云元数据等硬禁区强制拦截。</div>
+              :placeholder="t('每行一个主机名或IP（如 192.168.1.50 或 dev.local，只追加，全局回环地址默认放行）')" />
+      <div class="hint">{{ t('该项目测试时允许额外访问的主机白名单；链路本地与云元数据等硬禁区强制拦截。') }}</div>
     </div>
     <label class="checkline" style="margin-top:12px">
       <NSwitch v-model:value="pDraft.use_cam" />
@@ -1691,14 +1692,14 @@ async function newFolder(): Promise<void> {
       <div class="duo" style="margin-top:6px">
         <div class="f2"><label>仓库 URL{{ repoPlatform ? ' · ' + repoPlatform : '' }}</label>
           <NInput v-model:value="pDraft.repo_url" placeholder="https://github.com/owner/repo" /></div>
-        <div class="f1"><label>平台（自托管必选）</label>
+        <div class="f1"><label>{{ t('平台（自托管必选）') }}</label>
           <NSelect v-model:value="pDraft.repo_provider" :options="repoProviderOptions" /></div>
       </div>
       <div class="duo">
-        <div class="f1"><label>访问 token（与账号密码二选一）</label>
+        <div class="f1"><label>{{ t('访问 token（与账号密码二选一）') }}</label>
           <NInput v-model:value="pDraft.repo_token" type="password" show-password-on="click"
                   :placeholder="repoTokenPlaceholder" @update:value="repoTokenTouched = true" /></div>
-        <div class="f1"><label>账号 + 密码（可选，GitLab / Gitee / Gitea 支持）</label>
+        <div class="f1"><label>{{ t('账号 + 密码（可选，GitLab / Gitee / Gitea 支持）') }}</label>
           <div class="duo">
             <NInput v-model:value="pDraft.repo_user" placeholder="username" />
             <NInput v-model:value="pDraft.repo_pass" type="password" show-password-on="click"
@@ -1709,11 +1710,11 @@ async function newFolder(): Promise<void> {
         认证二选一：token 优先；GitHub 只支持 token。自托管 Gitea / GitLab 请在「平台」里显式选择。绑定后在项目卡片点「拉取 Issues」导入任务，优先级默认 P2（带 P0~P4 标签按标签）。
       </div>
       <div class="duo" style="margin-top:6px">
-        <div class="f1"><label>自动拉取间隔（分钟，0 = 仅手动）</label>
+        <div class="f1"><label>{{ t('自动拉取间隔（分钟，0 = 仅手动）') }}</label>
           <NInputNumber v-model:value="pDraft.repo_auto_pull" :min="0" :step="5"
                         :disabled="!pDraft.repo_url.trim()"
-                        placeholder="0 表示只在点「拉取 Issues」时拉取" /></div>
-        <div class="f2"><label>上次自动拉取</label>
+                        :placeholder="t('0 表示只在点「拉取 Issues」时拉取')" /></div>
+        <div class="f2"><label>{{ t('上次自动拉取') }}</label>
           <div class="hint" style="padding-top:6px">
             {{ repoAutoPullHint }}</div></div>
       </div>
@@ -1726,9 +1727,9 @@ async function newFolder(): Promise<void> {
         技术栈（按路径自动探测预填，可修改；保存时写入 AGENT.md 的 Project 节，留空不填）
       </label>
       <div class="duo">
-        <div class="f1"><label>技术栈 Stack</label><NInput v-model:value="pDraft.stack" placeholder="Node.js (Vue)" /></div>
-        <div class="f1"><label>本地运行 Run</label><NInput v-model:value="pDraft.run" placeholder="npm run dev" /></div>
-        <div class="f1"><label>测试 Test</label><NInput v-model:value="pDraft.test" placeholder="npm test" /></div>
+        <div class="f1"><label>{{ t('技术栈 Stack') }}</label><NInput v-model:value="pDraft.stack" placeholder="Node.js (Vue)" /></div>
+        <div class="f1"><label>{{ t('本地运行 Run') }}</label><NInput v-model:value="pDraft.run" placeholder="npm run dev" /></div>
+        <div class="f1"><label>{{ t('测试 Test') }}</label><NInput v-model:value="pDraft.test" placeholder="npm test" /></div>
       </div>
     </template>
     <label class="checkline" style="margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line);">
@@ -1736,8 +1737,8 @@ async function newFolder(): Promise<void> {
       启用该项目（停用后调度器跳过，配置保留）
     </label>
     <div class="dlg-actions">
-      <NButton @click="ui.projectDlg = null">取消</NButton>
-      <NButton type="primary" @click="saveProject">保存</NButton>
+      <NButton @click="ui.projectDlg = null">{{ t('取消') }}</NButton>
+      <NButton type="primary" @click="saveProject">{{ t('保存') }}</NButton>
     </div>
   </NModal>
 
@@ -1755,34 +1756,34 @@ async function newFolder(): Promise<void> {
       <NButton size="small" quaternary @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
       <span class="tsheet-title">{{ tTitle }}</span>
       <NButton v-if="!tReadonly" size="small" type="primary"
-               @click="saveTask(tForceOverwrite)">保存</NButton>
+               @click="saveTask(tForceOverwrite)">{{ t('保存') }}</NButton>
     </div>
     <!-- 未保存草稿恢复提示：来电/切后台被杀后重开不丢输入 -->
     <div class="draftbar" v-if="draftAvailable">
-      <span class="draftbar-msg">检测到未保存的草稿</span>
-      <NButton size="tiny" type="primary" @click="restoreDraft">恢复</NButton>
-      <NButton size="tiny" quaternary @click="discardDraft">丢弃</NButton>
+      <span class="draftbar-msg">{{ t('检测到未保存的草稿') }}</span>
+      <NButton size="tiny" type="primary" @click="restoreDraft">{{ t('恢复') }}</NButton>
+      <NButton size="tiny" quaternary @click="discardDraft">{{ t('丢弃') }}</NButton>
     </div>
-    <div class="hint" v-if="tReadonly">该任务不在待办状态（已归档/执行中/受阻），只读查看；重新入队后再编辑。</div>
-    <div class="hint" v-else>仅待办（open）状态的任务可编辑；执行中/受阻的任务请等本轮结束后再改。</div>
+    <div class="hint" v-if="tReadonly">{{ t('该任务不在待办状态（已归档/执行中/受阻），只读查看；重新入队后再编辑。') }}</div>
+    <div class="hint" v-else>{{ t('仅待办（open）状态的任务可编辑；执行中/受阻的任务请等本轮结束后再改。') }}</div>
     <div class="err" v-if="tDraft.err">{{ tDraft.err }}</div>
     <div class="duo">
-      <div class="f1"><label>任务 ID（留空自动生成：优先级-标题）</label><NInput v-model:value="tDraft.id" :disabled="tDraft.idLocked" placeholder="fix-login-timeout" /></div>
-      <div class="f1"><label>优先级</label>
+      <div class="f1"><label>{{ t('任务 ID（留空自动生成：优先级-标题）') }}</label><NInput v-model:value="tDraft.id" :disabled="tDraft.idLocked" placeholder="fix-login-timeout" /></div>
+      <div class="f1"><label>{{ t('优先级') }}</label>
         <NSelect v-model:value="tDraft.priority" :options="priOptions" :disabled="tReadonly" /></div>
     </div>
-    <label>标题</label>
-    <NInput v-model:value="tDraft.title" :disabled="tReadonly" placeholder="一句话描述要做什么" />
+    <label>{{ t('标题') }}</label>
+    <NInput v-model:value="tDraft.title" :disabled="tReadonly" :placeholder="t('一句话描述要做什么')" />
     <div class="duo">
-      <div class="f1"><label>标签（逗号分隔）</label><NInput v-model:value="tDraft.labels" :disabled="tReadonly" placeholder="bug, ui" /></div>
+      <div class="f1"><label>{{ t('标签（逗号分隔）') }}</label><NInput v-model:value="tDraft.labels" :disabled="tReadonly" placeholder="bug, ui" /></div>
       <div class="f1">
-        <label>指派执行角色</label>
-        <NSelect v-model:value="tDraft.assignee" :options="projectAssigneeOptions" :disabled="tReadonly" filterable tag clearable placeholder="留空自动认领" />
+        <label>{{ t('指派执行角色') }}</label>
+        <NSelect v-model:value="tDraft.assignee" :options="projectAssigneeOptions" :disabled="tReadonly" filterable tag clearable :placeholder="t('留空自动认领')" />
       </div>
     </div>
     <div style="margin-bottom: 6px;">
-      <label>前置依赖任务（全部完成后本任务方可认领执行）</label>
-      <NSelect v-model:value="tDraft.depends_on" multiple filterable :options="projectTaskOptions" :disabled="tReadonly" placeholder="选择依赖的前置任务（可选）..." />
+      <label>{{ t('前置依赖任务（全部完成后本任务方可认领执行）') }}</label>
+      <NSelect v-model:value="tDraft.depends_on" multiple filterable :options="projectTaskOptions" :disabled="tReadonly" :placeholder="t('选择依赖的前置任务（可选）...')" />
       <div v-if="tDraft.parent_id" class="hint" style="margin-top: 4px;">
         <i class="ms sm">link</i> 关联父需求/来源任务：
         <button type="button" class="deplink" @click="openDependency(tDraft.parent_id)">
@@ -1791,7 +1792,7 @@ async function newFolder(): Promise<void> {
         {{ tDraft.qa_round ? `· 回归轮次 #${tDraft.qa_round}` : '' }}
       </div>
       <div v-if="depTasks.length" class="deplist">
-        <div class="deplist-head">前置任务成果（点击任务打开详情）</div>
+        <div class="deplist-head">{{ t('前置任务成果（点击任务打开详情）') }}</div>
         <div v-for="d in depTasks" :key="d.id" class="depitem">
           <NTag size="tiny" :bordered="false" :type="depTag(d).type">{{ depTag(d).label }}</NTag>
           <button type="button" class="deplink" :disabled="d.missing" @click="openDependency(d.id)">
@@ -1801,21 +1802,21 @@ async function newFolder(): Promise<void> {
         </div>
       </div>
     </div>
-    <label>任务描述（Markdown 正文）</label>
+    <label>{{ t('任务描述（Markdown 正文）') }}</label>
     <!-- 移动端 Markdown 快捷工具条：一键插入标题/待办/加粗/代码块 -->
     <div class="md-bar" v-if="isMobile && !tReadonly">
       <button type="button" @click="mdInsert('# ', '')">H1</button>
       <button type="button" @click="mdInsert('## ', '')">H2</button>
-      <button type="button" @click="mdInsert('- [ ] ', '')"><i class="ms sm">check_box</i> 待办</button>
-      <button type="button" @click="mdInsert('- ', '')"><i class="ms sm">format_list_bulleted</i> 列表</button>
-      <button type="button" @click="mdInsert('**', '**')">B 粗体</button>
-      <button type="button" title="行内代码" @click="mdInsert('`', '`')"><i class="ms sm">code</i></button>
-      <button type="button" title="代码块" @click="mdInsert('\n```\n', '\n```\n')"><i class="ms sm">integration_instructions</i></button>
+      <button type="button" @click="mdInsert('- [ ] ', '')"><i class="ms sm">check_box</i> {{ t('待办') }}</button>
+      <button type="button" @click="mdInsert('- ', '')"><i class="ms sm">format_list_bulleted</i> {{ t('列表') }}</button>
+      <button type="button" @click="mdInsert('**', '**', '')">{{ t('B 粗体') }}</button>
+      <button type="button" :title="t('行内代码')" @click="mdInsert('`', '`', '')"><i class="ms sm">code</i></button>
+      <button type="button" :title="t('代码块')" @click="mdInsert('\n```\n', '\n```\n', '')"><i class="ms sm">integration_instructions</i></button>
     </div>
     <NInput ref="descInputRef" v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
     <!-- 结构化审查意见（从正文「## 审查结果」节解析）：severity 色标条目列表 -->
     <template v-if="reviewIssues.length">
-      <label style="margin-top:10px">审查意见（独立审查 Agent 退回的问题清单）</label>
+      <label style="margin-top:10px">{{ t('审查意见（独立审查 Agent 退回的问题清单）') }}</label>
       <div class="review-issues">
         <div v-for="(it, idx) in reviewIssues" :key="idx" class="review-issue">
           <NTag size="tiny" :type="it.severity === 'blocker' ? 'error' : it.severity === 'major' ? 'warning' : 'default'"
@@ -1828,10 +1829,10 @@ async function newFolder(): Promise<void> {
     <!-- 运行台账（V1-R1）：历史 run 列表 + 事件回放 + 工件查看（只读） -->
     <div v-if="ui.taskDlg?.id" class="runsec">
       <div class="runsec-head">
-        <label style="margin:0">运行记录</label>
+        <label style="margin:0">{{ t('运行记录') }}</label>
         <span class="hint" style="margin:0">{{ runList.length ? `${runList.length} 次` : '暂无' }}</span>
         <NButton size="tiny" quaternary :loading="runLoading" :disabled="runlogBusy"
-                 @click="loadRuns">刷新</NButton>
+                 @click="loadRuns">{{ t('刷新') }}</NButton>
       </div>
       <div v-if="runlogBusy" class="hint">
         运行台账正在迁移目录，暂不可回放；迁移完成后自动恢复。
@@ -1848,7 +1849,7 @@ async function newFolder(): Promise<void> {
           <span class="run-toggle"><i class="ms sm">{{ runOpen === r.run_id ? 'expand_more' : 'chevron_right' }}</i></span>
         </div>
         <div v-if="runOpen === r.run_id" class="run-detail">
-          <div v-if="runDetailLoading" class="hint">加载中…</div>
+          <div v-if="runDetailLoading" class="hint">{{ t('加载中…') }}</div>
           <template v-else-if="runDetail">
             <div v-if="runError" class="err">{{ runError }}</div>
             <div class="hint">
@@ -1880,18 +1881,18 @@ async function newFolder(): Promise<void> {
     </div>
     <div class="dlg-actions" v-if="!isMobile">
       <NButton @click="ui.taskDlg = null">{{ tReadonly ? '关闭' : '取消' }}</NButton>
-      <NButton v-if="!tReadonly" type="primary" @click="saveTask(tForceOverwrite)">保存</NButton>
+      <NButton v-if="!tReadonly" type="primary" @click="saveTask(tForceOverwrite)">{{ t('保存') }}</NButton>
     </div>
   </NModal>
 
   <!-- 手机连接向导：可达地址清单 + 扫码二维码 + 开放指引 -->
-  <NModal v-model:show="cVisible" preset="card" title="手机远程连接"
+  <NModal v-model:show="cVisible" preset="card" :title="t('手机远程连接')"
           style="width: min(480px, 94vw)">
     <div class="hint">手机与电脑连同一 Wi-Fi（或经反代/内网穿透/公网域名），用手机相机扫码直达看板；
       首次打开需输入登录密码{{ cAuthRequired ? '（已开启访问鉴权）' : '（未开启鉴权可直接访问）' }}。</div>
     <!-- 仅监听 127.0.0.1：不渲染打不开的回环二维码，展示一键开启 + 手动指引 -->
     <div class="ep-guide" v-if="cAllLoopback && !cLoading">
-      <div class="ep-guide-title"><i class="ms sm">warning</i> 手机现在还连不上：看板只监听了本机回环（127.0.0.1）</div>
+      <div class="ep-guide-title"><i class="ms sm">warning</i> {{ t('手机现在还连不上：看板只监听了本机回环（127.0.0.1）') }}</div>
       <div class="ep-enable">
         <NCheckbox :checked="cEnableChecked" :disabled="cEnableBusy || cEnabled"
                    @update:checked="onEnableToggle">
@@ -1901,14 +1902,14 @@ async function newFolder(): Promise<void> {
       </div>
       <div class="ep-guide-steps">
         <div>手动方式：打开 config.yaml（数据目录下），把 <code>web.host</code> 改为 <code>0.0.0.0</code>，
-          设置 <code>web.auth_password</code> 登录密码后重启。</div>
+          设置 <code>web.auth_password</code> {{ t('登录密码后重启。') }}</div>
       </div>
       <div class="ep-guide-hint" v-if="cHint">{{ cHint }}</div>
     </div>
     <NSpin :show="cLoading">
       <div class="qr-wrap" v-if="cSelected">
         <div v-if="cQrSvg" class="qr-svg" v-html="cQrSvg" />
-        <div v-else class="qr-empty">二维码生成失败，请直接输入下方地址</div>
+        <div v-else class="qr-empty">{{ t('二维码生成失败，请直接输入下方地址') }}</div>
         <div class="qr-url">{{ cSelected }}</div>
       </div>
       <div class="ep-list">
@@ -1920,8 +1921,8 @@ async function newFolder(): Promise<void> {
         </button>
       </div>
       <div class="dlg-actions">
-        <NButton size="small" :disabled="!cSelected" @click="copyEndpoint(cSelected)">复制地址</NButton>
-        <NButton size="small" type="primary" @click="ui.connectDlg = false">完成</NButton>
+        <NButton size="small" :disabled="!cSelected" @click="copyEndpoint(cSelected)">{{ t('复制地址') }}</NButton>
+        <NButton size="small" type="primary" @click="ui.connectDlg = false">{{ t('完成') }}</NButton>
       </div>
     </NSpin>
   </NModal>
@@ -1936,8 +1937,8 @@ async function newFolder(): Promise<void> {
             :autosize="false" :input-props="{ spellcheck: false }"
             style="height: 55vh" />
     <div class="dlg-actions">
-      <NButton @click="ui.guideDlg = null">取消</NButton>
-      <NButton type="primary" @click="saveGuide">保存指引</NButton>
+      <NButton @click="ui.guideDlg = null">{{ t('取消') }}</NButton>
+      <NButton type="primary" @click="saveGuide">{{ t('保存指引') }}</NButton>
     </div>
   </NModal>
 
@@ -1945,43 +1946,43 @@ async function newFolder(): Promise<void> {
   <NModal v-model:show="kVisible" preset="card"
           :title="ui.skillDlg?.original ? `编辑技能 · ${ui.skillDlg.original}` : '新建技能'"
           style="width: min(760px, 94vw)">
-    <div class="hint">技能存放在 Orcsy 技能库（不落项目目录）；正文为 SKILL.md 的 Markdown 正文，frontmatter 由系统维护。</div>
+    <div class="hint">{{ t('技能存放在 Orcsy 技能库（不落项目目录）；正文为 SKILL.md 的 Markdown 正文，frontmatter 由系统维护。') }}</div>
     <div class="err" v-if="kDraft.err">{{ kDraft.err }}</div>
     <div class="duo">
-      <div class="f1"><label>技能名（字母数字/下划线/连字符）</label><NInput v-model:value="kDraft.name" placeholder="vue-best-practices" /></div>
-      <div class="f1"><label>适用范围</label>
+      <div class="f1"><label>{{ t('技能名（字母数字/下划线/连字符）') }}</label><NInput v-model:value="kDraft.name" placeholder="vue-best-practices" /></div>
+      <div class="f1"><label>{{ t('适用范围') }}</label>
         <NSelect v-model:value="kDraft.scope" :options="scopeOptions" /></div>
     </div>
-    <label>描述（进入 Agent 系统提示词的索引，写清何时该用这个技能）</label>
-    <NInput v-model:value="kDraft.description" placeholder="一句话说明技能的用途与适用场景" />
+    <label>{{ t('描述（进入 Agent 系统提示词的索引，写清何时该用这个技能）') }}</label>
+    <NInput v-model:value="kDraft.description" :placeholder="t('一句话说明技能的用途与适用场景')" />
     <label class="checkline" style="margin-top:4px">
       <NSwitch v-model:value="kDraft.enabled" />
       启用（停用后不注入索引，内容保留）
     </label>
-    <label>技能内容（Markdown 正文，Agent 通过 read_skill 工具按需读取）</label>
+    <label>{{ t('技能内容（Markdown 正文，Agent 通过 read_skill 工具按需读取）') }}</label>
     <NInput v-model:value="kDraft.body" type="textarea" class="keditor"
             :autosize="false" :input-props="{ spellcheck: false }"
-            style="height: 38vh" placeholder="# 何时使用 / # 步骤与规范 / # 注意事项 …" />
+            style="height: 38vh" :placeholder="t('# 何时使用 / # 步骤与规范 / # 注意事项 …')" />
     <div class="dlg-actions">
-      <NButton @click="ui.skillDlg = null">取消</NButton>
-      <NButton type="primary" @click="saveSkill">保存技能</NButton>
+      <NButton @click="ui.skillDlg = null">{{ t('取消') }}</NButton>
+      <NButton type="primary" @click="saveSkill">{{ t('保存技能') }}</NButton>
     </div>
   </NModal>
 
   <!-- 扫描 AI 工具技能 -->
-  <NModal v-model:show="scanVisible" preset="card" title="扫描 AI 工具的本地技能"
+  <NModal v-model:show="scanVisible" preset="card" :title="t('扫描 AI 工具的本地技能')"
           style="width: min(660px, 94vw)">
-    <div class="hint">扫描常见 AI 工具的用户级技能目录（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等），勾选后整目录复制进 Orcsy 技能库；同一技能在多个工具里重复部署时只显示一次。找不到想要的可点「导入本地技能」手工选目录。</div>
+    <div class="hint">{{ t('扫描常见 AI 工具的用户级技能目录（ZCode / 通用 Agent / Claude Code / Codex / OpenCode 等），勾选后整目录复制进 Orcsy 技能库；同一技能在多个工具里重复部署时只显示一次。找不到想要的可点「导入本地技能」手工选目录。') }}</div>
     <div class="err" v-if="scanErr">{{ scanErr }}</div>
-    <div v-if="scanning" class="hint">扫描中…</div>
+    <div v-if="scanning" class="hint">{{ t('扫描中…') }}</div>
     <template v-else>
       <div v-if="!scanSources.length" class="hint">
         没有发现常见 AI 工具的技能目录。可手工选择目录导入，或在上述工具里先安装技能。
       </div>
       <div v-if="scanSources.length" class="scan-toolbar">
         <span class="hint">共 {{ allScanSkills.length }} 个技能，已选 {{ checkedPaths.length }} 个</span>
-        <NButton size="tiny" @click="checkAll">全选</NButton>
-        <NButton size="tiny" @click="invertChecked">反选</NButton>
+        <NButton size="tiny" @click="checkAll">{{ t('全选') }}</NButton>
+        <NButton size="tiny" @click="invertChecked">{{ t('反选') }}</NButton>
       </div>
       <div v-for="src in scanSources" :key="src.path" class="scan-group">
         <div class="scan-tool">{{ src.tool }} <span class="scan-path">{{ src.path }}</span></div>
@@ -1989,12 +1990,12 @@ async function newFolder(): Promise<void> {
           <input type="checkbox" v-model="scanChecked[k.path]" />
           <span class="scan-name">{{ k.name }}</span>
           <span class="scan-desc">{{ k.description || '（无描述）' }}</span>
-          <NTag v-if="k.exists" size="small" :bordered="false">已导入</NTag>
+          <NTag v-if="k.exists" size="small" :bordered="false">{{ t('已导入') }}</NTag>
         </label>
       </div>
     </template>
     <div class="dlg-actions">
-      <NButton @click="ui.skillScanDlg = false">取消</NButton>
+      <NButton @click="ui.skillScanDlg = false">{{ t('取消') }}</NButton>
       <NButton type="primary" :loading="importing" :disabled="!checkedPaths.length" @click="importChecked">
         导入选中（{{ checkedPaths.length }}）
       </NButton>
@@ -2008,7 +2009,7 @@ async function newFolder(): Promise<void> {
     <div class="brow-crumb">
       <!-- parent=="" 是盘符列表根入口（可点）；仅 null/undefined 才禁用 -->
       <NButton size="small" @click="browseTo(bStack?.parent ?? '')"
-               :disabled="bStack?.parent == null"><i class="ms sm">arrow_upward</i> 上一级</NButton>
+               :disabled="bStack?.parent == null"><i class="ms sm">arrow_upward</i> {{ t('上一级') }}</NButton>
       <span class="bcur">{{ bStack?.path || '（请选择盘符 / 常用目录）' }}</span>
     </div>
     <div class="blist">
@@ -2017,25 +2018,25 @@ async function newFolder(): Promise<void> {
         <div v-for="f in bStack?.files || []" :key="f" class="bitem bfile" @click="pickFile(f)">
           {{ f.split('\\').pop()?.split('/').pop() }}
         </div>
-        <div v-if="bStack && !bStack.files?.length" class="bempty">（当前目录没有文件）</div>
+        <div v-if="bStack && !bStack.files?.length" class="bempty">{{ t('（当前目录没有文件）') }}</div>
       </template>
       <div v-else-if="bStack && !bStack.dirs.length" class="bempty">{{ bStack.note || '（没有子目录，可直接用下面的路径框）' }}</div>
     </div>
     <div class="pathline" style="margin-bottom:8px">
-      <NInput v-model:value="bNewFolder" size="small" placeholder="在当前目录下新建文件夹，输入名称"
+      <NInput v-model:value="bNewFolder" size="small" :placeholder="t('在当前目录下新建文件夹，输入名称')"
               @keydown.enter="newFolder" />
-      <NButton size="small" @click="newFolder">＋ 新建文件夹</NButton>
+      <NButton size="small" @click="newFolder">{{ t('＋ 新建文件夹') }}</NButton>
     </div>
     <div class="pathline">
-      <NInput v-model:value="bManual" placeholder="或直接粘贴完整路径" @keydown.enter="pickPath" />
+      <NInput v-model:value="bManual" :placeholder="t('或直接粘贴完整路径')" @keydown.enter="pickPath" />
       <NButton type="primary" @click="pickPath">{{ ui.browserMode === 'file' ? '使用此文件' : '使用此目录' }}</NButton>
     </div>
-    <div class="dlg-actions"><NButton @click="ui.browserDlg = false">取消</NButton></div>
+    <div class="dlg-actions"><NButton @click="ui.browserDlg = false">{{ t('取消') }}</NButton></div>
   </NModal>
 
   <!-- 人工审批面板：列表绑定 store.state.approvals，5s 轮询自动刷新；
        本面板故意不暂停轮询（store.anyModal 不含 approvalDlg），处理结果即时可见 -->
-  <NModal v-model:show="approvalVisible" preset="card" title="待人工审批"
+  <NModal v-model:show="approvalVisible" preset="card" :title="t('待人工审批')"
           style="width: min(640px, 92vw)">
     <div class="hint">
       Agent 按访问权限模式（变更前询问 / 自主模式）挂起了以下操作，等待你的决定；
@@ -2057,9 +2058,9 @@ async function newFolder(): Promise<void> {
         <NCheckbox v-model:checked="alwaysAllow[a.id]">本任务内始终允许 {{ a.tool }}</NCheckbox>
         <div class="btnrow">
           <NButton size="small" :disabled="responding === a.id"
-                   @click="respondApproval(a.id, false)">拒绝</NButton>
+                   @click="respondApproval(a.id, false)">{{ t('拒绝') }}</NButton>
           <NButton size="small" type="primary" :loading="responding === a.id"
-                   @click="respondApproval(a.id, true)">批准</NButton>
+                   @click="respondApproval(a.id, true)">{{ t('批准') }}</NButton>
         </div>
       </div>
     </div>
@@ -2146,9 +2147,12 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 /* 结构化审查意见：severity 色标 + 文件位置 + 问题描述 */
 .review-issues { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
   display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow: auto; }
-.review-issue { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
-.ri-loc { font-family: Consolas, "Cascadia Mono", monospace; color: var(--dim); flex: none; }
-.ri-msg { color: var(--text); min-width: 0; word-break: break-word; }
+.review-issue { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; min-width: 0; }
+/* 位置列可收缩并省略显示：长路径不得把右侧描述挤成窄列 */
+.ri-loc { font-family: Consolas, "Cascadia Mono", monospace; color: var(--dim);
+  flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.ri-msg { color: var(--text); min-width: 0; flex: 1 1 auto; word-break: break-word; }
 
 /* ---- 移动端任务全屏抽屉（Sheet）：吸顶操作条 + 键盘避让 + 工具条 ---- */
 .tsheet { border-radius: 0; }

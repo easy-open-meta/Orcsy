@@ -5,6 +5,7 @@ import { api, type AuditEntryT, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
 import { cmpVersion, fmtTokens } from '../utils'
 import { miIcon } from '../mi'
+import { tNow as t, tFmt } from '../lang'
 
 const message = () => window.$message
 
@@ -15,56 +16,56 @@ interface SettingGroup { key: string; label: string; icon: string; items: Settin
 
 const SETTING_GROUPS: SettingGroup[] = [
   {
-    key: 'model', label: '模型与团队', icon: 'smart_toy',
+    key: 'model', label: t('模型与团队'), icon: 'smart_toy',
     items: [
-      { key: 'llm', label: '大模型接入', icon: 'smart_toy',
-        desc: 'OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。' },
-      { key: 'profiles', label: '多模型项目小组 (Team)', icon: 'group',
-        desc: '配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。' },
-      { key: 'review', label: '任务审查（Review Agent）', icon: 'rate_review',
-        desc: '独立模型合并前审查任务成果；未配置审查模型时审查未启用。' },
+      { key: 'llm', label: t('大模型接入'), icon: 'smart_toy',
+        desc: t('OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。') },
+      { key: 'profiles', label: t('多模型项目小组 (Team)'), icon: 'group',
+        desc: t('配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。') },
+      { key: 'review', label: t('任务审查（Review Agent）'), icon: 'rate_review',
+        desc: t('独立模型合并前审查任务成果；未配置审查模型时审查未启用。') },
     ],
   },
   {
-    key: 'runtime', label: '运行与成本', icon: 'schedule',
+    key: 'runtime', label: t('运行与成本'), icon: 'schedule',
     items: [
-      { key: 'sched', label: '调度与看板', icon: 'schedule',
-        desc: '扫描间隔、并行数保存后立即生效；看板端口下次启动生效。' },
-      { key: 'budget', label: '预算与成本', icon: 'savings',
-        desc: '任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。' },
-      { key: 'resilience', label: '熔断与恢复', icon: 'health_and_safety',
-        desc: '连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。' },
+      { key: 'sched', label: t('调度与看板'), icon: 'schedule',
+        desc: t('扫描间隔、并行数保存后立即生效；看板端口下次启动生效。') },
+      { key: 'budget', label: t('预算与成本'), icon: 'savings',
+        desc: t('任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。') },
+      { key: 'resilience', label: t('熔断与恢复'), icon: 'health_and_safety',
+        desc: t('连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。') },
     ],
   },
   {
-    key: 'data', label: '数据与合规', icon: 'security',
+    key: 'data', label: t('数据与合规'), icon: 'security',
     items: [
-      { key: 'masking', label: '数据脱敏', icon: 'security',
-        desc: '密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。' },
-      { key: 'runlog', label: '运行台账', icon: 'receipt_long',
-        desc: '每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。' },
-      { key: 'audit', label: '审计日志', icon: 'history',
-        desc: '登录、任务/项目/设置变更、提交确认与 API Key 写调用留痕；只读，不记录密钥与正文。' },
+      { key: 'masking', label: t('数据脱敏'), icon: 'security',
+        desc: t('密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。') },
+      { key: 'runlog', label: t('运行台账'), icon: 'receipt_long',
+        desc: t('每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。') },
+      { key: 'audit', label: t('审计日志'), icon: 'history',
+        desc: t('登录、任务/项目/设置变更、提交确认与 API Key 写调用留痕；只读，不记录密钥与正文。') },
     ],
   },
   {
-    key: 'tools', label: '工具与网络', icon: 'handyman',
+    key: 'tools', label: t('工具与网络'), icon: 'handyman',
     items: [
-      { key: 'tools', label: 'Agent 工具与访问权限', icon: 'handyman',
-        desc: '全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。' },
-      { key: 'mirrors', label: '镜像源管理与测速选源', icon: 'sync_alt',
-        desc: 'Agent 装环境/拉依赖前测速，哪个快用哪个。' },
-      { key: 'egress', label: '出网白名单', icon: 'lan',
-        desc: '应用自身 HTTP（模型/Issue/镜像/更新/网页抓取）只允许白名单主机；拒绝写审计。' },
+      { key: 'tools', label: t('Agent 工具与访问权限'), icon: 'handyman',
+        desc: t('全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。') },
+      { key: 'mirrors', label: t('镜像源管理与测速选源'), icon: 'sync_alt',
+        desc: t('Agent 装环境/拉依赖前测速，哪个快用哪个。') },
+      { key: 'egress', label: t('出网白名单'), icon: 'lan',
+        desc: t('应用自身 HTTP（模型/Issue/镜像/更新/网页抓取）只允许白名单主机；拒绝写审计。') },
     ],
   },
   {
-    key: 'app', label: '通知与应用', icon: 'notifications',
+    key: 'app', label: t('通知与应用'), icon: 'notifications',
     items: [
-      { key: 'notify', label: '提醒设置', icon: 'notifications',
-        desc: '任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。' },
-      { key: 'app', label: '应用', icon: 'settings',
-        desc: '更新源、自更新检查、看板登录密码与开机自启动。' },
+      { key: 'notify', label: t('提醒设置'), icon: 'notifications',
+        desc: t('任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。') },
+      { key: 'app', label: t('应用'), icon: 'settings',
+        desc: t('更新源、自更新检查、看板登录密码与开机自启动。') },
     ],
   },
 ]
@@ -208,58 +209,58 @@ const toolSearch = shallowRef('')
 const defaultToolCategories = [
   {
     key: 'file_ops',
-    label: '文件操作与编辑',
+    label: t('文件操作与编辑'),
     icon: 'folder',
-    description: '读取、创建、编辑、重命名及删除工作区代码和文本文件',
+    description: t('读取、创建、编辑、重命名及删除工作区代码和文本文件'),
     tools: ['read_file', 'write_file', 'edit_file', 'multi_edit', 'delete_file', 'move_file', 'list_dir'],
   },
   {
     key: 'code_search',
-    label: '代码搜索与定位',
+    label: t('代码搜索与定位'),
     icon: 'search',
-    description: '按通配符模式查找文件以及跨文件正则搜索内容',
+    description: t('按通配符模式查找文件以及跨文件正则搜索内容'),
     tools: ['find_files', 'grep'],
   },
   {
     key: 'command_exec',
-    label: '终端命令执行',
+    label: t('终端命令执行'),
     icon: 'terminal',
-    description: '在项目根目录执行白名单内的构建、测试、检查与系统命令',
+    description: t('在项目根目录执行白名单内的构建、测试、检查与系统命令'),
     tools: ['run_command'],
   },
   {
     key: 'task_collab',
-    label: '任务管理与协议',
+    label: t('任务管理与协议'),
     icon: 'task_alt',
-    description: '拆解多阶段子任务并在任务完成或受阻时给出结构化答复',
+    description: t('拆解多阶段子任务并在任务完成或受阻时给出结构化答复'),
     tools: ['create_tasks', 'finish'],
   },
   {
     key: 'session_bus',
-    label: '批次共享状态',
+    label: t('批次共享状态'),
     icon: 'share',
-    description: '同一需求批次内跨角色传递临时端口、测试账号、动态凭证等运行态信息',
+    description: t('同一需求批次内跨角色传递临时端口、测试账号、动态凭证等运行态信息'),
     tools: ['session_share', 'session_read'],
   },
   {
     key: 'project_memory',
-    label: '项目架构记忆',
+    label: t('项目架构记忆'),
     icon: 'account_tree',
-    description: '维护 ARCHITECTURE.md 全局架构黑板报：PM 首次梳理、开发重大接口变更后追加',
+    description: t('维护 ARCHITECTURE.md 全局架构黑板报：PM 首次梳理、开发重大接口变更后追加'),
     tools: ['update_architecture'],
   },
   {
     key: 'subagent',
-    label: '子代理并发协同',
+    label: t('子代理并发协同'),
     icon: 'group',
-    description: '派生只读子代理并行探索多个模块/目录，单轮拿到汇总结论',
+    description: t('派生只读子代理并行探索多个模块/目录，单轮拿到汇总结论'),
     tools: ['delegate_explore'],
   },
   {
     key: 'external_net',
-    label: '网络与外部知识',
+    label: t('网络与外部知识'),
     icon: 'language',
-    description: '查阅专业技能库文档、抓取公网页面正文与镜像源延迟测速',
+    description: t('查阅专业技能库文档、抓取公网页面正文与镜像源延迟测速'),
     tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
   },
 ]
@@ -267,65 +268,65 @@ const defaultToolCategories = [
 const defaultCommandCategories = [
   {
     key: 'python',
-    label: 'Python 生态',
+    label: t('Python 生态'),
     icon: 'code',
-    description: 'Python 解释器、包管理与测试/Lint 工具',
+    description: t('Python 解释器、包管理与测试/Lint 工具'),
     commands: ['python*', 'py', 'pip*', 'pytest', 'uv', 'uvx', 'poetry', 'tox', 'ruff', 'mypy', 'black', 'flake8'],
   },
   {
     key: 'node',
-    label: 'Node / 前端',
+    label: t('Node / 前端'),
     icon: 'javascript',
-    description: 'Node 运行时、包管理器与前端构建/测试工具',
+    description: t('Node 运行时、包管理器与前端构建/测试工具'),
     commands: ['node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'tsc', 'eslint', 'prettier', 'vitest', 'jest'],
   },
   {
     key: 'compiled',
     label: 'Rust / Go / .NET / Java',
     icon: 'build',
-    description: '系统级与强类型后端编译型语言工具链',
+    description: t('系统级与强类型后端编译型语言工具链'),
     commands: ['cargo', 'go', 'dotnet', 'gradle*', 'mvn', 'java', 'javac'],
   },
   {
     key: 'cpp',
-    label: 'C / C++ 构建',
+    label: t('C / C++ 构建'),
     icon: 'construction',
-    description: 'C/C++ 编译器、构建工具与测试套件',
+    description: t('C/C++ 编译器、构建工具与测试套件'),
     commands: ['make', 'cmake', 'ctest', 'ninja', 'gcc', 'g++', 'clang', 'clang++', 'msbuild'],
   },
   {
     key: 'vcs',
-    label: '版本控制',
+    label: t('版本控制'),
     icon: 'account_tree',
-    description: 'Git 代码仓库与分支版本管理',
+    description: t('Git 代码仓库与分支版本管理'),
     commands: ['git'],
   },
   {
     key: 'package_managers',
-    label: '包管理器',
+    label: t('包管理器'),
     icon: 'inventory_2',
-    description: '系统级包管理器（缺工具链时按需环境引导，受审批约束）',
+    description: t('系统级包管理器（缺工具链时按需环境引导，受审批约束）'),
     commands: ['winget*', 'choco', 'scoop', 'brew', 'apt*', 'apt-get', 'dnf', 'nvm'],
   },
   {
     key: 'system_shell',
-    label: '系统 Shell / 实用工具',
+    label: t('系统 Shell / 实用工具'),
     icon: 'terminal',
-    description: '系统 Shell、网络下载与归档解压',
+    description: t('系统 Shell、网络下载与归档解压'),
     commands: ['powershell', 'pwsh', 'curl', 'tar', 'setx'],
   },
   {
     key: 'windows_probe',
-    label: 'Windows 探测与排障',
+    label: t('Windows 探测与排障'),
     icon: 'desktop_windows',
-    description: 'Windows 环境排障、进程查看与文件探测（只读/信息性）',
+    description: t('Windows 环境排障、进程查看与文件探测（只读/信息性）'),
     commands: ['where', 'cmd', 'dir', 'type', 'echo', 'set', 'tasklist', 'systeminfo', 'findstr', 'more', 'ver', 'hostname', 'whoami'],
   },
   {
     key: 'posix_probe',
-    label: 'POSIX 只读探测与统计',
+    label: t('POSIX 只读探测与统计'),
     icon: 'data_object',
-    description: '跨平台/Unix 常用只读与文本统计命令（只读无害）',
+    description: t('跨平台/Unix 常用只读与文本统计命令（只读无害）'),
     commands: ['ls', 'cat', 'wc', 'head', 'tail', 'grep', 'sort', 'uniq', 'cut', 'tr', 'diff', 'stat', 'du', 'df', 'pwd', 'printf', 'date', 'sleep', 'uname', 'which', 'id', 'basename', 'dirname', 'touch', 'md5sum', 'sha256sum', 'printenv'],
   },
 ]
@@ -476,7 +477,7 @@ async function onTestBrowser(): Promise<void> {
     if (res.ok) {
       message()?.(res.message, 'success')
     } else {
-      message()?.(res.message || res.error || '测试失败', 'error')
+      message()?.(res.message || res.error || t('测试失败'), 'error')
     }
   } catch (e: any) {
     message()?.(e.message, 'error')
@@ -486,9 +487,9 @@ async function onTestBrowser(): Promise<void> {
 }
 // ---- 访问权限草稿（全局默认；项目可在对话框里逐个覆盖） ----
 const permOptions = [
-  { label: '变更前询问（发生变更时询问：写/改/删/移文件、执行命令都挂起等批准）', value: 'ask_on_change' },
-  { label: '自主模式（有风险时询问：仅 delete_file / move_file / run_command）', value: 'autonomous' },
-  { label: '完全访问（减少确认次数：一律不询问，与历史行为一致）', value: 'full_access' },
+  { label: t('变更前询问（发生变更时询问：写/改/删/移文件、执行命令都挂起等批准）'), value: 'ask_on_change' },
+  { label: t('自主模式（有风险时询问：仅 delete_file / move_file / run_command）'), value: 'autonomous' },
+  { label: t('完全访问（减少确认次数：一律不询问，与历史行为一致）'), value: 'full_access' },
 ]
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
 // ---- Git 提交与合并开关（默认关闭：改动直接保留在工作区） ----
@@ -621,11 +622,11 @@ const editingProfileId = shallowRef<string | null>(null)
 const profileTestingId = shallowRef<string | null>(null)
 
 const roleSelectOptions = [
-  { label: '项目经理 (PM)', value: 'pm' },
-  { label: '后端开发工程师', value: 'backend' },
-  { label: '前端开发工程师', value: 'frontend' },
-  { label: '测试工程师 (QA)', value: 'qa' },
-  { label: '自定义专职角色', value: 'custom' },
+  { label: t('项目经理 (PM)'), value: 'pm' },
+  { label: t('后端开发工程师'), value: 'backend' },
+  { label: t('前端开发工程师'), value: 'frontend' },
+  { label: t('测试工程师 (QA)'), value: 'qa' },
+  { label: t('自定义专职角色'), value: 'custom' },
 ]
 
 function getRoleIcon(role: string): string {
@@ -650,39 +651,39 @@ function getRoleTemplate(role: string): string {
 function loadRolePromptTemplate(prof: any): void {
   const tpl = getRoleTemplate(prof.role)
   if (!tpl) {
-    message()?.('未找到该角色的内置模版', 'warning')
+    message()?.(t('未找到该角色的内置模版'), 'warning')
     return
   }
   prof.extra_prompt = tpl
-  message()?.(`已为「${prof.name || prof.role}」载入内置职责规范模版`, 'success')
+  message()?.(tFmt('已为「{p0}」载入内置职责规范模版', { p0: prof.name || prof.role }), 'success')
 }
 
 function syncProfilesDraft(profs: Record<string, any> | undefined): void {
   const defaults: Record<string, any> = {
     pm_default: {
-      id: 'pm_default', name: '项目经理 PM', role: 'pm',
-      description: '负责需求分析、子任务拆分与前后端依赖编排',
+      id: 'pm_default', name: t('项目经理 PM'), role: 'pm',
+      description: t('负责需求分析、子任务拆分与前后端依赖编排'),
       max_turns: 20, produces_code: false, allow_test_scripts: false,
       extra_prompt: getRoleTemplate('pm'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
     },
     backend_default: {
-      id: 'backend_default', name: '后端开发', role: 'backend',
-      description: '负责后端服务架构、接口路由与业务逻辑实现',
+      id: 'backend_default', name: t('后端开发'), role: 'backend',
+      description: t('负责后端服务架构、接口路由与业务逻辑实现'),
       max_turns: 40, produces_code: true, allow_test_scripts: false,
       extra_prompt: getRoleTemplate('backend'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
     },
     frontend_default: {
-      id: 'frontend_default', name: '前端开发', role: 'frontend',
-      description: '负责前端页面组件、状态管理与接口联调',
+      id: 'frontend_default', name: t('前端开发'), role: 'frontend',
+      description: t('负责前端页面组件、状态管理与接口联调'),
       max_turns: 40, produces_code: true, allow_test_scripts: false,
       extra_prompt: getRoleTemplate('frontend'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
     },
     qa_default: {
-      id: 'qa_default', name: '测试工程师', role: 'qa',
-      description: '负责前后端联调测试、新建 Bug 任务与回归验收',
+      id: 'qa_default', name: t('测试工程师'), role: 'qa',
+      description: t('负责前后端联调测试、新建 Bug 任务与回归验收'),
       max_turns: 35, produces_code: false, allow_test_scripts: false,
       extra_prompt: getRoleTemplate('qa'),
       llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
@@ -727,9 +728,9 @@ function addProfile(): void {
   }
   profilesDraft.value[id] = {
     id,
-    name: '新建专职 Agent',
+    name: t('新建专职 Agent'),
     role: 'custom',
-    description: '专职自定义能力 Agent',
+    description: t('专职自定义能力 Agent'),
     max_turns: 40,
     produces_code: true,
     allow_test_scripts: false,
@@ -766,9 +767,9 @@ async function fetchProfileModelList(pid: string): Promise<void> {
         modelSpecs.value.push(m)
       }
     }
-    message()?.(`[${prof.name}] 已获取 ${r.models.length} 个模型，可在下拉框中选择`, 'success')
+    message()?.(tFmt('[{p0}] 已获取 {p1} 个模型，可在下拉框中选择', { p0: prof.name, p1: r.models.length }), 'success')
   } catch (e: any) {
-    message()?.(`[${prof.name}] 获取模型列表失败：${e.message}`, 'error')
+    message()?.(tFmt('[{p0}] 获取模型列表失败：{p1}', { p0: prof.name, p1: e.message }), 'error')
   } finally {
     profileFetchingId.value = null
   }
@@ -784,14 +785,14 @@ async function testProfileModel(pid: string): Promise<void> {
     model: prof.llm.model || store.state?.llm.model || '',
   }
   if (!eff.model) {
-    message()?.('该预设未指定模型名（将继承全局模型）', 'warning')
+    message()?.(t('该预设未指定模型名（将继承全局模型）'), 'warning')
   }
   profileTestingId.value = pid
   try {
     const res = await api.testModel(eff)
-    message()?.(`[${prof.name}] ${res.message || '连接成功'}`, 'success')
+    message()?.(`[${prof.name}] ${res.message || t('连接成功')}`, 'success')
   } catch (e: any) {
-    message()?.(`[${prof.name}] 连接测试失败：${e.message}`, 'error')
+    message()?.(tFmt('[{p0}] 连接测试失败：{p1}', { p0: prof.name, p1: e.message }), 'error')
   } finally {
     profileTestingId.value = null
   }
@@ -822,7 +823,7 @@ async function saveProfiles(): Promise<void> {
       payload[pid] = pData
     }
     await api.config({ agent_profiles: payload })
-    message()?.('Agent 角色预设池已保存并生效')
+    message()?.(t('Agent 角色预设池已保存并生效'))
     for (const k of Object.keys(profilesTouchedKeys)) delete profilesTouchedKeys[k]
   } catch (e: any) {
     message()?.(e.message, 'error')
@@ -843,7 +844,7 @@ async function saveLlm(): Promise<void> {
     // 三态：未触碰不带键（后端保留已存密钥）；触碰过按输入上报，空串 = 清除
     if (apiKeyTouched.value) llm.api_key = draft.api_key.trim()
     await api.config({ llm })
-    message()?.('已保存并生效')
+    message()?.(t('已保存并生效'))
     draft.api_key = ''
     apiKeyTouched.value = false
   } catch (e: any) { message()?.(e.message, 'error') }
@@ -854,7 +855,7 @@ async function saveNotify(): Promise<void> {
   notifySaving.value = true
   try {
     await api.config({ notify: { sound: notifyDraft.sound, system: notifyDraft.system } })
-    message()?.('已保存并生效（下个任务结束即按新开关提醒）')
+    message()?.(t('已保存并生效（下个任务结束即按新开关提醒）'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { notifySaving.value = false }
   void import('../store').then(m => m.refresh(true))
@@ -871,7 +872,7 @@ async function saveMasking(): Promise<void> {
       enhanced_rules: maskingDraft.enhanced_rules,
       custom_patterns,
     } })
-    message()?.('已保存并生效（进行中任务的已脱敏内容保持原映射）')
+    message()?.(t('已保存并生效（进行中任务的已脱敏内容保持原映射）'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { maskingSaving.value = false }
   void import('../store').then(m => m.refresh(true))
@@ -883,7 +884,7 @@ async function saveReview(): Promise<void> {
   try {
     const hasModel = reviewDraft.model.trim().length > 0
     if (hasModel && effTaskModel().value && reviewDraft.model.trim().toLowerCase() === effTaskModel().value.trim().toLowerCase()) {
-      message()?.('审查模型不能与任务模型相同（' + effTaskModel().value + '）——请换一个独立模型', 'error')
+      message()?.(t('审查模型不能与任务模型相同（') + effTaskModel().value + t('）——请换一个独立模型'), 'error')
       return
     }
     const llm = hasModel ? {
@@ -902,8 +903,8 @@ async function saveReview(): Promise<void> {
         squash_merge: reviewDraft.squash_merge,
       },
     })
-    if (!hasModel) message()?.('已保存：审查未启用（未配置审查模型）')
-    else message()?.('已保存：审查门已对全部项目默认生效（项目级可单独关闭）')
+    if (!hasModel) message()?.(t('已保存：审查未启用（未配置审查模型）'))
+    else message()?.(t('已保存：审查门已对全部项目默认生效（项目级可单独关闭）'))
     reviewDraft.api_key = ''
     reviewKeyTouched.value = false
   } catch (e: any) { message()?.(e.message, 'error') }
@@ -921,7 +922,7 @@ async function fetchReviewModelList(): Promise<void> {
       model: reviewDraft.model.trim(),
     })
     reviewModelOptions.value = r.models
-    message()?.(`已获取 ${r.models.length} 个模型`)
+    message()?.(tFmt('已获取 {p0} 个模型', { p0: r.models.length }))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { reviewFetching.value = false }
 }
@@ -943,9 +944,9 @@ async function saveSched(): Promise<void> {
       web,
       logging: { retention_days: draft.retention, max_total_mb: draft.max_total_mb },
     })
-    if (authPwdClear.value) message()?.('已保存：看板登录鉴权已关闭', 'success')
-    else if (authPwdTouched.value) message()?.('已保存：登录密码已更新，旧会话已失效，请重新登录', 'success')
-    else message()?.('已保存（端口下次启动生效；日志归档清理立即按新天数执行）')
+    if (authPwdClear.value) message()?.(t('已保存：看板登录鉴权已关闭'), 'success')
+    else if (authPwdTouched.value) message()?.(t('已保存：登录密码已更新，旧会话已失效，请重新登录'), 'success')
+    else message()?.(t('已保存（端口下次启动生效；日志归档清理立即按新天数执行）'))
     authPwd.value = ''
     authPwdTouched.value = false
     authPwdClear.value = false
@@ -957,7 +958,7 @@ async function saveSched(): Promise<void> {
 const runlogSaving = shallowRef(false)
 async function saveRunlog(): Promise<void> {
   if (runlogBusy.value) {
-    message()?.('运行台账正在迁移，请等待完成后再修改', 'warning')
+    message()?.(t('运行台账正在迁移，请等待完成后再修改'), 'warning')
     return
   }
   runlogSaving.value = true
@@ -968,7 +969,7 @@ async function saveRunlog(): Promise<void> {
       max_total_mb: draft.runlog_max_mb,
       dir: draft.runlog_dir.trim(),
     } })
-    message()?.('运行台账设置已保存并立即生效')
+    message()?.(t('运行台账设置已保存并立即生效'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { runlogSaving.value = false }
   void import('../store').then(m => m.refresh(true))
@@ -989,7 +990,7 @@ async function saveBudget(): Promise<void> {
       max_tokens_per_project_per_day: draft.budget_day_tokens,
       max_cost_per_task_cny: draft.budget_task_cost,
     } })
-    message()?.('预算设置已保存并立即生效')
+    message()?.(t('预算设置已保存并立即生效'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { budgetSaving.value = false }
   void import('../store').then(m => m.refresh(true))
@@ -1008,7 +1009,7 @@ async function saveResilience(): Promise<void> {
       min_samples: draft.res_samples,
       auto_resume: draft.res_auto,
     } })
-    message()?.('熔断设置已保存并立即生效')
+    message()?.(t('熔断设置已保存并立即生效'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { resilienceSaving.value = false }
   void import('../store').then(m => m.refresh(true))
@@ -1024,7 +1025,7 @@ async function saveEgress(): Promise<void> {
       extra_hosts: draft.egress_extra,
       audit: draft.egress_audit,
     } })
-    message()?.('出网白名单已保存并立即生效')
+    message()?.(t('出网白名单已保存并立即生效'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { egressSaving.value = false }
   void import('../store').then(m => m.refresh(true))
@@ -1037,7 +1038,7 @@ const pausedProjects = computed(() =>
 async function resumeProject(name: string): Promise<void> {
   try {
     await api.resumeProject(name)
-    message()?.(`项目 ${name} 已恢复`, 'success')
+    message()?.(tFmt('项目 {p0} 已恢复', { p0: name }), 'success')
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
@@ -1087,12 +1088,12 @@ watch(() => mig.value?.state, (s, prev) => {
     clearInterval(migTimer); migTimer = null
   }
   if (s === 'done' && prev === 'running') {
-    message()?.('运行台账目录迁移完成', 'success')
+    message()?.(t('运行台账目录迁移完成'), 'success')
     draft.runlog_dir = store.state?.runlog?.dir ?? ''
     void import('../store').then(m => m.refresh(true))
   }
   if (s === 'failed' && prev === 'running') {
-    message()?.('运行台账目录迁移失败，请查看错误后重试或改回原目录', 'error')
+    message()?.(t('运行台账目录迁移失败，请查看错误后重试或改回原目录'), 'error')
   }
 }, { immediate: true })
 
@@ -1100,7 +1101,7 @@ async function retryRunlogMigration(): Promise<void> {
   try {
     const r = await api.retryRunlogMigration()
     if (store.state) store.state.runlog_migration = r.migration
-    message()?.('已重新开始迁移')
+    message()?.(t('已重新开始迁移'))
   } catch (e: any) { message()?.(e.message, 'error') }
 }
 
@@ -1124,7 +1125,7 @@ function clearAuthPwd(): void {
 async function toggleAutostart(enabled: boolean): Promise<void> {
   try {
     await api.autostart(enabled)
-    message()?.('开机自启动已' + (enabled ? '开启' : '关闭'))
+    message()?.(t('开机自启动已') + (enabled ? t('开启') : t('关闭')))
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
@@ -1164,7 +1165,7 @@ async function saveTools(): Promise<void> {
       envVars[k] = v
     }
     if (skipped.length) {
-      message()?.(`以下行无法解析为 KEY=VALUE，已跳过：${skipped.join('；')}`, 'warning')
+      message()?.(tFmt('以下行无法解析为 KEY=VALUE，已跳过：{p0}', { p0: skipped.join('；') }), 'warning')
     }
     await api.config({
       tools: toolsPayload,
@@ -1187,7 +1188,7 @@ async function saveTools(): Promise<void> {
         artifacts_retention_days: localDebugDraft.artifacts_retention_days,
       },
     })
-    message()?.('工具 / 命令白名单 / 访问权限已保存并生效')
+    message()?.(t('工具 / 命令白名单 / 访问权限已保存并生效'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { toolsSaving.value = false }
   void import('../store').then(m => m.refresh(true))
@@ -1205,7 +1206,7 @@ function mirrorRows(cat: string): MirrorRowT[] {
   const builtinUrls = new Set(builtin.map(r => r.url))
   const customs: MirrorRowT[] = (mirrorCustom.value[cat] ?? [])
     .filter(u => !builtinUrls.has(u))
-    .map(u => ({ url: u, label: '用户添加', builtin: false, enabled: true, test_url: u }))
+    .map(u => ({ url: u, label: t('用户添加'), builtin: false, enabled: true, test_url: u }))
   return [...builtin, ...customs]
 }
 
@@ -1230,14 +1231,14 @@ function removeCustom(cat: string, url: string): void {
 function addCustom(): void {
   const url = addUrl.value.trim()
   if (!/^https?:\/\/\S+$/.test(url)) {
-    message()?.('请填写 http(s):// 开头、可直接访问的镜像 URL', 'error')
+    message()?.(t('请填写 http(s):// 开头、可直接访问的镜像 URL'), 'error')
     return
   }
   const list = mirrorCustom.value[addCat.value] ?? []
   if (list.includes(url)) { message()?.('该源已添加过', 'warning'); return }
   mirrorCustom.value = { ...mirrorCustom.value, [addCat.value]: [...list, url] }
   addUrl.value = ''
-  message()?.('已添加，点「保存镜像源配置」后生效（Agent 测速时会一并探测）')
+  message()?.(t('已添加，点「保存镜像源配置」后生效（Agent 测速时会一并探测）'))
 }
 
 /** 延迟徽标：≤800ms 绿 / ≤2500ms 黄 / 更慢或不可达红 / 未测灰 */
@@ -1272,7 +1273,7 @@ async function saveMirrors(): Promise<void> {
     const custom = Object.fromEntries(
       Object.entries(mirrorCustom.value).filter(([, v]) => v.length))
     await api.config({ mirrors: { custom, disabled: mirrorDisabled.value } })
-    message()?.('镜像源配置已保存并生效')
+    message()?.(t('镜像源配置已保存并生效'))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { mirrorsSaving.value = false }
   const m = await import('../store')
@@ -1287,7 +1288,7 @@ async function testMirrors(category?: string): Promise<void> {
     const r = await api.mirrorTest(category)
     mirrorSpeeds.value = r.speeds?.results ?? {}
     mirrorTestedAt.value = r.speeds?.tested_at ?? ''
-    message()?.(r.message || '测速完成', 'success')
+    message()?.(r.message || t('测速完成'), 'success')
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { mirrorTesting.value = false; mirrorTestingCat.value = null }
 }
@@ -1296,7 +1297,7 @@ async function applyMirrors(): Promise<void> {
   mirrorApplying.value = true
   try {
     const r = await api.mirrorApply()
-    message()?.(r.message || '已应用最快源', 'success')
+    message()?.(r.message || t('已应用最快源'), 'success')
     const m = await import('../store')
     await m.refresh(true)
     // env.vars 被后端覆盖：同步刷新环境变量草稿，
@@ -1327,7 +1328,7 @@ async function saveUpdate(): Promise<void> {
     // 三态：未触碰不带键（后端保留已存令牌）；触碰过按输入上报，空串 = 清除
     if (updTokenTouched.value) update.token = updDraft.token.trim()
     await api.config({ update })
-    message()?.('更新配置已保存')
+    message()?.(t('更新配置已保存'))
     updDraft.token = ''
     updTokenTouched.value = false
   } catch (e: any) { message()?.(e.message, 'error') }
@@ -1339,8 +1340,8 @@ async function checkUpdateNow(): Promise<void> {
   updChecking.value = true
   try {
     const r = await api.updateCheck()
-    if (r.phase === 'available') message()?.(`发现新版本 v${r.latest}，可点顶部「更新到 ${r.latest}」安装`, 'success')
-    else message()?.(`已是最新版本（v${r.current}）`, 'success')
+    if (r.phase === 'available') message()?.(tFmt('发现新版本 v{p0}，可点顶部「更新到 {p1}」安装', { p0: r.latest, p1: r.latest }), 'success')
+    else message()?.(tFmt('已是最新版本（v{p0}）', { p0: r.current }), 'success')
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { updChecking.value = false }
 }
@@ -1370,19 +1371,19 @@ function installPackage(): void {
   if (!localPkg.value) return
   const target = pkgVersion.value
   window.$dialog?.warning({
-    title: target ? `安装更新包 v${target}` : '安装更新包（版本未知）',
+    title: target ? tFmt('安装更新包 v{p0}', { p0: target }) : t('安装更新包（版本未知）'),
     content: `目标文件：${localPkg.value}\n\n注意：若正在执行任务会被中断。安装在后台静默进行`
       + '（全程无 UAC 弹窗，装回程序当前目录），完成后应用自动重启，本页面自动刷新。'
-      + '升级过程中出错会写安装日志并自动打开日志文档；全程无错误则不打开日志。',
-    positiveText: '安装更新包',
-    negativeText: '取消',
+      + t('升级过程中出错会写安装日志并自动打开日志文档；全程无错误则不打开日志。'),
+    positiveText: t('安装更新包'),
+    negativeText: t('取消'),
     onPositiveClick() {
       pkgInstalling.value = true
       api.updateInstall(localPkg.value)
         .then(() => {
           // 挂目标版本（未知按当前版本核对）；遮罩立即出现，应用回归后自动刷新
           beginRestartWait(target || store.state?.version || '')
-          message()?.('正在静默升级，应用将短暂离线并自动重启', 'success')
+          message()?.(t('正在静默升级，应用将短暂离线并自动重启'), 'success')
         })
         .catch((e: any) => { message()?.(e.message, 'error') })
         .finally(() => { pkgInstalling.value = false })
@@ -1428,7 +1429,7 @@ async function fetchModels(): Promise<void> {
       provider: draft.provider, base_url: draft.base_url.trim(), api_key: draft.api_key.trim(),
     })
     modelSpecs.value = r.models
-    message()?.(`已获取 ${r.models.length} 个模型：在「模型」框下拉选择，规格自动填充`)
+    message()?.(tFmt('已获取 {p0} 个模型：在「模型」框下拉选择，规格自动填充', { p0: r.models.length }))
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { fetching.value = false }
 }
@@ -1441,7 +1442,7 @@ async function testModel(): Promise<void> {
       provider: draft.provider, base_url: draft.base_url.trim(),
       api_key: draft.api_key.trim(), model: draft.model.trim(),
     })
-    message()?.(r.message || '连接成功', 'success')
+    message()?.(r.message || t('连接成功'), 'success')
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { testing.value = false }
 }
@@ -1454,11 +1455,11 @@ function onModelPick(v: string | null): void {
   if (m.context_window) draft.max_context_tokens = m.context_window
   if (m.max_output_tokens) draft.max_tokens = m.max_output_tokens
   if (m.context_window || m.max_output_tokens)
-    message()?.('已按该模型的规格自动填充上下文窗口与最大输出（可手改）')
+    message()?.(t('已按该模型的规格自动填充上下文窗口与最大输出（可手改）'))
 }
 
 const providerOptions = [
-  { label: 'openai（兼容协议）', value: 'openai' },
+  { label: t('openai（兼容协议）'), value: 'openai' },
   { label: 'anthropic', value: 'anthropic' },
 ]
 </script>
@@ -1497,17 +1498,17 @@ const providerOptions = [
       <section class="content">
         <div v-if="settingsSection === 'llm'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">smart_toy</i> 大模型接入</template>
+            <template #header><i class="ms">smart_toy</i> {{ t('大模型接入') }}</template>
       <div class="frow">
-        <div class="f1"><label>协议 provider</label>
+        <div class="f1"><label>{{ t('协议 provider') }}</label>
           <NSelect v-model:value="draft.provider" :options="providerOptions" /></div>
-        <div class="f2"><label>模型 model（下拉选择或输入过滤，支持自定义 id）</label>
+        <div class="f2"><label>{{ t('模型 model（下拉选择或输入过滤，支持自定义 id）') }}</label>
           <NSelect v-model:value="draft.model" :options="modelOptions" filterable tag
-                   placeholder="deepseek-chat 或获取列表后选择" @update:value="onModelPick" /></div>
+                   :placeholder="t('deepseek-chat 或获取列表后选择')" @update:value="onModelPick" /></div>
         <div class="f0"><label>&nbsp;</label>
           <div class="btnrow">
-            <NButton :loading="fetching" @click="fetchModels">获取列表</NButton>
-            <NButton :loading="testing" title="发送一条极短对话，验证网络/密钥/模型名是否可用" @click="testModel">测试连接</NButton>
+            <NButton :loading="fetching" @click="fetchModels">{{ t('获取列表') }}</NButton>
+            <NButton :loading="testing" :title="t('发送一条极短对话，验证网络/密钥/模型名是否可用')" @click="testModel">{{ t('测试连接') }}</NButton>
           </div></div>
       </div>
       <div class="modelspec" v-if="selectedSpec && (selectedSpec.context_window || selectedSpec.max_output_tokens)">
@@ -1515,7 +1516,7 @@ const providerOptions = [
         最大输出 {{ fmtTokens(selectedSpec.max_output_tokens) || '未知' }}（已自动填充到下方，可手改）
       </div>
       <div class="frow">
-        <div class="f2"><label>API 地址 base_url</label><NInput v-model:value="draft.base_url" :placeholder="draft.provider === 'anthropic' ? 'https://api.anthropic.com（自动补 /v1）' : 'https://api.deepseek.com/v1'" /></div>
+        <div class="f2"><label>{{ t('API 地址 base_url') }}</label><NInput v-model:value="draft.base_url" :placeholder="draft.provider === 'anthropic' ? 'https://api.anthropic.com（自动补 /v1）' : 'https://api.deepseek.com/v1'" /></div>
         <div class="f14"><label>API Key</label>
           <NInput v-model:value="draft.api_key" type="password" show-password-on="click"
                   :placeholder="apiKeyConfigured
@@ -1526,39 +1527,39 @@ const providerOptions = [
         Anthropic 协议：直接填官方/兼容服务公布的根地址即可，程序自动补 /v1（已含 /v1 则不重复）；多数兼容服务不提供 /models 列表端点，拉取 404 时直接手填模型名即可。
       </div>
       <div class="frow">
-        <div class="f1"><label>采样温度 temperature</label><NInputNumber v-model:value="draft.temperature" :step="0.1" :min="0" :max="2" /></div>
-        <div class="f1"><label>最大输出 max_tokens（拉取过模型列表时，上限跟随模型上报值）</label><NInputNumber v-model:value="draft.max_tokens" :step="256" :min="256" :max="selectedSpec?.max_output_tokens || 200000" /></div>
+        <div class="f1"><label>{{ t('采样温度 temperature') }}</label><NInputNumber v-model:value="draft.temperature" :step="0.1" :min="0" :max="2" /></div>
+        <div class="f1"><label>{{ t('最大输出 max_tokens（拉取过模型列表时，上限跟随模型上报值）') }}</label><NInputNumber v-model:value="draft.max_tokens" :step="256" :min="256" :max="selectedSpec?.max_output_tokens || 200000" /></div>
       </div>
       <div class="frow">
-        <div class="f1"><label>上下文窗口 max_context_tokens（上限同样跟随模型上报值）</label><NInputNumber v-model:value="draft.max_context_tokens" :step="1024" :min="4096" :max="selectedSpec?.context_window || 2000000" /></div>
-        <div class="f1"><label>请求超时（秒，-1 = 不超时，挂起时可用看板「强制停止」打断）</label><NInputNumber v-model:value="draft.timeout_seconds" :min="-1" :max="3600" /></div>
+        <div class="f1"><label>{{ t('上下文窗口 max_context_tokens（上限同样跟随模型上报值）') }}</label><NInputNumber v-model:value="draft.max_context_tokens" :step="1024" :min="4096" :max="selectedSpec?.context_window || 2000000" /></div>
+        <div class="f1"><label>{{ t('请求超时（秒，-1 = 不超时，挂起时可用看板「强制停止」打断）') }}</label><NInputNumber v-model:value="draft.timeout_seconds" :min="-1" :max="3600" /></div>
       </div>
       <label class="checkline" style="margin-bottom: 10px">
         <NSwitch v-model:value="draft.enable_thinking" />
         请求侧开启模型思考
-        <span class="hint">默认关闭：DeepSeek-R1 等推理模型会自动返回思考内容，无需开启。anthropic 需此项才会返回 thinking 块（预留一半 max_tokens 作思考预算）；OpenAI 兼容服务按 Qwen（enable_thinking）/ GLM（thinking）约定传参，不支持的服务请勿开启。</span>
+        <span class="hint">{{ t('默认关闭：DeepSeek-R1 等推理模型会自动返回思考内容，无需开启。anthropic 需此项才会返回 thinking 块（预留一半 max_tokens 作思考预算）；OpenAI 兼容服务按 Qwen（enable_thinking）/ GLM（thinking）约定传参，不支持的服务请勿开启。') }}</span>
       </label>
       <div class="sfoot">
-        <NButton type="primary" @click="saveLlm">保存模型配置</NButton>
+        <NButton type="primary" @click="saveLlm">{{ t('保存模型配置') }}</NButton>
       </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'profiles'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">group</i> 多模型项目小组 (Team Profiles)</template>
+            <template #header><i class="ms">group</i> {{ t('多模型项目小组 (Team Profiles)') }}</template>
             <div class="team-banner" style="background: rgba(91, 140, 255, 0.08); border: 1px solid rgba(91, 140, 255, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text);">
-              <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;"><i class="ms sm">lightbulb</i> 多模型 Agent 项目小组模式 (Team) 配置说明</div>
+              <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;"><i class="ms sm">lightbulb</i> {{ t('多模型 Agent 项目小组模式 (Team) 配置说明') }}</div>
               <div>
                 系统采用<b>「全局角色预设池 + 项目小队自由进驻」</b>的双层架构：
                 <ul style="margin: 4px 0 0 16px; padding: 0;">
-                  <li><b>全局层（此处）</b>：统一配置 <b>项目经理 (PM)</b>、<b>后端工程师</b>、<b>前端工程师</b>、<b>测试工程师 (QA)</b> 各自绑定的专属大模型（如 DeepSeek-R1、Claude 3.7、GPT-4o）与独立 API 密钥，一次配置后全系统共享；</li>
-                  <li><b>项目层进驻</b>：每个项目可独立决定是否启用小组模式。在「项目」页或「看板」卡片点击<b>「设置」→「多模型 Agent 项目小组模式 (Team)」</b>即可一键勾选启用小队进驻并自由调整成员名单。</li>
+                  <li><b>{{ t('全局层（此处）') }}</b>{{ t('：统一配置') }} <b>{{ t('项目经理 (PM)') }}</b>、<b>{{ t('后端工程师') }}</b>、<b>{{ t('前端工程师') }}</b>、<b>{{ t('测试工程师 (QA)') }}</b> {{ t('各自绑定的专属大模型（如 DeepSeek-R1、Claude 3.7、GPT-4o）与独立 API 密钥，一次配置后全系统共享；') }}</li>
+                  <li><b>{{ t('项目层进驻') }}</b>{{ t('：每个项目可独立决定是否启用小组模式。在「项目」页或「看板」卡片点击') }}<b>{{ t('「设置」→「多模型 Agent 项目小组模式 (Team)」') }}</b>{{ t('即可一键勾选启用小队进驻并自由调整成员名单。') }}</li>
                 </ul>
               </div>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
-              <span class="hint">配置不同专业职能角色的专属大模型与能力边界，进驻任意项目时可自由选用或局部微调。</span>
-              <NButton size="small" type="primary" secondary @click="addProfile">+ 新建角色预设</NButton>
+              <span class="hint">{{ t('配置不同专业职能角色的专属大模型与能力边界，进驻任意项目时可自由选用或局部微调。') }}</span>
+              <NButton size="small" type="primary" secondary @click="addProfile">{{ t('+ 新建角色预设') }}</NButton>
             </div>
 
             <div class="profiles-container">
@@ -1570,12 +1571,12 @@ const providerOptions = [
                     <NTag size="tiny" round type="info">{{ prof.role.toUpperCase() }}</NTag>
                     <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">ID: {{ pid }}</NTag>
                     <span class="hint" v-if="prof.llm?.model" style="display:inline-flex; align-items:center;">· 模型: {{ prof.llm.model }}</span>
-                    <span class="hint" v-else style="display:inline-flex; align-items:center;">· 继承全局模型</span>
+                    <span class="hint" v-else style="display:inline-flex; align-items:center;">{{ t('· 继承全局模型') }}</span>
                   </div>
                   <div class="group-ops" @click.stop>
-                    <NButton size="tiny" secondary :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)">获取模型列表</NButton>
-                    <NButton size="tiny" secondary :loading="profileTestingId === pid" @click="testProfileModel(pid)">测试连接</NButton>
-                    <NButton size="tiny" quaternary type="error" @click="removeProfile(pid)">删除</NButton>
+                    <NButton size="tiny" secondary :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)">{{ t('获取模型列表') }}</NButton>
+                    <NButton size="tiny" secondary :loading="profileTestingId === pid" @click="testProfileModel(pid)">{{ t('测试连接') }}</NButton>
+                    <NButton size="tiny" quaternary type="error" @click="removeProfile(pid)">{{ t('删除') }}</NButton>
                     <span style="font-size: 12px; color: var(--dim)"><i class="ms sm">{{ editingProfileId === pid ? 'expand_less' : 'edit' }}</i> {{ editingProfileId === pid ? '收起' : '编辑' }}</span>
                   </div>
                 </div>
@@ -1583,22 +1584,22 @@ const providerOptions = [
                 <div v-if="editingProfileId === pid" style="padding: 12px; border-top: 1px solid var(--line); background: var(--card);">
                   <div class="frow">
                     <div class="f1">
-                      <label>预设名称</label>
-                      <NInput v-model:value="prof.name" placeholder="如 资深后端开发" />
+                      <label>{{ t('预设名称') }}</label>
+                      <NInput v-model:value="prof.name" :placeholder="t('如 资深后端开发')" />
                     </div>
                     <div class="f1">
-                      <label>职能角色</label>
+                      <label>{{ t('职能角色') }}</label>
                       <NSelect v-model:value="prof.role" :options="roleSelectOptions" />
                     </div>
                     <div class="f14">
-                      <label>职责简介（将展示在团队名册）</label>
-                      <NInput v-model:value="prof.description" placeholder="负责接口与业务逻辑实现" />
+                      <label>{{ t('职责简介（将展示在团队名册）') }}</label>
+                      <NInput v-model:value="prof.description" :placeholder="t('负责接口与业务逻辑实现')" />
                     </div>
                   </div>
 
                   <div class="frow" style="margin-top: 8px">
                     <div class="f1">
-                      <label>协议 provider（留空继承全局）</label>
+                      <label>{{ t('协议 provider（留空继承全局）') }}</label>
                       <NSelect v-model:value="prof.llm.provider" :options="[
                         { label: '继承全局', value: '' },
                         { label: 'openai（兼容协议）', value: 'openai' },
@@ -1607,8 +1608,8 @@ const providerOptions = [
                     </div>
                     <div class="f1">
                       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <label style="margin:0">模型名 model（留空继承全局）</label>
-                        <NButton size="tiny" quaternary type="primary" :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)" style="font-size:11px; padding:0 4px">获取模型列表</NButton>
+                        <label style="margin:0">{{ t('模型名 model（留空继承全局）') }}</label>
+                        <NButton size="tiny" quaternary type="primary" :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)" style="font-size:11px; padding:0 4px">{{ t('获取模型列表') }}</NButton>
                       </div>
                       <NSelect
                         v-model:value="prof.llm.model"
@@ -1621,71 +1622,71 @@ const providerOptions = [
                       />
                     </div>
                     <div class="f14">
-                      <label>接口 base_url（留空继承全局）</label>
+                      <label>{{ t('接口 base_url（留空继承全局）') }}</label>
                       <NInput v-model:value="prof.llm.base_url" placeholder="https://api.deepseek.com/v1" />
                     </div>
                   </div>
 
                   <div class="frow" style="margin-top: 8px">
                     <div class="f2">
-                      <label>API Key（留空继承全局或保持已配置密钥）</label>
+                      <label>{{ t('API Key（留空继承全局或保持已配置密钥）') }}</label>
                       <NInput v-model:value="prof.llm.api_key" type="password" show-password-on="click"
                               :placeholder="prof.llm.api_key_configured ? `已配置（${prof.llm.api_key_masked}），留空保持` : 'sk-...'"
                               @update:value="profilesTouchedKeys[pid] = true" />
                     </div>
                     <div class="f1">
-                      <label>单任务轮数上限（留空用默认）</label>
-                      <NInputNumber v-model:value="prof.max_turns" :min="-1" :max="200" placeholder="默认" />
+                      <label>{{ t('单任务轮数上限（留空用默认）') }}</label>
+                      <NInputNumber v-model:value="prof.max_turns" :min="-1" :max="200" :placeholder="t('默认')" />
                     </div>
                   </div>
 
                   <div v-if="prof.role === 'qa'" style="margin-top: 6px;">
                     <label class="checkline">
                       <NSwitch size="small" v-model:value="prof.allow_test_scripts" />
-                      <span>允许测试工程师编写/补充自动化测试脚本（开启后允许 QA 新增测试目录脚本并纳入提交）</span>
+                      <span>{{ t('允许测试工程师编写/补充自动化测试脚本（开启后允许 QA 新增测试目录脚本并纳入提交）') }}</span>
                     </label>
                   </div>
 
                   <div style="margin-top: 8px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                      <label style="font-size: 12px; color: var(--dim); margin: 0;">角色专属补充提示词（注入该角色系统提示词）</label>
-                      <NButton size="tiny" quaternary type="primary" @click="loadRolePromptTemplate(prof)" style="font-size: 11.5px; padding: 0 4px;"><i class="ms sm">description</i> 载入内置角色模版（类似 AGENT.md）</NButton>
+                      <label style="font-size: 12px; color: var(--dim); margin: 0;">{{ t('角色专属补充提示词（注入该角色系统提示词）') }}</label>
+                      <NButton size="tiny" quaternary type="primary" @click="loadRolePromptTemplate(prof)" style="font-size: 11.5px; padding: 0 4px;"><i class="ms sm">description</i> {{ t('载入内置角色模版（类似 AGENT.md）') }}</NButton>
                     </div>
                     <NInput v-model:value="prof.extra_prompt" type="textarea" :rows="4" :autosize="{ minRows: 3, maxRows: 14 }"
-                            placeholder="如：工作流与协作规范、测试要求、编码风格与交付验收标准..." />
+                            :placeholder="t('如：工作流与协作规范、测试要求、编码风格与交付验收标准...')" />
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="sfoot" style="margin-top: 14px;">
-              <NButton type="primary" :loading="profilesSaving" @click="saveProfiles">保存角色预设池</NButton>
+              <NButton type="primary" :loading="profilesSaving" @click="saveProfiles">{{ t('保存角色预设池') }}</NButton>
             </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'sched'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">schedule</i> 调度与看板</template>
+            <template #header><i class="ms">schedule</i> {{ t('调度与看板') }}</template>
       <div class="frow">
-        <div class="f1"><label>扫描间隔（秒，30~86400）</label><NInputNumber v-model:value="draft.interval" :min="30" :max="86400" /></div>
-        <div class="f1"><label>并行 Agent 数（1~16）</label><NInputNumber v-model:value="draft.parallel" :min="1" :max="16" /></div>
-        <div class="f1"><label>看板端口（下次启动生效）</label><NInputNumber v-model:value="draft.port" :min="1" :max="65535" /></div>
+        <div class="f1"><label>{{ t('扫描间隔（秒，30~86400）') }}</label><NInputNumber v-model:value="draft.interval" :min="30" :max="86400" /></div>
+        <div class="f1"><label>{{ t('并行 Agent 数（1~16）') }}</label><NInputNumber v-model:value="draft.parallel" :min="1" :max="16" /></div>
+        <div class="f1"><label>{{ t('看板端口（下次启动生效）') }}</label><NInputNumber v-model:value="draft.port" :min="1" :max="65535" /></div>
       </div>
       <div class="frow">
-        <div class="f1"><label>日志保留（天，0 为关闭自动归档清理，保存后立即执行）</label>
+        <div class="f1"><label>{{ t('日志保留（天，0 为关闭自动归档清理，保存后立即执行）') }}</label>
           <NInputNumber v-model:value="draft.retention" :min="0" :max="365" /></div>
-        <div class="f1"><label>日志总占用上限（MB，超出从最旧删起，0 为不限制）</label>
+        <div class="f1"><label>{{ t('日志总占用上限（MB，超出从最旧删起，0 为不限制）') }}</label>
           <NInputNumber v-model:value="draft.max_total_mb" :min="0" :max="100000" /></div>
       </div>
       <div class="frow">
-        <div class="f1"><label>看板登录密码（非空时访问页面/API 均需先登录，保存后立即生效）</label>
+        <div class="f1"><label>{{ t('看板登录密码（非空时访问页面/API 均需先登录，保存后立即生效）') }}</label>
           <NInput :value="authPwd" type="password" show-password-on="click"
                   :placeholder="store.state.web_cfg.auth_enabled
                     ? '已设置，留空保持不变' : '未设置（免登录；外网部署务必设置）'"
                   @update:value="onPwdInput" /></div>
         <div class="f0 pwd-btns">
           <NButton v-if="store.state.web_cfg.auth_enabled" size="small" quaternary
-                   type="error" :disabled="authPwdClear" @click="clearAuthPwd">清除密码（关闭鉴权）</NButton>
+                   type="error" :disabled="authPwdClear" @click="clearAuthPwd">{{ t('清除密码（关闭鉴权）') }}</NButton>
         </div>
       </div>
       <div class="hint pwd-hint" v-if="authPwdClear">
@@ -1694,54 +1695,54 @@ const providerOptions = [
       <div class="hint pwd-hint" v-else-if="authPwdTouched">
         将在保存后启用/更新登录密码，所有已登录会话立即失效，需用新密码重新登录。
       </div>
-      <div class="sfoot"><NButton type="primary" @click="saveSched">保存调度配置</NButton></div>
+      <div class="sfoot"><NButton type="primary" @click="saveSched">{{ t('保存调度配置') }}</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'notify'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">notifications</i> 提醒设置</template>
+            <template #header><i class="ms">notifications</i> {{ t('提醒设置') }}</template>
       <div class="frow">
         <div class="f1"><label class="checkline">
           <NSwitch v-model:value="notifyDraft.sound" />
           提示音
-          <span class="hint">完成/受阻时播程序内置提示音（完成「叮咚」，受阻警示音；随程序分发，不跟随系统声音方案），音频缺失时回退 Windows 系统音。</span>
+          <span class="hint">{{ t('完成/受阻时播程序内置提示音（完成「叮咚」，受阻警示音；随程序分发，不跟随系统声音方案），音频缺失时回退 Windows 系统音。') }}</span>
         </label></div>
         <div class="f1"><label class="checkline">
           <NSwitch v-model:value="notifyDraft.system" />
           系统通知
-          <span class="hint">完成/受阻时弹托盘气泡，看板没开也能收到；--no-tray 启动时无渠道。</span>
+          <span class="hint">{{ t('完成/受阻时弹托盘气泡，看板没开也能收到；--no-tray 启动时无渠道。') }}</span>
         </label></div>
       </div>
-      <div class="sfoot"><NButton type="primary" :loading="notifySaving" @click="saveNotify">保存提醒设置</NButton></div>
+      <div class="sfoot"><NButton type="primary" :loading="notifySaving" @click="saveNotify">{{ t('保存提醒设置') }}</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'masking'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">security</i> 数据脱敏</template>
+            <template #header><i class="ms">security</i> {{ t('数据脱敏') }}</template>
       <label class="checkline">
         <NSwitch v-model:value="maskingDraft.enabled" />
         启用脱敏
-        <span class="hint">发送模型厂商前在本地掩除密码/密钥等敏感信息（高置信规则：sk-/ghp_/glpat-/AKIA/AIza/xox-/JWT/PEM 私钥块/Bearer/URL token 参数/连接串密码段）。处理只在内存中进行，不写磁盘、不进日志；模型写回的占位符在落盘前自动还原原文，任务结束即清除映射。</span>
+        <span class="hint">{{ t('发送模型厂商前在本地掩除密码/密钥等敏感信息（高置信规则：sk-/ghp_/glpat-/AKIA/AIza/xox-/JWT/PEM 私钥块/Bearer/URL token 参数/连接串密码段）。处理只在内存中进行，不写磁盘、不进日志；模型写回的占位符在落盘前自动还原原文，任务结束即清除映射。') }}</span>
       </label>
       <label class="checkline">
         <NSwitch v-model:value="maskingDraft.enhanced_rules" />
         键值对增强规则
-        <span class="hint">掩除 api_key=xxx、"password": "xxx" 等键值对的值（键保留）。覆盖面广但误伤面也大——文档示例、测试夹具里的假密钥同样会被替换，模型将读到占位符而非原文，默认关闭，确认工作区无此类内容再开启。</span>
+        <span class="hint">{{ t('掩除 api_key=xxx、"password": "xxx" 等键值对的值（键保留）。覆盖面广但误伤面也大——文档示例、测试夹具里的假密钥同样会被替换，模型将读到占位符而非原文，默认关闭，确认工作区无此类内容再开启。') }}</span>
       </label>
       <div class="frow">
         <div class="f1">
-          <label>自定义脱敏正则（每行一条，整段匹配替换；≤20 条、每条 ≤500 字符）</label>
+          <label>{{ t('自定义脱敏正则（每行一条，整段匹配替换；≤20 条、每条 ≤500 字符）') }}</label>
           <NInput v-model:value="maskingDraft.patternsText" type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"
-                  placeholder="例：PROJECT_SECRET_[A-Za-z0-9]{16,}" />
+                  :placeholder="t('例：PROJECT_SECRET_[A-Za-z0-9]{16,}')" />
         </div>
       </div>
-      <div class="sfoot"><NButton type="primary" :loading="maskingSaving" @click="saveMasking">保存脱敏设置</NButton></div>
+      <div class="sfoot"><NButton type="primary" :loading="maskingSaving" @click="saveMasking">{{ t('保存脱敏设置') }}</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'runlog'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">receipt_long</i> 运行台账（RunLog）</template>
+            <template #header><i class="ms">receipt_long</i> {{ t('运行台账（RunLog）') }}</template>
             <div v-if="runlogBusy || mig?.state === 'failed'" class="migbox">
               <NProgress type="line" :percentage="migPercent" :processing="runlogBusy"
                          :status="mig?.state === 'failed' ? 'error' : 'default'" />
@@ -1754,29 +1755,29 @@ const providerOptions = [
                 <template v-else>
                   迁移失败：{{ mig?.error || '未知错误' }}
                   <NButton size="tiny" type="warning" style="margin-left:8px"
-                           @click="retryRunlogMigration">重试迁移</NButton>
+                           @click="retryRunlogMigration">{{ t('重试迁移') }}</NButton>
                 </template>
               </div>
             </div>
             <label class="checkline">
               <NSwitch v-model:value="draft.runlog_enabled" :disabled="runlogBusy" />
               启用运行台账
-              <span class="hint">每个任务一轮执行生成一个 run 目录：事件流 + diff + 测试输出 + 审查结论 + 用量。用于看板「任务详情 → 运行记录」回放；关闭后不再记录，不影响任务执行。</span>
+              <span class="hint">{{ t('每个任务一轮执行生成一个 run 目录：事件流 + diff + 测试输出 + 审查结论 + 用量。用于看板「任务详情 → 运行记录」回放；关闭后不再记录，不影响任务执行。') }}</span>
             </label>
             <div class="frow">
-              <div class="f1"><label>保留天数（0 为不按时间清理）</label>
+              <div class="f1"><label>{{ t('保留天数（0 为不按时间清理）') }}</label>
                 <NInputNumber v-model:value="draft.runlog_retention" :min="0" :max="3650"
                               :disabled="runlogBusy" /></div>
-              <div class="f1"><label>总占用上限（MB，超出从最旧 run 删起，0 为不限制）</label>
+              <div class="f1"><label>{{ t('总占用上限（MB，超出从最旧 run 删起，0 为不限制）') }}</label>
                 <NInputNumber v-model:value="draft.runlog_max_mb" :min="0" :max="100000"
                               :disabled="runlogBusy" /></div>
             </div>
             <div class="frow">
-              <div class="f1"><label>台账目录（留空 = 配置文件同级 runs/；改目录会自动迁移历史记录）</label>
+              <div class="f1"><label>{{ t('台账目录（留空 = 配置文件同级 runs/；改目录会自动迁移历史记录）') }}</label>
                 <div class="pathline">
                   <NInput v-model:value="draft.runlog_dir" :disabled="runlogBusy"
-                          placeholder="留空使用默认目录；也可输入绝对路径" />
-                  <NButton :disabled="runlogBusy" @click="pickRunlogDir">浏览…</NButton>
+                          :placeholder="t('留空使用默认目录；也可输入绝对路径')" />
+                  <NButton :disabled="runlogBusy" @click="pickRunlogDir">{{ t('浏览…') }}</NButton>
                 </div>
               </div>
             </div>
@@ -1785,87 +1786,87 @@ const providerOptions = [
               迁移期间台账设置与回放按钮会锁定并显示进度。
             </div>
             <div class="sfoot"><NButton type="primary" :loading="runlogSaving"
-                                        :disabled="runlogBusy" @click="saveRunlog">保存运行台账设置</NButton></div>
+                                        :disabled="runlogBusy" @click="saveRunlog">{{ t('保存运行台账设置') }}</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'budget'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">savings</i> 预算与成本</template>
+            <template #header><i class="ms">savings</i> {{ t('预算与成本') }}</template>
             <label class="checkline">
               <NSwitch v-model:value="draft.budget_enabled" />
               启用预算硬闸
-              <span class="hint">超限立即停止本次执行（任务标记为受阻，原因 budget_exceeded），保留 worktree 成果；项目当日用尽后暂停领取新任务。默认关闭。</span>
+              <span class="hint">{{ t('超限立即停止本次执行（任务标记为受阻，原因 budget_exceeded），保留 worktree 成果；项目当日用尽后暂停领取新任务。默认关闭。') }}</span>
             </label>
             <div class="frow">
-              <div class="f1"><label>单任务 token 上限（prompt + completion，0 = 不限制）</label>
+              <div class="f1"><label>{{ t('单任务 token 上限（prompt + completion，0 = 不限制）') }}</label>
                 <NInputNumber v-model:value="draft.budget_task_tokens" :min="0" :max="1000000000" /></div>
-              <div class="f1"><label>项目当日 token 上限（本地自然日，0 = 不限制）</label>
+              <div class="f1"><label>{{ t('项目当日 token 上限（本地自然日，0 = 不限制）') }}</label>
                 <NInputNumber v-model:value="draft.budget_day_tokens" :min="0" :max="10000000000" /></div>
-              <div class="f1"><label>单任务成本上限（元，需在 config.yaml 的 budget.prices 配单价）</label>
+              <div class="f1"><label>{{ t('单任务成本上限（元，需在 config.yaml 的 budget.prices 配单价）') }}</label>
                 <NInputNumber v-model:value="draft.budget_task_cost" :min="0" :max="1000000000" /></div>
             </div>
             <div class="hint">
               成本只对配置了单价的模型计算（`budget.prices: {模型名: {prompt: 元/百万, completion: 元/百万}}`，单价表当前在 config.yaml 维护）。
               预算超限不是失败：任务停在受阻，调高预算后重新入队即可续跑。
             </div>
-            <label style="margin-top:6px">各项目今日用量</label>
+            <label style="margin-top:6px">{{ t('各项目今日用量') }}</label>
             <div class="budget-today">
               <div v-for="(v, k) in (store.state.budget_today || {})" :key="k" class="budget-row">
                 <span class="budget-name">{{ k }}</span>
                 <span>{{ fmtTokens(v.total_tokens || 0) }} tokens</span>
                 <span>¥{{ (v.cost_cny || 0).toFixed(4) }}</span>
               </div>
-              <div v-if="!Object.keys(store.state.budget_today || {}).length" class="hint">今日暂无用量记录</div>
+              <div v-if="!Object.keys(store.state.budget_today || {}).length" class="hint">{{ t('今日暂无用量记录') }}</div>
             </div>
-            <div class="sfoot"><NButton type="primary" :loading="budgetSaving" @click="saveBudget">保存预算设置</NButton></div>
+            <div class="sfoot"><NButton type="primary" :loading="budgetSaving" @click="saveBudget">{{ t('保存预算设置') }}</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'resilience'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">health_and_safety</i> 熔断与恢复</template>
+            <template #header><i class="ms">health_and_safety</i> {{ t('熔断与恢复') }}</template>
             <label class="checkline">
               <NSwitch v-model:value="draft.res_enabled" />
               启用熔断停机
-              <span class="hint">连续失败或窗口失败率超阈值时，项目暂停领取新任务；正在跑的任务允许收尾。默认需要人工恢复，避免自动重启掩盖系统性故障。</span>
+              <span class="hint">{{ t('连续失败或窗口失败率超阈值时，项目暂停领取新任务；正在跑的任务允许收尾。默认需要人工恢复，避免自动重启掩盖系统性故障。') }}</span>
             </label>
             <div class="frow">
-              <div class="f1"><label>连续失败阈值（0 = 不按此规则）</label>
+              <div class="f1"><label>{{ t('连续失败阈值（0 = 不按此规则）') }}</label>
                 <NInputNumber v-model:value="draft.res_consec" :min="0" :max="100" /></div>
-              <div class="f1"><label>失败率统计窗口（分钟）</label>
+              <div class="f1"><label>{{ t('失败率统计窗口（分钟）') }}</label>
                 <NInputNumber v-model:value="draft.res_window" :min="1" :max="1440" /></div>
             </div>
             <div class="frow">
-              <div class="f1"><label>窗口失败率阈值（%，0 = 不按此规则）</label>
+              <div class="f1"><label>{{ t('窗口失败率阈值（%，0 = 不按此规则）') }}</label>
                 <NInputNumber v-model:value="draft.res_rate_pct" :min="0" :max="100" /></div>
-              <div class="f1"><label>窗口最少样本数</label>
+              <div class="f1"><label>{{ t('窗口最少样本数') }}</label>
                 <NInputNumber v-model:value="draft.res_samples" :min="1" :max="1000" /></div>
             </div>
             <label class="checkline">
               <NSwitch v-model:value="draft.res_auto" />
               窗口结束后自动恢复
-              <span class="hint">默认关闭：熔断后必须人工点「恢复」。开启后暂停满一个窗口自动恢复一次（清空旧失败记录）。</span>
+              <span class="hint">{{ t('默认关闭：熔断后必须人工点「恢复」。开启后暂停满一个窗口自动恢复一次（清空旧失败记录）。') }}</span>
             </label>
-            <label style="margin-top:6px">当前暂停的项目</label>
+            <label style="margin-top:6px">{{ t('当前暂停的项目') }}</label>
             <div class="budget-today">
               <div v-for="p in pausedProjects" :key="p.name" class="budget-row">
                 <span class="budget-name">{{ p.name }} · {{ p.health?.pause_reason || '已暂停' }}</span>
-                <NButton size="tiny" type="warning" @click="resumeProject(p.name)">恢复</NButton>
+                <NButton size="tiny" type="warning" @click="resumeProject(p.name)">{{ t('恢复') }}</NButton>
               </div>
-              <div v-if="!pausedProjects.length" class="hint">当前没有暂停的项目</div>
+              <div v-if="!pausedProjects.length" class="hint">{{ t('当前没有暂停的项目') }}</div>
             </div>
-            <div class="sfoot"><NButton type="primary" :loading="resilienceSaving" @click="saveResilience">保存熔断设置</NButton></div>
+            <div class="sfoot"><NButton type="primary" :loading="resilienceSaving" @click="saveResilience">{{ t('保存熔断设置') }}</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'audit'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">history</i> 审计日志</template>
+            <template #header><i class="ms">history</i> {{ t('审计日志') }}</template>
             <div class="frow">
-              <div class="f1"><label>动作过滤（如 task / project / auth）</label>
-                <NInput v-model:value="auditAction" placeholder="留空 = 全部" /></div>
-              <div class="f1"><label>操作者过滤（user / api_key / local）</label>
-                <NInput v-model:value="auditActor" placeholder="留空 = 全部" /></div>
+              <div class="f1"><label>{{ t('动作过滤（如 task / project / auth）') }}</label>
+                <NInput v-model:value="auditAction" :placeholder="t('留空 = 全部')" /></div>
+              <div class="f1"><label>{{ t('操作者过滤（user / api_key / local）') }}</label>
+                <NInput v-model:value="auditActor" :placeholder="t('留空 = 全部')" /></div>
               <div class="f1" style="justify-content:flex-end">
-                <NButton type="primary" secondary :loading="auditLoading" @click="loadAudit">刷新</NButton>
+                <NButton type="primary" secondary :loading="auditLoading" @click="loadAudit">{{ t('刷新') }}</NButton>
               </div>
             </div>
             <div class="audit-list">
@@ -1877,7 +1878,7 @@ const providerOptions = [
                 <NTag size="tiny" :bordered="false"
                       :type="e.result === 'ok' ? 'success' : 'error'">{{ e.result }}</NTag>
               </div>
-              <div v-if="!auditLoading && !auditEntries.length" class="hint">暂无审计记录</div>
+              <div v-if="!auditLoading && !auditEntries.length" class="hint">{{ t('暂无审计记录') }}</div>
             </div>
             <div class="hint">
               只展示最近记录；完整日志在数据目录 `logs/audit.jsonl`。参数只记摘要，不记密码、API Key 或任务正文。
@@ -1886,60 +1887,60 @@ const providerOptions = [
         </div>
         <div v-if="settingsSection === 'review'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">rate_review</i> 任务审查（Review Agent）</template>
+            <template #header><i class="ms">rate_review</i> {{ t('任务审查（Review Agent）') }}</template>
       <label class="checkline">
         <NSwitch v-model:value="reviewDraft.enabled" />
         启用审查（配置审查模型后即对全部项目默认生效；项目可单独关闭）
       </label>
       <template v-if="reviewDraft.enabled">
         <div class="frow" style="margin-top:8px">
-          <div class="f1"><label>协议 provider</label>
+          <div class="f1"><label>{{ t('协议 provider') }}</label>
             <NSelect v-model:value="reviewDraft.provider" :options="[
               { label: 'openai（兼容协议）', value: 'openai' },
               { label: 'anthropic', value: 'anthropic' },
             ]" /></div>
-          <div class="f2"><label>审查模型 model（必须与任务模型不同）</label>
+          <div class="f2"><label>{{ t('审查模型 model（必须与任务模型不同）') }}</label>
             <NSelect v-model:value="reviewDraft.model" :options="reviewModelOptions.map(m => ({ label: m.id, value: m.id }))"
-                     filterable tag clearable placeholder="如 deepseek-chat / glm-4-flash（可配便宜小模型）"
+                     filterable tag clearable :placeholder="t('如 deepseek-chat / glm-4-flash（可配便宜小模型）')"
                      @update:value="(v: string | null) => { reviewDraft.model = v || '' }" /></div>
         </div>
         <div class="frow">
-          <div class="f1"><label>接口 base_url</label>
+          <div class="f1"><label>{{ t('接口 base_url') }}</label>
             <NInput v-model:value="reviewDraft.base_url" placeholder="https://api.deepseek.com/v1" /></div>
-          <div class="f1"><label>密钥 api_key</label>
+          <div class="f1"><label>{{ t('密钥 api_key') }}</label>
             <NInput v-model:value="reviewDraft.api_key" type="password" show-password-on="click"
                     :placeholder="reviewKeyConfigured && reviewKeyMasked ? `已配置（${reviewKeyMasked}），留空保持原值` : '审查模型服务密钥'"
                     @update:value="reviewKeyTouched = true" /></div>
         </div>
         <div class="frow">
-          <div class="f1"><label>单次审查轮数上限（max_turns）</label>
-            <NInputNumber v-model:value="reviewDraft.max_turns" :min="-1" :max="100" placeholder="-1 为不限" />
-            <div class="hint" style="margin-top:2px">单次审查工具交互轮次上限（-1 为不限，默认 10）</div></div>
-          <div class="f1"><label>返工审查轮数上限（全局默认，-1 为不上限）</label>
-            <NInputNumber v-model:value="reviewDraft.max_review_rounds" :min="-1" :max="10" placeholder="-1 为不限" />
-            <div class="hint" style="margin-top:2px">不通过累计达到上限转受阻（-1 表示不上限持续返工）</div></div>
+          <div class="f1"><label>{{ t('单次审查轮数上限（max_turns）') }}</label>
+            <NInputNumber v-model:value="reviewDraft.max_turns" :min="-1" :max="100" :placeholder="t('-1 为不限')" />
+            <div class="hint" style="margin-top:2px">{{ t('单次审查工具交互轮次上限（-1 为不限，默认 10）') }}</div></div>
+          <div class="f1"><label>{{ t('返工审查轮数上限（全局默认，-1 为不上限）') }}</label>
+            <NInputNumber v-model:value="reviewDraft.max_review_rounds" :min="-1" :max="10" :placeholder="t('-1 为不限')" />
+            <div class="hint" style="margin-top:2px">{{ t('不通过累计达到上限转受阻（-1 表示不上限持续返工）') }}</div></div>
         </div>
         <label class="checkline stack">
           <NSwitch v-model:value="reviewDraft.allow_test_commands" />
           审查可执行测试命令
-          <span class="hint">审查 agent 可用 run_command 实测验证（受项目命令白名单与访问权限审批约束）；关闭=纯只读审查。</span>
+          <span class="hint">{{ t('审查 agent 可用 run_command 实测验证（受项目命令白名单与访问权限审批约束）；关闭=纯只读审查。') }}</span>
         </label>
         <label class="checkline stack">
           <NSwitch v-model:value="reviewDraft.squash_merge" />
           返工通过后收敛提交
-          <span class="hint">返工任务的多个 WIP 提交在通过审查后 merge --squash 收敛为单提交；关闭=保留 --no-ff 合并。</span>
+          <span class="hint">{{ t('返工任务的多个 WIP 提交在通过审查后 merge --squash 收敛为单提交；关闭=保留 --no-ff 合并。') }}</span>
         </label>
         <div class="btnrow" style="margin-top:6px">
-          <NButton size="small" :loading="reviewFetching" @click="fetchReviewModelList">获取模型列表</NButton>
-          <span class="hint">审查与任务使用不同模型交叉验证，防止「自审自批」；后端保存时强制校验互斥。</span>
+          <NButton size="small" :loading="reviewFetching" @click="fetchReviewModelList">{{ t('获取模型列表') }}</NButton>
+          <span class="hint">{{ t('审查与任务使用不同模型交叉验证，防止「自审自批」；后端保存时强制校验互斥。') }}</span>
         </div>
       </template>
-      <div class="sfoot"><NButton type="primary" :loading="reviewSaving" @click="saveReview">保存审查配置</NButton></div>
+      <div class="sfoot"><NButton type="primary" :loading="reviewSaving" @click="saveReview">{{ t('保存审查配置') }}</NButton></div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'tools'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">handyman</i> Agent 工具与访问权限</template>
+            <template #header><i class="ms">handyman</i> {{ t('Agent 工具与访问权限') }}</template>
             <!-- 一级：四大核心分类 Tab -->
             <div style="margin-bottom: 14px;">
               <NTabs v-model:value="toolsTab" type="segment" size="small" class="tools-tabs">
@@ -1967,15 +1968,15 @@ const providerOptions = [
                     </NTag>
                   </template>
                 </NTabPane>
-                <NTabPane name="perms"><template #tab><i class="ms">lock</i> 权限模式与环境</template></NTabPane>
+                <NTabPane name="perms"><template #tab><i class="ms">lock</i> {{ t('权限模式与环境') }}</template></NTabPane>
               </NTabs>
             </div>
 
             <!-- TAB 1: Agent 工具能力 (Core & Extended Tools) -->
             <div v-show="toolsTab === 'tools'" class="tab-content">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
-                <span class="hint">控制 Agent 在任务中可调用的内置核心工具；关闭的工具不会下发给大模型提示词。</span>
-                <NInput v-model:value="toolSearch" size="small" placeholder="搜索工具名称或描述..." clearable style="width: 240px;" />
+                <span class="hint">{{ t('控制 Agent 在任务中可调用的内置核心工具；关闭的工具不会下发给大模型提示词。') }}</span>
+                <NInput v-model:value="toolSearch" size="small" :placeholder="t('搜索工具名称或描述...')" clearable style="width: 240px;" />
               </div>
 
               <div class="tool-groups-container">
@@ -1984,8 +1985,8 @@ const providerOptions = [
                   <div class="group-header">
                     <div class="group-title-wrap">
                       <span class="group-icon"><i class="ms sm">bolt</i></span>
-                      <span class="group-title">子代理并发预算</span>
-                      <span class="group-desc">限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；撞 429 自动对半降并发，成功后逐步爬回。</span>
+                      <span class="group-title">{{ t('子代理并发预算') }}</span>
+                      <span class="group-desc">{{ t('限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；撞 429 自动对半降并发，成功后逐步爬回。') }}</span>
                     </div>
                     <div class="group-ops">
                       <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
@@ -1995,11 +1996,11 @@ const providerOptions = [
                   </div>
                   <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-end; padding-top: 2px;">
                     <div class="f1" style="margin:0;">
-                      <label>最大并发请求数（1~16，同一模型+密钥共享）</label>
+                      <label>{{ t('最大并发请求数（1~16，同一模型+密钥共享）') }}</label>
                       <NInputNumber v-model:value="subagentDraft.max_parallel" :min="1" :max="16" size="small" style="width: 120px;" />
                     </div>
                     <div class="f1" style="margin:0;">
-                      <label>按 429 / Retry-After 自适应降速（厂商不返回限流头时也有效）</label>
+                      <label>{{ t('按 429 / Retry-After 自适应降速（厂商不返回限流头时也有效）') }}</label>
                       <NSwitch size="small" v-model:value="subagentDraft.adaptive" />
                     </div>
                   </div>
@@ -2016,8 +2017,8 @@ const providerOptions = [
                       <NTag size="small" round :type="getGroupToolsCount(cat.tools).enabled === getGroupToolsCount(cat.tools).total ? 'success' : 'warning'">
                         已启用 {{ getGroupToolsCount(cat.tools).enabled }} / {{ getGroupToolsCount(cat.tools).total }}
                       </NTag>
-                      <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, true)">全选</NButton>
-                      <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, false)">全关</NButton>
+                      <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, true)">{{ t('全选') }}</NButton>
+                      <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, false)">{{ t('全关') }}</NButton>
                     </div>
                   </div>
                   <div class="group-items-grid">
@@ -2042,8 +2043,8 @@ const providerOptions = [
                   <div class="group-header" style="border-bottom: none; padding: 10px 14px;">
                     <div class="group-title-wrap">
                       <span class="group-icon"><i class="ms sm">explore</i></span>
-                      <span class="group-title">本地开发服务与浏览器自动化扩展</span>
-                      <span class="group-desc">包含 dev_server_* 服务管理（3工具）、http_request 接口调试（1工具）与 Chromium 浏览器自动化（10工具）</span>
+                      <span class="group-title">{{ t('本地开发服务与浏览器自动化扩展') }}</span>
+                      <span class="group-desc">{{ t('包含 dev_server_* 服务管理（3工具）、http_request 接口调试（1工具）与 Chromium 浏览器自动化（10工具）') }}</span>
                     </div>
                     <div class="group-ops">
                       <NButton size="small" type="primary" secondary @click="toolsTab = 'debug'">
@@ -2065,10 +2066,10 @@ const providerOptions = [
                   按语言和技术生态细分管理默认放行的命令。关闭的命令从默认白名单移除（Agent 调 run_command 会被直接拦截）。
                 </span>
                 <div class="cmd-actions">
-                  <NButton size="tiny" secondary @click="toggleAllCommands(true)">全部放行</NButton>
-                  <NButton size="tiny" secondary @click="toggleAllCommands(false)">全部禁用</NButton>
+                  <NButton size="tiny" secondary @click="toggleAllCommands(true)">{{ t('全部放行') }}</NButton>
+                  <NButton size="tiny" secondary @click="toggleAllCommands(false)">{{ t('全部禁用') }}</NButton>
                   <NInput v-model:value="cmdSearch" size="small" class="cmd-search"
-                          placeholder="过滤命令（如 pytest、npm）..." clearable />
+                          :placeholder="t('过滤命令（如 pytest、npm）...')" clearable />
                 </div>
               </div>
 
@@ -2084,8 +2085,8 @@ const providerOptions = [
                       <NTag size="small" round :type="getGroupCommandsCount(cat.commands).enabled === getGroupCommandsCount(cat.commands).total ? 'success' : 'warning'">
                         已放行 {{ getGroupCommandsCount(cat.commands).enabled }} / {{ getGroupCommandsCount(cat.commands).total }}
                       </NTag>
-                      <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, true)">全选</NButton>
-                      <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, false)">全关</NButton>
+                      <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, true)">{{ t('全选') }}</NButton>
+                      <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, false)">{{ t('全关') }}</NButton>
                     </div>
                   </div>
                   <div class="cmd-chips-grid">
@@ -2108,12 +2109,12 @@ const providerOptions = [
                   <div class="group-header">
                     <div class="group-title-wrap">
                       <span class="group-icon"><i class="ms sm">rocket_launch</i></span>
-                      <span class="group-title">后台开发服务管理 (dev_server)</span>
-                      <span class="group-desc">支持任务中后台常驻启动 dev server（自动端口与就绪等待），任务结束自动清理</span>
+                      <span class="group-title">{{ t('后台开发服务管理 (dev_server)') }}</span>
+                      <span class="group-desc">{{ t('支持任务中后台常驻启动 dev server（自动端口与就绪等待），任务结束自动清理') }}</span>
                     </div>
                     <div class="group-ops">
                       <label class="checkline" style="gap:6px">
-                        <span style="font-size:12px; font-weight:600">服务组主开关：</span>
+                        <span style="font-size:12px; font-weight:600">{{ t('服务组主开关：') }}</span>
                         <NSwitch size="small" v-model:value="devServerGroupEnabled" />
                       </label>
                     </div>
@@ -2138,8 +2139,8 @@ const providerOptions = [
                   <div class="group-header">
                     <div class="group-title-wrap">
                       <span class="group-icon"><i class="ms sm">language</i></span>
-                      <span class="group-title">本地 HTTP API 调试 (http_request)</span>
-                      <span class="group-desc">支持对本地或内网开发服务发起 HTTP 请求，调试 REST/GraphQL 接口（受下方主机白名单约束）</span>
+                      <span class="group-title">{{ t('本地 HTTP API 调试 (http_request)') }}</span>
+                      <span class="group-desc">{{ t('支持对本地或内网开发服务发起 HTTP 请求，调试 REST/GraphQL 接口（受下方主机白名单约束）') }}</span>
                     </div>
                     <div class="group-ops">
                       <NSwitch size="small" v-model:value="toolsDraft['http_request']" />
@@ -2162,12 +2163,12 @@ const providerOptions = [
                   <div class="group-header">
                     <div class="group-title-wrap">
                       <span class="group-icon"><i class="ms sm">explore</i></span>
-                      <span class="group-title">本地 Chromium 浏览器调试 (browser)</span>
-                      <span class="group-desc">驱动本地 Chrome/Edge 浏览器，支持访问页面、点击输入、截图与监听控制台/网络日志</span>
+                      <span class="group-title">{{ t('本地 Chromium 浏览器调试 (browser)') }}</span>
+                      <span class="group-desc">{{ t('驱动本地 Chrome/Edge 浏览器，支持访问页面、点击输入、截图与监听控制台/网络日志') }}</span>
                     </div>
                     <div class="group-ops">
                       <label class="checkline" style="gap:6px">
-                        <span style="font-size:12px; font-weight:600">浏览器组主开关：</span>
+                        <span style="font-size:12px; font-weight:600">{{ t('浏览器组主开关：') }}</span>
                         <NSwitch size="small" v-model:value="browserGroupEnabled" />
                       </label>
                     </div>
@@ -2193,39 +2194,39 @@ const providerOptions = [
                   <div class="group-header">
                     <div class="group-title-wrap">
                       <span class="group-icon"><i class="ms">settings</i></span>
-                      <span class="group-title">调试环境运行参数与安全限制</span>
-                      <span class="group-desc">配置浏览器内核路径、窗口显示模式及内网穿透防护主机白名单</span>
+                      <span class="group-title">{{ t('调试环境运行参数与安全限制') }}</span>
+                      <span class="group-desc">{{ t('配置浏览器内核路径、窗口显示模式及内网穿透防护主机白名单') }}</span>
                     </div>
                   </div>
                   <div style="padding: 12px;">
                     <div class="frow">
-                      <div class="f1"><label>浏览器引擎</label>
+                      <div class="f1"><label>{{ t('浏览器引擎') }}</label>
                         <NSelect v-model:value="localDebugDraft.browser" :options="[
                           { label: 'auto（优先 Chrome，无则回退 Edge）', value: 'auto' },
                           { label: 'Google Chrome', value: 'chrome' },
                           { label: 'Microsoft Edge', value: 'edge' },
                         ]" /></div>
-                      <div class="f2"><label>自定义浏览器路径（留空则自动探测系统安装）</label>
+                      <div class="f2"><label>{{ t('自定义浏览器路径（留空则自动探测系统安装）') }}</label>
                         <NInput v-model:value="localDebugDraft.browser_executable" placeholder="C:\...\chrome.exe" /></div>
                     </div>
                     <div class="frow" style="margin-top:8px;align-items:center">
                       <label class="cmd-chip">
                         <NSwitch size="small" v-model:value="localDebugDraft.headless" />
-                        <span class="cmd-name">无头模式运行（关闭时在桌面弹出浏览器窗口，可直观围观操作）</span>
+                        <span class="cmd-name">{{ t('无头模式运行（关闭时在桌面弹出浏览器窗口，可直观围观操作）') }}</span>
                       </label>
-                      <NButton size="small" :loading="testingBrowser" @click="onTestBrowser">测试浏览器探测</NButton>
+                      <NButton size="small" :loading="testingBrowser" @click="onTestBrowser">{{ t('测试浏览器探测') }}</NButton>
                     </div>
                     <div class="frow" style="margin-top:10px">
                       <div class="f2">
-                        <label>允许访问的主机白名单（每行一个，防内网穿透；默认仅限回环）</label>
+                        <label>{{ t('允许访问的主机白名单（每行一个，防内网穿透；默认仅限回环）') }}</label>
                         <NInput v-model:value="localDebugDraft.hosts_text" type="textarea" :rows="3"
                                 placeholder="localhost&#10;127.0.0.1&#10;::1" />
                       </div>
                       <div class="f1">
-                        <label>导航超时 / 服务就绪超时（秒）</label>
+                        <label>{{ t('导航超时 / 服务就绪超时（秒）') }}</label>
                         <div style="display:flex;gap:8px">
-                          <NInputNumber v-model:value="localDebugDraft.navigation_timeout_seconds" :min="5" :max="300" placeholder="导航" />
-                          <NInputNumber v-model:value="localDebugDraft.service_ready_timeout_seconds" :min="5" :max="600" placeholder="就绪" />
+                          <NInputNumber v-model:value="localDebugDraft.navigation_timeout_seconds" :min="5" :max="300" :placeholder="t('导航')" />
+                          <NInputNumber v-model:value="localDebugDraft.service_ready_timeout_seconds" :min="5" :max="600" :placeholder="t('就绪')" />
                         </div>
                       </div>
                     </div>
@@ -2244,9 +2245,9 @@ const providerOptions = [
                   <i class="ms sm">security</i> 敏感操作访问权限模式
                 </div>
                 <div class="frow">
-                  <div class="f2"><label>访问权限模式（敏感操作是否挂起等待看板批准）</label>
+                  <div class="f2"><label>{{ t('访问权限模式（敏感操作是否挂起等待看板批准）') }}</label>
                     <NSelect v-model:value="permDraft.mode" :options="permOptions" /></div>
-                  <div class="f1"><label>审批超时（分钟，1~1440，无人响应自动拒绝）</label>
+                  <div class="f1"><label>{{ t('审批超时（分钟，1~1440，无人响应自动拒绝）') }}</label>
                     <NInputNumber v-model:value="permDraft.timeout_minutes" :min="1" :max="1440" /></div>
                 </div>
                 <div class="hint pwd-hint" style="margin-top: 6px;">
@@ -2258,9 +2259,9 @@ const providerOptions = [
                 <label class="checkline stack" style="margin: 0; padding: 0; border: none; background: none;">
                   <div style="display:flex;align-items:center;gap:8px">
                     <NSwitch v-model:value="gitCommitAndMergeDraft" />
-                    <span style="font-weight: 600; font-size: 13px; color: var(--text);"><i class="ms sm">account_tree</i> 任务完成后自动提交并合并代码（Git 自动提交与合并）</span>
+                    <span style="font-weight: 600; font-size: 13px; color: var(--text);"><i class="ms sm">account_tree</i> {{ t('任务完成后自动提交并合并代码（Git 自动提交与合并）') }}</span>
                   </div>
-                  <span class="hint" style="margin-top: 6px;">默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。</span>
+                  <span class="hint" style="margin-top: 6px;">{{ t('默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。') }}</span>
                 </label>
               </div>
 
@@ -2268,15 +2269,15 @@ const providerOptions = [
                 <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text);">
                   <i class="ms sm">terminal</i> Agent 子进程环境变量与 PATH 引导
                 </div>
-                <label style="font-size: 12px; color: var(--dim); margin-bottom: 4px; display: block;">自定义环境变量（代理 / 国内镜像，每行 KEY=VALUE）</label>
+                <label style="font-size: 12px; color: var(--dim); margin-bottom: 4px; display: block;">{{ t('自定义环境变量（代理 / 国内镜像，每行 KEY=VALUE）') }}</label>
                 <NInput v-model:value="envDraft" type="textarea" :rows="3"
                         placeholder="每行一个 KEY=VALUE（也接受 KEY: VALUE），例如：&#10;GOPROXY=https://goproxy.cn,direct&#10;HTTP_PROXY=http://127.0.0.1:7890" />
                 <div class="hint tool-foot" style="margin-top: 6px;">
                   注入 run_command 子进程：国内网络拉依赖失败时配 GOPROXY、npm registry（HTTP_PROXY）、PIP_INDEX_URL 即可；不允许覆盖 PATH/SYSTEMROOT 等系统变量。
                 </div>
-                <label class="cmd-chip" style="margin-top: 6px;" title="写入前备份旧值到日志，只增不删，可手动改回">
+                <label class="cmd-chip" style="margin-top: 6px;" :title="t('写入前备份旧值到日志，只增不删，可手动改回')">
                   <NSwitch size="small" v-model:value="pathAutofix" />
-                  <span class="cmd-name">任务启动时自动把缺失的工具目录写入用户 PATH</span>
+                  <span class="cmd-name">{{ t('任务启动时自动把缺失的工具目录写入用户 PATH') }}</span>
                 </label>
                 <div class="hint tool-foot" style="margin-top: 6px;">
                   启动任务时扫描 node/npm/go/java 等常用命令：不在 PATH 的自动注入 Agent 会话并写进提示词；开启后还会把缺失目录持久写入用户 PATH。
@@ -2286,19 +2287,19 @@ const providerOptions = [
 
             <!-- 统一底栏保存按钮 -->
             <div class="sfoot" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);">
-              <NButton type="primary" :loading="toolsSaving" @click="saveTools">保存工具与权限</NButton>
+              <NButton type="primary" :loading="toolsSaving" @click="saveTools">{{ t('保存工具与权限') }}</NButton>
             </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'mirrors'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">sync_alt</i> 镜像源管理与测速选源</template>
+            <template #header><i class="ms">sync_alt</i> {{ t('镜像源管理与测速选源') }}</template>
       <div class="mirror-ops">
-        <NButton size="small" :loading="mirrorTesting" @click="testMirrors()">测速全部源</NButton>
+        <NButton size="small" :loading="mirrorTesting" @click="testMirrors()">{{ t('测速全部源') }}</NButton>
         <NButton size="small" type="primary" :loading="mirrorApplying" @click="applyMirrors">
           应用最快源到环境变量</NButton>
         <span class="hint" v-if="mirrorTestedAt">上次测速：{{ mirrorTestedAtText }}</span>
-        <span class="hint" v-else>尚未测速（Agent 会按内置默认顺序下载）</span>
+        <span class="hint" v-else>{{ t('尚未测速（Agent 会按内置默认顺序下载）') }}</span>
       </div>
       <div class="hint tool-foot">
         测速 = HTTP 直连取首包（绕过系统代理，正是「无代理时」的真实速度）；结果存
@@ -2311,29 +2312,29 @@ const providerOptions = [
           <span class="mcat-name">{{ cat.label }}</span>
           <NTag size="tiny" :bordered="false" :type="cat.kind === 'proxy' ? 'info' : 'default'">
             <template v-if="cat.kind === 'proxy'"><i class="ms sm">arrow_forward</i> 可应用 {{ cat.env_var }}</template>
-            <template v-else>下载源</template></NTag>
+            <template v-else>{{ t('下载源') }}</template></NTag>
           <NButton size="tiny" quaternary :loading="mirrorTestingCat === cat.key"
-                   :disabled="mirrorTesting" @click="testMirrors(cat.key)">只测这类</NButton>
+                   :disabled="mirrorTesting" @click="testMirrors(cat.key)">{{ t('只测这类') }}</NButton>
         </div>
         <div v-for="row in mirrorRows(cat.key)" :key="row.url" class="mrow">
           <NSwitch size="small" :value="mirrorEnabled(row.url)"
                    @update:value="(v: boolean) => toggleMirror(row.url, v)" />
           <span class="murl">{{ row.url }}</span>
           <NTag v-if="row.builtin" size="tiny" :bordered="false">内置·{{ row.label }}</NTag>
-          <NTag v-else size="tiny" :bordered="false" type="success">自定义</NTag>
+          <NTag v-else size="tiny" :bordered="false" type="success">{{ t('自定义') }}</NTag>
           <NTag size="tiny" :bordered="false" :type="latencyTag(row.url).type">
             {{ latencyTag(row.url).text }}</NTag>
           <NButton v-if="!row.builtin" size="tiny" quaternary type="error"
-                   @click="removeCustom(cat.key, row.url)">删除</NButton>
+                   @click="removeCustom(cat.key, row.url)">{{ t('删除') }}</NButton>
         </div>
       </div>
 
       <div class="madd">
         <NSelect v-model:value="addCat" size="small" :options="catOptions" class="madd-cat" />
         <NInput v-model:value="addUrl" size="small" class="madd-url"
-                placeholder="要添加的镜像 URL（http(s)://，需可直接访问；测速时会一并探测）"
+                :placeholder="t('要添加的镜像 URL（http(s)://，需可直接访问；测速时会一并探测）')"
                 @keyup.enter="addCustom" />
-        <NButton size="small" @click="addCustom">添加镜像源</NButton>
+        <NButton size="small" @click="addCustom">{{ t('添加镜像源') }}</NButton>
       </div>
       <div class="hint tool-foot">
         添加/禁用需点下方「保存镜像源配置」生效；禁用的源不参与测速、也不会推荐给 Agent；
@@ -2342,21 +2343,21 @@ const providerOptions = [
 
       <div class="sfoot">
         <NButton type="primary" :loading="mirrorsSaving" :disabled="!mirrorsDirty"
-                 @click="saveMirrors">保存镜像源配置</NButton>
+                 @click="saveMirrors">{{ t('保存镜像源配置') }}</NButton>
       </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'egress'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">lan</i> 出网白名单</template>
+            <template #header><i class="ms">lan</i> {{ t('出网白名单') }}</template>
       <div class="frow">
-        <div class="f2"><label>模式</label>
+        <div class="f2"><label>{{ t('模式') }}</label>
           <NSelect v-model:value="draft.egress_mode" :options="[
             { label: 'allowlist — 只允许白名单主机（默认）', value: 'allowlist' },
             { label: 'off — 全部放行（仅排障用）', value: 'off' },
           ]" />
         </div>
-        <div class="f1"><label>拒绝时写审计</label>
+        <div class="f1"><label>{{ t('拒绝时写审计') }}</label>
           <div style="display:flex;align-items:center;gap:8px">
             <NSwitch v-model:value="draft.egress_audit" />
             <span class="hint">logs/audit.jsonl · action=egress.deny</span>
@@ -2364,9 +2365,9 @@ const providerOptions = [
         </div>
       </div>
       <div class="frow">
-        <div class="f1"><label>额外放行主机（extra_hosts）</label>
+        <div class="f1"><label>{{ t('额外放行主机（extra_hosts）') }}</label>
           <NDynamicTags v-model:value="draft.egress_extra" :max="30"
-                        placeholder="api.example.com（可带 :端口；*.example.com 含子域）" />
+                        :placeholder="t('api.example.com（可带 :端口；*.example.com 含子域）')" />
           <div class="hint tool-foot">
             模型 / Issue / 镜像 / 更新源主机按各自配置自动放行，无需在此重复；
             网页抓取要访问的文档站需在此添加。回环地址始终放行；Agent 子进程
@@ -2388,13 +2389,13 @@ const providerOptions = [
         </template>
       </div>
       <div class="sfoot">
-        <NButton type="primary" :loading="egressSaving" @click="saveEgress">保存出网白名单</NButton>
+        <NButton type="primary" :loading="egressSaving" @click="saveEgress">{{ t('保存出网白名单') }}</NButton>
       </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'app'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">settings</i> 应用</template>
+            <template #header><i class="ms">settings</i> {{ t('应用') }}</template>
       <label class="checkline">
         <NSwitch :value="store.state.app_autostart.enabled" @update:value="toggleAutostart" />
         开机自动启动（写入当前用户注册表）
@@ -2404,28 +2405,28 @@ const providerOptions = [
         启动时自动检查更新（Gitee Release 源）
       </label>
       <div class="frow">
-        <div class="f2"><label>更新源仓库 URL（Gitee，Release 附件放安装包）</label>
+        <div class="f2"><label>{{ t('更新源仓库 URL（Gitee，Release 附件放安装包）') }}</label>
           <NInput v-model:value="updDraft.repo" placeholder="https://gitee.com/xxx/orcsy" /></div>
-        <div class="f1"><label>访问 token（私有仓库用）</label>
+        <div class="f1"><label>{{ t('访问 token（私有仓库用）') }}</label>
           <NInput v-model:value="updDraft.token" type="password" show-password-on="click"
                   :placeholder="updTokenConfigured
                     ? `已配置：${updTokenMasked}（留空保持不变）` : '可选'"
                   @update:value="updTokenTouched = true" /></div>
       </div>
       <div class="sfoot">
-        <NButton :loading="updSaving" @click="saveUpdate">保存更新配置</NButton>
-        <NButton :loading="updChecking" @click="checkUpdateNow">检查更新</NButton>
+        <NButton :loading="updSaving" @click="saveUpdate">{{ t('保存更新配置') }}</NButton>
+        <NButton :loading="updChecking" @click="checkUpdateNow">{{ t('检查更新') }}</NButton>
       </div>
       <div class="pkg-block">
         <div class="pkg-row">
           <div class="f2">
-            <label>手动导入本地安装包（orcsy-update-*.zip；同版本覆盖、升/降级均可）</label>
-            <NInput :value="localPkg" readonly placeholder="尚未选择更新包文件" />
+            <label>{{ t('手动导入本地安装包（orcsy-update-*.zip；同版本覆盖、升/降级均可）') }}</label>
+            <NInput :value="localPkg" readonly :placeholder="t('尚未选择更新包文件')" />
           </div>
           <div class="f0 pkg-btns">
-            <NButton @click="pickPackage">选择安装包…</NButton>
+            <NButton @click="pickPackage">{{ t('选择安装包…') }}</NButton>
             <NButton type="primary" :loading="pkgInstalling" :disabled="!localPkg"
-                     @click="installPackage">安装更新包</NButton>
+                     @click="installPackage">{{ t('安装更新包') }}</NButton>
           </div>
         </div>
         <div v-if="localPkg" class="pkg-meta">

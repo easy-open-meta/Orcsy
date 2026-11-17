@@ -609,7 +609,9 @@ class AppState:
                   or self.token_valid(token)
                   or self.is_valid_api_key(token)
                   or self.is_valid_api_key(api_key))
-        return {"ok": True, "enabled": enabled, "authed": authed}
+        # app 标记供启动时的「已有实例」探测使用：/api/auth 是免登录端点，
+        # 带鉴权也能识别出这是 Orcsy，而不是把 401 当成端口被别的程序占用。
+        return {"ok": True, "app": "orcsy", "enabled": enabled, "authed": authed}
 
     def _prune_sessions(self) -> None:
         """清掉过期会话（调用方须持有 _auth_lock）。"""
@@ -804,7 +806,8 @@ class AppState:
                     dep_info = None if t.error else evaluate_task_dependencies(t, all_statuses, done_ids)
                     all_tasks.append(self._task_dict(t, dep_info))
             is_git = agent.executor.probe_git_repo()
-            pending_git = Git(p.path).pending_changes_summary() if is_git else {"is_git": False, "count": 0, "files": []}
+            pending_git = (git_service.pending_changes(agent) if is_git
+                           else {"is_git": False, "count": 0, "files": [], "repos": []})
             projects.append({
                 "name": name,
                 "path": str(p.path),
@@ -2829,14 +2832,68 @@ class WebHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class OrcsyHTTPServer(ThreadingHTTPServer):
+    """带活动连接跟踪的 ThreadingHTTPServer。
+
+    HTTP/1.1 keep-alive 下，浏览器会保留长连接；只关闭监听 socket 时，
+    这些已建立的连接仍可由请求线程继续服务，表现为「托盘已退出、页面还能
+    操作」。退出时主动 shutdown/close 所有活动连接，确保看板立刻不可用，
+    也避免请求线程拖住进程收尾。
+    """
+
+    daemon_threads = True
+
+    def __init__(self, server_address, handler_cls):  # type: ignore[no-untyped-def]
+        super().__init__(server_address, handler_cls)
+        self._active_lock = threading.Lock()
+        self._active_sockets: set[socket.socket] = set()
+
+    def process_request(self, request, client_address):  # type: ignore[no-untyped-def]
+        with self._active_lock:
+            self._active_sockets.add(request)
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            with self._active_lock:
+                self._active_sockets.discard(request)
+            raise
+
+    def shutdown_request(self, request):  # type: ignore[no-untyped-def]
+        try:
+            super().shutdown_request(request)
+        finally:
+            with self._active_lock:
+                self._active_sockets.discard(request)
+
+    def close_active_connections(self) -> int:
+        """强制断开所有已建立的连接（含 keep-alive 空闲连接），返回数量。"""
+        with self._active_lock:
+            sockets = list(self._active_sockets)
+            self._active_sockets.clear()
+        for sock in sockets:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+        return len(sockets)
+
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            self.close_active_connections()
+
+
 def make_server(state: AppState, host: str, port: int) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (WebHandler,), {"state": state})
-    server = ThreadingHTTPServer((host, port), handler)
+    server = OrcsyHTTPServer((host, port), handler)
     # 绑定成功写回实际监听地址：连接向导按它（而非可能已被看板保存热更的
     # config.web.host）报告可达性
     state.bound_host = host
-    # 请求线程随主线程退出：否则看板页面的轮询连接会让进程迟迟退不干净
-    server.daemon_threads = True
     return server
 
 

@@ -1,3 +1,4 @@
+import { tNow, tFmt } from './lang'
 // 后端 API 的类型化封装。端点与 orcsy/web.py 的 do_GET/do_POST 一一对应。
 
 export type ThemeName = 'dark' | 'light'
@@ -61,10 +62,34 @@ export interface ProjectTeamT {
   members: TeamMemberT[]
 }
 
+export interface PendingFileT {
+  /** 相对所属仓库根的路径（repo-aware diff/discard 用） */
+  path: string
+  /** 跨仓库展示名：子仓库自动带 repo/ 前缀 */
+  display: string
+  /** git status --porcelain 的 XY，如 " M" / "??" */
+  status?: string
+  /** file=普通文件；gitlink=子仓库干净但父仓库指针变化 */
+  kind?: 'file' | 'gitlink'
+}
+
+export interface PendingRepoT {
+  /** "" = 主仓库；其他值 = 相对项目根的 gitlink 路径 */
+  repo: string
+  label: string
+  nested: boolean
+  count: number
+  files: PendingFileT[]
+}
+
 export interface ProjectPendingChangesT {
   is_git: boolean
+  /** 主仓库 + 所有嵌套仓库的真实文件总数 */
   count: number
+  /** 兼容旧调用方的扁平展示名列表 */
   files: string[]
+  repos?: PendingRepoT[]
+  errors?: string[]
 }
 
 export interface TaskT {
@@ -510,7 +535,7 @@ export interface DirListing {
 
 // Windows 回环偶发连接重置 / 看板重启瞬间，fetch 会抛 TypeError("Failed to
 // fetch")——网络层失败转成人话；GET 是幂等读，自动重试一次
-const NET_ERR = '无法连接看板服务（可能正在重启），请刷新页面重试'
+const NET_ERR = () => tNow('无法连接看板服务（可能正在重启），请刷新页面重试')
 
 function isNetErr(e: unknown): boolean {
   return e instanceof TypeError  // fetch 的网络层失败统一是 TypeError
@@ -518,7 +543,7 @@ function isNetErr(e: unknown): boolean {
 
 // ---- 登录鉴权：401 全局回调（store 注册后把应用切到未登录态，登录层接管） ----
 export class UnauthorizedError extends Error {
-  constructor() { super('未登录或会话已过期') }
+  constructor() { super(tNow('未登录或会话已过期')) }
 }
 
 // 任务并发保存冲突（后端 409 Conflict）：携带服务端最新任务内容，
@@ -576,7 +601,7 @@ async function post(path: string, body: unknown): Promise<any> {
       body: JSON.stringify(body),
     })
   } catch {
-    throw new Error(NET_ERR)
+    throw new Error(NET_ERR())
   }
   handle401(r, path)
   const j = await r.json().catch(() => ({}))
@@ -602,7 +627,7 @@ async function get(path: string): Promise<any> {
       await new Promise(res => setTimeout(res, 250))
     }
   }
-  throw new Error(NET_ERR)
+  throw new Error(NET_ERR())
 }
 
 /** 运行台账（V1-R1）：一次任务执行的结构化留痕 */
@@ -753,21 +778,30 @@ export const api = {
     /** true=409 冲突后用户明确选择「保留我的修改」：强制覆盖落盘 */
     force_overwrite?: boolean
   }) => post('/api/task', p) as Promise<{ ok: boolean; id: string; version_token?: string }>,
-  commitProject: (p: { name: string; message: string; push?: boolean; exclude?: string[] }) =>
+  commitProject: (p: {
+    name: string; message: string; push?: boolean
+    /** 旧格式：主仓库排除列表；新格式：{仓库路径: [相对该仓库的路径]} */
+    exclude?: string[] | Record<string, string[]>
+  }) =>
     post('/api/project/commit', p) as Promise<{
       ok: boolean; committed: boolean; commit: string; pushed: boolean
-      skipped?: string[]; message: string
+      skipped?: string[]; message: string; push_note?: string
+      repos?: {
+        repo: string; label: string; commit: string; branch?: string
+        pushed: boolean; push_note?: string; skipped: string[]
+      }[]
     }>,
-  /** 人工把关提交页：查看单个文件在主工作区的未提交改动 diff（新文件返回全文预览） */
-  projectFileDiff: (p: { name: string; file: string }) =>
+  /** 人工把关提交页：查看单个文件的未提交改动 diff（新文件返回全文预览） */
+  projectFileDiff: (p: { name: string; file: string; repo?: string }) =>
     post('/api/project/diff', p) as Promise<{
-      ok: boolean; file: string; diff: string
+      ok: boolean; repo?: string; file: string; diff: string
       truncated?: boolean; total_chars?: number; lines?: number
     }>,
   /** 人工把关提交页：丢弃指定文件的未提交改动（未跟踪→删除，已跟踪→还原到 HEAD） */
-  discardProjectFiles: (p: { name: string; files: string[] }) =>
+  discardProjectFiles: (p: { name: string; files: string[]; repo?: string }) =>
     post('/api/project/discard', p) as Promise<{
-      ok: boolean; deleted: string[]; restored: string[]; skipped: string[]; message: string
+      ok: boolean; repo?: string; deleted: string[]; restored: string[]
+      skipped: string[]; message: string
     }>,
   gitInitProject: (p: { name: string }) =>
     post('/api/project/git-init', p) as Promise<{ ok: boolean; message: string }>,
@@ -888,7 +922,7 @@ export const api = {
   systemQr: async (url: string): Promise<string> => {
     const r = await fetch(`/api/system/qr?url=${encodeURIComponent(url)}`,
                           { headers: authHeaders() })
-    if (!r.ok) throw new Error(`二维码生成失败（HTTP ${r.status}）`)
+    if (!r.ok) throw new Error(tFmt('二维码生成失败（HTTP {p0}）', { p0: r.status }))
     return r.text()
   },
 }

@@ -4,9 +4,10 @@
 
 📖 **[用户指南（Wiki）](docs/用户指南.md)** —— 面向普通使用者的安装部署、功能说明与逐步操作教程。
 
-> Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：把任务写成 Markdown，定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后自动提交合并、回写任务状态——全程 Web 看板可视化掌控，无人值守闭环运转。
+> Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：把任务写成 Markdown，定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后经**独立审查门**把关、增量落地主分支工作区，**最终提交由人工确认**——幂等派发、租约续跑、预算/熔断与任务级运行台账全程留痕，Web 看板可视化掌控的可信无人值守闭环。
 
-![version](https://img.shields.io/badge/version-0.24.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.25.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+
 
 ```
 ┌────────────────────────────────── Orcsy ────────────────────────────────┐
@@ -31,7 +32,7 @@
 
 - **多模型 Agent 项目小组（Project Team）** —— 自由编排 **👑 项目经理 / ⚙️ 后端 / 🎨 前端 / 🧪 测试 QA** 进驻项目：PM 只读摸底、拆解 DAG 子任务（`depends_on_refs`）或直接转派；前后端在任务隔离的 Worktree 沙盒中专端开发，Prompt 自动透传上游接口契约；QA 拉起本地服务与浏览器做端到端联调，缺陷经 `report_bug` 派发修复任务并自动回归；依赖解锁后同周期链式接棒（`chain_within_cycle`），单个需求一个周期完整闭环。
 - **🧠 团队记忆（Phase 1）** —— `ARCHITECTURE.md` 架构黑板报（正文英文书写以节省 token）在任务启动时自动注入前 3000 字，PM 首次梳理、开发重大接口变更后追加（`update_architecture`，只写该文件）；同一需求批次的角色可用 `session_share` / `session_read` 直接传递临时端口、测试账号与动态凭证，需求验收后自动清除；任务详情可一键查看前置任务成果并跳转其详情。
-- **🧩 特殊仓库兼容** —— 自动识别父仓库中的 gitlink/嵌套 Git 仓库（如 caresy-api、caresy-web）：这类结构无法用 worktree 隔离，系统自动回退主工作区串行模式，任务直接修改真实子仓库文件，不会出现 worktree 空目录或合并丢失改动；运行台账/审查会合并展示子仓库 diff，收尾提示人工在子仓库内提交。
+- **🧩 特殊仓库兼容** —— 自动识别父仓库中的 gitlink/嵌套 Git 仓库（如 caresy-api、caresy-web）：这类结构无法用 worktree 隔离，系统自动回退主工作区串行模式，任务直接修改真实子仓库文件，不会出现 worktree 空目录或合并丢失改动；运行台账/审查会合并展示子仓库 diff，「待人工提交」页按仓库分组，提交时自动先提交子仓库、再提交父仓库 gitlink 指针。
 - **🔍 独立审查 Agent（合并前把关）** —— 任务完成先落 WIP 提交，由**另一个不同模型**只读审查（对照验收标准抽查、可实际跑测试），通过才合并归档；不通过带结构化问题清单自动返工（次数可调），杜绝「自己审自己」。
 - **🔒 幂等派发与断点续跑** —— 任务指纹 + 带 TTL/心跳的租约，同一任务不会被重复认领；提交前二次校验，运行中任务正文/依赖/模型被改会阻断提交并标 `stale_lease`；WIP 提交或合并阶段崩溃后自动续跑，不重复提交。
 - **💰 预算硬闸** —— 任务级 token/成本上限 + 项目当日上限；超限立即停止并保留 worktree 成果，项目预算用尽后自动暂停领取新任务；看板「预算与成本」可调，单价表按模型配置。
@@ -48,7 +49,7 @@
 - **技能库（Skill）** —— 导入本地目录 / 看板新建 / 一键扫描 ZCode / Claude Code / Codex 等工具的用户级技能批量导入；提示词只注入「名称+描述」索引，全文按需 `read_skill`，不撑爆上下文。
 - **仓库 Issues 集成** —— 绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），open Issue 一键转任务（标签映射优先级、归档去重、单向导入）。
 - **📱 移动端远程访问** —— 手机远程查看/编辑/新建任务：扫码直达、30 天 Cookie + Bearer 双轨免登录、专属移动布局（吸顶顶栏/底部导航/全屏任务抽屉）、触屏排序、乐观锁冲突保存、草稿暂存、PWA 添加到主屏幕；受信任代理限速，防反代误锁 127.0.0.1。
-- **Web 可视化看板** —— 状态总览、任务增删改与拖拽排序、**人工把关提交页**（文件清单 + diff 对比，一键确认 commit/push）、模型连通测试、运行日志与模型思考查看；托盘常驻、开机自启、自更新（零 UAC / 系统目录一次提权）、任务结束提醒、按角色用量台账与 12 周热力图。
+- **Web 可视化看板** —— 状态总览、任务增删改与拖拽排序、**人工把关提交页**（按仓库分组的文件清单 + diff 对比，嵌套 gitlink 一并提交，一键确认 commit/push）、模型连通测试、运行日志与模型思考查看；托盘常驻、开机自启、自更新（零 UAC / 系统目录一次提权）、任务结束提醒、按角色用量台账与 12 周热力图。
 - **开箱即用的项目接入** —— 新建/导入项目只新增 `tasks/` 与 `AGENT.md`；自动探测技术栈预填运行与测试命令。
 
 ## 🚀 快速开始
@@ -330,7 +331,7 @@ Agent 执行任务时通过一组**禁锢在项目内的工具**真实地工作�
 
 `orcsy web` 启动后访问 [http://127.0.0.1:5116](http://127.0.0.1:5116)：状态总览、项目卡片、任务增删改与拖拽排序、手动触发扫描、执行中任务强制停止、用量台账与热力图、运行日志（模型思考可折叠），页面 5 秒自动刷新。
 
-自定义端口/地址：命令行 `--port / --host` > `config.yaml` 的 `web.port / web.host`。端口被其它程序占用且未显式指定时自动换口并提示；显式指定被占用则报错退出。
+自定义端口/地址：命令行 `--port / --host` > `config.yaml` 的 `web.port / web.host`。端口被其它程序占用且未显式指定时自动换口并提示；显式指定被占用则报错退出。如果占用端口的是另一个 Orcsy 实例，本次启动会直接取消并提示（避免两个实例同时扫描/执行同一批任务）；确实要另起实例请用 `--port` 指定不同端口。
 
 ```bash
 orcsy web --port 8080          # 冲突时换这个端口

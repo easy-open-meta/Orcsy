@@ -6,6 +6,7 @@ import { computed, onActivated, reactive, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { refresh, store } from '../store'
+import { tNow as t, tFmt } from '../lang'
 
 const route = useRoute()
 const router = useRouter()
@@ -87,7 +88,7 @@ async function discardFiles(targets: string[]): Promise<void> {
   discarding.value = targets
   try {
     const res = await api.discardProjectFiles({ name: projectName.value, files: targets })
-    window.$message?.(res.message || '已丢弃所选改动', 'success')
+    window.$message?.(res.message || t('已丢弃所选改动'), 'success')
     forgetDiff(targets)
     await refresh(true)
   } catch (e: any) {
@@ -102,11 +103,11 @@ function confirmDiscard(targets: string[], batch = false): void {
   const preview = targets.slice(0, 8).map(f => `  · ${f}`).join('\n')
   const more = targets.length > 8 ? `\n  … 等共 ${targets.length} 项` : ''
   window.$dialog?.warning({
-    title: batch ? `删除 ${targets.length} 个临时/测试产物？` : `丢弃该文件的改动？`,
+    title: batch ? tFmt('删除 {p0} 个临时/测试产物？', { p0: targets.length }) : t('丢弃该文件的改动？'),
     content: '未跟踪文件将被物理删除（不可恢复）；已跟踪文件将还原到 HEAD（撤销本次改动，文件本身保留）。'
       + `\n\n${preview}${more}`,
-    positiveText: '确认丢弃',
-    negativeText: '取消',
+    positiveText: t('确认丢弃'),
+    negativeText: t('取消'),
     async onPositiveClick() {
       await discardFiles(targets)
     },
@@ -206,7 +207,7 @@ async function submit(): Promise<void> {
       push: form.push,
       exclude: excludedList.value,
     })
-    window.$message?.(res.message || '已成功提交并把关入库！', 'success')
+    window.$message?.(res.message || t('已成功提交并把关入库！'), 'success')
     await refresh(true)
     // 全部提交完毕（没有剩余排除项）才回到项目页；还有排除文件时留在本页，
     // 让用户明确看到哪些文件未提交（列表会自动刷新为剩余文件）
@@ -223,22 +224,22 @@ async function submit(): Promise<void> {
   <div class="commitpage">
     <div class="chead">
       <div class="cleft">
-        <NButton size="small" quaternary @click="backToProjects"><i class="ms sm">arrow_back</i> 返回项目</NButton>
+        <NButton size="small" quaternary @click="backToProjects"><i class="ms sm">arrow_back</i> {{ t('返回项目') }}</NButton>
         <span class="ctitle">人工把关提交 · {{ projectName || '（未知项目）' }}</span>
         <NTag v-if="files.length" size="small" type="info" :bordered="false">
           {{ files.length }} 个改动文件
         </NTag>
       </div>
-      <span v-if="project" class="hint">确认无误后以规范 commit 提交至当前主分支（可选推送）</span>
+      <span v-if="project" class="hint">{{ t('确认无误后以规范 commit 提交至当前主分支（可选推送）') }}</span>
     </div>
 
     <div v-if="!project" class="cempty">
-      <div>项目不存在或已被移除。</div>
-      <NButton size="small" @click="backToProjects">返回项目页</NButton>
+      <div>{{ t('项目不存在或已被移除。') }}</div>
+      <NButton size="small" @click="backToProjects">{{ t('返回项目页') }}</NButton>
     </div>
     <div v-else-if="!files.length" class="cempty">
-      <div>当前没有待提交的改动（可能已完成人工提交，或 Agent 尚未落地代码）。</div>
-      <NButton size="small" @click="backToProjects">返回项目页</NButton>
+      <div>{{ t('当前没有待提交的改动（可能已完成人工提交，或 Agent 尚未落地代码）。') }}</div>
+      <NButton size="small" @click="backToProjects">{{ t('返回项目页') }}</NButton>
     </div>
     <template v-else>
       <div class="cbody">
@@ -254,7 +255,7 @@ async function submit(): Promise<void> {
                        :title="`删除 ${suggestedTemp.length} 个临时/测试产物（未跟踪物理删除，已跟踪还原）`"
                        @click="confirmDiscard(suggestedTemp, true)">删除临时产物 {{ suggestedTemp.length }}</NButton>
               <NButton v-if="excludedList.length" size="tiny" quaternary
-                       @click="includeAll">全部包含</NButton>
+                       @click="includeAll">{{ t('全部包含') }}</NButton>
             </span>
           </div>
           <div v-for="f in files" :key="f" class="cfile"
@@ -269,8 +270,8 @@ async function submit(): Promise<void> {
             </NButton>
             <NButton size="tiny" quaternary type="error" class="ex-btn"
                      :loading="discarding.includes(f)"
-                     title="删除该文件改动（未跟踪物理删除；已跟踪还原到 HEAD）"
-                     @click.stop="confirmDiscard([f])">删除</NButton>
+                     :title="t('删除该文件改动（未跟踪物理删除；已跟踪还原到 HEAD）')"
+                     @click.stop="confirmDiscard([f])">{{ t('删除') }}</NButton>
           </div>
         </aside>
         <main class="cdiff">
@@ -286,9 +287,9 @@ async function submit(): Promise<void> {
               </span>
               <NButton size="tiny" quaternary :type="wrapLines ? 'primary' : 'default'"
                        :title="wrapLines ? '当前：长行自动折行（点击切换为横向滚动）' : '当前：不折行（点击切换为自动折行）'"
-                       @click="wrapLines = !wrapLines">自动换行</NButton>
-              <NButton size="tiny" quaternary title="下载当前文件的完整补丁（.patch）"
-                       @click="downloadPatch">下载补丁</NButton>
+                       @click="wrapLines = !wrapLines">{{ t('自动换行') }}</NButton>
+              <NButton size="tiny" quaternary :title="t('下载当前文件的完整补丁（.patch）')"
+                       @click="downloadPatch">{{ t('下载补丁') }}</NButton>
             </template>
           </div>
           <div v-if="curMeta?.truncated" class="cdiff-trunc">
@@ -310,19 +311,19 @@ async function submit(): Promise<void> {
           <span class="exclude-names">{{ excludedList.join('、') }}</span>
         </div>
         <div class="cfoot-row">
-          <label class="clabel">提交说明 Commit Message</label>
-          <NInput v-model:value="form.message" placeholder="如 feat: 完成用户登录与前后端联调测试" />
+          <label class="clabel">{{ t('提交说明 Commit Message') }}</label>
+          <NInput v-model:value="form.message" :placeholder="t('如 feat: 完成用户登录与前后端联调测试')" />
         </div>
         <div class="cfoot-row cf-actions">
           <label class="checkline">
             <NSwitch size="small" v-model:value="form.push" />
-            <span>同时推送到远程仓库 (git push origin)</span>
+            <span>{{ t('同时推送到远程仓库 (git push origin)') }}</span>
           </label>
           <div class="spacer" />
           <span class="commit-count">将提交 {{ includedList.length }} 个文件</span>
-          <NButton @click="backToProjects">取消</NButton>
+          <NButton @click="backToProjects">{{ t('取消') }}</NButton>
           <NButton type="primary" :loading="form.submitting"
-                   :disabled="!includedList.length" @click="submit">确认提交主分支</NButton>
+                   :disabled="!includedList.length" @click="submit">{{ t('确认提交主分支') }}</NButton>
         </div>
         <div v-if="form.err" class="err">{{ form.err }}</div>
       </div>
