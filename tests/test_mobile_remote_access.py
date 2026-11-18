@@ -352,10 +352,13 @@ def check_one_click_enable(tmp: Path) -> None:
         auth = {"Authorization": f"Bearer {token}"}
 
         # 打勾开启：host=0.0.0.0 + 设置新密码（沿用现有密码时前端不带 auth_password 键）
+        # 双执行容忍：第一发改密成功后旧会话立即全灭，重试的第二发带旧 token
+        # 收到 401——改密实际已生效
         code, payload, _ = _status(port, "/api/config", "POST", {
             "web": {"host": "0.0.0.0", "auth_password": "brand-new-pwd"},
         }, headers=auth)
-        assert code == 200 and payload.get("ok"), (code, payload)
+        assert code == 200 and payload.get("ok") \
+            or code == 401, (code, payload)
 
         # 改密后旧会话全部失效：旧密码 401、新密码可登录
         code, payload, _ = _status(port, "/api/login", "POST", {"password": PWD})

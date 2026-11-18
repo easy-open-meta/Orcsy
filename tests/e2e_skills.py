@@ -293,8 +293,10 @@ def check_rename_remove_remap(root: Path, port: int, skills_dir: Path) -> None:
     r = api(port, "/api/skill/remove", {"names": []})
     assert not r.get("ok"), r
     # 外部导入技能同样可删：副本删掉，原样本仍在工具目录（重扫可找回，见第 10 项）
+    # 双执行容忍：第一发已删但响应丢失，重试第二发报「技能不存在」——以落盘为准
     r = api(port, "/api/skill/remove", {"names": ["imported-skill"]})
-    assert r.get("ok") and r["removed"] == ["imported-skill"], r
+    assert (r.get("ok") and r["removed"] == ["imported-skill"]) \
+        or "不存在" in str(r.get("skipped") or ""), r
     assert not (skills_dir / "imported-skill").exists()
     print("9. 删除技能：清副本无中转目录、批量与拦截、导入技能同样可删 ✅")
 
@@ -344,15 +346,12 @@ def check_scan_and_batch(root: Path, port: int, skills_dir: Path) -> None:
 
         # 批量导入：frontmatter name 优先，无 name 用目录名。
         # 连接层劫持下 POST 可能双执行（第一发已导入成功但响应丢失，第二发
-        # 全 skipped）——最终一致性断言：两技能必须落库，imported/skipped 比例不限
+        # 全 skipped）——最终一致性断言：两技能必须落库（imported/skipped 比例不限）
         r = api(port, "/api/skill/import-batch",
                 {"paths": [str(zcode), str(claude)]})
         assert r.get("ok"), r
         assert (skills_dir / "scanned-foo" / "SKILL.md").is_file()
         assert (skills_dir / "plain-skill" / "SKILL.md").is_file()
-        batch_names = set(r["imported"]) | {x["path"].rstrip("/\\").split("/")[-1]
-                                            for x in r["skipped"]}
-        assert {"scanned-foo", "plain-skill"} <= batch_names | set(r["imported"]), r
 
         # 重复导入 → 全部跳过不报错
         r = api(port, "/api/skill/import-batch", {"paths": [str(zcode), str(claude)]})
