@@ -951,7 +951,6 @@ export default {
   "待审批": "Approvals",
   "暂无任务 · 点项目卡下方「新建任务」添加": "No tasks yet · add via \"New task\" on a project card",
   "已完成": "Completed",
-  "当前没有正在执行任务的项目 · 调度器空闲中": "No project is running tasks · scheduler idle",
   "项目 {p0} 已恢复": "Project {p0} resumed",
   "调度与看板": "Scheduler & dashboard",
   "扫描间隔、并行数保存后立即生效；看板端口下次启动生效。": "Interval and parallelism apply immediately; dashboard port applies on next start.",
