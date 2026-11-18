@@ -584,11 +584,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
 </template>
 
 <style scoped>
-.projpage { padding: 0 20px; }
+.projpage { padding: 0 20px; overflow-x: clip; }
 .head { margin-bottom: 12px; }
 .hint { font-size: 12px; color: var(--faint); }
 .empty { color: var(--faint); font-size: 13px; text-align: center; padding: 40px 0; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(400px, 100%), 1fr)); gap: 14px; }
 .phead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .git-refresh { padding: 0 6px; font-size: 13px; }
 /* 路径与任务统计同行两端对齐：路径过长自行折行，统计钉在右上角不随路径折行漂移 */
