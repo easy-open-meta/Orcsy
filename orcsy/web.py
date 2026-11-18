@@ -1433,7 +1433,9 @@ class AppState:
                     "message": "当前没有可分析的改动（工作区干净），无法生成提交说明"}
         try:
             r = generate_commit_message(cfg.provider, cfg.base_url, cfg.api_key,
-                                        cfg.model, diff, cfg.timeout_seconds)
+                                        cfg.model, diff, cfg.timeout_seconds,
+                                        enable_thinking=cfg.enable_thinking,
+                                        max_tokens=cfg.max_tokens or 4096)
         except LLMError as e:
             log.warning("AI 生成提交说明失败（%s）：%s", name, e)
             return {"ok": False, "message": str(e)}

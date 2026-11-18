@@ -87,7 +87,8 @@ def check_success_and_failure(monkeypatched: bool = True) -> None:
         (proj / "feature.py").write_text("print('feat')\n", encoding="utf-8")
 
         # 1) 模型成功：单行规范 message
-        def fake_ok(provider, base_url, api_key, model, diff, timeout_seconds):
+        def fake_ok(provider, base_url, api_key, model, diff, timeout_seconds,
+                    enable_thinking=False, max_tokens=4096):
             assert "feature.py" in diff, "diff 应包含改动文件"
             return {"message": "feat: 新增 feature 模块", "elapsed_seconds": 1.2}
 
@@ -96,7 +97,8 @@ def check_success_and_failure(monkeypatched: bool = True) -> None:
         assert r["ok"] is True and r["message"] == "feat: 新增 feature 模块", r
 
         # 2) 模型失败：ok:false 不打断页面
-        def fake_fail(provider, base_url, api_key, model, diff, timeout_seconds):
+        def fake_fail(provider, base_url, api_key, model, diff, timeout_seconds,
+                      enable_thinking=False, max_tokens=4096):
             raise llm_mod.LLMError("连接超时")
 
         llm_mod.generate_commit_message = fake_fail

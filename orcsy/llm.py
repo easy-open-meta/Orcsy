@@ -151,11 +151,15 @@ def test_connection(provider: str, base_url: str, api_key: str, model: str,
 
 def generate_commit_message(provider: str, base_url: str, api_key: str,
                             model: str, diff_text: str,
-                            timeout_seconds: int = 300) -> dict:
+                            timeout_seconds: int = 300,
+                            enable_thinking: bool = False,
+                            max_tokens: int = 4096) -> dict:
     """根据工作区改动 diff 生成一条规范 commit message（人工把关提交页「AI 生成」）。
 
-    单轮无工具请求，max_tokens=300；diff 截断到 12000 字符（约 4~6k tokens）
-    控制成本。返回 {message, elapsed_seconds}；失败抛 LLMError。
+    单轮无工具请求；diff 截断到 12000 字符（约 4~6k tokens）控制成本。
+    max_tokens 给足 4096：推理模型（DeepSeek-R1 / GLM 思考等）的思考内容也
+    计入输出预算，给小了思考耗尽额度后正文为空。返回 {message, elapsed_seconds}；
+    失败抛 LLMError。
     """
     provider = provider.strip().lower()
     model = model.strip()
@@ -170,6 +174,7 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
         diff = diff[:12000] + "\n…（diff 已截断）"
     client = LLMClient(LLMConfig(
         provider=provider, api_key=api_key, base_url=base_url, model=model,
+        enable_thinking=enable_thinking,
         timeout_seconds=(30 if int(timeout_seconds) <= 0
                          else max(10, min(int(timeout_seconds), 120))),
     ))
@@ -189,9 +194,13 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
         url = base_url.rstrip("/") + "/chat/completions"
         headers = _auth_headers("openai", api_key)
     payload = {
-        "model": model, "max_tokens": 300,
+        "model": model, "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
+    if enable_thinking and provider == "openai":
+        # 与任务执行同约定：Qwen（enable_thinking）/ GLM（thinking 对象）
+        payload["enable_thinking"] = True
+        payload["thinking"] = {"type": "enabled"}
     started = time.monotonic()
     data = client._post(url, payload, headers)
     elapsed = round(time.monotonic() - started, 1)
@@ -200,13 +209,57 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
                         if isinstance(b, dict) and b.get("type") == "text").strip()
     else:
         try:
-            reply = str(data["choices"][0]["message"].get("content") or "").strip()
+            msg = data["choices"][0]["message"] or {}
+            reply = str(msg.get("content") or "").strip()
+            # 推理模型思考优先耗尽 max_tokens 时 content 可能为空，
+            # 但思考内容里往往带着结论——兜底取 reasoning_content
+            if not reply:
+                reply = str(msg.get("reasoning_content") or "").strip()
         except (KeyError, IndexError, TypeError) as e:
             raise LLMError(
                 f"响应结构异常：{json.dumps(data, ensure_ascii=False)[:300]}") from e
-    message = reply.strip().strip('"').strip("'").splitlines()[0].strip() if reply else ""
+    if reply:
+        # 正文/思考兜底里取「像 commit message 的行」：优先含 conventional 前缀
+        # （feat:/fix:/…）的行；思考块里结论通常带此类前缀或在末尾。
+        lines = [l.strip().strip('"').strip("'") for l in reply.splitlines() if l.strip()]
+        message = ""
+        # 1) 优先：任何行以 conventional 前缀开头（正文首行或思考结论行，
+        #    兼容「结论：feat: xxx」式包装——取最后一个冒号后的 type 段判断）
+        for l in reversed(lines):
+            probe = l
+            for sep in ("：", ":"):
+                if sep in probe:
+                    tail = probe.rsplit(sep, 1)[1].strip().lower()
+                    head = tail.split(":")[0].strip() if ":" in tail else tail.split("：")[0].strip()
+                    if head in ("feat", "fix", "refactor", "docs", "test",
+                                "chore", "style", "perf"):
+                        probe = tail
+                    break
+            first = probe.split('：')[0].split(':')[0].strip().lower()
+            if first in ("feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"):
+                # 剥掉「结论：」等包装前缀
+                for prefix in ("结论：", "结论:", "提交说明：", "提交信息：",
+                               "最终答案：", "commit message:"):
+                    if l.lower().startswith(prefix.lower()):
+                        l = l[len(prefix):].strip()
+                        break
+                message = l
+                break
+        # 2) 兜底：正文首行（正常非推理模型路径）
+        if not message:
+            message = lines[0] if lines else ""
+        # 3) 思考前缀清理（如「结论：feat: xxx」）
+        for prefix in ("结论：", "结论:", "提交说明：", "提交信息：",
+                       "最终答案：", "commit message:"):
+            if message.lower().startswith(prefix.lower()):
+                message = message[len(prefix):].strip()
+                break
+    else:
+        message = ""
     if not message:
-        raise LLMError("模型未返回有效的提交说明（推理模型可能只输出了思考内容）")
+        raise LLMError(
+            "模型未返回有效的提交说明（思考内容为空或全部超长）；"
+            "可在设置页开启「请求侧开启模型思考」后重试，或手动填写")
     return {"message": message[:200], "elapsed_seconds": elapsed}
 
 
