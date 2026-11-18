@@ -459,14 +459,24 @@ body {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.brand { display: flex; gap: 12px; align-items: center; min-width: 0; flex: 1 1 260px; }
+.brand { display: flex; gap: 12px; align-items: center; min-width: 0; flex: 1 1 220px; }
 /* 关键：内层 div 也要允许收缩，否则 .sub 的 nowrap 撑破父级、文字溢出到页签下 */
 .brand > div { min-width: 0; }
 .brand .logo { width: 30px; height: 30px; flex: none; display: block; border-radius: 6px; }
 .brand h1 { margin: 0; font-size: 17px; line-height: 1.3; color: var(--text); }
 .brand .sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.actions { display: flex; gap: 8px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.actions { display: flex; gap: 8px; align-items: center; flex: 1 1 auto; min-width: 0;
+  flex-wrap: wrap; justify-content: flex-end; }
 .navseg { width: 360px; max-width: 52vw; }
+/* 中等宽度（平板/半屏）：顶栏三段各自收缩换行，背景始终覆盖全部按钮。
+   768~1100px 桌面布局仍显示顶栏，但按钮多（更新/审批/语言…）时
+   flex:none 会把末尾按钮挤出白框外——这里改为允许 .actions 占满第二行 */
+@media (max-width: 1100px) {
+  .top { row-gap: 8px; }
+  .brand { flex: 1 1 100%; }
+  .brand .sub { max-width: 60vw; }
+  .actions { justify-content: flex-start; }
+}
 @media (max-width: 640px) { .brand .sub { display: none; } .navseg { width: auto; } }
 
 /* ---- 移动端专属布局（≤768px）：极简吸顶顶栏 + 底部导航 + 抽屉菜单 ---- */
