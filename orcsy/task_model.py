@@ -400,6 +400,26 @@ def set_task_file_status(path: Path, status: str) -> bool:
     return changed
 
 
+def archive_task_file(path: Path, tasks_dir: Path) -> Path | None:
+    """把已完成/已取消的任务文件移进 tasks/done/（与 Agent 完成归档同一落点）。
+
+    手工在看板「标记完成」也走这里，保证归档列表状态一致。同名文件已存在时
+    跳过（避免覆盖），返回目标路径；移动失败返回 None（任务留在原地，不影响状态）。
+    """
+    done_dir = tasks_dir / "done"
+    target = done_dir / path.name
+    if target == path:
+        return target
+    try:
+        done_dir.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            return None
+        path.replace(target)
+        return target
+    except OSError:
+        return None
+
+
 def _next_requeue_seq(tasks_dir: Path) -> int:
     """下一个受阻重入队轮次戳：全项目现有最大值 +1（无则 1）。"""
     seq = 0

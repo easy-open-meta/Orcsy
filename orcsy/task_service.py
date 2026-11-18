@@ -24,6 +24,7 @@ from .session_bus import cleanup_if_finished
 from .task_model import (
     _next_requeue_seq,
     _set_frontmatter_field,
+    archive_task_file,
     detect_dependency_cycle,
     parse_task_file,
     priority_rank,
@@ -274,9 +275,17 @@ def set_task_status(agents: dict, data: dict) -> dict:
     status = str(data.get("status", "")).strip().lower()
     if status not in VALID_STATUS:
         raise ValueError(f"状态不合法：{status}")
+    agent = agents.get(project)
+    if agent is None:
+        raise ValueError(f"未知项目：{project}")
     path = task_path(agents, project, task_id)
     if not path.exists():
-        raise ValueError(f"任务不存在：{task_id}")
+        # 已归档（tasks/done/）的任务也允许改状态——典型场景是「重新入队」；
+        # 改回 open 时文件会回迁到 tasks/ 根目录重新参与调度。
+        archived_path = agent.tasks_dir / "done" / path.name
+        if not archived_path.exists():
+            raise ValueError(f"任务不存在：{task_id}")
+        path = archived_path
     text = path.read_text(encoding="utf-8")
     m = FRONTMATTER_RE.match(text)
     if not m:
@@ -293,16 +302,30 @@ def set_task_status(agents: dict, data: dict) -> dict:
                                str(_next_requeue_seq(path.parent)))
     else:
         _set_frontmatter_field(path, None, "requeue_seq", None)
+    # 手工重开已归档任务：回迁到 tasks/ 根目录重新参与调度
+    if status == "open" and path.parent.name == "done":
+        restored = path.parent.parent / path.name
+        try:
+            path.replace(restored)
+            path = restored
+            log.info("Web 重新入队已归档任务 %s/%s，回迁到 %s", project, task_id, restored)
+        except OSError as e:
+            log.warning("回迁任务 %s/%s 失败（留在 done/）：%s", project, task_id, e)
     # Phase 1：人工把批次内最后一个任务标为 done/cancelled 时同步销毁共享剪贴板
     if status in ("done", "cancelled"):
         try:
-            agent = agents.get(project)
-            if agent is not None and getattr(agent, "claims", None) is not None:
+            if getattr(agent, "claims", None) is not None:
                 t = parse_task_file(path)
                 cleanup_if_finished(agent.project, agent.claims.state_dir, t,
                                     tasks_dir=agent.tasks_dir)
         except Exception:  # noqa: BLE001 — 清理旁路
             log.warning("按批次清理共享剪贴板失败（忽略）", exc_info=True)
+    # 手工标 done 与 Agent 完成走同一归档落点（tasks/done/），保证看板
+    # 「已归档」列表状态一致；cancelled/blocked 留在原地便于重新入队。
+    if status == "done":
+        target = archive_task_file(path, agent.tasks_dir)
+        if target is not None:
+            log.info("Web 人工完成任务 %s/%s 已归档到 %s", project, task_id, target)
     log.info("Web 修改任务状态 %s/%s -> %s", project, task_id, status)
     return {"ok": True}
 

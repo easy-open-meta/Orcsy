@@ -537,7 +537,7 @@ in_progress (running)
 | Batch delete | Appears after selection | Delete the selected task files; irreversible |
 | Clear tasks (N) | Above the list | Delete all active tasks in the project; archived tasks are kept |
 | Requeue | Blocked/in-progress task | Back to open; picked up first next scan |
-| Mark done | Open/in-progress task | Mark complete manually (no auto-archive) |
+| Mark done | Open/in-progress task | Mark complete manually and archive it to `tasks/done/` (same location as agent completions; appears in the Archived list immediately) |
 | Force stop | In-progress task | Abort the AI loop and running commands, discard temporary changes, mark cancelled |
 | Delete | Each task row | Delete one task file |
 
