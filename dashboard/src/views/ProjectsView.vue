@@ -453,7 +453,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
           <i class="ms sm tasklist-chev" :class="{ open: isTaskListOpen(p) }">{{ isTaskListOpen(p) ? 'expand_less' : 'expand_more' }}</i>
           <span class="tasklist-title">{{ it('任务列表') }}</span>
           <span class="tasklist-count">
-            待办 {{ p.tasks.length }}<template v-if="p.parse_errors.length"> · 异常 {{ p.parse_errors.length }}</template><template v-if="p.archived.length"> · 归档 {{ p.archived.length }}</template>
+            {{ it('待办') }} {{ p.tasks.length }}<template v-if="p.parse_errors.length"> · {{ it('异常') }} {{ p.parse_errors.length }}</template>
           </span>
           <span class="tasklist-hint">{{ isTaskListOpen(p) ? '收起' : '展开' }}</span>
         </button>

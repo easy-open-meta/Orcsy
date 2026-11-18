@@ -324,6 +324,7 @@ export default {
   '工具循环轮数上限（-1 = 不设上限）': 'Tool-loop round cap (-1 = unlimited)',
   '单任务轮数上限（留空用默认）': 'Per-task round cap (empty = default)',
   '解析失败': 'Parse failed',
+  '异常': 'Errors',
   '注意：任务文件解析有问题 —— {error}': 'Task file parse problem — {error}',
 
   // ---- 依赖 / 嵌套仓库 / 提交页 ----
