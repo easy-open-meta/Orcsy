@@ -70,7 +70,12 @@ def api(port: int, path: str, body: dict | None = None) -> dict:
             with urllib.request.urlopen(req, timeout=15) as r:
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
-            return json.loads(e.read().decode())
+            try:
+                return json.loads(e.read().decode())
+            except (ConnectionResetError, TimeoutError, OSError, ValueError) as re:
+                # 4xx 响应体读取期被 RST：响应已丢，连接层重试
+                last_err = re
+                _time.sleep(0.4 * (attempt + 1))
         except (ConnectionResetError, TimeoutError, OSError) as e:
             last_err = e
             _time.sleep(0.4 * (attempt + 1))
