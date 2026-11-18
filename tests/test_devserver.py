@@ -42,8 +42,17 @@ def test_devserver_lifecycle() -> None:
         base_url = res["base_url"]
         assert f":{port}" in base_url
 
-        # 验证服务确实可访问
-        resp = httpx.get(f"{base_url}/", timeout=2.0)
+        # 验证服务确实可访问（回环建连偶发被本机代理劫持 RST：退避重试）
+        for _attempt in range(6):
+            try:
+                resp = httpx.get(f"{base_url}/", timeout=5.0)
+                if resp.status_code == 200:
+                    break
+            except httpx.TransportError:
+                pass
+            time.sleep(0.5 * (_attempt + 1))
+        else:
+            resp = httpx.get(f"{base_url}/", timeout=5.0)
         assert resp.status_code == 200
 
         # 2. 读取日志
