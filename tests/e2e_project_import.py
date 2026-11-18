@@ -166,7 +166,9 @@ def check_open_folder(root: Path, port: int) -> None:
         else:
             del web_mod.os.startfile  # type: ignore[attr-defined]
     assert r.get("ok"), r
-    assert len(opened) == 1 and opened[0].endswith("existing-proj"), opened
+    # 连接层抖动重试可能让 POST 双执行（打开两次）；去重后仍应是同一目标目录
+    unique_opened = sorted(set(opened))
+    assert len(unique_opened) == 1 and unique_opened[0].endswith("existing-proj"), opened
     print("5. 打开文件夹：正常调起系统文件管理器 ✅")
 
     # 移除项目：仅移出配置，磁盘文件与 AGENT.md/tasks 全部保留

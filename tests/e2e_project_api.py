@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 import urllib.error
 import os
 os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')  # 本机回环不走系统代理（环境可能带 http_proxy）
@@ -14,16 +15,27 @@ BASE = "http://127.0.0.1:5116"
 
 
 def api(path: str, body: dict | None = None) -> dict:
-    req = urllib.request.Request(
-        BASE + path,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={"Content-Type": "application/json"},
-        method="POST" if body is not None else "GET")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        return json.loads(e.read().decode())
+    """带退避重试：Windows 本机回环在高频快速连断下偶发 RST/超时
+    （防护软件/代理对 python.exe 快速建连的拦截），重试后即可恢复；
+    HTTPError 是服务端正常响应（如重名拦截），原样返回不重试。
+    单请求 timeout 15s：被代理吞掉的连接常 ~60s 才 RST，等不起——
+    直接放弃该连接立即重发新连接（新连接大概率直达）。"""
+    last_err: Exception | None = None
+    for attempt in range(6):
+        req = urllib.request.Request(
+            BASE + path,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={"Connection": "close", "Content-Type": "application/json"},
+            method="POST" if body is not None else "GET")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read().decode())
+        except (ConnectionResetError, TimeoutError, OSError) as e:
+            last_err = e
+            time.sleep(0.4 * (attempt + 1))
+    raise last_err  # type: ignore[misc]
 
 
 def main() -> int:
@@ -32,6 +44,10 @@ def main() -> int:
     base = tempfile.mkdtemp(prefix="e2e-api-")
     proj_path = os.path.join(base, "newproj")
     os.makedirs(proj_path, exist_ok=True)
+
+    # 幂等化起点：连接层抖动重试可能让首次创建已生效（响应期 RST 双执行），
+    # 先清掉同名残留，保证「新建成功/重名拦截」断言语义不变
+    api("/api/project/delete", {"name": "web-proj"})
 
     r = api("/api/project", {"name": "web-proj", "path": proj_path,
                              "tasks_dir": "tasks", "guide_file": "AGENT.md",

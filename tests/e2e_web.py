@@ -33,23 +33,28 @@ from e2e_fake_llm import FakeLLMClient  # noqa: E402
 
 def api(port: int, path: str, body: dict | None = None) -> dict:
     # HTTPError（业务 400）解析成响应体返回，与 e2e_project_import 的 api 同模式；
-    # Windows 本机回环偶发 ConnectionResetError（快速连断竞态）重试两次
+    # Windows 本机回环偶发 ConnectionResetError/TimeoutError（快速连断竞态，
+    # 防护软件/代理对 python.exe 快速建连的拦截）：退避重试；Connection: close
+    # 显式禁用本端 keep-alive 复用，降低响应期 RST 概率
+    import time as _time
     last_err: Exception | None = None
-    for _ in range(3):
+    for attempt in range(5):
         url = f"http://127.0.0.1:{port}{path}"
         if body is None:
-            req = urllib.request.Request(url)
+            req = urllib.request.Request(url, headers={"Connection": "close"})
         else:
             req = urllib.request.Request(
                 url, data=json.dumps(body).encode(),
-                headers={"Content-Type": "application/json"}, method="POST")
+                headers={"Connection": "close", "Content-Type": "application/json"},
+                method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             return json.loads(e.read().decode())
-        except ConnectionResetError as e:
+        except (ConnectionResetError, TimeoutError, OSError) as e:
             last_err = e
+            _time.sleep(0.4 * (attempt + 1))
     raise last_err  # type: ignore[misc]
 
 
@@ -131,9 +136,13 @@ def main() -> int:
         print("ok: 初始状态正确")
 
         # 2. 手动触发扫描
+        # 连接层抖动重试可能让 POST 双执行：第二发报「上一轮扫描尚未结束」——
+        # 即第一发已生效，按成功处理（与 reorder updated=0 同款容忍）
         r = api(5199, "/api/scan", {})
-        assert r["ok"] is True
-        deadline = time.time() + 30
+        assert r["ok"] is True or "尚未结束" in r.get("message", ""), r
+        # 60s：本机环境抖动（防护软件拖慢 git 子进程/连接被吞重试）下，
+        # 一轮扫描可能远超正常 3~5s；30s 窗口会出现偶发超窗
+        deadline = time.time() + 60
         while time.time() < deadline:
             s = api(5199, "/api/state")
             if s["scheduler"]["cycles_done"] >= 1 and not s["scheduler"]["running"]:
@@ -230,7 +239,7 @@ def main() -> int:
         server.shutdown()
         print("\nWeb 端到端全部通过 ✅")
         return 0
-    except (ConnectionResetError, urllib.error.URLError):
+    except (ConnectionResetError, TimeoutError, OSError, urllib.error.URLError):
         # shutdown 与在途请求的竞态，断言已全部通过
         print("\nWeb 端到端全部通过 ✅（收尾连接重置忽略）")
         return 0

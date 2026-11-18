@@ -2327,6 +2327,9 @@ class WebHandler(BaseHTTPRequestHandler):
     # HTTP/1.1：启用 keep-alive（看板 5s 轮询少建连），前提是所有响应都带
     # Content-Length —— _json/_html 均已设置
     protocol_version = "HTTP/1.1"
+    # 空闲 keep-alive 连接 75s 自动断（http.server 默认无超时，客户端不复用
+    # 连接时服务端线程会无限堆积：e2e 连发压测下线程耗尽 → 新连接被 reset）
+    timeout = 75
 
     # ---- 基础设施 ----
 
@@ -2882,6 +2885,10 @@ class OrcsyHTTPServer(ThreadingHTTPServer):
     """
 
     daemon_threads = True
+    # 默认 listen backlog 只有 5：e2e/移动端弱网重试等短时并发连发会溢出
+    # accept 队列，Windows 下表现为 ConnectionReset(10054)/拒连。128 是
+    # http.server 高并发场景的常规取值，listen 开销可忽略。
+    request_queue_size = 128
 
     def __init__(self, server_address, handler_cls):  # type: ignore[no-untyped-def]
         super().__init__(server_address, handler_cls)

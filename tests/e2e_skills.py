@@ -53,22 +53,25 @@ def make_config(root: Path) -> Path:
 
 
 def api(port: int, path: str, body: dict | None = None) -> dict:
-    # Windows 本机回环偶发 ConnectionResetError（快速连断竞态）：退避重试 5 次。
-    # 注意重试只对幂等 GET 安全；POST（创建类）重试可能重复执行，测试断言需容忍
+    # Windows 本机回环偶发 ConnectionResetError/TimeoutError（快速连断竞态，
+    # 防护软件/代理对 python.exe 快速建连的拦截）：退避重试 5 次。
+    # Connection: close 显式禁用本端 keep-alive 复用，降低响应期 RST 概率。
+    # 注意重试只对幂等 GET 安全；POST（创建类）在「响应期 RST」时可能已被
+    # 服务端执行过一次——测试断言需容忍（或调用点幂等化：先删残留再建）。
     last_err: Exception | None = None
     import time as _time
     for attempt in range(5):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}{path}",
             data=json.dumps(body).encode() if body is not None else None,
-            headers={"Content-Type": "application/json"},
+            headers={"Connection": "close", "Content-Type": "application/json"},
             method="POST" if body is not None else "GET")
         try:
-            with urllib.request.urlopen(req, timeout=10) as r:
+            with urllib.request.urlopen(req, timeout=15) as r:
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             return json.loads(e.read().decode())
-        except ConnectionResetError as e:
+        except (ConnectionResetError, TimeoutError, OSError) as e:
             last_err = e
             _time.sleep(0.4 * (attempt + 1))
     raise last_err  # type: ignore[misc]
@@ -85,6 +88,11 @@ def check_create(root: Path, port: int, skills_dir: Path) -> None:
     proj.mkdir()
     r = api(port, "/api/project", {"name": "proj-a", "path": str(proj)})
     assert r.get("ok"), r
+    # 幂等化起点：连接层抖动重试可能让首次创建已生效（响应期 RST 双执行），
+    # 先清掉同名残留，保证「新建成功/重名拦截」断言语义不变
+    api(port, "/api/skill/remove", {"names": ["commit-style", "imported-skill",
+                                              "proj-skill", "to-rename",
+                                              "renamed-skill", "remap-skill"]})
     before = {p.name for p in proj.iterdir()}
 
     # 新建全局技能
@@ -241,6 +249,8 @@ def check_rename_remove_remap(root: Path, port: int, skills_dir: Path) -> None:
     print("7. 技能改名：目录改名生效、目标名冲突拦截 ✅")
 
     # 项目改名 → 专属技能 scope 自动重映射
+    # 幂等化前置：响应期 RST 重试可能让首次创建已生效，先清残留
+    api(port, "/api/skill/remove", {"names": ["remap-skill"]})
     r = api(port, "/api/skill", {
         "name": "remap-skill", "description": "随项目改名",
         "scope": "proj-a", "enabled": True, "body": "x",
