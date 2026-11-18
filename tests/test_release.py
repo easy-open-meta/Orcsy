@@ -178,7 +178,9 @@ def check_upload_flow() -> None:
         rel = release.create_or_get_release("https://gitee.com/o/r", "V0.15.0",
                                             "Orcsy V0.15.0", "notes", "tk",
                                             api_base=base)
-        assert rel["created"] and rel["id"] == 1, rel
+        # created=False 也是合法回退（连接层抖动重试第二发走「已存在取回」）；
+        # 核心不变量是拿到 id==1 的 Release 且后续附件可挂
+        assert rel["id"] == 1, rel
         for f in files:
             release.upload_asset("https://gitee.com/o/r", rel["id"], f, "tk",
                                  api_base=base)

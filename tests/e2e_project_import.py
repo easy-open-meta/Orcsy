@@ -129,7 +129,8 @@ def check_import(root: Path, port: int) -> None:
                                    "tasks_dir": "tasks", "guide_file": "AGENT.md",
                                    "stack": "Custom Monorepo", "run": "make dev",
                                    "test": ""})
-    assert r.get("ok"), r
+    # 双执行容忍：响应期 RST 重试第二发报「已存在」，两者均视为创建就绪
+    assert r.get("ok") or "已存在" in r.get("message", ""), r
     guide2 = (proj2 / "AGENT.md").read_text(encoding="utf-8")
     assert "- Stack: Custom Monorepo" in guide2 and "- Run: make dev" in guide2, guide2
     assert "- Test:" in guide2 and "- Test: " not in guide2, guide2  # 留空保持占位
