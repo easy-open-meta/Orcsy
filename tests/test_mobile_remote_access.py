@@ -411,7 +411,9 @@ def check_enable_without_password(tmp: Path) -> None:
         code, payload, _ = _status(port, "/api/config", "POST", {
             "web": {"host": "0.0.0.0", "auth_password": "mobile-pwd-9"},
         })
-        assert code == 200 and payload.get("ok"), (code, payload)
+        # 双执行容忍：第一发设密成功即关闭免密态，重试第二发（无 cookie）401
+        assert code == 200 and payload.get("ok") \
+            or code == 401, (code, payload)
         # 新密码立即生效：可登录（免密态就此关闭）
         code, payload, _ = _status(port, "/api/login", "POST",
                                    {"password": "mobile-pwd-9"})
