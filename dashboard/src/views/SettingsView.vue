@@ -1504,11 +1504,11 @@ const providerOptions = [
           <NSelect v-model:value="draft.provider" :options="providerOptions" /></div>
         <div class="f2"><label>{{ it('模型 model（下拉选择或输入过滤，支持自定义 id）') }}</label>
           <NSelect v-model:value="draft.model" :options="modelOptions" filterable tag
-                   :placeholder="t('deepseek-chat 或获取列表后选择')" @update:value="onModelPick" /></div>
+                   :placeholder="it('deepseek-chat 或获取列表后选择')" @update:value="onModelPick" /></div>
         <div class="f0"><label>&nbsp;</label>
           <div class="btnrow">
             <NButton :loading="fetching" @click="fetchModels">{{ it('获取列表') }}</NButton>
-            <NButton :loading="testing" :title="t('发送一条极短对话，验证网络/密钥/模型名是否可用')" @click="testModel">{{ it('测试连接') }}</NButton>
+            <NButton :loading="testing" :title="it('发送一条极短对话，验证网络/密钥/模型名是否可用')" @click="testModel">{{ it('测试连接') }}</NButton>
           </div></div>
       </div>
       <div class="modelspec" v-if="selectedSpec && (selectedSpec.context_window || selectedSpec.max_output_tokens)">
@@ -1585,7 +1585,7 @@ const providerOptions = [
                   <div class="frow">
                     <div class="f1">
                       <label>{{ it('预设名称') }}</label>
-                      <NInput v-model:value="prof.name" :placeholder="t('如 资深后端开发')" />
+                      <NInput v-model:value="prof.name" :placeholder="it('如 资深后端开发')" />
                     </div>
                     <div class="f1">
                       <label>{{ it('职能角色') }}</label>
@@ -1593,7 +1593,7 @@ const providerOptions = [
                     </div>
                     <div class="f14">
                       <label>{{ it('职责简介（将展示在团队名册）') }}</label>
-                      <NInput v-model:value="prof.description" :placeholder="t('负责接口与业务逻辑实现')" />
+                      <NInput v-model:value="prof.description" :placeholder="it('负责接口与业务逻辑实现')" />
                     </div>
                   </div>
 
@@ -1636,7 +1636,7 @@ const providerOptions = [
                     </div>
                     <div class="f1">
                       <label>{{ it('单任务轮数上限（留空用默认）') }}</label>
-                      <NInputNumber v-model:value="prof.max_turns" :min="-1" :max="200" :placeholder="t('默认')" />
+                      <NInputNumber v-model:value="prof.max_turns" :min="-1" :max="200" :placeholder="it('默认')" />
                     </div>
                   </div>
 
@@ -1653,7 +1653,7 @@ const providerOptions = [
                       <NButton size="tiny" quaternary type="primary" @click="loadRolePromptTemplate(prof)" style="font-size: 11.5px; padding: 0 4px;"><i class="ms sm">description</i> {{ it('载入内置角色模版（类似 AGENT.md）') }}</NButton>
                     </div>
                     <NInput v-model:value="prof.extra_prompt" type="textarea" :rows="4" :autosize="{ minRows: 3, maxRows: 14 }"
-                            :placeholder="t('如：工作流与协作规范、测试要求、编码风格与交付验收标准...')" />
+                            :placeholder="it('如：工作流与协作规范、测试要求、编码风格与交付验收标准...')" />
                   </div>
                 </div>
               </div>
@@ -1734,7 +1734,7 @@ const providerOptions = [
           <label>{{ it('自定义脱敏正则（每行一条，整段匹配替换；≤20 条、每条 ≤500 字符）') }}</label>
           <NInput v-model:value="maskingDraft.patternsText" type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"
-                  :placeholder="t('例：PROJECT_SECRET_[A-Za-z0-9]{16,}')" />
+                  :placeholder="it('例：PROJECT_SECRET_[A-Za-z0-9]{16,}')" />
         </div>
       </div>
       <div class="sfoot"><NButton type="primary" :loading="maskingSaving" @click="saveMasking">{{ it('保存脱敏设置') }}</NButton></div>
@@ -1776,7 +1776,7 @@ const providerOptions = [
               <div class="f1"><label>{{ it('台账目录（留空 = 配置文件同级 runs/；改目录会自动迁移历史记录）') }}</label>
                 <div class="pathline">
                   <NInput v-model:value="draft.runlog_dir" :disabled="runlogBusy"
-                          :placeholder="t('留空使用默认目录；也可输入绝对路径')" />
+                          :placeholder="it('留空使用默认目录；也可输入绝对路径')" />
                   <NButton :disabled="runlogBusy" @click="pickRunlogDir">{{ it('浏览…') }}</NButton>
                 </div>
               </div>
@@ -1862,9 +1862,9 @@ const providerOptions = [
             <template #header><i class="ms">history</i> {{ it('审计日志') }}</template>
             <div class="frow">
               <div class="f1"><label>{{ it('动作过滤（如 task / project / auth）') }}</label>
-                <NInput v-model:value="auditAction" :placeholder="t('留空 = 全部')" /></div>
+                <NInput v-model:value="auditAction" :placeholder="it('留空 = 全部')" /></div>
               <div class="f1"><label>{{ it('操作者过滤（user / api_key / local）') }}</label>
-                <NInput v-model:value="auditActor" :placeholder="t('留空 = 全部')" /></div>
+                <NInput v-model:value="auditActor" :placeholder="it('留空 = 全部')" /></div>
               <div class="f1" style="justify-content:flex-end">
                 <NButton type="primary" secondary :loading="auditLoading" @click="loadAudit">{{ it('刷新') }}</NButton>
               </div>
@@ -1901,7 +1901,7 @@ const providerOptions = [
             ]" /></div>
           <div class="f2"><label>{{ it('审查模型 model（必须与任务模型不同）') }}</label>
             <NSelect v-model:value="reviewDraft.model" :options="reviewModelOptions.map(m => ({ label: m.id, value: m.id }))"
-                     filterable tag clearable :placeholder="t('如 deepseek-chat / glm-4-flash（可配便宜小模型）')"
+                     filterable tag clearable :placeholder="it('如 deepseek-chat / glm-4-flash（可配便宜小模型）')"
                      @update:value="(v: string | null) => { reviewDraft.model = v || '' }" /></div>
         </div>
         <div class="frow">
@@ -1914,10 +1914,10 @@ const providerOptions = [
         </div>
         <div class="frow">
           <div class="f1"><label>{{ it('单次审查轮数上限（max_turns）') }}</label>
-            <NInputNumber v-model:value="reviewDraft.max_turns" :min="-1" :max="100" :placeholder="t('-1 为不限')" />
+            <NInputNumber v-model:value="reviewDraft.max_turns" :min="-1" :max="100" :placeholder="it('-1 为不限')" />
             <div class="hint" style="margin-top:2px">{{ it('单次审查工具交互轮次上限（-1 为不限，默认 10）') }}</div></div>
           <div class="f1"><label>{{ it('返工审查轮数上限（全局默认，-1 为不上限）') }}</label>
-            <NInputNumber v-model:value="reviewDraft.max_review_rounds" :min="-1" :max="10" :placeholder="t('-1 为不限')" />
+            <NInputNumber v-model:value="reviewDraft.max_review_rounds" :min="-1" :max="10" :placeholder="it('-1 为不限')" />
             <div class="hint" style="margin-top:2px">{{ it('不通过累计达到上限转受阻（-1 表示不上限持续返工）') }}</div></div>
         </div>
         <label class="checkline stack">
@@ -1976,7 +1976,7 @@ const providerOptions = [
             <div v-show="toolsTab === 'tools'" class="tab-content">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
                 <span class="hint">{{ it('控制 Agent 在任务中可调用的内置核心工具；关闭的工具不会下发给大模型提示词。') }}</span>
-                <NInput v-model:value="toolSearch" size="small" :placeholder="t('搜索工具名称或描述...')" clearable style="width: 240px;" />
+                <NInput v-model:value="toolSearch" size="small" :placeholder="it('搜索工具名称或描述...')" clearable style="width: 240px;" />
               </div>
 
               <div class="tool-groups-container">
@@ -2069,7 +2069,7 @@ const providerOptions = [
                   <NButton size="tiny" secondary @click="toggleAllCommands(true)">{{ it('全部放行') }}</NButton>
                   <NButton size="tiny" secondary @click="toggleAllCommands(false)">{{ it('全部禁用') }}</NButton>
                   <NInput v-model:value="cmdSearch" size="small" class="cmd-search"
-                          :placeholder="t('过滤命令（如 pytest、npm）...')" clearable />
+                          :placeholder="it('过滤命令（如 pytest、npm）...')" clearable />
                 </div>
               </div>
 
@@ -2225,8 +2225,8 @@ const providerOptions = [
                       <div class="f1">
                         <label>{{ it('导航超时 / 服务就绪超时（秒）') }}</label>
                         <div style="display:flex;gap:8px">
-                          <NInputNumber v-model:value="localDebugDraft.navigation_timeout_seconds" :min="5" :max="300" :placeholder="t('导航')" />
-                          <NInputNumber v-model:value="localDebugDraft.service_ready_timeout_seconds" :min="5" :max="600" :placeholder="t('就绪')" />
+                          <NInputNumber v-model:value="localDebugDraft.navigation_timeout_seconds" :min="5" :max="300" :placeholder="it('导航')" />
+                          <NInputNumber v-model:value="localDebugDraft.service_ready_timeout_seconds" :min="5" :max="600" :placeholder="it('就绪')" />
                         </div>
                       </div>
                     </div>
@@ -2275,7 +2275,7 @@ const providerOptions = [
                 <div class="hint tool-foot" style="margin-top: 6px;">
                   注入 run_command 子进程：国内网络拉依赖失败时配 GOPROXY、npm registry（HTTP_PROXY）、PIP_INDEX_URL 即可；不允许覆盖 PATH/SYSTEMROOT 等系统变量。
                 </div>
-                <label class="cmd-chip" style="margin-top: 6px;" :title="t('写入前备份旧值到日志，只增不删，可手动改回')">
+                <label class="cmd-chip" style="margin-top: 6px;" :title="it('写入前备份旧值到日志，只增不删，可手动改回')">
                   <NSwitch size="small" v-model:value="pathAutofix" />
                   <span class="cmd-name">{{ it('任务启动时自动把缺失的工具目录写入用户 PATH') }}</span>
                 </label>
@@ -2332,7 +2332,7 @@ const providerOptions = [
       <div class="madd">
         <NSelect v-model:value="addCat" size="small" :options="catOptions" class="madd-cat" />
         <NInput v-model:value="addUrl" size="small" class="madd-url"
-                :placeholder="t('要添加的镜像 URL（http(s)://，需可直接访问；测速时会一并探测）')"
+                :placeholder="it('要添加的镜像 URL（http(s)://，需可直接访问；测速时会一并探测）')"
                 @keyup.enter="addCustom" />
         <NButton size="small" @click="addCustom">{{ it('添加镜像源') }}</NButton>
       </div>
@@ -2367,7 +2367,7 @@ const providerOptions = [
       <div class="frow">
         <div class="f1"><label>{{ it('额外放行主机（extra_hosts）') }}</label>
           <NDynamicTags v-model:value="draft.egress_extra" :max="30"
-                        :placeholder="t('api.example.com（可带 :端口；*.example.com 含子域）')" />
+                        :placeholder="it('api.example.com（可带 :端口；*.example.com 含子域）')" />
           <div class="hint tool-foot">
             模型 / Issue / 镜像 / 更新源主机按各自配置自动放行，无需在此重复；
             网页抓取要访问的文档站需在此添加。回环地址始终放行；Agent 子进程
@@ -2421,7 +2421,7 @@ const providerOptions = [
         <div class="pkg-row">
           <div class="f2">
             <label>{{ it('手动导入本地安装包（orcsy-update-*.zip；同版本覆盖、升/降级均可）') }}</label>
-            <NInput :value="localPkg" readonly :placeholder="t('尚未选择更新包文件')" />
+            <NInput :value="localPkg" readonly :placeholder="it('尚未选择更新包文件')" />
           </div>
           <div class="f0 pkg-btns">
             <NButton @click="pickPackage">{{ it('选择安装包…') }}</NButton>

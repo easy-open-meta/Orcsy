@@ -368,7 +368,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
       <span class="hint">共 {{ total }} 个受管项目 · 每页 {{ PAGE_SIZE }} 个，翻页按需渲染</span>
     </div>
     <div v-if="store.state && !total" class="empty">
-      <NEmpty :description="t('还没有项目，点右上「＋ 新建项目」添加')" />
+      <NEmpty :description="it('还没有项目，点右上「＋ 新建项目」添加')" />
     </div>
 
     <div class="grid">
@@ -385,7 +385,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
               嵌套仓库 ({{ p.nested_gitlinks.length }})
             </NTag>
             <NTag v-if="p.budget_paused" size="small" type="warning" :bordered="false"
-                  :title="t('项目今日 token 预算已用尽，暂停领取新任务；调高预算或等次日恢复')">
+                  :title="it('项目今日 token 预算已用尽，暂停领取新任务；调高预算或等次日恢复')">
               预算暂停
             </NTag>
             <NTag v-if="p.health?.paused" size="small" type="error" :bordered="false"
@@ -395,7 +395,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <NButton v-if="p.health?.paused" size="tiny" type="warning" secondary
                      @click="resumePaused(p.name)">{{ it('恢复') }}</NButton>
             <NButton size="tiny" quaternary class="git-refresh" :loading="gitRefreshing === p.name"
-                     :title="t('刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）')"
+                     :title="it('刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）')"
                      @click="refreshGit(p)"><i class="ms sm">refresh</i></NButton>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">{{ it('缺指引') }}</NTag>
             <NTag v-if="p.team_enabled" size="small" type="info" :bordered="false"
@@ -404,7 +404,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
             </NTag>
             <NButton v-if="p.pending_git_changes && p.pending_git_changes.count > 0"
                      size="tiny" type="warning" secondary
-                     :title="t('主工作区有已通过测试但未提交的变更，点此人工把关确认提交')"
+                     :title="it('主工作区有已通过测试但未提交的变更，点此人工把关确认提交')"
                      @click="openCommitDlg(p.name)">
               待人工提交 ({{ p.pending_git_changes.count }})
             </NButton>
@@ -416,7 +416,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
               审查开启</NTag>
             <NTag v-else-if="p.review_enabled === false || (p.review?.enabled_effective === false && p.review?.model_configured)"
                   size="small" :bordered="false"
-                  :title="t('本项目已关闭审查门（跟随关闭优先于全局开关）')">{{ it('审查关闭') }}</NTag>
+                  :title="it('本项目已关闭审查门（跟随关闭优先于全局开关）')">{{ it('审查关闭') }}</NTag>
             <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
                   :type="p.issue_auto_pull.last_error ? 'error' : 'success'"
                   :title="p.issue_auto_pull.last_error || undefined">
@@ -441,7 +441,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </div>
 
         <div class="quickadd">
-          <NInput v-model:value="q(p.name).title" size="small" :placeholder="t('新任务标题，回车快速添加')"
+          <NInput v-model:value="q(p.name).title" size="small" :placeholder="it('新任务标题，回车快速添加')"
                   @keydown.enter="quickAdd(p)" />
           <NSelect v-model:value="q(p.name).pri" size="small" class="qpri" :options="priOptions" />
           <NButton size="small" type="primary" :loading="adding" @click="quickAdd(p)">{{ it('添加') }}</NButton>
@@ -486,7 +486,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
                :class="{ 'drop-before': dropAt?.id === tk.id && dropAt.before,
                          'drop-after': dropAt?.id === tk.id && !dropAt.before,
                          dragging: dragId === tk.id }"
-               draggable="true" :title="t('拖拽调整顺序（同一优先级内生效，同时决定 Agent 领取顺序）')"
+               draggable="true" :title="it('拖拽调整顺序（同一优先级内生效，同时决定 Agent 领取顺序）')"
                @dragstart="onDragStart($event, t)" @dragend="onDragEnd()"
                @dragover.prevent="onDragOver($event, t)" @drop.prevent="onDrop(p, t)">
             <div class="t-main clickable"
@@ -506,18 +506,18 @@ async function quickAdd(p: ProjectT): Promise<void> {
                 {{ roleBadgeText(tk.assignee) }}
               </NTag>
               <NTag v-if="tk.dep_state === 'waiting'" size="small" :bordered="false"
-                    :title="t('等待前置依赖任务完成')">
+                    :title="it('等待前置依赖任务完成')">
                 <i class="ms sm">hourglass_top</i> 等待前置 ({{ tk.dep_done_count }}/{{ tk.dep_total_count }})
               </NTag>
               <NTag v-else-if="tk.dep_state === 'upstream_blocked'" size="small" type="error" :bordered="false"
-                    :title="t('前置依赖任务存在受阻/取消')">
+                    :title="it('前置依赖任务存在受阻/取消')">
                 <i class="ms sm">warning</i> 前置受阻
               </NTag>
               <NTag v-if="(tk.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
                 <i class="ms sm">autorenew</i> 回归 #{{ tk.qa_round }}
               </NTag>
               <NTag v-if="tk.review_pending" size="small" type="info" :bordered="false"
-                    :title="t('任务已完成，独立审查进行中或等待补审；审查通过后合并归档')">
+                    :title="it('任务已完成，独立审查进行中或等待补审；审查通过后合并归档')">
                 <i class="ms sm">rate_review</i> 待审查
               </NTag>
               <NTag v-else-if="(tk.review_round || 0) > 0 && tk.status !== 'done' && tk.status !== 'cancelled'"
@@ -526,7 +526,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
                 <i class="ms sm">rate_review</i> 返工 ×{{ tk.review_round }}
               </NTag>
               <NTag v-if="waitingApproval(p.name, tk.id)" size="small" type="warning"
-                    :bordered="false" :title="t('Agent 有操作挂起等待人工审批，点顶栏「待审批」处理')">
+                    :bordered="false" :title="it('Agent 有操作挂起等待人工审批，点顶栏「待审批」处理')">
                 <i class="ms sm">pause_circle</i> 待审批
               </NTag>
             </div>
@@ -543,7 +543,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
               <NButton v-if="tk.status === 'open' || tk.status === 'in_progress'" size="tiny"
                        @click="setStatus(p, t, 'done')">{{ it('标记完成') }}</NButton>
               <NButton v-if="tk.status === 'in_progress'" size="tiny" type="warning" secondary
-                       :title="t('立即中止正在执行的 Agent 循环（丢弃 worktree 改动，可重新入队）')"
+                       :title="it('立即中止正在执行的 Agent 循环（丢弃 worktree 改动，可重新入队）')"
                        @click="stopTask(p, t)">{{ it('强制停止') }}</NButton>
               <NButton size="tiny" quaternary type="error" @click="delTask(p, t)">{{ it('删除') }}</NButton>
             </div>
@@ -565,7 +565,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
             <span class="arch-hint" />
           </summary>
           <div v-for="tk in [...p.archived].reverse()" :key="tk.id" class="task">
-            <div class="t-main clickable" :title="t('点击查看任务详情（只读）')" @click="openTaskView(p.name, tk.id)">
+            <div class="t-main clickable" :title="it('点击查看任务详情（只读）')" @click="openTaskView(p.name, tk.id)">
               <NTag size="small" :color="{ color: PRI_COLOR[tk.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ tk.priority }}</NTag>
               <span class="title">{{ tk.title }}</span>
               <NTag size="small" type="success" :bordered="false">{{ it('已完成') }}</NTag>
