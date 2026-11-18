@@ -353,7 +353,7 @@ function getToolRiskTag(name: string): { label: string; type: 'success' | 'warni
 }
 
 function getToolDesc(name: string): string {
-  const found = toolsCatalog.value.find(t => tk.name === name)
+  const found = toolsCatalog.value.find(t => t.name === name)
   return found ? found.description : ''
 }
 
@@ -395,9 +395,9 @@ function getGroupCommandsCount(cmds: string[]): { enabled: number; total: number
 function getFilteredTools(toolNames: string[]) {
   const q = toolSearch.value.trim().toLowerCase()
   return toolsCatalog.value.filter(t => {
-    if (!toolNames.includes(tk.name)) return false
+    if (!toolNames.includes(t.name)) return false
     if (!q) return true
-    return tk.name.toLowerCase().includes(q) || tk.description.toLowerCase().includes(q)
+    return t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)
   })
 }
 
@@ -414,7 +414,7 @@ const filteredToolCategories = computed(() => {
     if (cat.label.toLowerCase().includes(q) || cat.description.toLowerCase().includes(q)) return true
     return cat.tools.some(t => {
       const toolObj = toolsCatalog.value.find(item => item.name === t)
-      return tk.toLowerCase().includes(q) || (toolObj && toolObj.description.toLowerCase().includes(q))
+      return t.toLowerCase().includes(q) || (toolObj && toolObj.description.toLowerCase().includes(q))
     })
   })
 })
@@ -428,8 +428,8 @@ const filteredCommandCategories = computed(() => {
   })
 })
 
-const toolsTotalCount = computed(() => toolsCatalog.value.filter(t => !t.group && tk.name !== 'http_request').length)
-const toolsEnabledCount = computed(() => toolsCatalog.value.filter(t => !t.group && tk.name !== 'http_request' && (tk.name === 'finish' || toolsDraft[tk.name])).length)
+const toolsTotalCount = computed(() => toolsCatalog.value.filter(t => !t.group && t.name !== 'http_request').length)
+const toolsEnabledCount = computed(() => toolsCatalog.value.filter(t => !t.group && t.name !== 'http_request' && (t.name === 'finish' || toolsDraft[t.name])).length)
 const cmdsTotalCount = computed(() => commandsCatalog.value.length)
 const cmdsEnabledCount = computed(() => commandsCatalog.value.filter(c => commandsDraft[c] !== false).length)
 const debugActiveCount = computed(() => {
@@ -530,9 +530,9 @@ watch(() => store.state, (s) => {
   ])
   // finish 只是展示行（常开且禁用），不进草稿、不参与保存
   for (const t of toolsCatalog.value) {
-    if (tk.name === 'finish') continue
-    const defVal = !defaultOff.has(tk.name)
-    toolsDraft[tk.name] = s.tools_cfg?.[tk.name] ?? defVal
+    if (t.name === 'finish') continue
+    const defVal = !defaultOff.has(t.name)
+    toolsDraft[t.name] = s.tools_cfg?.[t.name] ?? defVal
   }
   commandsCatalog.value = s.commands_catalog ?? []
   for (const c of commandsCatalog.value) commandsDraft[c] = s.commands_cfg?.[c] ?? true

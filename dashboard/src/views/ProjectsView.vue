@@ -65,16 +65,16 @@ const dragId = shallowRef<string | null>(null)
 const dropAt = shallowRef<{ id: string; before: boolean } | null>(null)
 
 function onDragStart(e: DragEvent, t: TaskT): void {
-  dragId.value = tk.id
-  ui.dragTask = tk.id
-  e.dataTransfer?.setData('text/plain', tk.id)
+  dragId.value = t.id
+  ui.dragTask = t.id
+  e.dataTransfer?.setData('text/plain', t.id)
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
 }
 function onDragOver(e: DragEvent, t: TaskT): void {
-  if (!dragId.value || dragId.value === tk.id) return
+  if (!dragId.value || dragId.value === t.id) return
   const el = e.currentTarget as HTMLElement
   const r = el.getBoundingClientRect()
-  dropAt.value = { id: tk.id, before: e.clientY < r.top + r.height / 2 }
+  dropAt.value = { id: t.id, before: e.clientY < r.top + r.height / 2 }
 }
 function onDragEnd(): void {
   dragId.value = null
@@ -85,7 +85,7 @@ async function onDrop(p: ProjectT, t: TaskT): Promise<void> {
   const src = dragId.value
   const at = dropAt.value
   onDragEnd()
-  if (!src || !at || src === tk.id) return
+  if (!src || !at || src === t.id) return
   const all = sorted(p)
   const moved = all.find(x => x.id === src)
   const anchorTask = all.find(x => x.id === at.id)
@@ -175,21 +175,21 @@ async function resumePaused(name: string): Promise<void> {
 }
 
 function clickTask(project: string, t: TaskT): void {
-  if (tk.status === 'open') {
-    ui.taskDlg = { project, id: tk.id }
+  if (t.status === 'open') {
+    ui.taskDlg = { project, id: t.id }
   } else {
-    openTaskView(project, tk.id)
+    openTaskView(project, t.id)
   }
 }
 
 async function delTask(p: ProjectT, t: TaskT): Promise<void> {
   window.$dialog?.warning({
     title: it('删除任务'),
-    content: tFmt('确定删除任务 {p0}？', { p0: tk.id }),
+    content: tFmt('确定删除任务 {p0}？', { p0: t.id }),
     positiveText: it('删除'),
     negativeText: it('取消'),
     async onPositiveClick() {
-      try { await api.taskDelete(p.name, tk.id); window.$message?.('已删除') }
+      try { await api.taskDelete(p.name, t.id); window.$message?.('已删除') }
       catch (e: any) { window.$message?.(e.message, 'error') }
       void import('../store').then(m => m.refresh(true))
     },
@@ -199,14 +199,14 @@ async function delTask(p: ProjectT, t: TaskT): Promise<void> {
 function stopTask(p: ProjectT, t: TaskT): void {
   window.$dialog?.warning({
     title: it('强制停止任务'),
-    content: `确定立即停止正在执行的任务 ${tk.id}？\n\n`
+    content: `确定立即停止正在执行的任务 ${t.id}？\n\n`
       + '当前工具调用（含正在跑的命令）会被中止，worktree 里未提交的改动将被丢弃，'
       + it('任务标记为「已取消」——之后可点「重新入队」再跑。'),
     positiveText: it('强制停止'),
     negativeText: it('取消'),
     async onPositiveClick() {
       try {
-        const r = await api.taskStop(p.name, tk.id)
+        const r = await api.taskStop(p.name, t.id)
         window.$message?.(r.message || it('已发送停止信号'), 'success')
       } catch (e: any) { window.$message?.(e.message, 'error') }
       void import('../store').then(m => m.refresh(true))
@@ -268,16 +268,16 @@ function clearChecked(name: string): void {
   delete checked[name]
 }
 function pageAllChecked(p: ProjectT): boolean {
-  const ids = pageTasks(p).map(t => tk.id)
+  const ids = pageTasks(p).map(t => t.id)
   return ids.length > 0 && ids.every(id => checkedIds(p.name).includes(id))
 }
 function pageSomeChecked(p: ProjectT): boolean {
-  const ids = pageTasks(p).map(t => tk.id)
+  const ids = pageTasks(p).map(t => t.id)
   const hit = ids.filter(id => checkedIds(p.name).includes(id)).length
   return hit > 0 && hit < ids.length
 }
 function checkAllPage(p: ProjectT, on: boolean): void {
-  const pageIds = pageTasks(p).map(t => tk.id)
+  const pageIds = pageTasks(p).map(t => t.id)
   const rest = checkedIds(p.name).filter(id => !pageIds.includes(id))
   checked[p.name] = on ? [...rest, ...pageIds] : rest
 }
@@ -329,7 +329,7 @@ async function openFolder(p: ProjectT): Promise<void> {
 }
 
 async function setStatus(p: ProjectT, t: TaskT, st: string): Promise<void> {
-  try { await api.taskStatus(p.name, tk.id, st); window.$message?.('已更新') }
+  try { await api.taskStatus(p.name, t.id, st); window.$message?.('已更新') }
   catch (e: any) { window.$message?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
@@ -487,11 +487,11 @@ async function quickAdd(p: ProjectT): Promise<void> {
                          'drop-after': dropAt?.id === tk.id && !dropAt.before,
                          dragging: dragId === tk.id }"
                draggable="true" :title="it('拖拽调整顺序（同一优先级内生效，同时决定 Agent 领取顺序）')"
-               @dragstart="onDragStart($event, t)" @dragend="onDragEnd()"
-               @dragover.prevent="onDragOver($event, t)" @drop.prevent="onDrop(p, t)">
+               @dragstart="onDragStart($event, tk)" @dragend="onDragEnd()"
+               @dragover.prevent="onDragOver($event, tk)" @drop.prevent="onDrop(p, tk)">
             <div class="t-main clickable"
                  :title="tk.status === 'open' ? '点击编辑任务内容' : '点击查看任务内容（只读）'"
-                 @click="clickTask(p.name, t)">
+                 @click="clickTask(p.name, tk)">
               <span class="tcheck" @click.stop>
                 <NCheckbox size="small" :checked="isTaskChecked(p.name, tk.id)"
                            @update:checked="(v: boolean) => toggleCheck(p.name, tk.id, v)" />
@@ -539,13 +539,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
             </details>
             <div class="ops-row">
               <NButton v-if="tk.status !== 'open' && tk.status !== 'cancelled'" size="tiny"
-                       @click="setStatus(p, t, 'open')">{{ it('重新入队') }}</NButton>
+                       @click="setStatus(p, tk, 'open')">{{ it('重新入队') }}</NButton>
               <NButton v-if="tk.status === 'open' || tk.status === 'in_progress'" size="tiny"
-                       @click="setStatus(p, t, 'done')">{{ it('标记完成') }}</NButton>
+                       @click="setStatus(p, tk, 'done')">{{ it('标记完成') }}</NButton>
               <NButton v-if="tk.status === 'in_progress'" size="tiny" type="warning" secondary
                        :title="it('立即中止正在执行的 Agent 循环（丢弃 worktree 改动，可重新入队）')"
-                       @click="stopTask(p, t)">{{ it('强制停止') }}</NButton>
-              <NButton size="tiny" quaternary type="error" @click="delTask(p, t)">{{ it('删除') }}</NButton>
+                       @click="stopTask(p, tk)">{{ it('强制停止') }}</NButton>
+              <NButton size="tiny" quaternary type="error" @click="delTask(p, tk)">{{ it('删除') }}</NButton>
             </div>
           </div>
 
