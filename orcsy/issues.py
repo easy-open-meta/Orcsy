@@ -127,15 +127,16 @@ def _get_json(url: str, *, headers: dict[str, str] | None = None,
         raise IssueError(str(e)) from e
     last_err: Exception | None = None
     resp = None
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             resp = httpx.get(url, headers=headers, params=params, timeout=30,
                              auth=auth, trust_env=trust_env)
             break
         except httpx.HTTPError as e:
             last_err = e
-            if attempt < 2 and isinstance(e, httpx.TransportError):
-                time.sleep(0.3 * (attempt + 1))
+            if attempt < 4 and isinstance(e, httpx.TransportError):
+                # 本机代理阵发劫持回环/出站建连（RST/超时），退避重试可自愈
+                time.sleep(0.5 * (attempt + 1))
                 continue
             raise IssueError(f"请求仓库 API 失败：{e}") from e
     if resp is None:  # 循环走完仍未拿到响应（理论上不会：异常分支均已 raise）

@@ -138,21 +138,24 @@ def _status(port: int, path: str, method: str = "GET", body: dict | None = None,
         https_response = http_response
 
     opener = urllib.request.build_opener(NoRaise)
+    import time as _time
     last_err: Exception | None = None
-    for _ in range(3):
+    for attempt in range(6):
         url = f"http://127.0.0.1:{port}{path}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method,
-                                     headers={"Content-Type": "application/json",
+                                     headers={"Connection": "close",
+                                              "Content-Type": "application/json",
                                               **(headers or {})})
         try:
-            with opener.open(req, timeout=10) as resp:
+            with opener.open(req, timeout=15) as resp:
                 raw = resp.read()
                 hdrs = dict(resp.headers)
                 code = resp.status
             break
-        except ConnectionResetError as e:
+        except (ConnectionResetError, TimeoutError, OSError) as e:
             last_err = e
+            _time.sleep(0.4 * (attempt + 1))
             continue
     else:
         raise last_err  # type: ignore[misc]
