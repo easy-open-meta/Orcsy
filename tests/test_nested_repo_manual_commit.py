@@ -279,12 +279,49 @@ def check_push_order() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_gitignore_false_positive() -> None:
+    """.gitignore 裸目录规则误伤大小写不同的源码目录时提交仍成功。
+
+    caresy 真实案例：.gitignore 的 `data/`（Docker 运行时目录）在 Windows
+    大小写不敏感匹配下命中 `src/EOM.Caresy.Infrastructure/Data/`，其内已跟踪
+    文件（SeedData.cs）被 git 判为「父目录被忽略」，`git add -A -- <pathspec>`
+    整体拒绝。人工提交必须回退 -f 强制暂存，不能整体失败。
+    """
+    tmp, state, _parent, api, _web = _make_env()
+    try:
+        # 复刻 caresy 历史：文件先被跟踪，之后才出现误伤的 ignore 规则
+        data_dir = api / "src" / "EOM.Caresy.Infrastructure" / "Data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "SeedData.cs").write_text("seed = 1\n", encoding="utf-8")
+        child = Git(api)
+        child.add_all()
+        child.commit("chore: init seed")
+        (api / ".gitignore").write_text("data/\n", encoding="utf-8")
+        child.add_all()
+        child.commit("chore: add gitignore")
+        # 已跟踪文件修改后，add pathspec 因父目录命中 ignore 规则整体拒绝
+        (data_dir / "SeedData.cs").write_text("seed = 2\n", encoding="utf-8")
+        (api / "src/feature.py").write_text("x = 5\n", encoding="utf-8")
+
+        res = state.manual_commit_project({
+            "name": "caresy", "message": "fix: seed data", "push": False})
+        repos = {r["label"]: r for r in res["repos"]}
+        assert repos["caresy-api"]["commit"], res["repos"]
+        head = Git(api).run("rev-parse", "HEAD:src/EOM.Caresy.Infrastructure/Data/SeedData.cs")
+        assert head, "SeedData.cs 应被提交"
+        assert "seed = 2" in Git(api).run("show", f"{head}"), "应提交最新内容"
+        print("ok: gitignore 误伤 Data 目录时回退 -f 暂存，提交不整体失败")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     check_pending_and_diff()
     check_discard_nested()
     check_manual_commit_nested()
     check_pointer_only()
     check_push_order()
+    check_gitignore_false_positive()
     print("\n嵌套仓库人工把关提交全部测试通过 ✅")
     return 0
 

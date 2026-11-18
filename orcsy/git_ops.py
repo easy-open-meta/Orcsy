@@ -597,7 +597,16 @@ class Git:
         # 先清空索引（不动工作区），再仅暂存未被排除的路径（含删除），
         # 避免用户此前已手动 git add 的排除文件被顺带提交
         self._run("reset")
-        self._run("add", "-A", "--", *staged_paths)
+        try:
+            self._run("add", "-A", "--", *staged_paths)
+        except GitError as e:
+            # pathspec 里混入「父目录命中 .gitignore」的路径（如裸 data/ 规则
+            # 误伤大小写不同的 src/**/Data 源码目录）时 git 会整体拒绝；
+            # 已跟踪文件不受 ignore 影响，加 -f 强制暂存即可。
+            if "paths are ignored" not in str(e):
+                raise
+            log.warning("git add 命中忽略规则，改用 -f 强制暂存：%s", e)
+            self._run("add", "-A", "-f", "--", *staged_paths)
         proc = subprocess.run(
             ["git", "-C", str(self.repo), "commit", "-m", msg],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
