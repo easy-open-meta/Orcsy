@@ -17,6 +17,8 @@ API（均为 GET/POST JSON）：
   POST /api/models       拉取大模型列表 {provider?, base_url?, api_key?}（缺省用已存配置）
   POST /api/llm/test     测试大模型连通性 {provider?, base_url?, api_key?, model?}
                          （一条极短对话；缺省回退已存配置；失败返回 ok:false+原因）
+  POST /api/commit-message  人工把关提交页「AI 生成」：{name} 按项目生效模型读
+                         工作区 diff 生成一条规范 commit message（单轮无工具）
 
 移动端远程访问（docs/design-mobile-remote-access.md）：
   GET  /api/system/endpoints  手机连接向导（免登录白名单）：本机局域网 IP/回环/
@@ -1409,6 +1411,37 @@ class AppState:
         return {"ok": True, "reply": reply,
                 "elapsed_seconds": r["elapsed_seconds"], "message": message}
 
+    def generate_commit_message(self, data: dict) -> dict:
+        """人工把关提交页「AI 生成」：按项目生效模型读工作区 diff 生成提交说明。
+
+        diff 来源与审查/台账一致（executor._workspace_diff：主仓库 + 嵌套子仓库），
+        单轮无工具请求；模型取项目级 llm 覆盖（与任务执行同模型），请求失败返回
+        ok:false + 原因（不打断页面）。
+        """
+        from .config import resolve_llm
+        from .llm import LLMError, generate_commit_message
+
+        name = str(data.get("name") or data.get("project") or "").strip()
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"未知项目：{name}")
+        # 项目生效模型：项目级覆盖 > 全局（与任务执行一致）
+        cfg = resolve_llm(self.config.llm, agent.project.llm, context="llm")
+        diff = agent.executor._workspace_diff() if agent.executor.is_git_repo else ""
+        if not diff.strip():
+            return {"ok": False,
+                    "message": "当前没有可分析的改动（工作区干净），无法生成提交说明"}
+        try:
+            r = generate_commit_message(cfg.provider, cfg.base_url, cfg.api_key,
+                                        cfg.model, diff, cfg.timeout_seconds)
+        except LLMError as e:
+            log.warning("AI 生成提交说明失败（%s）：%s", name, e)
+            return {"ok": False, "message": str(e)}
+        log.info("Web AI 生成提交说明（%s）：%.1fs model=%s", name,
+                 r["elapsed_seconds"], cfg.model)
+        return {"ok": True, "message": r["message"],
+                "elapsed_seconds": r["elapsed_seconds"]}
+
     def test_browser_api(self, data: dict) -> dict:
         """测试 Chrome / Edge 浏览器连通性与版本探测。"""
         engine = str(data.get("browser") or self.config.local_debug.browser or "auto").strip().lower()
@@ -2727,6 +2760,11 @@ class WebHandler(BaseHTTPRequestHandler):
             elif path == "/api/llm/test":
                 try:
                     self._json(self.state.test_model(body))
+                except (ValueError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/commit-message":
+                try:
+                    self._json(self.state.generate_commit_message(body))
                 except (ValueError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/debug/browser-test":

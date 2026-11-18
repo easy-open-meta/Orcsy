@@ -149,6 +149,67 @@ def test_connection(provider: str, base_url: str, api_key: str, model: str,
     return {"reply": reply[:200], "elapsed_seconds": elapsed}
 
 
+def generate_commit_message(provider: str, base_url: str, api_key: str,
+                            model: str, diff_text: str,
+                            timeout_seconds: int = 300) -> dict:
+    """根据工作区改动 diff 生成一条规范 commit message（人工把关提交页「AI 生成」）。
+
+    单轮无工具请求，max_tokens=300；diff 截断到 12000 字符（约 4~6k tokens）
+    控制成本。返回 {message, elapsed_seconds}；失败抛 LLMError。
+    """
+    provider = provider.strip().lower()
+    model = model.strip()
+    if provider not in ("openai", "anthropic"):
+        raise LLMError(f"provider 不合法：{provider}（openai / anthropic）")
+    if not model:
+        raise LLMError("model 不能为空")
+    diff = (diff_text or "").strip()
+    if not diff:
+        raise LLMError("当前没有可分析的改动内容（工作区为干净状态）")
+    if len(diff) > 12000:
+        diff = diff[:12000] + "\n…（diff 已截断）"
+    client = LLMClient(LLMConfig(
+        provider=provider, api_key=api_key, base_url=base_url, model=model,
+        timeout_seconds=(30 if int(timeout_seconds) <= 0
+                         else max(10, min(int(timeout_seconds), 120))),
+    ))
+    prompt = (
+        "You are a commit-message generator. Based on the git diff below, "
+        "write ONE conventional-commit message in Chinese.\n"
+        "Rules: format 'type: summary' (type = feat/fix/refactor/docs/test/chore); "
+        "summary <= 50 chars, no trailing period; mention the key module/file scope "
+        "when obvious; do NOT invent changes that are not in the diff.\n\n"
+        "Git diff:\n```\n" + diff + "\n```\n\n"
+        "Reply with the commit message text ONLY (no quotes, no explanation)."
+    )
+    if provider == "anthropic":
+        url = _anthropic_base(base_url) + "/messages"
+        headers = _auth_headers("anthropic", api_key)
+    else:
+        url = base_url.rstrip("/") + "/chat/completions"
+        headers = _auth_headers("openai", api_key)
+    payload = {
+        "model": model, "max_tokens": 300,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    started = time.monotonic()
+    data = client._post(url, payload, headers)
+    elapsed = round(time.monotonic() - started, 1)
+    if provider == "anthropic":
+        reply = "".join(b.get("text", "") for b in data.get("content") or []
+                        if isinstance(b, dict) and b.get("type") == "text").strip()
+    else:
+        try:
+            reply = str(data["choices"][0]["message"].get("content") or "").strip()
+        except (KeyError, IndexError, TypeError) as e:
+            raise LLMError(
+                f"响应结构异常：{json.dumps(data, ensure_ascii=False)[:300]}") from e
+    message = reply.strip().strip('"').strip("'").splitlines()[0].strip() if reply else ""
+    if not message:
+        raise LLMError("模型未返回有效的提交说明（推理模型可能只输出了思考内容）")
+    return {"message": message[:200], "elapsed_seconds": elapsed}
+
+
 def list_models(provider: str, base_url: str, api_key: str,
                 timeout_seconds: int = 30) -> list[dict]:
     """拉取大模型服务的模型列表，尽量带上每个模型的上下文/输出上限。

@@ -830,6 +830,11 @@ export const api = {
     post('/api/llm/test', p) as Promise<{
       ok: boolean; message: string; reply: string; elapsed_seconds: number
     }>,
+  /** 人工把关提交页「AI 生成」：按项目生效模型读工作区 diff 生成一条提交说明 */
+  generateCommitMessage: (name: string) =>
+    post('/api/commit-message', { name }) as Promise<{
+      ok: boolean; message?: string; elapsed_seconds?: number
+    }>,
   browse: (path: string) => post('/api/browse', { path }) as Promise<DirListing>,
 
   probe: (path: string) =>

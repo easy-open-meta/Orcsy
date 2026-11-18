@@ -903,14 +903,17 @@ class TaskExecutor:
 
         父仓库的 `git diff` 只显示 gitlink 指针，不包含子仓库文件改动；
         这里把每个嵌套仓库的 `status --short` 与 `git diff` 一并拼上，供审查
-        Agent 看到真实改动。异常一律降级为空片段，不影响主流程。
+        Agent 看到真实改动。未跟踪文件 `git diff HEAD` 不可见，附带内容预览
+        （限量截断防误入的大目录撑爆上下文）。异常一律降级为空片段，不影响主流程。
         """
         parts: list[str] = []
         if self.is_git_repo:
             try:
                 parent = self.git.run("diff", "HEAD") or ""
-                if parent.strip():
-                    parts.append(parent)
+                untracked = self._untracked_preview()
+                block = (parent.strip() + "\n" if parent.strip() else "") + untracked
+                if block.strip():
+                    parts.append(block)
             except GitError:
                 pass
         for rel in self.gitlinks:
@@ -928,6 +931,36 @@ class TaskExecutor:
             except GitError as e:
                 parts.append(f"### nested repo: {rel}\n（读取改动失败：{e}）")
         return "\n\n".join(p for p in parts if p.strip())
+
+    def _untracked_preview(self, max_files: int = 50,
+                           max_chars_per_file: int = 2000) -> str:
+        """未跟踪文件的路径 + 内容预览（git diff HEAD 看不到新文件）。
+
+        只取文本文件前 N 字符；二进制/超大文件只列路径。限量防误入的
+        node_modules 等大目录撑爆上下文。
+        """
+        try:
+            out = self.git.run("ls-files", "--others", "--exclude-standard")
+        except GitError:
+            return ""
+        paths = [p for p in out.splitlines() if p.strip()][:max_files]
+        if not paths:
+            return ""
+        more = f"\n…（未跟踪文件超过 {max_files} 个，已截断）" if len(paths) >= max_files else ""
+        blocks: list[str] = []
+        for rel in paths:
+            path = Path(self.project.path) / rel
+            try:
+                if not path.is_file():
+                    continue
+                if path.stat().st_size > 200_000:
+                    blocks.append(f"?? {rel}（大文件，未读取内容）")
+                    continue
+                head = path.read_text(encoding="utf-8", errors="replace")[:max_chars_per_file]
+                blocks.append(f"?? {rel}\n{head}")
+            except OSError:
+                continue
+        return "\n".join(blocks) + more
 
     def _note_nested_repo_commit(self, task: Task) -> None:
         """工作区模式任务完成后提醒：嵌套仓库改动需在各自仓库内提交。"""

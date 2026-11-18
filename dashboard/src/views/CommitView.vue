@@ -30,7 +30,7 @@ const excluded = reactive<Record<string, boolean>>({})
 const excludedList = computed(() => files.value.filter(f => excluded[f]))
 const includedList = computed(() => files.value.filter(f => !excluded[f]))
 
-const form = reactive({ message: '', push: false, submitting: false, err: '' })
+const form = reactive({ message: '', push: false, submitting: false, err: '', aiBusy: false })
 
 // ---- 临时/测试产物识别：一键排除，避免把测试跑出来的临时文件带进主分支 ----
 // 保守白名单式匹配（只匹配明确属于构建/测试缓存与临时输出的产物），
@@ -166,6 +166,7 @@ function resetPage(): void {
   form.message = ''
   form.push = false
   form.submitting = false
+  form.aiBusy = false
   form.err = ''
   const first = files.value.find(f => !excluded[f])
   if (first) void loadDiff(first)
@@ -190,6 +191,27 @@ watch(files, (list) => {
     void loadDiff(target)
   }
 })
+
+// AI 生成提交说明：项目模型读当前工作区改动，单轮生成；失败提示不打断页面
+async function aiGenerate(): Promise<void> {
+  if (form.aiBusy) return
+  form.aiBusy = true
+  form.err = ''
+  try {
+    const r = await api.generateCommitMessage(projectName.value)
+    if (r.ok && r.message) {
+      form.message = r.message
+      window.$message?.(
+        tFmt('已生成提交说明（{p0}s）', { p0: r.elapsed_seconds ?? '?' }), 'success')
+    } else {
+      form.err = r.message || t('生成失败，请稍后重试或手动填写')
+    }
+  } catch (e: any) {
+    form.err = e.message
+  } finally {
+    form.aiBusy = false
+  }
+}
 
 async function submit(): Promise<void> {
   if (!project.value) return
@@ -311,7 +333,12 @@ async function submit(): Promise<void> {
           <span class="exclude-names">{{ excludedList.join('、') }}</span>
         </div>
         <div class="cfoot-row">
-          <label class="clabel">{{ t('提交说明 Commit Message') }}</label>
+          <div class="clabel-row">
+            <label class="clabel">{{ t('提交说明 Commit Message') }}</label>
+            <NButton size="tiny" quaternary type="primary" :loading="form.aiBusy"
+                     :title="t('让项目模型阅读当前工作区改动，自动生成一条规范提交说明')"
+                     @click="aiGenerate"><i class="ms sm">auto_awesome</i> {{ t('AI 生成') }}</NButton>
+          </div>
           <NInput v-model:value="form.message" :placeholder="t('如 feat: 完成用户登录与前后端联调测试')" />
         </div>
         <div class="cfoot-row cf-actions">
@@ -411,6 +438,9 @@ async function submit(): Promise<void> {
 .commit-count { font-size: 12px; color: var(--faint); margin-right: 2px; }
 .cfoot-row { margin-bottom: 8px; }
 .clabel { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text); }
+.clabel-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.clabel-row .clabel { margin-bottom: 0; }
+.clabel-row .n-button { flex: none; }
 .cf-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .checkline { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); }
 .spacer { flex: 1; }
