@@ -1102,7 +1102,10 @@ async function saveTask(force = false): Promise<void> {
 // 枚举本机可达地址（局域网直连/公网域名/回环）+ 扫码二维码；后端 /api/system/endpoints
 // 免登录，二维码 /api/system/qr 需登录（桌面端此刻必然已登录）。
 // 仅监听 127.0.0.1 时：不渲染打不开的回环二维码，改为展示「开放手机访问」操作指引
-const cVisible = computed(() => ui.connectDlg)
+const cVisible = computed({
+  get: () => ui.connectDlg,
+  set: (v: boolean) => { ui.connectDlg = v },
+})
 const cEndpoints = shallowRef<{ name: string; url: string; active?: boolean }[]>([])
 const cAuthRequired = shallowRef(false)
 const cAllLoopback = shallowRef(false)
