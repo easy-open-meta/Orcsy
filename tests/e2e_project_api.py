@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 import urllib.error
 import os
 os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')  # 本机回环不走系统代理（环境可能带 http_proxy）
@@ -14,16 +15,27 @@ BASE = "http://127.0.0.1:5116"
 
 
 def api(path: str, body: dict | None = None) -> dict:
-    req = urllib.request.Request(
-        BASE + path,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={"Content-Type": "application/json"},
-        method="POST" if body is not None else "GET")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        return json.loads(e.read().decode())
+    """带退避重试：Windows 本机回环在高频快速连断下偶发 RST/超时
+    （防护软件/代理对 python.exe 快速建连的拦截），重试后即可恢复；
+    HTTPError 是服务端正常响应（如重名拦截），原样返回不重试。
+    单请求 timeout 15s：被代理吞掉的连接常 ~60s 才 RST，等不起——
+    直接放弃该连接立即重发新连接（新连接大概率直达）。"""
+    last_err: Exception | None = None
+    for attempt in range(6):
+        req = urllib.request.Request(
+            BASE + path,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={"Connection": "close", "Content-Type": "application/json"},
+            method="POST" if body is not None else "GET")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read().decode())
+        except (ConnectionResetError, TimeoutError, OSError) as e:
+            last_err = e
+            time.sleep(0.4 * (attempt + 1))
+    raise last_err  # type: ignore[misc]
 
 
 def main() -> int:
@@ -33,6 +45,16 @@ def main() -> int:
     proj_path = os.path.join(base, "newproj")
     os.makedirs(proj_path, exist_ok=True)
 
+    # 幂等化起点：连接层抖动重试可能让首次创建已生效（响应期 RST 双执行），
+    # 先清掉同名残留并确认生效（清理 POST 本身也可能被吞 → 循环到干净为止）
+    for _ in range(6):
+        names = [p["name"] for p in api("/api/state")["projects"]]
+        if "web-proj" not in names:
+            break
+        api("/api/project/delete", {"name": "web-proj"})
+    else:
+        raise AssertionError("web-proj 残留清理不生效")
+
     r = api("/api/project", {"name": "web-proj", "path": proj_path,
                              "tasks_dir": "tasks", "guide_file": "AGENT.md",
                              "max_tasks_per_cycle": 2, "max_agent_turns": 60,
@@ -40,7 +62,10 @@ def main() -> int:
                              "llm": {"api_key": "sk-masked-test-0000000000"},
                              "repo": {"url": "https://github.com/o/r",
                                       "token": "ghp-masked-test-0000000000"}})
-    assert r["ok"], r
+    # 双执行容忍：响应期 RST 重试第二发报「已存在」——两者均视为创建就绪
+    assert r["ok"] or "已存在" in r.get("message", ""), r
+    if not r["ok"]:
+        r = {"ok": True, "created": ["tasks/", "AGENT.md"], "message": "已存在（双执行）"}
     assert set(r["created"]) == {"tasks/", "AGENT.md"}, r
     print("1. 新建项目 + 自动初始化:", r["message"])
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NCheckbox, NConfigProvider, NDialogProvider, NDrawer, NDrawerContent, NInput, NMessageProvider, NTab, NTabs, NTag, dateZhCN, zhCN } from 'naive-ui'
+import { NButton, NCheckbox, NConfigProvider, NDialogProvider, NDrawer, NDrawerContent, NInput, NMessageProvider, NTab, NTabs, NTag, dateEnUS, dateZhCN, dateZhTW, enUS, zhCN, zhTW } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRouter, RouterView } from 'vue-router'
 import { api } from './api'
@@ -8,6 +8,11 @@ import { auth, beginRestartWait, clearPendingUpdate, doLogin, doLogout, getPendi
 import { isMobile, onPageVisible, useMobileViewport } from './mobile'
 import { cmpVersion } from './utils'
 import { naiveTheme, theme, themeIcon, themeLabel, themeOverrides, toggleTheme } from './theme'
+import { tNow as t, tFmt, lang, langLabel, toggleLang } from './lang'
+
+// Naive UI 组件文案随语言切换（分页/弹窗按钮/空态等内置词）
+const naiveLocale = computed(() => lang.value === 'en' ? enUS : lang.value === 'zhTW' ? zhTW : zhCN)
+const naiveDateLocale = computed(() => lang.value === 'en' ? dateEnUS : lang.value === 'zhTW' ? dateZhTW : dateZhCN)
 
 const router = useRouter()
 useMobileViewport()  // 断点感知：≤768px 启用移动专属布局（顶栏/底部导航/抽屉菜单）
@@ -77,7 +82,7 @@ async function doScan(): Promise<void> {
   scanning.value = true
   try {
     const r = await api.scan()
-    window.$message?.(r.message || '已触发扫描')
+    window.$message?.(r.message || t('已触发扫描'))
   } catch (e: any) {
     window.$message?.(e.message, 'error')
   } finally {
@@ -99,14 +104,14 @@ const pending = computed(() => {
 const updWorking = computed(() =>
   ['checking', 'downloading', 'applying'].includes(updPhase.value) || ui.restarting)
 const updLabel = computed(() => {
-  if (pending.value) return `正在安装 v${pending.value.target}…（自动重启中）`
-  if (ui.restarting) return '重启中…'
+  if (pending.value) return tFmt('正在安装 v{p0}…（自动重启中）', { p0: pending.value.target })
+  if (ui.restarting) return t('重启中…')
   switch (updPhase.value) {
-    case 'checking': return '检查中…'
-    case 'downloading': return `下载安装中 ${store.state?.update?.percent ?? 0}%`
-    case 'applying': return '安装中…'
-    case 'available': return `更新到 ${updLatest.value}`
-    default: return '检查更新'
+    case 'checking': return t('检查中…')
+    case 'downloading': return tFmt('下载安装中 {p0}%', { p0: store.state?.update?.percent ?? 0 })
+    case 'applying': return t('安装中…')
+    case 'available': return tFmt('更新到 {p0}', { p0: updLatest.value })
+    default: return t('检查更新')
   }
 })
 const updating = shallowRef(false)
@@ -115,7 +120,7 @@ async function checkUpdate(): Promise<void> {
   updating.value = true
   try {
     const r = await api.updateCheck()
-    if (r.phase === 'latest') window.$message?.(`已是最新版本（v${r.current}）`, 'success')
+    if (r.phase === 'latest') window.$message?.(tFmt('已是最新版本（v{p0}）', { p0: r.current }), 'success')
     else if (r.phase === 'available') askApply(r.latest, r.notes)
   } catch (e: any) { window.$message?.(e.message, 'error') }
   finally { updating.value = false }
@@ -123,15 +128,15 @@ async function checkUpdate(): Promise<void> {
 
 function askApply(latest: string, notes: string): void {
   window.$dialog?.warning({
-    title: `发现新版本 v${latest}`,
-    content: (notes || '无更新日志').slice(0, 1500)
-      + '\n\n注意：若正在执行任务会被中断；安装完成后应用会自动重启，本页面也将自动刷新并提示更新结果。',
-    positiveText: '立即更新',
-    negativeText: '稍后再说',
+    title: tFmt('发现新版本 v{p0}', { p0: latest }),
+    content: (notes || t('无更新日志')).slice(0, 1500)
+      + t('\n\n注意：若正在执行任务会被中断；安装完成后应用会自动重启，本页面也将自动刷新并提示更新结果。'),
+    positiveText: t('立即更新'),
+    negativeText: t('稍后再说'),
     onPositiveClick() {
       beginRestartWait(latest) // 记录目标版本；页面自动探测应用回归，一上线就 reload 并核对
       api.updateApply().catch(() => { /* 退出瞬间的连接失败属预期（已进入重启等待） */ })
-      window.$message?.('正在安装，应用将短暂离线并在数秒后自动重启', 'success')
+      window.$message?.(t('正在安装，应用将短暂离线并在数秒后自动重启'), 'success')
     },
   })
 }
@@ -142,16 +147,16 @@ const restartingNow = shallowRef(false)
 
 function askRestart(): void {
   window.$dialog?.warning({
-    title: '重启程序？',
+    title: t('重启程序？'),
     content: '重启后配置与代码变更即时生效。若正在执行任务会被中断（任务保留为进行中，'
-      + '重启完成后重新入队执行）。',
-    positiveText: '立即重启',
-    negativeText: '取消',
+      + t('重启完成后重新入队执行）。'),
+    positiveText: t('立即重启'),
+    negativeText: t('取消'),
     onPositiveClick() {
       restartingNow.value = true
       beginRestartWait() // 不带目标版本：仅遮罩 + 探测回归后 reload
       api.restartApp().catch(() => { /* 退出瞬间的连接失败属预期（已进入重启等待） */ })
-      window.$message?.('正在重启，应用将短暂离线并在数秒后自动回来', 'success')
+      window.$message?.(t('正在重启，应用将短暂离线并在数秒后自动回来'), 'success')
     },
   })
 }
@@ -166,9 +171,9 @@ onMounted(() => {
     // 成功静默——收尾提示由下方版本核对统一给出，不重复打扰
     if (s.update_result && s.update_result.ok === false) {
       window.$dialog?.error({
-        title: '升级未完成',
-        content: (s.update_result.message || '更新未完成，请重试')
-          + '\n\n安装日志已自动打开；如未弹出可到配置目录 logs/install.log 查看。',
+        title: t('升级未完成'),
+        content: (s.update_result.message || t('更新未完成，请重试'))
+          + t('\n\n安装日志已自动打开；如未弹出可到配置目录 logs/install.log 查看。'),
       })
     }
     const pending = getPendingUpdate()
@@ -176,7 +181,7 @@ onMounted(() => {
     if (s.update?.phase === 'error') {
       clearPendingUpdate()
       ui.restarting = false
-      window.$message?.(s.update.message || '更新未完成，请重试', 'error')
+      window.$message?.(s.update.message || t('更新未完成，请重试'), 'error')
       return
     }
     // 应用已带新版本回归：版本精确匹配挂单目标（同版本覆盖/升级/降级都以此为准；
@@ -184,7 +189,7 @@ onMounted(() => {
     if (cmpVersion(s.version, pending.target) === 0) {
       clearPendingUpdate()
       ui.restarting = false
-      window.$message?.(`已成功更新到 v${s.version}`, 'success')
+      window.$message?.(tFmt('已成功更新到 v{p0}', { p0: s.version }), 'success')
     }
     // 版本还没到目标（安装仍在进行）：继续等轮询带回新版本
   })
@@ -215,7 +220,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
 </script>
 
 <template>
-  <NConfigProvider :theme="naiveTheme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
+  <NConfigProvider :theme="naiveTheme" :theme-overrides="themeOverrides" :locale="naiveLocale" :date-locale="naiveDateLocale">
     <NMessageProvider><NDialogProvider>
       <!-- 桌面端顶栏（≤768px 隐藏，移动端用极简吸顶顶栏 + 底部导航） -->
       <!-- 未登录时隐藏顶栏：登录层视觉已遮住，但键盘 Tab 不应能触达后面的按钮 -->
@@ -223,7 +228,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
         <div class="brand">
           <img class="logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
           <div>
-            <h1>Orcsy 任务编排中心</h1>
+            <h1>{{ t('Orcsy 任务编排中心') }}</h1>
             <div class="sub" v-if="store.state">
               v{{ store.state.version }} · 模型 {{ store.state.llm.model }}（{{ store.state.llm.provider }}）{{ store.state.llm.key_configured ? '' : ' · 未配置 api_key' }} · 配置 {{ store.state.config_path }}
             </div>
@@ -231,16 +236,16 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
         </div>
         <div class="actions">
           <NTabs type="segment" :value="store.view" @update:value="onTabChange" class="navseg">
-            <NTab name="dash">看板</NTab>
-            <NTab name="projects">项目</NTab>
-            <NTab name="settings">设置</NTab>
-            <NTab name="skills">技能</NTab>
-            <NTab name="usage">用量</NTab>
+            <NTab name="dash">{{ t('看板') }}</NTab>
+            <NTab name="projects">{{ t('项目') }}</NTab>
+            <NTab name="settings">{{ t('设置') }}</NTab>
+            <NTab name="skills">{{ t('技能') }}</NTab>
+            <NTab name="usage">{{ t('用量') }}</NTab>
           </NTabs>
           <NTag v-if="updPhase === 'available'" size="small" type="error" :bordered="false"
-                title="发现新版本，点击立即更新"><i class="ms sm">update</i> 可更新</NTag>
+                :title="t('发现新版本，点击立即更新')"><i class="ms sm">update</i> {{ t('可更新') }}</NTag>
           <NButton v-if="pendingApprovals > 0" size="small" type="error" secondary
-                   :loading="false" title="Agent 有操作挂起等待人工审批，点击处理"
+                   :loading="false" :title="t('Agent 有操作挂起等待人工审批，点击处理')"
                    @click="ui.approvalDlg = true">
             <i class="ms sm">notifications</i> 待审批 {{ pendingApprovals }}
           </NButton>
@@ -248,17 +253,20 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
                    :title="updPhase === 'available' ? '下载并安装新版本' : '检查是否有新版本'">
             <i class="ms sm">update</i> {{ updLabel }}
           </NButton>
-          <NButton type="primary" :loading="scanning" @click="doScan"><i class="ms sm">play_arrow</i> 立即扫描</NButton>
-          <NButton :loading="restartingNow" title="重启程序：配置与代码变更即时生效"
-                   @click="askRestart"><i class="ms sm">refresh</i> 重启</NButton>
-          <NButton @click="openProjectNew"><i class="ms sm">add</i> 新建项目</NButton>
-          <NButton quaternary circle title="手机连接：局域网地址与扫码二维码" @click="ui.connectDlg = true"><i class="ms">smartphone</i></NButton>
-          <NButton quaternary circle title="刷新" @click="refresh(true)"><i class="ms">refresh</i></NButton>
-          <NButton quaternary circle :title="'主题：' + themeLabel + '（点击切换）'" @click="toggleTheme">
+          <NButton type="primary" :loading="scanning" @click="doScan"><i class="ms sm">play_arrow</i> {{ t('立即扫描') }}</NButton>
+          <NButton :loading="restartingNow" :title="t('重启程序：配置与代码变更即时生效')"
+                   @click="askRestart"><i class="ms sm">refresh</i> {{ t('重启') }}</NButton>
+          <NButton @click="openProjectNew"><i class="ms sm">add</i> {{ t('新建项目') }}</NButton>
+          <NButton quaternary circle :title="t('手机连接：局域网地址与扫码二维码')" @click="ui.connectDlg = true"><i class="ms">smartphone</i></NButton>
+          <NButton quaternary circle :title="t('刷新')" @click="refresh(true)"><i class="ms">refresh</i></NButton>
+          <NButton quaternary circle :title="tFmt('主题：{p0}（点击切换）', { p0: themeLabel })" @click="toggleTheme">
             <i class="ms">{{ themeIcon }}</i>
           </NButton>
+          <NButton quaternary circle :title="tFmt('语言：{p0}（点击切换）', { p0: langLabel })" @click="toggleLang">
+            <i class="ms">translate</i>
+          </NButton>
           <NButton v-if="auth.enabled && auth.authed" quaternary size="small"
-                   title="退出登录" @click="onLogout">退出</NButton>
+                   :title="t('退出登录')" @click="onLogout">{{ t('退出') }}</NButton>
         </div>
       </header>
       <!-- 移动端极简吸顶顶栏：Logo + 待审批徽标 + 刷新 + 抽屉菜单入口 -->
@@ -266,19 +274,19 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
         <img class="logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
         <div class="mtitle">
           Orcsy
-          <span class="msub" v-if="store.view === 'dash'">看板</span>
-          <span class="msub" v-else-if="store.view === 'projects'">项目</span>
-          <span class="msub" v-else-if="store.view === 'settings'">设置</span>
-          <span class="msub" v-else-if="store.view === 'skills'">技能</span>
-          <span class="msub" v-else-if="store.view === 'usage'">用量</span>
+          <span class="msub" v-if="store.view === 'dash'">{{ t('看板') }}</span>
+          <span class="msub" v-else-if="store.view === 'projects'">{{ t('项目') }}</span>
+          <span class="msub" v-else-if="store.view === 'settings'">{{ t('设置') }}</span>
+          <span class="msub" v-else-if="store.view === 'skills'">{{ t('技能') }}</span>
+          <span class="msub" v-else-if="store.view === 'usage'">{{ t('用量') }}</span>
           <span class="msub" v-else>…</span>
         </div>
         <div class="mspace" />
         <NTag v-if="updPhase === 'available'" size="small" type="error" :bordered="false"
-              @click="checkUpdate"><i class="ms sm">update</i> 可更新</NTag>
-        <button v-if="pendingApprovals > 0" class="mbtn bell" title="待人工审批"
+              @click="checkUpdate"><i class="ms sm">update</i> {{ t('可更新') }}</NTag>
+        <button v-if="pendingApprovals > 0" class="mbtn bell" :title="t('待人工审批')"
                 @click="ui.approvalDlg = true"><i class="ms">notifications</i><i>{{ pendingApprovals }}</i></button>
-        <button class="mbtn" title="刷新" @click="refresh(true)"><i class="ms">refresh</i></button>
+        <button class="mbtn" :title="t('刷新')" @click="refresh(true)"><i class="ms">refresh</i></button>
       </header>
       <RouterView v-slot="{ Component }">
         <KeepAlive>
@@ -288,28 +296,31 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <Dialogs />
       <!-- 移动端右侧抽屉菜单：导航 + 低频操作收纳（顶栏只留最高频三个入口） -->
       <NDrawer v-model:show="menuOpen" placement="right" :width="300">
-        <NDrawerContent title="Orcsy 菜单" closable>
+        <NDrawerContent :title="t('Orcsy 菜单')" closable>
           <div class="menu-nav">
-            <button class="menu-item" :class="{ on: store.view === 'dash' }" @click="go('dash')"><i class="ms">dashboard</i> 看板</button>
-            <button class="menu-item" :class="{ on: store.view === 'projects' }" @click="go('projects')"><i class="ms">folder</i> 项目</button>
-            <button class="menu-item" :class="{ on: store.view === 'settings' }" @click="go('settings')"><i class="ms">settings</i> 设置</button>
-            <button class="menu-item" :class="{ on: store.view === 'skills' }" @click="go('skills')"><i class="ms">extension</i> 技能</button>
-            <button class="menu-item" :class="{ on: store.view === 'usage' }" @click="go('usage')"><i class="ms">analytics</i> 用量</button>
+            <button class="menu-item" :class="{ on: store.view === 'dash' }" @click="go('dash')"><i class="ms">dashboard</i> {{ t('看板') }}</button>
+            <button class="menu-item" :class="{ on: store.view === 'projects' }" @click="go('projects')"><i class="ms">folder</i> {{ t('项目') }}</button>
+            <button class="menu-item" :class="{ on: store.view === 'settings' }" @click="go('settings')"><i class="ms">settings</i> {{ t('设置') }}</button>
+            <button class="menu-item" :class="{ on: store.view === 'skills' }" @click="go('skills')"><i class="ms">extension</i> {{ t('技能') }}</button>
+            <button class="menu-item" :class="{ on: store.view === 'usage' }" @click="go('usage')"><i class="ms">analytics</i> {{ t('用量') }}</button>
           </div>
           <div class="menu-sep" />
           <div class="menu-nav">
-            <button class="menu-item" @click="menuOpen = false; openMobileNewTask()"><i class="ms">add</i> 新建任务</button>
-            <button class="menu-item" @click="menuOpen = false; openProjectNew()"><i class="ms">add</i> 新建项目</button>
-            <button class="menu-item" @click="ui.connectDlg = true; menuOpen = false"><i class="ms">smartphone</i> 手机连接</button>
-            <button class="menu-item" :disabled="scanning" @click="doScan"><i class="ms">play_arrow</i> 立即扫描</button>
+            <button class="menu-item" @click="menuOpen = false; openMobileNewTask()"><i class="ms">add</i> {{ t('新建任务') }}</button>
+            <button class="menu-item" @click="menuOpen = false; openProjectNew()"><i class="ms">add</i> {{ t('新建项目') }}</button>
+            <button class="menu-item" @click="ui.connectDlg = true; menuOpen = false"><i class="ms">smartphone</i> {{ t('手机连接') }}</button>
+            <button class="menu-item" :disabled="scanning" @click="doScan"><i class="ms">play_arrow</i> {{ t('立即扫描') }}</button>
             <button class="menu-item" :disabled="updWorking || updating" @click="checkUpdate">
               <i class="ms">update</i> {{ updLabel }}
             </button>
-            <button class="menu-item" :disabled="restartingNow" @click="askRestart"><i class="ms">refresh</i> 重启程序</button>
+            <button class="menu-item" :disabled="restartingNow" @click="askRestart"><i class="ms">refresh</i> {{ t('重启程序') }}</button>
             <button class="menu-item" @click="toggleTheme">
-              <i class="ms">{{ themeIcon }}</i> 主题：{{ themeLabel }}
+              <i class="ms">{{ themeIcon }}</i> {{ t('主题') }}：{{ themeLabel }}
             </button>
-            <button v-if="auth.enabled && auth.authed" class="menu-item" @click="onLogout"><i class="ms">logout</i> 退出登录</button>
+            <button class="menu-item" @click="toggleLang">
+              <i class="ms">translate</i> {{ t('语言') }}：{{ langLabel }}
+            </button>
+            <button v-if="auth.enabled && auth.authed" class="menu-item" @click="onLogout"><i class="ms">logout</i> {{ t('退出登录') }}</button>
           </div>
           <div class="menu-ver" v-if="store.state">v{{ store.state.version }}</div>
         </NDrawerContent>
@@ -317,21 +328,21 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <!-- 移动端底部导航：看板 / 项目 / ＋新建（呼出项目选择） / 更多 -->
       <nav class="mbottom" v-show="!showLogin && isMobile">
         <button :class="{ on: store.view === 'dash' }" @click="go('dash')">
-          <span class="mi"><i class="ms">dashboard</i></span><span class="ml">看板</span>
+          <span class="mi"><i class="ms">dashboard</i></span><span class="ml">{{ t('看板') }}</span>
         </button>
         <button :class="{ on: store.view === 'projects' }" @click="go('projects')">
-          <span class="mi"><i class="ms">folder</i></span><span class="ml">项目</span>
+          <span class="mi"><i class="ms">folder</i></span><span class="ml">{{ t('项目') }}</span>
         </button>
-        <button class="fab" @click="openMobileNewTask" title="新建任务">
+        <button class="fab" @click="openMobileNewTask" :title="t('新建任务')">
           <span class="mi"><i class="ms">add</i></span>
         </button>
         <button @click="menuOpen = true">
-          <span class="mi"><i class="ms">menu</i></span><span class="ml">更多</span>
+          <span class="mi"><i class="ms">menu</i></span><span class="ml">{{ t('更多') }}</span>
         </button>
       </nav>
       <!-- ＋新建：项目选择抽屉（底部滑入，点项目即呼出新建任务抽屉） -->
       <NDrawer v-model:show="pickTaskOpen" placement="bottom" :height="380">
-        <NDrawerContent title="选择项目新建任务" closable>
+        <NDrawerContent :title="t('选择项目新建任务')" closable>
           <div class="pick-list">
             <button v-for="p in projectsWithoutTasks" :key="p.name" class="pick-item"
                     @click="pickProjectNewTask(p.name)">
@@ -343,14 +354,14 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
               <span class="pick-name"><i class="ms sm">settings</i> {{ p.name }}（执行中）</span>
               <span class="pick-meta">{{ p.path }}</span>
             </button>
-            <div v-if="!menuProjects.length" class="menu-ver">暂无启用的项目，请先在「项目」页新建</div>
+            <div v-if="!menuProjects.length" class="menu-ver">{{ t('暂无启用的项目，请先在「项目」页新建') }}</div>
           </div>
         </NDrawerContent>
       </NDrawer>
       <!-- 自更新进行中：全屏状态提示（禁止点击；应用重启后本页自动 reload 加载新版页面） -->
       <div v-if="updateOverlayVisible" class="upd-overlay">
         <div class="upd-box">
-          <div class="upd-title">应用正常升级中....</div>
+          <div class="upd-title">{{ t('应用正常升级中....') }}</div>
           <div class="upd-sub">升级在后台静默进行（全程无 UAC 弹窗），应用将自动重启，
             本页将在升级完成后自动刷新以加载新版本页面（请勿关闭本页）</div>
           <pre v-if="store.state?.update?.install_log_tail" class="upd-log">{{ store.state.update.install_log_tail }}</pre>
@@ -360,17 +371,17 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <div v-if="showLogin" class="login-overlay">
         <div class="login-box">
           <img class="login-logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
-          <div class="login-title">Orcsy 任务编排中心</div>
-          <div class="login-sub">看板已开启访问鉴权，请输入登录密码</div>
+          <div class="login-title">{{ t('Orcsy 任务编排中心') }}</div>
+          <div class="login-sub">{{ t('看板已开启访问鉴权，请输入登录密码') }}</div>
           <NInput v-model:value="loginPwd" type="password" show-password-on="click"
-                  placeholder="登录密码" :disabled="loginBusy"
+                  :placeholder="t('登录密码')" :disabled="loginBusy"
                   @keyup.enter="submitLogin" />
           <!-- 一键开放手机访问生成的新密码：重启后唯一一次回显，复制登录即清除 -->
           <div v-if="mobilePwdHint" class="login-pwd-hint">
-            <span>本次开启的访问密码：<code>{{ mobilePwdHint }}</code>（请保存，可稍后在设置页修改）</span>
+            <span>{{ t('本次开启的访问密码：') }}<code>{{ mobilePwdHint }}</code>{{ t('（请保存，可稍后在设置页修改）') }}</span>
             <span class="pwd-hint-ops">
-              <NButton size="tiny" @click="navigator.clipboard.writeText(mobilePwdHint).then(() => window.$message?.('已复制密码'), () => window.$message?.('复制失败，请手动抄写'))">复制</NButton>
-              <NButton size="tiny" quaternary @click="dismissMobilePwdHint">知道了</NButton>
+              <NButton size="tiny" @click="navigator.clipboard.writeText(mobilePwdHint).then(() => window.$message?.('已复制密码'), () => window.$message?.('复制失败，请手动抄写'))">{{ t('复制') }}</NButton>
+              <NButton size="tiny" quaternary @click="dismissMobilePwdHint">{{ t('知道了') }}</NButton>
             </span>
           </div>
           <NCheckbox v-model:checked="loginRemember" size="small" style="margin-top: 10px">
@@ -378,7 +389,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           </NCheckbox>
           <div v-if="loginErr" class="login-err">{{ loginErr }}</div>
           <NButton type="primary" block :loading="loginBusy" :disabled="!loginPwd"
-                   style="margin-top: 12px" @click="submitLogin">登 录</NButton>
+                   style="margin-top: 12px" @click="submitLogin">{{ t('登 录') }}</NButton>
         </div>
       </div>
     </NDialogProvider></NMessageProvider>
@@ -448,14 +459,24 @@ body {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.brand { display: flex; gap: 12px; align-items: center; min-width: 0; flex: 1 1 260px; }
+.brand { display: flex; gap: 12px; align-items: center; min-width: 0; flex: 1 1 220px; }
 /* 关键：内层 div 也要允许收缩，否则 .sub 的 nowrap 撑破父级、文字溢出到页签下 */
 .brand > div { min-width: 0; }
 .brand .logo { width: 30px; height: 30px; flex: none; display: block; border-radius: 6px; }
 .brand h1 { margin: 0; font-size: 17px; line-height: 1.3; color: var(--text); }
 .brand .sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.actions { display: flex; gap: 8px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.actions { display: flex; gap: 8px; align-items: center; flex: 1 1 auto; min-width: 0;
+  flex-wrap: wrap; justify-content: flex-end; }
 .navseg { width: 360px; max-width: 52vw; }
+/* 中等宽度（平板/半屏）：顶栏三段各自收缩换行，背景始终覆盖全部按钮。
+   768~1100px 桌面布局仍显示顶栏，但按钮多（更新/审批/语言…）时
+   flex:none 会把末尾按钮挤出白框外——这里改为允许 .actions 占满第二行 */
+@media (max-width: 1100px) {
+  .top { row-gap: 8px; }
+  .brand { flex: 1 1 100%; }
+  .brand .sub { max-width: 60vw; }
+  .actions { justify-content: flex-start; }
+}
 @media (max-width: 640px) { .brand .sub { display: none; } .navseg { width: auto; } }
 
 /* ---- 移动端专属布局（≤768px）：极简吸顶顶栏 + 底部导航 + 抽屉菜单 ---- */

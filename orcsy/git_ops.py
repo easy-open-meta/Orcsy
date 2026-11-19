@@ -72,6 +72,33 @@ class Git:
         )
         return proc.returncode == 0
 
+    def gitlinks(self) -> list[str]:
+        """返回仓库中的 gitlink 路径（mode 160000：子模块或未注册的嵌套仓库）。
+
+        用 `-z` 避免中文/空格路径被 git 加引号；gitlink 的目录内容不在父仓库
+        对象库里，worktree 检出后只会得到空目录。
+        """
+        proc = subprocess.run(
+            ["git", "-C", str(self.repo), "ls-files", "-s", "-z"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            startupinfo=_windows_startupinfo(),
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        if proc.returncode != 0:
+            raise GitError(
+                "git ls-files -s -z 失败："
+                + proc.stderr.decode("utf-8", errors="replace").strip())
+        out: list[str] = []
+        for rec in proc.stdout.decode("utf-8", errors="replace").split("\x00"):
+            if not rec:
+                continue
+            meta, _, path = rec.partition("\t")
+            parts = meta.split()
+            if len(parts) >= 3 and parts[0] == "160000" and path:
+                out.append(path)
+        return out
+
     def current_branch(self) -> str:
         # git branch --show-current 在空仓库（尚未产生任何 commit）也能正确返回当前分支名（如 main）
         proc = subprocess.run(
@@ -343,6 +370,29 @@ class Git:
             })
         return entries
 
+    def status_entries(self) -> list[dict]:
+        """公开的结构化 status 条目（人工把关提交的跨仓库聚合使用）。"""
+        return self._status_entries()
+
+    @staticmethod
+    def is_path_excluded(paths: list[str], exclude: set[str]) -> bool:
+        """判断一条 status 条目是否命中排除列表（含目录/文件双向前缀匹配）。
+
+        git 对未跟踪目录只报目录本身（`?? __pycache__/`），用户排除的往往是
+        目录内具体文件；反过来排除父目录也应覆盖其下所有文件。
+        """
+        if not exclude:
+            return False
+        for p in paths:
+            if p in exclude:
+                return True
+            pfx = p.rstrip("/") + "/"
+            if any(e.startswith(pfx) for e in exclude):
+                return True
+            if any(p.startswith(e.rstrip("/") + "/") for e in exclude):
+                return True
+        return False
+
     def pending_changes_summary(self) -> dict:
         """统计主工作区当前未提交的改动文件信息（看板「待人工审阅提交」展示用）。"""
         if not self.is_repo():
@@ -430,6 +480,46 @@ class Git:
                 total_chars, True)
         return _pack(diff_text, total_chars, False)
 
+    def gitlink_diff(self, rel_path: str) -> dict:
+        """gitlink 指针项摘要（子仓库本身干净、父仓库只有指针变化的场景）。
+
+        父仓库对 gitlink 的 `git diff` 只有一行指针变化，不能像普通文件一样
+        读取内容；这里显式展示父仓库记录的旧 SHA 与子仓库当前 HEAD，避免人工
+        把关页对目录执行 file_diff 时得到误导性的「新增文件」或读取错误。
+        """
+        rel = str(rel_path or "").strip().replace("\\", "/").strip("/")
+        if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+            raise GitError(f"非法的子仓库路径：{rel}")
+        links = set(self.gitlinks())
+        if rel not in links:
+            raise GitError(f"不是已登记的嵌套仓库：{rel}")
+        nested = self.repo / rel
+        if not (nested / ".git").exists():
+            raise GitError(f"嵌套仓库未初始化：{rel}")
+
+        tree = self.run("ls-tree", "HEAD", "--", rel, check=False)
+        old = ""
+        if tree.strip():
+            parts = tree.split()
+            if len(parts) >= 3:
+                old = parts[2]
+        new = Git(nested).rev_parse("HEAD")
+        raw = self.run("diff", "--raw", "HEAD", "--", rel, check=False).strip()
+        lines = [
+            f"子仓库指针：{rel}",
+            f"父仓库 HEAD 记录：{old or '（未记录）'}",
+            f"子仓库当前 HEAD：{new or '（无提交）'}",
+        ]
+        if raw:
+            lines.extend(["", "父仓库指针 diff：", raw])
+        elif old and new and old == new:
+            lines.extend(["", "指针未变化（子仓库工作区可能有未提交改动，"
+                              "请在上方该子仓库分组内处理）。"])
+        text = "\n".join(lines)
+        return {"diff": text, "truncated": False,
+                "total_chars": len(text),
+                "lines": text.count("\n") + 1}
+
     def discard_changes(self, files: list[str]) -> dict:
         """丢弃指定文件的未提交改动（可视化管理临时/测试产物）。
 
@@ -493,30 +583,11 @@ class Git:
         if not self.is_dirty():
             raise GitError("主工作区当前没有可提交的改动")
         exclude_set = {str(x).strip().strip('"') for x in (exclude or []) if str(x).strip()}
-
-        def _hit_exclude(paths: list[str]) -> bool:
-            """判断条目是否被排除：支持「目录 ↔ 目录内文件」双向前缀匹配。
-
-            git 对未跟踪目录只报目录本身（`?? __pycache__/`），用户排除的往往是
-            目录内具体文件；反过来排除父目录也应覆盖其下所有文件。
-            """
-            if not exclude_set:
-                return False
-            for p in paths:
-                if p in exclude_set:
-                    return True
-                pfx = p.rstrip("/") + "/"
-                if any(e.startswith(pfx) for e in exclude_set):
-                    return True
-                if any(p.startswith(e.rstrip("/") + "/") for e in exclude_set):
-                    return True
-            return False
-
         entries = self._status_entries()
         staged_paths: list[str] = []
         skipped: list[str] = []
         for e in entries:
-            if _hit_exclude(e["paths"]):
+            if self.is_path_excluded(e["paths"], exclude_set):
                 skipped.append(e["display"])
             else:
                 staged_paths.extend(e["paths"])
@@ -526,7 +597,16 @@ class Git:
         # 先清空索引（不动工作区），再仅暂存未被排除的路径（含删除），
         # 避免用户此前已手动 git add 的排除文件被顺带提交
         self._run("reset")
-        self._run("add", "-A", "--", *staged_paths)
+        try:
+            self._run("add", "-A", "--", *staged_paths)
+        except GitError as e:
+            # pathspec 里混入「父目录命中 .gitignore」的路径（如裸 data/ 规则
+            # 误伤大小写不同的 src/**/Data 源码目录）时 git 会整体拒绝；
+            # 已跟踪文件不受 ignore 影响，加 -f 强制暂存即可。
+            if "paths are ignored" not in str(e):
+                raise
+            log.warning("git add 命中忽略规则，改用 -f 强制暂存：%s", e)
+            self._run("add", "-A", "-f", "--", *staged_paths)
         proc = subprocess.run(
             ["git", "-C", str(self.repo), "commit", "-m", msg],
             capture_output=True, text=True, encoding="utf-8", errors="replace",

@@ -400,6 +400,26 @@ def set_task_file_status(path: Path, status: str) -> bool:
     return changed
 
 
+def archive_task_file(path: Path, tasks_dir: Path) -> Path | None:
+    """把已完成/已取消的任务文件移进 tasks/done/（与 Agent 完成归档同一落点）。
+
+    手工在看板「标记完成」也走这里，保证归档列表状态一致。同名文件已存在时
+    跳过（避免覆盖），返回目标路径；移动失败返回 None（任务留在原地，不影响状态）。
+    """
+    done_dir = tasks_dir / "done"
+    target = done_dir / path.name
+    if target == path:
+        return target
+    try:
+        done_dir.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            return None
+        path.replace(target)
+        return target
+    except OSError:
+        return None
+
+
 def _next_requeue_seq(tasks_dir: Path) -> int:
     """下一个受阻重入队轮次戳：全项目现有最大值 +1（无则 1）。"""
     seq = 0
@@ -661,6 +681,22 @@ def detect_dependency_cycle(
     return None
 
 
+def _agent_result_summary(description: str, max_chars: int) -> str:
+    """从任务正文提取「## Agent 处理结果」节；超过上限截断。"""
+    body = description or ""
+    heading = "## Agent 处理结果"
+    idx = body.find(heading)
+    if idx >= 0:
+        rest = body[idx + len(heading):]
+        nxt = re.search(r"\n## (?!Agent 处理结果)", rest)
+        section = rest[:nxt.start()].strip() if nxt else rest.strip()
+    else:
+        section = body.strip()
+    if len(section) > max_chars:
+        section = section[:max_chars].rstrip() + "\n…（已截断）"
+    return section
+
+
 def read_done_summaries(
     tasks_dir: Path,
     dep_ids: list[str],
@@ -680,22 +716,54 @@ def read_done_summaries(
         t = parse_task_file(cand)
         if t.error:
             continue
-        body = t.description
-        heading = "## Agent 处理结果"
-        idx = body.find(heading)
-        if idx >= 0:
-            rest = body[idx:]
-            nxt = re.search(r"\n## (?!Agent 处理结果)", rest)
-            section = rest[:nxt.start()].strip() if nxt else rest.strip()
-        else:
-            section = body.strip()
-        if len(section) > max_chars_per_dep:
-            section = section[:max_chars_per_dep].rstrip() + "\n…（已截断）"
         out.append({
             "id": dep_id,
             "title": t.title,
             "assignee": t.assignee,
-            "summary": section,
+            "summary": _agent_result_summary(t.description, max_chars_per_dep),
+        })
+    return out
+
+
+def read_dependency_overview(
+    tasks_dir: Path,
+    dep_ids: list[str],
+    max_summary_chars: int = 600,
+) -> list[dict]:
+    """读取前置任务概览（看板任务详情用）：状态 + 是否归档 + 成果摘要。
+
+    与 `read_done_summaries` 不同：不存在的依赖也返回 missing 条目，前端可
+    提示「任务已删除」；未完成的任务只给状态，不把整段需求正文当成果展示。
+    """
+    out: list[dict] = []
+    if not dep_ids:
+        return out
+    for dep_id in dep_ids:
+        done_path = tasks_dir / "done" / f"{dep_id}.md"
+        active_path = tasks_dir / f"{dep_id}.md"
+        archived = done_path.is_file()
+        path = done_path if archived else active_path
+        if not path.is_file():
+            out.append({
+                "id": dep_id, "title": "", "status": "missing",
+                "assignee": "", "archived": False, "missing": True,
+                "summary": "", "qa_round": 0, "parent_id": "",
+            })
+            continue
+        t = parse_task_file(path)
+        summary = ""
+        if not t.error and t.status == "done":
+            summary = _agent_result_summary(t.description, max_summary_chars)
+        out.append({
+            "id": dep_id,
+            "title": t.title,
+            "status": t.status,
+            "assignee": t.assignee,
+            "archived": archived,
+            "missing": False,
+            "summary": summary,
+            "qa_round": t.qa_round,
+            "parent_id": t.parent_id,
         })
     return out
 
@@ -711,6 +779,7 @@ __all__ = [
     "increment_task_file_review_round",
     "parse_task_file",
     "priority_rank",
+    "read_dependency_overview",
     "read_done_summaries",
     "scan_tasks",
     "set_task_file_assignee",

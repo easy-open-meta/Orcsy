@@ -101,6 +101,22 @@ def run_tray(state, scheduler, url: str, server=None) -> None:
 
     def quit_app(icon, item):
         log.info("托盘退出")
+        # 硬兜底：pystray 菜单回调/图标线程若卡住，server.shutdown 可能永远
+        # 执行不到；运行中的 Agent 线程也会拖住解释器退出。4 秒后强制结束，
+        # 保证「退出托盘」= 整个 Orcsy 进程停止。
+        def _force_exit() -> None:
+            log.warning("托盘退出收尾超时，强制结束进程")
+            try:
+                import logging
+                logging.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+            import os
+            os._exit(0)
+
+        timer = threading.Timer(4.0, _force_exit)
+        timer.daemon = True
+        timer.start()
         icon.stop()
         if server is not None:
             # 不能在图标线程直接等 shutdown()：主线程收尾时还要回到

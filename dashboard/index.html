@@ -1,6 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
+<html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b0f17">
@@ -17,7 +16,18 @@
 (function(){try{var t=localStorage.getItem('ta-theme');
 if(t!=='light'&&t!=='dark'&&t!=='system')t='system';
 if(t==='system')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
-document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme='dark';}})();
+document.documentElement.dataset.theme=t;
+var l=localStorage.getItem('ta-lang');
+if(l!=='zh'&&l!=='zhTW'&&l!=='en'){
+  var ls=(navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||'']).map(function(x){return (x||'').toLowerCase()});
+  l='zh';
+  for(var i=0;i<ls.length;i++){var s=ls[i];
+    if(s.indexOf('zh-tw')===0||s.indexOf('zh-hant')===0||s.indexOf('zh-hk')===0||s.indexOf('zh-mo')===0){l='zhTW';break}
+    if(s.indexOf('en')===0){l='en';break}
+    if(s.indexOf('zh')===0){l='zh';break}
+  }
+}
+document.documentElement.lang=l==='zhTW'?'zh-TW':(l==='en'?'en':'zh-CN');}catch(e){document.documentElement.dataset.theme='dark';}})();
 window.__errs=[];
 window.addEventListener('error',function(e){(window.__errs=window.__errs||[]).push('ERR: '+e.message+' @'+(e.filename||'')+':'+e.lineno);});
 window.addEventListener('unhandledrejection',function(e){(window.__errs=window.__errs||[]).push('REJ: '+(e.reason&&e.reason.message||e.reason));});

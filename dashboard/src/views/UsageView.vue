@@ -5,6 +5,7 @@ import { NCard, NTag } from 'naive-ui'
 import { computed, ref } from 'vue'
 import { store } from '../store'
 import { fmtTokens, type TokenUnit } from '../utils'
+import { tNow as t, tFmt } from '../lang'
 
 const usage = computed(() => store.state?.usage)
 
@@ -33,19 +34,19 @@ function fmtFull(v: number | undefined): string {
 }
 
 const OUT_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }> = {
-  done: { type: 'success', name: '完成' },
-  open: { type: 'info', name: '待续' },
-  blocked: { type: 'warning', name: '受阻' },
-  cancelled: { type: 'default', name: '取消' },
+  done: { type: 'success', name: t('完成') },
+  open: { type: 'info', name: t('待续') },
+  blocked: { type: 'warning', name: t('受阻') },
+  cancelled: { type: 'default', name: t('取消') },
 }
 
 // 审查记录（kind=review）的结果列用另一套词汇：badge 颜色区分 + 🔍 前缀，
 // 与任务结果（完成/受阻）同框但一眼可辨，不再混用同一列语义
 const REVIEW_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }> = {
-  pass: { type: 'success', name: '审查通过' },
-  fail: { type: 'error', name: '审查不通过' },
-  error: { type: 'warning', name: '审查失败' },
-  skipped: { type: 'default', name: '免审查' },
+  pass: { type: 'success', name: t('审查通过') },
+  fail: { type: 'error', name: t('审查不通过') },
+  error: { type: 'warning', name: t('审查失败') },
+  skipped: { type: 'default', name: t('免审查') },
 }
 
 // 台账旧记录缺 kind 字段视为任务记录
@@ -70,12 +71,12 @@ const filteredRecent = computed(() =>
 
 function roleLabel(role: string): string {
   const map: Record<string, string> = {
-    pm: '项目经理 (PM)',
-    backend: '后端开发工程师',
-    frontend: '前端开发工程师',
-    qa: '测试工程师 (QA)',
-    review: '任务审查 (Review Agent)',
-    solo: '全栈单兵 / 传统模式',
+    pm: t('项目经理 (PM)'),
+    backend: t('后端开发工程师'),
+    frontend: t('前端开发工程师'),
+    qa: t('测试工程师 (QA)'),
+    review: t('任务审查 (Review Agent)'),
+    solo: t('全栈单兵 / 传统模式'),
   }
   return map[role] || role
 }
@@ -99,14 +100,14 @@ const heat = computed(() => {
     const level = tokens <= 0 ? 0 : ratio <= 0.25 ? 1 : ratio <= 0.5 ? 2 : ratio <= 0.75 ? 3 : 4
     col.cells.push({
       date: d.date, tasks: d.tasks, tokens, level,
-      title: `${d.date} · ${d.tasks} 个任务 · ${fmt(tokens)} tokens`,
+      title: tFmt('{p0} · {p1} 个任务 · {p2} tokens', { p0: d.date, p1: d.tasks, p2: fmt(tokens) }),
     })
     if (r === 6) col = null
   }
   if (col) while (col.cells.length < 7) col.cells.push(null)  // 末列补满一周
   // 月份标签：列首日期换月时显示（首列也显示）
   const months = cols.map((c, i) =>
-    (i === 0 || c.month !== cols[i - 1].month) ? `${Number(c.month.slice(5))}月` : '')
+    (i === 0 || c.month !== cols[i - 1].month) ? tFmt('{p0}月', { p0: Number(c.month.slice(5)) }) : '')
   return { cols, months }
 })
 </script>
@@ -114,38 +115,38 @@ const heat = computed(() => {
 <template>
   <div class="usage" v-if="store.state">
     <div class="ubar">
-      <span class="uhint">tokens 单位</span>
+      <span class="uhint">{{ t('tokens 单位') }}</span>
       <div class="useg" role="group" aria-label="tokens 单位">
         <button type="button" :class="{ on: unit === 'zh' }"
-                :aria-pressed="unit === 'zh'" @click="setUnit('zh')">万 / 亿</button>
+                :aria-pressed="unit === 'zh'" @click="setUnit('zh')">{{ t('万 / 亿') }}</button>
         <button type="button" :class="{ on: unit === 'en' }"
                 :aria-pressed="unit === 'en'" @click="setUnit('en')">K / M / B</button>
       </div>
     </div>
     <div class="ucards">
-      <div class="ucard"><div class="ulabel">总任务数</div>
+      <div class="ucard"><div class="ulabel">{{ t('总任务数') }}</div>
         <div class="uval">{{ usage?.total.tasks ?? 0 }}</div>
-        <div class="usub">台账累计（含受阻/取消）</div></div>
-      <div class="ucard"><div class="ulabel">总轮数</div>
+        <div class="usub">{{ t('台账累计（含受阻/取消）') }}</div></div>
+      <div class="ucard"><div class="ulabel">{{ t('总轮数') }}</div>
         <div class="uval">{{ fmtFull(usage?.total.turns) }}</div>
-        <div class="usub">Agent 工具循环轮次</div></div>
-      <div class="ucard"><div class="ulabel">输入 tokens</div>
+        <div class="usub">{{ t('Agent 工具循环轮次') }}</div></div>
+      <div class="ucard"><div class="ulabel">{{ t('输入 tokens') }}</div>
         <div class="uval">{{ fmt(usage?.total.prompt_tokens) }}</div>
         <div class="usub">精确值 {{ fmtFull(usage?.total.prompt_tokens) }}</div></div>
-      <div class="ucard"><div class="ulabel">输出 tokens</div>
+      <div class="ucard"><div class="ulabel">{{ t('输出 tokens') }}</div>
         <div class="uval">{{ fmt(usage?.total.completion_tokens) }}</div>
         <div class="usub">精确值 {{ fmtFull(usage?.total.completion_tokens) }}</div></div>
     </div>
 
     <NCard size="small" class="scard">
-      <template #header><i class="ms">analytics</i> 各项目用量</template>
+      <template #header><i class="ms">analytics</i> {{ t('各项目用量') }}</template>
       <template #header-extra>
-        <span class="hint">按总 tokens 降序；台账文件 logs/usage.jsonl，任务结束即追加</span>
+        <span class="hint">{{ t('按总 tokens 降序；台账文件 logs/usage.jsonl，任务结束即追加') }}</span>
       </template>
       <table class="utable" v-if="usage?.projects.length">
         <thead><tr>
-          <th>项目</th><th>任务数</th><th>轮数</th>
-          <th>输入 tokens</th><th>输出 tokens</th><th>合计</th><th>最近使用</th>
+          <th>{{ t('项目') }}</th><th>{{ t('任务数') }}</th><th>{{ t('轮数') }}</th>
+          <th>{{ t('输入 tokens') }}</th><th>{{ t('输出 tokens') }}</th><th>{{ t('合计') }}</th><th>{{ t('最近使用') }}</th>
         </tr></thead>
         <tbody>
           <tr v-for="p in usage.projects" :key="p.name">
@@ -159,18 +160,18 @@ const heat = computed(() => {
           </tr>
         </tbody>
       </table>
-      <div v-else class="uempty">还没有用量记录——跑一轮任务后这里会按项目累计 tokens。</div>
+      <div v-else class="uempty">{{ t('还没有用量记录——跑一轮任务后这里会按项目累计 tokens。') }}</div>
     </NCard>
 
     <NCard v-if="usage?.roles?.length" size="small" class="scard">
-        <template #header><i class="ms">group</i> 按 Agent 角色用量</template>
+        <template #header><i class="ms">group</i> {{ t('按 Agent 角色用量') }}</template>
       <template #header-extra>
-        <span class="hint">按总 tokens 降序；小组模式展开成员明细（执行 + 触发的审查）</span>
+        <span class="hint">{{ t('按总 tokens 降序；小组模式展开成员明细（执行 + 触发的审查）') }}</span>
       </template>
       <table class="utable">
         <thead><tr>
-          <th>角色 / 成员</th><th>任务数</th><th>轮数</th>
-          <th>输入 tokens</th><th>输出 tokens</th><th>合计</th>
+          <th>{{ t('角色 / 成员') }}</th><th>{{ t('任务数') }}</th><th>{{ t('轮数') }}</th>
+          <th>{{ t('输入 tokens') }}</th><th>{{ t('输出 tokens') }}</th><th>{{ t('合计') }}</th>
         </tr></thead>
         <tbody>
           <template v-for="r in usage.roles" :key="r.role">
@@ -197,8 +198,8 @@ const heat = computed(() => {
     </NCard>
 
     <NCard size="small" class="scard">
-        <template #header><i class="ms">local_fire_department</i> 用量热力图（近 12 周）</template>
-      <template #header-extra><span class="hint">色深 = 当日输入+输出 tokens；悬停看单日明细</span></template>
+        <template #header><i class="ms">local_fire_department</i> {{ t('用量热力图（近 12 周）') }}</template>
+      <template #header-extra><span class="hint">{{ t('色深 = 当日输入+输出 tokens；悬停看单日明细') }}</span></template>
       <div class="hm" v-if="heat.cols.length">
         <div class="hm-months">
           <span class="hm-rl-spacer"></span>
@@ -223,11 +224,11 @@ const heat = computed(() => {
           多
         </div>
       </div>
-      <div v-else class="uempty">暂无用量数据。</div>
+      <div v-else class="uempty">{{ t('暂无用量数据。') }}</div>
     </NCard>
 
     <NCard size="small" class="scard">
-      <template #header><i class="ms">history</i> 最近任务记录</template>
+      <template #header><i class="ms">history</i> {{ t('最近任务记录') }}</template>
       <template #header-extra>
         <div class="rec-tabs">
           <button class="rtab" :class="{ on: recTab === 'all' }" @click="recTab = 'all'">
@@ -240,8 +241,8 @@ const heat = computed(() => {
       </template>
       <table class="utable" v-if="filteredRecent.length">
         <thead><tr>
-          <th>时间</th><th>项目</th><th>任务</th><th>结果</th>
-          <th>轮数</th><th>输入 / 输出</th><th>模型</th>
+          <th>{{ t('时间') }}</th><th>{{ t('项目') }}</th><th>{{ t('任务') }}</th><th>{{ t('结果') }}</th>
+          <th>{{ t('轮数') }}</th><th>{{ t('输入 / 输出') }}</th><th>{{ t('模型') }}</th>
         </tr></thead>
         <tbody>
           <tr v-for="(r, i) in filteredRecent" :key="i"
@@ -257,7 +258,7 @@ const heat = computed(() => {
           </tr>
         </tbody>
       </table>
-      <div v-else class="uempty">该分类下暂无记录。</div>
+      <div v-else class="uempty">{{ t('该分类下暂无记录。') }}</div>
     </NCard>
   </div>
 </template>

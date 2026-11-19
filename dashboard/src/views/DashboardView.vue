@@ -7,6 +7,7 @@ import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { parseLogEntries, relTime } from '../utils'
 import type { ProjectT, TaskT } from '../api'
 import { api } from '../api'
+import { tNow as it, tFmt } from '../lang'
 
 function roleIcon(role: string): string {
   const map: Record<string, string> = {
@@ -41,9 +42,9 @@ function stats(p: ProjectT): string {
   const c: Record<string, number> = {}
   for (const t of p.tasks) c[t.status] = (c[t.status] || 0) + 1
   const parts: string[] = []
-  if (c.open) parts.push(`${c.open} 待办`)
-  if (c.in_progress) parts.push(`${c.in_progress} 执行中`)
-  if (c.blocked) parts.push(`${c.blocked} 受阻`)
+  if (c.open) parts.push(tFmt('{p0} 待办', { p0: c.open }))
+  if (c.in_progress) parts.push(tFmt('{p0} 执行中', { p0: c.in_progress }))
+  if (c.blocked) parts.push(tFmt('{p0} 受阻', { p0: c.blocked }))
   return parts.join(' · ') || '无待办'
 }
 
@@ -95,7 +96,7 @@ async function onDrop(p: ProjectT, t: TaskT): Promise<void> {
   // 排序只在同「状态 + 优先级」分组内有效（跨级拖拽会被优先级重新归位），
   // 明确提示而不是让用户以为拖拽失灵
   if (moved.status !== anchorTask.status || moved.rank !== anchorTask.rank) {
-    window.$message?.('任务顺序仅在同一优先级分组内生效（跨优先级请先改优先级）', 'warning')
+    window.$message?.(it('任务顺序仅在同一优先级分组内生效（跨优先级请先改优先级）'), 'warning')
     return
   }
   // 以当前显示序为基准重排：摘出被拖任务，插到落点行的前/后
@@ -118,7 +119,7 @@ async function moveTask(p: ProjectT, t: TaskT, dir: -1 | 1): Promise<void> {
   if (idx < 0 || j < 0 || j >= all.length) return
   const neighbor = all[j]
   if (neighbor.status !== t.status || neighbor.rank !== t.rank) {
-    window.$message?.('任务顺序仅在同一优先级分组内调整（跨级请先改优先级）', 'warning')
+    window.$message?.(it('任务顺序仅在同一优先级分组内调整（跨级请先改优先级）'), 'warning')
     return
   }
   const ids = all.map(x => x.id)
@@ -196,7 +197,7 @@ async function toggleProject(p: ProjectT, enabled: boolean): Promise<void> {
       team: p.team ?? null,
       original_name: p.name,
     })
-    window.$message?.(enabled ? `已启用 ${p.name}` : `已停用 ${p.name}`)
+    window.$message?.(enabled ? tFmt('已启用 {p0}', { p0: p.name }) : tFmt('已停用 {p0}', { p0: p.name }))
   } catch (e: any) {
     window.$message?.(e.message, 'error')
   }
@@ -214,10 +215,10 @@ function clickTask(project: string, t: TaskT): void {
 
 async function delTask(p: ProjectT, t: TaskT): Promise<void> {
   window.$dialog?.warning({
-    title: '删除任务',
-    content: `确定删除任务 ${t.id}？`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: it('删除任务'),
+    content: tFmt('确定删除任务 {p0}？', { p0: t.id }),
+    positiveText: it('删除'),
+    negativeText: it('取消'),
     async onPositiveClick() {
       try { await api.taskDelete(p.name, t.id); window.$message?.('已删除') }
       catch (e: any) { window.$message?.(e.message, 'error') }
@@ -229,16 +230,16 @@ async function delTask(p: ProjectT, t: TaskT): Promise<void> {
 // 强制停止执行中的任务：置位停止信号，执行器在工具边界收尾为 cancelled
 function stopTask(p: ProjectT, t: TaskT): void {
   window.$dialog?.warning({
-    title: '强制停止任务',
+    title: it('强制停止任务'),
     content: `确定立即停止正在执行的任务 ${t.id}？\n\n`
       + '当前工具调用（含正在跑的命令）会被中止，worktree 里未提交的改动将被丢弃，'
-      + '任务标记为「已取消」——之后可点「重新入队」再跑。',
-    positiveText: '强制停止',
-    negativeText: '取消',
+      + it('任务标记为「已取消」——之后可点「重新入队」再跑。'),
+    positiveText: it('强制停止'),
+    negativeText: it('取消'),
     async onPositiveClick() {
       try {
         const r = await api.taskStop(p.name, t.id)
-        window.$message?.(r.message || '已发送停止信号', 'success')
+        window.$message?.(r.message || it('已发送停止信号'), 'success')
       } catch (e: any) { window.$message?.(e.message, 'error') }
       void import('../store').then(m => m.refresh(true))
     },
@@ -248,10 +249,10 @@ function stopTask(p: ProjectT, t: TaskT): void {
 // 只从系统移除项目（配置移除，磁盘文件与任务全部保留）；彻底删除请手动删目录
 async function delProject(p: ProjectT): Promise<void> {
   window.$dialog?.warning({
-    title: '移除项目',
-    content: `确定从系统移除项目 ${p.name}？（仅移出配置，目录与任务文件不会删除）`,
-    positiveText: '移除',
-    negativeText: '取消',
+    title: it('移除项目'),
+    content: tFmt('确定从系统移除项目 {p0}？（仅移出配置，目录与任务文件不会删除）', { p0: p.name }),
+    positiveText: it('移除'),
+    negativeText: it('取消'),
       async onPositiveClick() {
       try { await api.projectDelete(p.name); window.$message?.('已移除（文件已保留）') }
       catch (e: any) { window.$message?.(e.message, 'error') }
@@ -266,7 +267,7 @@ async function syncIssues(p: { name: string }): Promise<void> {
   syncing.value = p.name
   try {
     const r = await api.issuesSync(p.name)
-    window.$message?.(r.message || '同步完成', 'success')
+    window.$message?.(r.message || it('同步完成'), 'success')
   } catch (e: any) { window.$message?.(e.message, 'error') }
   finally { syncing.value = '' }
   void import('../store').then(m => m.refresh(true))
@@ -279,7 +280,7 @@ async function refreshGit(p: { name: string }): Promise<void> {
   try {
     await refresh(true)
     const cur = store.state?.projects.find(x => x.name === p.name)
-    window.$message?.(cur?.is_git_repo ? '已识别为 git 仓库' : '仍不是 git 仓库', 'success')
+    window.$message?.(cur?.is_git_repo ? it('已识别为 git 仓库') : it('仍不是 git 仓库'), 'success')
   } catch (e: any) {
     window.$message?.(e.message, 'error')
   } finally { gitRefreshing.value = '' }
@@ -318,15 +319,15 @@ async function batchDel(p: ProjectT): Promise<void> {
   const ids = [...checkedIds(p.name)]
   if (!ids.length) return
   window.$dialog?.warning({
-    title: '批量删除任务',
-    content: `确定删除选中的 ${ids.length} 个任务？任务文件将被删除，不可恢复。`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: it('批量删除任务'),
+    content: tFmt('确定删除选中的 {p0} 个任务？任务文件将被删除，不可恢复。', { p0: ids.length }),
+    positiveText: it('删除'),
+    negativeText: it('取消'),
     async onPositiveClick() {
       batchDeleting.value = p.name
       try {
         const r = await api.taskDeleteBatch(p.name, ids)
-        window.$message?.(r.message || `已删除 ${r.deleted} 个`, 'success')
+        window.$message?.(r.message || tFmt('已删除 {p0} 个', { p0: r.deleted }), 'success')
       } catch (e: any) { window.$message?.(e.message, 'error') }
       finally { batchDeleting.value = ''; clearChecked(p.name) }
       void import('../store').then(m => m.refresh(true))
@@ -338,16 +339,16 @@ async function batchDel(p: ProjectT): Promise<void> {
 const clearing = shallowRef('')
 async function clearTasks(p: ProjectT): Promise<void> {
   window.$dialog?.warning({
-    title: '清空任务',
+    title: it('清空任务'),
     content: `确定清空项目 ${p.name} 的全部 ${p.tasks.length} 个任务？`
-      + '已归档（done）的任务不受影响；任务文件将被删除，不可恢复。',
-    positiveText: '清空',
-    negativeText: '取消',
+      + it('已归档（done）的任务不受影响；任务文件将被删除，不可恢复。'),
+    positiveText: it('清空'),
+    negativeText: it('取消'),
     async onPositiveClick() {
       clearing.value = p.name
       try {
         const r = await api.taskClear(p.name)
-        window.$message?.(r.message || `已清空 ${r.cleared} 个`, 'success')
+        window.$message?.(r.message || tFmt('已清空 {p0} 个', { p0: r.cleared }), 'success')
       } catch (e: any) { window.$message?.(e.message, 'error') }
       finally { clearing.value = ''; clearChecked(p.name) }
       void import('../store').then(m => m.refresh(true))
@@ -359,7 +360,7 @@ async function clearTasks(p: ProjectT): Promise<void> {
 async function openFolder(p: ProjectT): Promise<void> {
   try {
     await api.projectOpenFolder(p.name)
-    window.$message?.(`已打开 ${p.path}`)
+    window.$message?.(tFmt('已打开 {p0}', { p0: p.path }))
   } catch (e: any) { window.$message?.(e.message, 'error') }
 }
 
@@ -385,7 +386,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
       project: p.name, id: '', title, priority: st.pri, status: 'open',
       labels: [], assignee: '', description: '',
     })
-    window.$message?.(`任务已创建：${r.id}`)
+    window.$message?.(tFmt('任务已创建：{p0}', { p0: r.id }))
     taskPage[p.name] = 1 // 新任务立即可见
     st.title = ''
   } catch (e: any) {
@@ -401,13 +402,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
   <div class="dash">
     <div class="stats" v-if="store.state">
       <NTag round :type="store.state.scheduler.running ? 'warning' : 'success'" size="large">
-        {{ store.state.scheduler.running ? '扫描执行中…' : '调度空闲' }}
+        {{ store.state.scheduler.running ? it('扫描执行中…') : it('调度空闲') }}
       </NTag>
-      <NTag round size="large">已完成周期 {{ store.state.scheduler.cycles_done }}</NTag>
-      <NTag round size="large">上次扫描 {{ relTime(store.state.scheduler.last_cycle_at) }}</NTag>
-      <NTag round size="large">扫描间隔 {{ store.state.scheduler.interval_seconds }}s</NTag>
+      <NTag round size="large">{{ it('已完成周期') }} {{ store.state.scheduler.cycles_done }}</NTag>
+      <NTag round size="large">{{ it('上次扫描') }} {{ relTime(store.state.scheduler.last_cycle_at) }}</NTag>
+      <NTag round size="large">{{ it('扫描间隔') }} {{ store.state.scheduler.interval_seconds }}s</NTag>
       <NTag v-for="(v, k) in store.state.scheduler.last_cycle_stats" :key="k" round size="large">
-        {{ k }}：处理 {{ v }} 任务
+        {{ k }}：{{ it('处理 {p0} 任务').replace('{p0}', String(v)) }}
       </NTag>
     </div>
 
@@ -421,28 +422,28 @@ async function quickAdd(p: ProjectT): Promise<void> {
               {{ p.is_git_repo ? 'git' : '非 git' }}
             </NTag>
             <NButton size="tiny" quaternary class="git-refresh" :loading="gitRefreshing === p.name"
-                     title="刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）"
+                     :title="it('刷新仓库信息（在文件夹里手动 init git 后点这里立即生效）')"
                      @click="refreshGit(p)"><i class="ms sm">refresh</i></NButton>
-            <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">缺指引</NTag>
+            <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">{{ it('缺指引') }}</NTag>
             <NTag v-if="p.team_enabled" size="small" type="info" :bordered="false"
                   :title="'已启用项目小组：' + (p.team_members_effective?.map(m => m.name).join('、') || '')">
               <i class="ms sm">group</i> 小组 ({{ p.team_members_effective?.length || 0 }})
             </NTag>
             <NButton v-if="p.pending_git_changes && p.pending_git_changes.count > 0"
                      size="tiny" type="warning" secondary
-                     title="主工作区有已通过测试但未提交的变更，点此人工把关确认提交"
+                     :title="it('主工作区有已通过测试但未提交的变更，点此人工把关确认提交')"
                      @click="openCommitDlg(p.name)">
               待人工提交 ({{ p.pending_git_changes.count }})
             </NButton>
             <NTag v-if="p.review?.warning" size="small" type="error" :bordered="false"
-                  :title="p.review.warning">审查模型冲突</NTag>
+                  :title="p.review.warning">{{ it('审查模型冲突') }}</NTag>
             <NTag v-else-if="p.review?.model_configured && p.review?.enabled_effective"
                   size="small" type="success" :bordered="false"
                   :title="`审查模型 ${p.review.effective_model} · 返工上限 ${p.review.effective_max_rounds} 次`">
               审查开启</NTag>
             <NTag v-else-if="p.review_enabled === false || (p.review?.enabled_effective === false && p.review?.model_configured)"
                   size="small" :bordered="false"
-                  title="本项目已关闭审查门（跟随关闭优先于全局开关）">审查关闭</NTag>
+                  :title="it('本项目已关闭审查门（跟随关闭优先于全局开关）')">{{ it('审查关闭') }}</NTag>
             <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
                   :type="p.issue_auto_pull.last_error ? 'error' : 'success'"
                   :title="p.issue_auto_pull.last_error || undefined">
@@ -452,12 +453,12 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </template>
         <template #footer>
           <div class="card-footer-ops">
-            <NButton size="tiny" @click="openFolder(p)">打开文件夹</NButton>
-            <NButton size="tiny" @click="openTaskNew(p.name)">新建任务</NButton>
+            <NButton size="tiny" @click="openFolder(p)">{{ it('打开文件夹') }}</NButton>
+            <NButton size="tiny" @click="openTaskNew(p.name)">{{ it('新建任务') }}</NButton>
             <NButton size="tiny" @click="openGuide(p.name)">AGENT.md</NButton>
-            <NButton size="tiny" :loading="syncing === p.name" @click="syncIssues(p)">拉取 Issues</NButton>
-            <NButton size="tiny" @click="openProjectEdit(p.name)">设置</NButton>
-            <NButton size="tiny" quaternary type="error" class="del-btn" @click="delProject(p)">移除</NButton>
+            <NButton size="tiny" :loading="syncing === p.name" @click="syncIssues(p)">{{ it('拉取 Issues') }}</NButton>
+            <NButton size="tiny" @click="openProjectEdit(p.name)">{{ it('设置') }}</NButton>
+            <NButton size="tiny" quaternary type="error" class="del-btn" @click="delProject(p)">{{ it('移除') }}</NButton>
           </div>
         </template>
 
@@ -467,20 +468,20 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </div>
 
         <div class="quickadd">
-          <NInput v-model:value="q(p.name).title" size="small" placeholder="新任务标题，回车快速添加"
+          <NInput v-model:value="q(p.name).title" size="small" :placeholder="it('新任务标题，回车快速添加')"
                   @keydown.enter="quickAdd(p)" />
           <NSelect v-model:value="q(p.name).pri" size="small" class="qpri" :options="priOptions" />
-          <NButton size="small" type="primary" :loading="adding" @click="quickAdd(p)">添加</NButton>
+          <NButton size="small" type="primary" :loading="adding" @click="quickAdd(p)">{{ it('添加') }}</NButton>
         </div>
 
         <div v-if="p.tasks.length || p.parse_errors.length" class="batchbar">
           <NCheckbox size="small" :checked="pageAllChecked(p)" :indeterminate="pageSomeChecked(p)"
-                     @update:checked="(v: boolean) => checkAllPage(p, v)">全选本页</NCheckbox>
+                     @update:checked="(v: boolean) => checkAllPage(p, v)">{{ it('全选本页') }}</NCheckbox>
           <template v-if="checkedIds(p.name).length">
             <span class="hint">已选 {{ checkedIds(p.name).length }} 个</span>
             <NButton size="tiny" type="error" :loading="batchDeleting === p.name"
-                     @click="batchDel(p)">批量删除</NButton>
-            <NButton size="tiny" quaternary @click="clearChecked(p.name)">取消选择</NButton>
+                     @click="batchDel(p)">{{ it('批量删除') }}</NButton>
+            <NButton size="tiny" quaternary @click="clearChecked(p.name)">{{ it('取消选择') }}</NButton>
           </template>
           <span class="batchbar-spacer" />
           <NButton size="tiny" type="warning" :loading="clearing === p.name"
@@ -490,83 +491,83 @@ async function quickAdd(p: ProjectT): Promise<void> {
         <div class="tasks">
           <div v-for="e in p.parse_errors" :key="'e' + e.id" class="task err">
             <div class="t-main">
-              <NTag size="small" type="error">格式</NTag>
-              <span class="title">{{ e.id }}</span><NTag size="small" type="error">解析失败</NTag>
+              <NTag size="small" type="error">{{ it('格式') }}</NTag>
+              <span class="title">{{ e.id }}</span><NTag size="small" type="error">{{ it('解析失败') }}</NTag>
             </div>
             <div class="t-meta">{{ e.error }}</div>
           </div>
 
-          <div v-for="t in pageTasks(p)" :key="t.id" class="task"
-               :class="{ 'drop-before': dropAt?.id === t.id && dropAt.before,
-                         'drop-after': dropAt?.id === t.id && !dropAt.before,
-                         dragging: dragId === t.id }"
-               draggable="true" title="拖拽调整顺序（同一优先级内生效，同时决定 Agent 领取顺序）"
-               @dragstart="onDragStart($event, t)" @dragend="onDragEnd()"
-               @dragover.prevent="onDragOver($event, t)" @drop.prevent="onDrop(p, t)">
+          <div v-for="tk in pageTasks(p)" :key="tk.id" class="task"
+               :class="{ 'drop-before': dropAt?.id === tk.id && dropAt.before,
+                         'drop-after': dropAt?.id === tk.id && !dropAt.before,
+                         dragging: dragId === tk.id }"
+               draggable="true" :title="it('拖拽调整顺序（同一优先级内生效，同时决定 Agent 领取顺序）')"
+               @dragstart="onDragStart($event, tk)" @dragend="onDragEnd()"
+               @dragover.prevent="onDragOver($event, tk)" @drop.prevent="onDrop(p, tk)">
             <div class="t-main clickable"
-                 :title="t.status === 'open' ? '点击编辑任务内容' : '点击查看任务内容（只读）'"
-                 @click="clickTask(p.name, t)">
+                 :title="tk.status === 'open' ? '点击编辑任务内容' : '点击查看任务内容（只读）'"
+                 @click="clickTask(p.name, tk)">
               <span class="tcheck" @click.stop>
-                <NCheckbox size="small" :checked="isTaskChecked(p.name, t.id)"
-                           @update:checked="(v: boolean) => toggleCheck(p.name, t.id, v)" />
+                <NCheckbox size="small" :checked="isTaskChecked(p.name, tk.id)"
+                           @update:checked="(v: boolean) => toggleCheck(p.name, tk.id, v)" />
               </span>
-              <NTag size="small" :color="{ color: PRI_COLOR[t.priority] || '#64748f', textColor: '#fff' }"
-                    :bordered="false">{{ t.priority }}</NTag>
-              <span class="title" :title="t.title">{{ t.title }}</span>
-              <NTag size="small" :type="ST_TYPE[t.status] || 'default'" :bordered="false">
-                {{ ST_NAME[t.status] || t.status }}
+              <NTag size="small" :color="{ color: PRI_COLOR[tk.priority] || '#64748f', textColor: '#fff' }"
+                    :bordered="false">{{ tk.priority }}</NTag>
+              <span class="title" :title="tk.title">{{ tk.title }}</span>
+              <NTag size="small" :type="ST_TYPE[tk.status] || 'default'" :bordered="false">
+                {{ ST_NAME[t.status] || tk.status }}
               </NTag>
-              <NTag v-if="t.assignee" size="small" type="info" :bordered="false">
-                <i class="ms sm">{{ roleIcon(t.assignee) }}</i> {{ roleLabel(t.assignee) }}
+              <NTag v-if="tk.assignee" size="small" type="info" :bordered="false">
+                <i class="ms sm">{{ roleIcon(tk.assignee) }}</i> {{ roleLabel(tk.assignee) }}
               </NTag>
-              <NTag v-if="t.dep_state === 'waiting'" size="small" :bordered="false"
-                    title="等待前置依赖任务完成">
-                <i class="ms sm">hourglass_top</i> 等待前置 ({{ t.dep_done_count }}/{{ t.dep_total_count }})
+              <NTag v-if="tk.dep_state === 'waiting'" size="small" :bordered="false"
+                    :title="it('等待前置依赖任务完成')">
+                <i class="ms sm">hourglass_top</i> 等待前置 ({{ tk.dep_done_count }}/{{ tk.dep_total_count }})
               </NTag>
-              <NTag v-else-if="t.dep_state === 'upstream_blocked'" size="small" type="error" :bordered="false"
-                    title="前置依赖任务存在受阻/取消">
+              <NTag v-else-if="tk.dep_state === 'upstream_blocked'" size="small" type="error" :bordered="false"
+                    :title="it('前置依赖任务存在受阻/取消')">
                 <i class="ms sm">warning</i> 前置受阻
               </NTag>
-              <NTag v-if="(t.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
-                <i class="ms sm">autorenew</i> 回归 #{{ t.qa_round }}
+              <NTag v-if="(tk.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
+                <i class="ms sm">autorenew</i> 回归 #{{ tk.qa_round }}
               </NTag>
-              <NTag v-if="t.review_pending" size="small" type="info" :bordered="false"
-                    title="任务已完成，独立审查进行中或等待补审；审查通过后合并归档">
+              <NTag v-if="tk.review_pending" size="small" type="info" :bordered="false"
+                    :title="it('任务已完成，独立审查进行中或等待补审；审查通过后合并归档')">
                 <i class="ms sm">rate_review</i> 待审查
               </NTag>
-              <NTag v-else-if="(t.review_round || 0) > 0 && t.status !== 'done' && t.status !== 'cancelled'"
+              <NTag v-else-if="(tk.review_round || 0) > 0 && tk.status !== 'done' && tk.status !== 'cancelled'"
                     size="small" type="warning" :bordered="false"
-                    :title="`已被审查退回 ${t.review_round} 次（返工轮）`">
-                <i class="ms sm">rate_review</i> 返工 ×{{ t.review_round }}
+                    :title="`已被审查退回 ${tk.review_round} 次（返工轮）`">
+                <i class="ms sm">rate_review</i> 返工 ×{{ tk.review_round }}
               </NTag>
-              <NTag v-if="waitingApproval(p.name, t.id)" size="small" type="warning"
-                    :bordered="false" title="Agent 有操作挂起等待人工审批，点顶栏「待审批」处理">
+              <NTag v-if="waitingApproval(p.name, tk.id)" size="small" type="warning"
+                    :bordered="false" :title="it('Agent 有操作挂起等待人工审批，点顶栏「待审批」处理')">
                 <i class="ms sm">pause_circle</i> 待审批
               </NTag>
             </div>
             <div class="t-meta">
-              {{ t.id }}<template v-if="t.labels.length"> · {{ t.labels.join(', ') }}</template><template v-if="t.assignee"> · 角色 {{ t.assignee }}</template><template v-if="t.depends_on && t.depends_on.length"> · 前置 {{ t.depends_on.join(', ') }}</template>
+              {{ tk.id }}<template v-if="tk.labels.length"> · {{ tk.labels.join(', ') }}</template><template v-if="tk.assignee"> · 角色 {{ tk.assignee }}</template><template v-if="tk.depends_on && tk.depends_on.length"> · 前置 {{ tk.depends_on.join(', ') }}</template>
             </div>
-            <details v-if="t.description" class="tdesc">
-              <summary>描述</summary>
-              <pre>{{ t.description }}</pre>
+            <details v-if="tk.description" class="tdesc">
+              <summary>{{ it('描述') }}</summary>
+              <pre>{{ tk.description }}</pre>
             </details>
             <div class="ops-row">
               <!-- 触屏排序（仅移动端显示）：同优先级分组内上移/下移 -->
               <template v-if="isMobile">
-                <NButton size="tiny" title="上移（同一优先级分组内）"
-                         @click="moveTask(p, t, -1)"><i class="ms sm">keyboard_arrow_up</i></NButton>
-                <NButton size="tiny" title="下移（同一优先级分组内）"
-                         @click="moveTask(p, t, 1)"><i class="ms sm">keyboard_arrow_down</i></NButton>
+                <NButton size="tiny" :title="it('上移（同一优先级分组内）')"
+                         @click="moveTask(p, tk, -1)"><i class="ms sm">keyboard_arrow_up</i></NButton>
+                <NButton size="tiny" :title="it('下移（同一优先级分组内）')"
+                         @click="moveTask(p, tk, 1)"><i class="ms sm">keyboard_arrow_down</i></NButton>
               </template>
-              <NButton v-if="t.status !== 'open' && t.status !== 'cancelled'" size="tiny"
-                       @click="setStatus(p, t, 'open')">重新入队</NButton>
-              <NButton v-if="t.status === 'open' || t.status === 'in_progress'" size="tiny"
-                       @click="setStatus(p, t, 'done')">标记完成</NButton>
-              <NButton v-if="t.status === 'in_progress'" size="tiny" type="warning" secondary
-                       title="立即中止正在执行的 Agent 循环（丢弃 worktree 改动，可重新入队）"
-                       @click="stopTask(p, t)">强制停止</NButton>
-              <NButton size="tiny" quaternary type="error" @click="delTask(p, t)">删除</NButton>
+              <NButton v-if="tk.status !== 'open' && tk.status !== 'cancelled'" size="tiny"
+                       @click="setStatus(p, tk, 'open')">{{ it('重新入队') }}</NButton>
+              <NButton v-if="tk.status === 'open' || tk.status === 'in_progress'" size="tiny"
+                       @click="setStatus(p, tk, 'done')">{{ it('标记完成') }}</NButton>
+              <NButton v-if="tk.status === 'in_progress'" size="tiny" type="warning" secondary
+                       :title="it('立即中止正在执行的 Agent 循环（丢弃 worktree 改动，可重新入队）')"
+                       @click="stopTask(p, tk)">{{ it('强制停止') }}</NButton>
+              <NButton size="tiny" quaternary type="error" @click="delTask(p, tk)">{{ it('删除') }}</NButton>
             </div>
           </div>
 
@@ -580,33 +581,33 @@ async function quickAdd(p: ProjectT): Promise<void> {
 
           <details v-if="p.archived.length" class="arch">
             <summary>已归档（{{ p.archived.length }}）· 点击查看详情</summary>
-            <div v-for="t in [...p.archived].reverse()" :key="t.id" class="task">
-              <div class="t-main clickable" title="点击查看任务详情（只读）" @click="openTaskView(p.name, t.id)">
-                <NTag size="small" :color="{ color: PRI_COLOR[t.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ t.priority }}</NTag>
-                <span class="title">{{ t.title }}</span>
-                <NTag size="small" type="success" :bordered="false">已完成</NTag>
+            <div v-for="tk in [...p.archived].reverse()" :key="tk.id" class="task">
+              <div class="t-main clickable" :title="it('点击查看任务详情（只读）')" @click="openTaskView(p.name, tk.id)">
+                <NTag size="small" :color="{ color: PRI_COLOR[tk.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ tk.priority }}</NTag>
+                <span class="title">{{ tk.title }}</span>
+                <NTag size="small" type="success" :bordered="false">{{ it('已完成') }}</NTag>
               </div>
-              <div class="t-meta">{{ t.id }}</div>
+              <div class="t-meta">{{ tk.id }}</div>
             </div>
           </details>
         </NCard>
       </div>
     <div v-else class="dash-empty">
       <div style="font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px;">
-        <i class="ms sm">local_cafe</i> 当前没有正在执行任务的项目 · 调度器空闲中
+        <i class="ms sm">local_cafe</i> {{ it('当前没有正在执行任务的项目 · 调度器空闲中') }}
       </div>
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center;">
-        <span class="hint">全量项目与任务请在顶部「项目」页查看与管理</span>
-        <NButton size="small" secondary @click="navigateTo('projects')">前往「项目」页 <i class="ms sm">arrow_forward</i></NButton>
+        <span class="hint">{{ it('全量项目与任务请在顶部「项目」页查看与管理') }}</span>
+        <NButton size="small" secondary @click="navigateTo('projects')">{{ it('前往「项目」页') }} <i class="ms sm">arrow_forward</i></NButton>
       </div>
     </div>
 
     <!-- 运行日志：桌面端随 5s 轮询全量刷新；移动端摘要轮询省流量，
          打开日志区按需全量拉取 + 手动刷新（低耗优先） -->
     <details v-if="store.state && !isMobile" class="logsec" open>
-      <summary>运行日志（从新到旧，点击收起）</summary>
+      <summary>{{ it('运行日志（从新到旧，点击收起）') }}</summary>
       <div class="logbox">
-        <div v-if="!logEntries.length" class="logempty">（暂无日志）</div>
+        <div v-if="!logEntries.length" class="logempty">{{ it('（暂无日志）') }}</div>
         <template v-for="(e, i) in logEntries" :key="i">
           <!-- 模型思考条目：默认折叠，展开查看完整思考过程 -->
           <details v-if="e.thinking" class="think">
@@ -627,7 +628,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
       </summary>
       <template v-if="mobileLogOpen">
         <div class="logbox">
-          <div v-if="!mobileLogEntries.length" class="logempty">（暂无日志）</div>
+          <div v-if="!mobileLogEntries.length" class="logempty">{{ it('（暂无日志）') }}</div>
           <template v-for="(e, i) in mobileLogEntries" :key="i">
             <details v-if="e.thinking" class="think">
               <summary>{{ e.head }}</summary>

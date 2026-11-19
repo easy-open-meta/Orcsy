@@ -1,6 +1,13 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import { router } from './router'
+import { registerPack } from './lang'
+import en from './locales/en'
+import zhTW from './locales/zhTW'
+
+// 语言包在挂载前注册：首帧即按 localStorage/浏览器语言渲染，无简中闪现
+registerPack('en', en)
+registerPack('zhTW', zhTW)
 
 const app = createApp(App)
 app.use(router)

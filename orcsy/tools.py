@@ -95,6 +95,8 @@ from .tools_task import (
     tool_reassign_task,
     tool_report_bug,
 )
+from .tools_session import SESSION_TOOLS
+from .tools_memory import MEMORY_TOOLS
 
 log = get_logger("tools")
 
@@ -126,6 +128,9 @@ class ToolContext:
     # 当前正在执行的任务（task_model.Task）：create_tasks 拆分工具用它定位
     # 任务目录并关闭原任务；None（如单元测试直构）时工具拒绝拆分
     current_task: object | None = None
+    # 批次共享剪贴板（orcsy.session_bus.SessionBus）：session_share/session_read
+    # 工具专用；None = 无批次上下文（测试直构/未注入）
+    session_bus: object | None = None
     # 本地调试会话（orcsy.debug_session.DebugSession）：持有开发服务管理器、
     # 会话级 HTTP 客户端与浏览器 CDP 客户端；None = 未启用本地调试
     session: object | None = None
@@ -168,6 +173,8 @@ TOOLS: dict[str, tuple[str, dict, object]] = {}
 TOOLS.update(FS_TOOLS)
 TOOLS.update(CMD_TOOLS)
 TOOLS.update(TASK_TOOLS)
+TOOLS.update(SESSION_TOOLS)
+TOOLS.update(MEMORY_TOOLS)
 TOOLS.update(NET_TOOLS)
 
 from .tools_debug import DEBUG_TOOLS  # noqa: E402
@@ -236,8 +243,10 @@ __all__ = [
     "MAX_SKILL_CHARS",
     "MAX_WEB_FETCH_BYTES",
     "MAX_WEB_FETCH_CHARS",
+    "MEMORY_TOOLS",
     "NET_TOOLS",
     "REG_PATH_KEYS",
+    "SESSION_TOOLS",
     "TASK_TOOLS",
     "TOGGLEABLE_TOOLS",
     "TOOL_CATEGORIES",

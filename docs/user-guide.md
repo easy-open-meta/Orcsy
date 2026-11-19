@@ -4,9 +4,11 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.24.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.25.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
-> ℹ️ The dashboard is currently Chinese-only. This guide uses English names for buttons and cards; a Chinese-label reference is in [section 9.1](#91-top-toolbar).
+> **v0.25.0 highlights**: the pending-commit page groups nested Git repositories with per-repo diff / exclude / discard; nested repos commit first, the parent records the pointers last. The dashboard UI now supports **Simplified Chinese, Traditional Chinese and English** (translate icon in the top bar; follows the browser language by default). Also fixes the tray exit leaving the web server/process alive and duplicate-instance detection when auth is enabled.
+>
+> ℹ️ The dashboard UI is fully translated (zh / zh-TW / en). Backend-returned dynamic messages (e.g. update progress, pause reasons) remain in the original language for now.
 
 ---
 
@@ -47,13 +49,14 @@ If Orcsy is already installed and you just want to try it, do these five things:
 
 ### 2.1 One sentence
 
-**Orcsy is a tool that turns a written task into work done for you.** You describe what you want in a Markdown file. Orcsy periodically checks the task list, hands the task to an AI agent, and lets it read code, edit files, and run tests inside your project. When it finishes, Orcsy commits the changes to Git and updates the task status.
+**Orcsy is a tool that turns a written task into work done for you.** You describe what you want in a Markdown file. Orcsy periodically checks the task list, hands the task to an AI agent, and lets it read code, edit files, and run tests inside your project. When it finishes, a **second model reviews the work independently**, the changes land in the working tree **awaiting your confirmation to commit** — and every step leaves a run ledger you can replay.
 
 A simple way to picture the roles:
 
 - **You** are the product owner: you write down what to do and what "done" means.
-- **Orcsy** is the project manager: it prioritizes, schedules, and tracks progress.
+- **Orcsy** is the project manager and safety officer: it prioritizes, schedules, tracks progress, and gates the critical hand-off points.
 - **The LLM** is the engineer: it actually reads and changes the code.
+- **The review agent** is the acceptor: a second model double-checks the work so the engineer never "grades its own homework".
 - **The dashboard** is the office display: you can always see what is running and where it stands.
 
 ### 2.2 What it is good at
@@ -387,7 +390,7 @@ Click **Save**. You will see:
 
 | Badge | Meaning |
 |---|---|
-| `git` | The project is a Git repository. Successful tasks are committed and merged; if a remote is configured, pushed |
+| `git` | The project is a Git repository. By default reviewed changes land in the working tree for your manual commit (auto commit/merge/push only when `commit_and_merge` is enabled) |
 | `non-git` | Not a Git repository. The Agent edits files directly, with no automatic commit |
 | `Missing guide` | No `AGENT.md`; click **AGENT.md** to create one |
 | `Auto pull Nmin` | Scheduled Issue pulling is on, every N minutes |
@@ -534,7 +537,7 @@ in_progress (running)
 | Batch delete | Appears after selection | Delete the selected task files; irreversible |
 | Clear tasks (N) | Above the list | Delete all active tasks in the project; archived tasks are kept |
 | Requeue | Blocked/in-progress task | Back to open; picked up first next scan |
-| Mark done | Open/in-progress task | Mark complete manually (no auto-archive) |
+| Mark done | Open/in-progress task | Mark complete manually and archive it to `tasks/done/` (same location as agent completions; appears in the Archived list immediately) |
 | Force stop | In-progress task | Abort the AI loop and running commands, discard temporary changes, mark cancelled |
 | Delete | Each task row | Delete one task file |
 
@@ -673,7 +676,7 @@ Toolbar buttons:
 
 ### 9.3 Projects tab
 
-Shows only the managed project cards (6 per page, paginated with lazy rendering); card actions match the dashboard: open folder, new task, AGENT.md, pull Issues, settings, remove. Project cards also show the review-gate status (Review on / Review off / Review model conflict).
+Shows only the managed project cards (6 per page, paginated with lazy rendering); card actions match the dashboard: open folder, new task, AGENT.md, pull Issues, settings, remove. Project cards also show the review-gate status (Review on / Review off / Review model conflict). The task list is collapsed by default — click the “Task list” row to expand/collapse it (empty lists expand to show a hint too), saving card height. The “Archived” list keeps its own expand/collapse and is not affected by the task-list toggle.
 
 ### 9.4 Settings tab
 
@@ -966,8 +969,9 @@ When the Project Team or Worktree isolation is enabled, agent output is only **a
 
 **Left: changed-file list**
 - Lists every uncommitted change; click a file to see its diff on the right;
+- If the project has nested gitlink sub-repositories (e.g. `caresy-api` / `caresy-web` in caresy), files are grouped by repo and the count is the sum of real files across all repos;
 - Each row has **`Exclude`** (don't commit, keep in the working tree) and **`Delete`**;
-- The list header offers bulk actions: **`Exclude temp artifacts (N)`** and **`Delete temp artifacts (N)`**.
+- The list header offers bulk actions: **`Exclude temp artifacts (N)`** and **`Delete temp artifacts (N)`**; each action applies only to the file's own repo.
 
 **Right: code diff**
 - **Wrap is on by default**, so very long lines fold instead of being cut off; the **Wrap** toggle in the header switches to "no wrap + horizontal scrolling";
@@ -986,7 +990,9 @@ When the Project Team or Worktree isolation is enabled, agent output is only **a
 
 **Committing**
 - Fill in the Commit Message; tick **Push to remote** to also run `git push origin`;
-- Click **Confirm commit to main branch** — only non-excluded files are committed; the working tree becomes clean and the internal stage branch is synced;
+- Click **Confirm commit to all repos** — only non-excluded files are committed; the working tree becomes clean and the internal stage branch is synced;
+- With nested repositories Orcsy orchestrates the order automatically: **nested repos commit first → parent commits the updated gitlink pointers last**. Pushes also go nested-first; the parent is pushed only after every nested push succeeds (if a nested push fails or has no remote, the parent push is skipped so the remote never points at an unavailable child commit);
+- All repos share the current Commit Message; the page header shows the repo/file counts actually being committed;
 - If some files remain excluded, the page stays open and tells you exactly which ones were skipped (**"N file(s) excluded and not committed (kept in the working tree)"**);
 - When every file is excluded, the confirm button is disabled so no empty commit can be created.
 
@@ -1089,6 +1095,39 @@ egress:
 - **Subprocesses are not intercepted**: `npm` / `pip` / `git` started via `run_command` can reach the network outside the application layer; mirrors/proxy environment variables and the run ledger provide the constraints. The docs make no "zero outbound requests" claim;
 - **Troubleshooting**: temporarily set `mode: off` (allow all, no deny audit), then switch back to `allowlist`. The settings page shows the derived host count, process-wide allow/deny counters and recent denials.
 
+### 10.21 Team memory (Phase 1)
+
+**Architecture blackboard `ARCHITECTURE.md`**
+- Lives in the project root: core layers, module boundaries, technology choices, shared data models and key routes; **write the body in English** (keep API paths/identifiers as-is) to save tokens;
+- Injected read-only into every task prompt (first 3000 chars) so all roles share the same project picture; omitted when the file does not exist;
+- The PM creates/updates it with `update_architecture(mode="replace")` on first decomposition; developers append a short English note (≤200 chars) after major API/schema changes with `mode="append"`; small changes need no update;
+- The tool can only write `ARCHITECTURE.md` — it does not give PM/QA arbitrary file-write access.
+
+**Requirement-batch shared clipboard**
+- PM subtasks, developers, QA and bug-fix tasks under the same `parent_id` tree share one batch;
+- Developers use `session_share(key, value)` for temporary ports, test accounts, dynamic JWTs or temporary DSNs;
+- QA reads them with `session_read(key)` (empty key lists available keys without values) instead of guessing from logs;
+- Data lives under `<data dir>/state/session_bus/`, never in task files or Git; it is deleted when the whole batch is archived/terminated, with a 7-day TTL fallback;
+- Only put temporary runtime state there — no long-lived secrets or large blobs.
+
+**One-click dependency results**
+- The task detail shows each upstream dependency's status (done/in progress/blocked/deleted) and result summary;
+- Click the task ID/title to open that task (archived tasks open read-only); the parent requirement/source task is also clickable.
+
+### 10.22 Nested Git repositories (gitlinks / unregistered submodules)
+
+Some parent repos record subdirectories as gitlinks (mode `160000`) without a `.gitmodules` file (e.g. `caresy-api` / `caresy-web` in caresy). A `git worktree` checkout leaves those directories empty, and changes cannot be carried by the parent merge — the task can look “done” while the code never reaches the main workspace.
+
+Orcsy detects this layout and switches to a compatible mode:
+
+- Projects with gitlinks **do not use worktree isolation**; tasks run directly in the main workspace and edit the real nested working trees;
+- The project runs **serially** to prevent concurrent edits to the same nested repo;
+- The run ledger/review combine the parent gitlink pointer with each nested repo's `git status/diff`, so the diff is not empty;
+- The **Pending commit** page groups changes by repo, with per-file diff, exclude and delete support;
+- Manual commit automatically runs **nested repos first → parent gitlink pointers last**, with optional push; if any nested push does not succeed, the parent push is skipped.
+
+Limitations: no worktree isolation/parallelism in this mode; nested repos commit on their current branch and every repo shares one Commit Message. New projects should use proper submodules or separate managed projects instead.
+
 ## 11. Data, backup, and migration
 
 ### 11.1 Where data lives
@@ -1101,6 +1140,7 @@ egress:
 | Usage ledger | `%APPDATA%\Orcsy\logs\usage.jsonl` | `./orcsy-data/logs/usage.jsonl` | `/var/lib/orcsy/logs/usage.jsonl` |
 | Run ledger | `%APPDATA%\Orcsy\runs\` | `./orcsy-data/runs/` | `/var/lib/orcsy/runs/` |
 | Task fingerprints / leases | `%APPDATA%\Orcsy\state\` | `./orcsy-data/state/` | `/var/lib/orcsy/state/` |
+| Requirement-batch clipboard | `%APPDATA%\Orcsy\state\session_bus\` | `./orcsy-data/state/session_bus/` | `/var/lib/orcsy/state/session_bus/` |
 | Tasks | Each project's `tasks\` | `./projects/<project>/tasks/` | `/srv/orcsy-projects/<project>/tasks/` |
 | Project guide | Each project's `AGENT.md` | `./projects/<project>/AGENT.md` | `/srv/orcsy-projects/<project>/AGENT.md` |
 
@@ -1136,7 +1176,8 @@ You can also set the `ORCSY_DATA_DIR` environment variable to move the whole dat
 - If the port is occupied:
   - started with the configured port: Orcsy automatically picks a free port and prints it in the console;
   - started with an explicit `--port`: it exits with an error instead of silently changing ports (your explicit choice is respected);
-- If another Orcsy is already running, it tells you and exits, so you do not accidentally run two.
+- If the port is held by another Orcsy instance, this launch is cancelled with a "detected an existing Orcsy instance" notice, so two instances never scan/execute the same task queue; use `--port` with a different port to start a separate instance deliberately;
+- Right-click the tray icon and choose **Exit** to stop both the dashboard server and the Orcsy process (running tasks are interrupted and reset for a rerun on next start). If the dashboard still responds after that, you have another independent instance running — close it too.
 
 ### 12.2 A task stays "Blocked"
 
@@ -1221,7 +1262,8 @@ The dashboard mode can also use `--no-sched` to keep only manual **Scan now**.
 
 ### 12.12 Where did the code go after a task finishes?
 
-- Git project: committed and merged back to the main branch; pushed if a remote is configured;
+- Git project (default): after the independent review passes, changes land incrementally in the main working tree (uncommitted) — you confirm commit/push on the Pending-commit page;
+- Git project (with `commit_and_merge` enabled): after review passes, Orcsy commits and merges back to the main branch automatically; pushed if a remote is configured;
 - Non-Git project: edited directly in the project folder, no commit;
 - Git project blocked/cancelled: the temporary copy is discarded and the main project folder is unchanged;
 - Non-Git project blocked/cancelled: there is no temporary copy; changes the Agent already made stay in the project folder, so review or revert them yourself.

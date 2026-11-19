@@ -343,22 +343,32 @@ def check_command_allowed(command: list[str],
 # 子进程输出乱码自愈：utf-8 优先，疑似乱码过多时回退系统 ANSI 代码页。
 # 背景：Windows 原生命令（cmd/findstr/dir）按 ANSI 代码页输出（简中系统为
 # cp936/GBK），用 utf-8 强解会把中文路径打成「乱码」。改为拿原始字节
-# 自适应解码——utf-8 解出过多 U+FFFD 时按 ANSI 重解，两边都保真。
+# 自适应解码——utf-8 解出连续 U+FFFD 时按 ANSI 重解，两边都保真。
 _ANSI_CP = "mbcs" if os.name == "nt" else "utf-8"
 
 
 def _decode_proc_output(raw: bytes) -> str:
-    """自适应解码子进程输出：utf-8 优先，U+FFFD 过多（>2%）回退 ANSI 代码页。"""
+    """自适应解码子进程输出：utf-8 优先，出现 GBK 乱码时回退 ANSI 代码页。
+
+    判定用「连续 U+FFFD」而不是「乱码占比」：长输出里只夹一段中文路径时，
+    中文路径只占全文极小比例，按比例会漏判（实际日志踩坑）；而 GBK 的一个
+    汉字至少产生 2 个连续 U+FFFD，utf-8 流里偶发损坏通常只有 1 个孤立字节。
+    因此 bad >= 2 且 ANSI 解出的 U+FFFD 更少时才回退。UTF-16 BOM 单独处理。
+    """
     if not raw:
         return ""
+    if raw.startswith(b"\xff\xfe"):
+        return raw[2:].decode("utf-16-le", errors="replace")
+    if raw.startswith(b"\xfe\xff"):
+        return raw[2:].decode("utf-16-be", errors="replace")
     text = raw.decode("utf-8", errors="replace")
     if os.name != "nt":
         return text
     bad = text.count("\ufffd")
-    if bad and bad / max(1, len(text)) > 0.02:
+    if bad >= 2:
         try:
             alt = raw.decode(_ANSI_CP, errors="replace")
-            # 回退解码的乱码比例更低才算改善（避免把真 utf-8 输出解坏）
+            # 回退解码的乱码更少才算改善（避免把真 utf-8 输出解坏）
             if alt.count("\ufffd") < bad:
                 return alt
         except (LookupError, UnicodeDecodeError):

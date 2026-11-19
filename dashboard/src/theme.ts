@@ -1,6 +1,7 @@
 // 现有双主题 CSS token → Naive UI 主题映射（视觉延续 0.3 的深蓝暗色 / 浅色系）
 import { darkTheme, lightTheme, type GlobalTheme, type GlobalThemeOverrides } from 'naive-ui'
 import { computed, ref } from 'vue'
+import { tNow } from './lang'
 
 export type ThemeName = 'dark' | 'light' | 'system'
 
@@ -42,9 +43,12 @@ export function toggleTheme(): void {
 export const themeIcon = computed(() =>
   theme.value === 'system' ? 'brightness_auto'
     : theme.value === 'dark' ? 'dark_mode' : 'light_mode')
-export const themeLabel = computed(() =>
-  theme.value === 'system' ? '跟随系统'
-    : theme.value === 'dark' ? '深色' : '浅色')
+// 主题名按当前语言显示（themeLabel 的 key 即简中原文，走 i18n 语言包）
+export const themeLabel = computed(() => {
+  const key = theme.value === 'system' ? '跟随系统'
+    : theme.value === 'dark' ? '深色' : '浅色'
+  return tNow(key)
+})
 
 apply()
 systemDark.addEventListener('change', () => { if (theme.value === 'system') apply() })
@@ -104,12 +108,18 @@ export const naiveTheme = computed<GlobalTheme>(() => (theme.value === 'dark' ? 
 export const themeOverrides = computed<GlobalThemeOverrides>(() => (theme.value === 'dark' ? DARK : LIGHT))
 
 // 任务状态 → n-tag 类型映射
-export const ST_NAME: Record<string, string> = {
-  open: '待办', in_progress: '执行中', done: '已完成', blocked: '受阻', cancelled: '已取消',
-}
 export const ST_TYPE: Record<string, 'default' | 'info' | 'success' | 'warning' | 'error'> = {
   open: 'info', in_progress: 'warning', done: 'success', blocked: 'error', cancelled: 'default',
 }
+// 任务状态名（按当前语言；ST_NAME 保留为简中键 → 译文的响应式映射）
+const ST_NAME_ZH: Record<string, string> = {
+  open: '待办', in_progress: '执行中', done: '已完成', blocked: '受阻', cancelled: '已取消',
+}
+export const ST_NAME = computed<Record<string, string>>(() => {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(ST_NAME_ZH)) out[k] = tNow(v)
+  return out
+})
 // P0~P4 优先级色（与旧版 pri.P0~P4 一致）
 export const PRI_COLOR: Record<string, string> = {
   P0: '#e05c5c', P1: '#ef7d45', P2: '#e8a13c', P3: '#5b8cff', P4: '#64748f',

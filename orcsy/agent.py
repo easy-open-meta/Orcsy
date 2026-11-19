@@ -163,6 +163,12 @@ class ProjectAgent:
         except Exception:  # noqa: BLE001 — 清理失败不阻断启动（TTL 仍会拦截）
             get_logger(f"agent.{project.name}").warning(
                 "清理过期租约失败（忽略）", exc_info=True)
+        try:  # Phase 1：进程被杀残留的批次共享剪贴板按 TTL 兜底回收
+            from .session_bus import prune_expired
+            prune_expired(self.claims.state_dir)
+        except Exception:  # noqa: BLE001 — 清理旁路
+            get_logger(f"agent.{project.name}").warning(
+                "清理过期批次共享剪贴板失败（忽略）", exc_info=True)
         # 预算软停状态：项目当日预算用尽时置位，供看板/日志解释
         self.budget_paused = False
         self.budget_day: dict = {}
@@ -335,6 +341,15 @@ class ProjectAgent:
                 with self._active_lock:
                     self.active_roles.pop(task.id, None)
 
+    def _cleanup_session_bus(self, task: Task) -> None:
+        """任务终态回写后检查批次：整批无未完成任务则物理删除共享剪贴板。"""
+        try:
+            from .session_bus import cleanup_if_finished
+            cleanup_if_finished(self.project, self.claims.state_dir, task,
+                                tasks_dir=self.tasks_dir)
+        except Exception:  # noqa: BLE001 — 清理旁路
+            self.log.warning("清理批次共享剪贴板失败（忽略）", exc_info=True)
+
     def _release_claim(self, task: Task) -> None:
         """任务已回写完毕：清续跑标记并释放租约（两步都失败不阻断调度）。"""
         try:
@@ -436,7 +451,11 @@ class ProjectAgent:
             for task in tasks:
                 dep_info = evaluate_task_dependencies(task, all_statuses, done_ids)
                 if dep_info["dep_state"] != "ready":
-                    log.debug("任务 %s 依赖未就绪（%s），跳过", task.id, dep_info["dep_state"])
+                    blockers = "、".join(
+                        f"{d['id']}({d['status']})"
+                        for d in dep_info["blocking_deps"]) or "无"
+                    log.debug("任务 %s 依赖未就绪（%s），跳过（未满足：%s）",
+                              task.id, dep_info["dep_state"], blockers)
                     continue
                 picked = self._select_member_for_task(task)
                 if picked is None:
@@ -455,6 +474,8 @@ class ProjectAgent:
                 and self.team_cfg is not None
                 and self.team_cfg.execution_mode == "parallel_worktree"
                 and self.executor.probe_git_repo()
+                # 含 gitlink/嵌套仓库的项目已回退主工作区模式，必须串行
+                and not getattr(self.executor, "gitlinks", None)
             )
             wave: list[tuple[Task, str, TaskExecutor]] = []
             if not can_parallel:
@@ -503,6 +524,7 @@ class ProjectAgent:
                         bad.block_reason = "stale_lease"
                         append_progress(t.path, f"⛔ {bad.notes}")
                         self._write_back_result(t, bad)
+                        self._cleanup_session_bus(t)
                         self._release_claim(t)
                         results.append(bad)
                         total_claimed += 1
@@ -513,6 +535,7 @@ class ProjectAgent:
                 res.review = ex._skipped_review("崩溃恢复：合并已完成")
                 set_task_file_resume(t.path, False)
                 self._write_back_result(t, res)
+                self._cleanup_session_bus(t)
                 self._release_claim(t)
                 results.append(res)
                 total_claimed += 1
@@ -548,25 +571,42 @@ class ProjectAgent:
             for t, _, _ in wave:
                 self._mark_in_progress(t)
 
-            wave_outputs: list[tuple[Task, str, TaskResult]] = []
-            if len(wave) == 1:
-                t, mid, ex = wave[0]
-                wave_outputs.append(self._run_member_task(t, mid, ex, guide, skills))
-            else:
-                with ThreadPoolExecutor(max_workers=len(wave)) as pool:
-                    futs = [
-                        pool.submit(self._run_member_task, t, mid, ex, guide, skills)
-                        for t, mid, ex in wave
-                    ]
-                    for fut in as_completed(futs):
-                        wave_outputs.append(fut.result())
-
-            for t, _mid, res in wave_outputs:
+            def _finalize_wave_item(t: Task, res: TaskResult) -> None:
+                """单个并行任务一结束就回写，不等待同波其他任务。"""
+                nonlocal total_claimed
                 self._write_back_result(t, res)
+                self._cleanup_session_bus(t)
                 self._release_claim(t)
                 self._record_health(t, res)
                 results.append(res)
                 total_claimed += 1
+
+            if len(wave) == 1:
+                t, mid, ex = wave[0]
+                _t, _mid, res = self._run_member_task(t, mid, ex, guide, skills)
+                _finalize_wave_item(t, res)
+            else:
+                with ThreadPoolExecutor(max_workers=len(wave)) as pool:
+                    futs = {
+                        pool.submit(self._run_member_task, t, mid, ex, guide, skills):
+                            (t, mid, ex)
+                        for t, mid, ex in wave
+                    }
+                    for fut in as_completed(futs):
+                        t, mid, ex = futs[fut]
+                        try:
+                            _t, _mid, res = fut.result()
+                        except Exception as e:  # noqa: BLE001 — 单任务异常不能拖垮同波其他任务
+                            self.log.exception("任务 %s 并行执行出现未预期异常", t.id)
+                            res = TaskResult(
+                                task_id=t.id, outcome="blocked",
+                                role=getattr(ex, "team_role", ""),
+                                agent_name=getattr(ex, "agent_name", ""))
+                            res.llm_error = str(e)
+                            res.notes = f"并行执行异常：{e}"
+                        # 完成即回写：某任务长时间运行时，已完成的兄弟任务
+                        # 不应继续显示 in_progress，也不应阻塞下游依赖。
+                        _finalize_wave_item(t, res)
 
             # 单兵模式若未启用小组链式流转：正常按 max_tasks_per_cycle 循环即可；
             # 小组模式关闭 chain_within_cycle 时只推进 1 波次
@@ -606,6 +646,7 @@ class ProjectAgent:
             result = self._review_pending_task(task)
             if result is not None:
                 self._write_back_result(task, result)
+                self._cleanup_session_bus(task)
                 self._release_claim(task)
                 self._record_health(task, result)
                 results.append(result)

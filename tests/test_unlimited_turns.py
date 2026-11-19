@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orcsy.config import LLMConfig
 from orcsy.llm import LLMClient, TaskStopped, finish_response
+from orcsy.task_model import Task
 from orcsy.tools import FinishSignal, ToolContext
 
 
@@ -105,8 +106,8 @@ def test_read_loop_still_guarded_under_unlimited() -> None:
     """-1 不限轮数下，「永远重读同一文件」仍被护栏熔断（不会真的无限跑）。
 
     回归背景：护栏 1（同文件 >5 次拦截）的 continue 曾跳过护栏 2 的连读计数，
-    导致被拦截的重读不累计，-1 模式下模型永远达不到 20 轮熔断阈值而无限空转。
-    修复后拦截也计入连读轮次，第 20 轮强制熔断。
+    导致被拦截的重读不累计，-1 模式下模型永远达不到熔断阈值而无限空转。
+    修复后拦截也计入连读轮次；首次落盘前的代码任务按勘察预算（60 次）熔断。
     """
     import tempfile
 
@@ -137,8 +138,8 @@ def test_read_loop_still_guarded_under_unlimited() -> None:
             resp = client.run_task_loop("loop", ctx, max_turns=-1)
         except FinishSignal as sig:
             resp = finish_response(sig.payload)
-        assert client.usage["turns"] < 40, \
-            f"同文件重读应被护栏提前熔断，实际 {client.usage['turns']} 轮"
+        assert 20 < client.usage["turns"] < 80, \
+            f"同文件重读应在勘察预算（60 次）内熔断，实际 {client.usage['turns']} 轮"
         assert resp.action == "blocked"
         # 熔断文案不得出现「最大轮数 -1」误导
         assert "-1" not in (resp.notes or ""), resp.notes
@@ -146,11 +147,199 @@ def test_read_loop_still_guarded_under_unlimited() -> None:
     print("ok: -1 模式下同文件重读死循环被护栏提前熔断（文案无 -1 误导）")
 
 
+def test_read_command_alternation_still_guarded() -> None:
+    """read_file 与扫描类 run_command 交替调用也不能绕过只读熔断。
+
+    回归背景：run_command 曾被当作写操作重置连续只读计数，模型只要在
+    read_file 之间穿插 PowerShell 扫描命令就能无限空转（实际事故）。
+    """
+    import tempfile
+
+    class _ReadCommandLoopLLM(LLMClient):
+        def __init__(self, cfg: LLMConfig) -> None:
+            super().__init__(cfg)
+            self.n = 0
+
+        def _step_openai(self, use_tools: bool):  # type: ignore[override]
+            self.n += 1
+            self.usage["turns"] = self.n
+            if self.n % 2:
+                name = "read_file"
+                args = json.dumps({"path": "target.py"})
+            else:
+                name = "run_command"
+                args = json.dumps({"command": ["echo", "scan"]})
+            return (
+                {"role": "assistant", "content": None,
+                 "tool_calls": [{"id": f"c{self.n}", "type": "function",
+                                 "function": {"name": name, "arguments": args}}]},
+                [(f"c{self.n}", name, args)], "",
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "target.py").write_text("x = 1\n", encoding="utf-8")
+        ctx = ToolContext(root=Path(tmp), produces_code=True,
+                          enabled_tools=frozenset({"read_file", "run_command", "finish"}))
+        client = _ReadCommandLoopLLM(LLMConfig(
+            api_key="k", base_url="http://localhost:9", model="m"))
+        client.reset("sys")
+        try:
+            resp = client.run_task_loop("loop", ctx, max_turns=-1)
+        except FinishSignal as sig:
+            resp = finish_response(sig.payload)
+        assert 20 < client.usage["turns"] < 140, \
+            f"read_file + run_command 交替也应被熔断，实际 {client.usage['turns']} 轮"
+        assert resp.action == "blocked", (resp.action, resp.summary)
+        assert "只读死循环" in (resp.notes or ""), resp.notes
+    print("ok: read_file/run_command 交替空转被只读熔断（勘察预算 60 次）")
+
+
+def test_coding_survey_grace_before_first_edit() -> None:
+    """代码任务首次落盘前允许 60 次勘察；25 次读取不应被 20 次阈值误杀。
+
+    真实案例：backend 补齐 CRUD 测试时先读控制器 / DTO / 既有测试写法，
+    连续 20 个不同文件的正常勘察被旧阈值当成死循环熔断。
+    """
+    import tempfile
+
+    class _SurveyThenWriteLLM(LLMClient):
+        def __init__(self, cfg: LLMConfig) -> None:
+            super().__init__(cfg)
+            self.n = 0
+
+        def _step_openai(self, use_tools: bool):  # type: ignore[override]
+            self.n += 1
+            self.usage["turns"] = self.n
+            if self.n <= 25:
+                name, args = "read_file", json.dumps({"path": f"f{self.n}.py"})
+            elif self.n == 26:
+                name, args = "write_file", json.dumps(
+                    {"path": "out.py", "content": "x = 1\n"})
+            elif self.n <= 36:
+                name, args = "read_file", json.dumps({"path": f"f{self.n}.py"})
+            else:
+                name, args = "finish", json.dumps(
+                    {"action": "completed", "summary": "done"})
+            return (
+                {"role": "assistant", "content": None,
+                 "tool_calls": [{"id": f"c{self.n}", "type": "function",
+                                 "function": {"name": name, "arguments": args}}]},
+                [(f"c{self.n}", name, args)], "",
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for i in range(1, 45):
+            Path(tmp, f"f{i}.py").write_text("x = 1\n", encoding="utf-8")
+        task = Task(id="B-1", path=Path(tmp) / "B-1.md",
+                    labels=["backend", "testing"])
+        ctx = ToolContext(root=Path(tmp), current_task=task, produces_code=True,
+                          enabled_tools=frozenset({"read_file", "write_file", "finish"}))
+        client = _SurveyThenWriteLLM(LLMConfig(
+            api_key="k", base_url="http://localhost:9", model="m"))
+        client.reset("sys")
+        try:
+            resp = client.run_task_loop("survey then write", ctx, max_turns=-1)
+        except FinishSignal as sig:
+            resp = finish_response(sig.payload)
+        assert resp.action == "completed", (resp.action, resp.notes)
+        assert client.usage["turns"] >= 37, client.usage["turns"]
+        assert "只读死循环" not in (resp.notes or ""), resp.notes
+    print("ok: 代码任务首次落盘前 25 次勘察不被 20 次阈值误杀")
+
+
+def test_post_edit_strict_read_loop_still_breaks() -> None:
+    """产生过文件改动后，连续 20 次只读仍按严格阈值熔断。"""
+    import tempfile
+
+    class _EditThenReadLoopLLM(LLMClient):
+        def __init__(self, cfg: LLMConfig) -> None:
+            super().__init__(cfg)
+            self.n = 0
+
+        def _step_openai(self, use_tools: bool):  # type: ignore[override]
+            self.n += 1
+            self.usage["turns"] = self.n
+            if self.n == 1:
+                name, args = "write_file", json.dumps(
+                    {"path": "out.py", "content": "x = 1\n"})
+            else:
+                name, args = "read_file", json.dumps({"path": f"f{self.n}.py"})
+            return (
+                {"role": "assistant", "content": None,
+                 "tool_calls": [{"id": f"c{self.n}", "type": "function",
+                                 "function": {"name": name, "arguments": args}}]},
+                [(f"c{self.n}", name, args)], "",
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for i in range(1, 50):
+            Path(tmp, f"f{i}.py").write_text("x = 1\n", encoding="utf-8")
+        task = Task(id="B-2", path=Path(tmp) / "B-2.md", labels=["backend"])
+        ctx = ToolContext(root=Path(tmp), current_task=task, produces_code=True,
+                          enabled_tools=frozenset({"read_file", "write_file", "finish"}))
+        client = _EditThenReadLoopLLM(LLMConfig(
+            api_key="k", base_url="http://localhost:9", model="m"))
+        client.reset("sys")
+        try:
+            resp = client.run_task_loop("edit then loop", ctx, max_turns=-1)
+        except FinishSignal as sig:
+            resp = finish_response(sig.payload)
+        assert resp.action == "blocked", (resp.action, resp.summary)
+        assert 20 <= client.usage["turns"] <= 30, client.usage["turns"]
+        assert "只读死循环" in (resp.notes or ""), resp.notes
+    print("ok: 首次落盘后连续 20 次只读进入检查点，仍按严格阈值熔断")
+
+
+def test_doc_task_gets_higher_read_threshold() -> None:
+    """docs/analysis 标签任务允许更多只读调研（60 次），但仍会熔断。"""
+    import tempfile
+
+    class _ReadLoopLLM(LLMClient):
+        def __init__(self, cfg: LLMConfig) -> None:
+            super().__init__(cfg)
+            self.n = 0
+
+        def _step_openai(self, use_tools: bool):  # type: ignore[override]
+            self.n += 1
+            self.usage["turns"] = self.n
+            args = json.dumps({"path": "target.py"})
+            return (
+                {"role": "assistant", "content": None,
+                 "tool_calls": [{"id": f"c{self.n}", "type": "function",
+                                 "function": {"name": "read_file", "arguments": args}}]},
+                [(f"c{self.n}", "read_file", args)], "",
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "target.py").write_text("x = 1\n", encoding="utf-8")
+        task = Task(id="DOC-1", path=Path(tmp) / "DOC-1.md", labels=["docs"])
+        ctx = ToolContext(root=Path(tmp), current_task=task, produces_code=True,
+                          enabled_tools=frozenset({"read_file", "finish"}))
+        client = _ReadLoopLLM(LLMConfig(
+            api_key="k", base_url="http://localhost:9", model="m"))
+        client.reset("sys")
+        try:
+            resp = client.run_task_loop("loop", ctx, max_turns=-1)
+        except FinishSignal as sig:
+            resp = finish_response(sig.payload)
+        assert client.usage["turns"] > 20, \
+            f"docs 任务不应在 20 次就被误杀，实际 {client.usage['turns']} 轮"
+        assert client.usage["turns"] < 80, \
+            f"docs 任务仍应有 60 次熔断上限，实际 {client.usage['turns']} 轮"
+        assert resp.action == "blocked"
+        assert "只读死循环" in (resp.notes or ""), resp.notes
+    print("ok: docs/analysis 任务使用更高只读阈值（60 次）")
+
+
 def main() -> int:
     test_unlimited_not_capped_at_120()
     test_finite_max_turns_still_caps()
     test_stop_event_breaks_unlimited()
     test_read_loop_still_guarded_under_unlimited()
+    test_read_command_alternation_still_guarded()
+    test_coding_survey_grace_before_first_edit()
+    test_post_edit_strict_read_loop_still_breaks()
+    test_doc_task_gets_higher_read_threshold()
     print("\nmax_turns=-1 真正不限轮数全部测试通过 ✅")
     return 0
 

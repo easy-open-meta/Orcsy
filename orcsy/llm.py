@@ -149,6 +149,120 @@ def test_connection(provider: str, base_url: str, api_key: str, model: str,
     return {"reply": reply[:200], "elapsed_seconds": elapsed}
 
 
+def generate_commit_message(provider: str, base_url: str, api_key: str,
+                            model: str, diff_text: str,
+                            timeout_seconds: int = 300,
+                            enable_thinking: bool = False,
+                            max_tokens: int = 4096) -> dict:
+    """根据工作区改动 diff 生成一条规范 commit message（人工把关提交页「AI 生成」）。
+
+    单轮无工具请求；diff 截断到 12000 字符（约 4~6k tokens）控制成本。
+    max_tokens 给足 4096：推理模型（DeepSeek-R1 / GLM 思考等）的思考内容也
+    计入输出预算，给小了思考耗尽额度后正文为空。返回 {message, elapsed_seconds}；
+    失败抛 LLMError。
+    """
+    provider = provider.strip().lower()
+    model = model.strip()
+    if provider not in ("openai", "anthropic"):
+        raise LLMError(f"provider 不合法：{provider}（openai / anthropic）")
+    if not model:
+        raise LLMError("model 不能为空")
+    diff = (diff_text or "").strip()
+    if not diff:
+        raise LLMError("当前没有可分析的改动内容（工作区为干净状态）")
+    if len(diff) > 12000:
+        diff = diff[:12000] + "\n…（diff 已截断）"
+    client = LLMClient(LLMConfig(
+        provider=provider, api_key=api_key, base_url=base_url, model=model,
+        enable_thinking=enable_thinking,
+        timeout_seconds=(30 if int(timeout_seconds) <= 0
+                         else max(10, min(int(timeout_seconds), 120))),
+    ))
+    prompt = (
+        "You are a commit-message generator. Based on the git diff below, "
+        "write ONE conventional-commit message in Chinese.\n"
+        "Rules: format 'type: summary' (type = feat/fix/refactor/docs/test/chore); "
+        "summary <= 50 chars, no trailing period; mention the key module/file scope "
+        "when obvious; do NOT invent changes that are not in the diff.\n\n"
+        "Git diff:\n```\n" + diff + "\n```\n\n"
+        "Reply with the commit message text ONLY (no quotes, no explanation)."
+    )
+    if provider == "anthropic":
+        url = _anthropic_base(base_url) + "/messages"
+        headers = _auth_headers("anthropic", api_key)
+    else:
+        url = base_url.rstrip("/") + "/chat/completions"
+        headers = _auth_headers("openai", api_key)
+    payload = {
+        "model": model, "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if enable_thinking and provider == "openai":
+        # 与任务执行同约定：Qwen（enable_thinking）/ GLM（thinking 对象）
+        payload["enable_thinking"] = True
+        payload["thinking"] = {"type": "enabled"}
+    started = time.monotonic()
+    data = client._post(url, payload, headers)
+    elapsed = round(time.monotonic() - started, 1)
+    if provider == "anthropic":
+        reply = "".join(b.get("text", "") for b in data.get("content") or []
+                        if isinstance(b, dict) and b.get("type") == "text").strip()
+    else:
+        try:
+            msg = data["choices"][0]["message"] or {}
+            reply = str(msg.get("content") or "").strip()
+            # 推理模型思考优先耗尽 max_tokens 时 content 可能为空，
+            # 但思考内容里往往带着结论——兜底取 reasoning_content
+            if not reply:
+                reply = str(msg.get("reasoning_content") or "").strip()
+        except (KeyError, IndexError, TypeError) as e:
+            raise LLMError(
+                f"响应结构异常：{json.dumps(data, ensure_ascii=False)[:300]}") from e
+    if reply:
+        # 正文/思考兜底里取「像 commit message 的行」：优先含 conventional 前缀
+        # （feat:/fix:/…）的行；思考块里结论通常带此类前缀或在末尾。
+        lines = [l.strip().strip('"').strip("'") for l in reply.splitlines() if l.strip()]
+        message = ""
+        # 1) 优先：任何行以 conventional 前缀开头（正文首行或思考结论行，
+        #    兼容「结论：feat: xxx」式包装——取最后一个冒号后的 type 段判断）
+        for l in reversed(lines):
+            probe = l
+            for sep in ("：", ":"):
+                if sep in probe:
+                    tail = probe.rsplit(sep, 1)[1].strip().lower()
+                    head = tail.split(":")[0].strip() if ":" in tail else tail.split("：")[0].strip()
+                    if head in ("feat", "fix", "refactor", "docs", "test",
+                                "chore", "style", "perf"):
+                        probe = tail
+                    break
+            first = probe.split('：')[0].split(':')[0].strip().lower()
+            if first in ("feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"):
+                # 剥掉「结论：」等包装前缀
+                for prefix in ("结论：", "结论:", "提交说明：", "提交信息：",
+                               "最终答案：", "commit message:"):
+                    if l.lower().startswith(prefix.lower()):
+                        l = l[len(prefix):].strip()
+                        break
+                message = l
+                break
+        # 2) 兜底：正文首行（正常非推理模型路径）
+        if not message:
+            message = lines[0] if lines else ""
+        # 3) 思考前缀清理（如「结论：feat: xxx」）
+        for prefix in ("结论：", "结论:", "提交说明：", "提交信息：",
+                       "最终答案：", "commit message:"):
+            if message.lower().startswith(prefix.lower()):
+                message = message[len(prefix):].strip()
+                break
+    else:
+        message = ""
+    if not message:
+        raise LLMError(
+            "模型未返回有效的提交说明（思考内容为空或全部超长）；"
+            "可在设置页开启「请求侧开启模型思考」后重试，或手动填写")
+    return {"message": message[:200], "elapsed_seconds": elapsed}
+
+
 def list_models(provider: str, base_url: str, api_key: str,
                 timeout_seconds: int = 30) -> list[dict]:
     """拉取大模型服务的模型列表，尽量带上每个模型的上下文/输出上限。
@@ -499,7 +613,39 @@ class LLMClient:
         no_tool_turns = 0        # 连续未调用工具的轮数（连续过多升级强制收尾）
         repeat_calls: Counter[tuple[str, str]] = Counter()  # (工具, 参数) → 次数
         file_read_counts: Counter[str] = Counter()         # path -> 累计读取次数（防死循环）
-        consecutive_read_turns = 0                         # 连续只读未动笔轮次
+        consecutive_read_turns = 0                         # 连续只读/扫描未产生文件改动的次数
+        read_warning_sent = False                          # 本轮连续只读是否已发过警告
+        has_edit_progress = False                          # 本任务是否已产生过文件改动
+        read_guard_tripped = False                         # 只读预算耗尽后进入「落盘检查点」
+        read_guard_violations = 0                          # 检查点内仍尝试只读的次数
+        read_guard_notice_pending = False                  # 需要在本轮工具结果后追加检查点提示
+        # 落盘检查点内仍继续只读/扫描的容忍次数：超过后强制收尾，防止
+        # 模型对「禁止读取」指令完全无视导致新一轮无限扫描。
+        _READ_GUARD_MAX_VIOLATIONS = 5
+        # 文档/分析类任务天然需要更多只读调研（如 90+ 页面 CRUD 矩阵），
+        # 用更高的阈值避免正常文档任务被代码任务的 20 次阈值误杀；
+        # 最终仍会强制收尾，只是给模型更充分的收集与落盘空间。
+        #
+        # 代码任务在「首次落盘前」也需要一轮真实的代码勘察（读控制器 / DTO /
+        # 既有测试写法后才动手），20 次连读会把这类正常开工误判成死循环
+        #（实际案例：backend 补齐 CRUD 测试，勘察 20 个不同文件即被熔断）。
+        # 因此采用两段阈值：首次写文件前给 30/60 的勘察预算；一旦产生过
+        # 文件改动，说明已进入实施阶段，恢复 10/20 的严格阈值——中途反复
+        # 只读打转仍会被快速熔断。
+        #
+        # 达到熔断阈值不再立刻杀任务：先进入「落盘检查点」，禁止继续读取并
+        # 要求模型立即写文件 / 拆分 / finish；连续无视仍会强制收尾。
+        task_obj = getattr(ctx, "current_task", None)
+        task_labels = {str(x).strip().lower()
+                       for x in (getattr(task_obj, "labels", None) or [])}
+        doc_task = bool(task_labels & {"docs", "doc", "documentation",
+                                       "analysis", "research", "design"})
+
+        def _read_thresholds() -> tuple[int, int]:
+            if doc_task or not has_edit_progress:
+                return 30, 60
+            return 10, 20
+
         forced_reason = ""       # 非空 = 因卡住/轮数耗尽强制收尾（而非 finish）
 
         while unlimited or turn < max_turns:
@@ -571,15 +717,40 @@ class LLMClient:
                 # 熔断阈值再也达不到，`-1` 不限轮数时就会无限空转。
                 produces_code = bool(getattr(ctx, "produces_code", True))
                 is_read_op = name in ("read_file", "list_dir", "find_files", "grep", "read_skill")
-                is_write_op = name in ("write_file", "edit_file", "multi_edit", "delete_file", "move_file", "run_command")
-                if is_write_op:
+                # 只有真正产生文件改动的工具才重置「只读死循环」计数。
+                # run_command 不算写操作：它常被用来跑扫描/测试/构建，若重置计数，
+                # 模型只要在 read_file 之间穿插扫描命令就能无限绕过熔断（实际事故）。
+                is_edit_op = name in ("write_file", "edit_file", "multi_edit",
+                                      "delete_file", "move_file", "update_architecture")
+                if is_edit_op:
+                    has_edit_progress = True
                     consecutive_read_turns = 0
+                    read_warning_sent = False
+                    read_guard_tripped = False
+                    read_guard_violations = 0
                 elif is_read_op:
                     consecutive_read_turns += 1
 
                 # 防死循环 1：同一文件重复读取硬拦截（超过 5 次直接拒绝，迫使模型基于已知上下文开工）
                 intercepted: str | None = None
-                if name == "read_file":
+                # 落盘检查点：只读预算耗尽后继续 read/list/find/grep/read_skill
+                # 一律拦截，给模型一次「不再收集、立即输出」的纠偏机会；若仍
+                # 无视，连续超过容忍次数后强制收尾。
+                if produces_code and read_guard_tripped and is_read_op:
+                    read_guard_violations += 1
+                    intercepted = (
+                        f"错误：只读/扫描预算已用尽（已连续 {consecutive_read_turns} 次"
+                        "只读/扫描调用而没有文件改动）。系统已暂停你的读取权限，"
+                        "本次调用未执行。请基于已收集信息立即行动："
+                        "调用 write_file / edit_file 落地已完成部分，"
+                        "或调用 create_tasks 拆分剩余工作，"
+                        "或调用 finish(action=blocked) 汇报剩余工作。"
+                        f"继续调用只读/扫描工具超过 {_READ_GUARD_MAX_VIOLATIONS} 次将强制收尾。"
+                    )
+                    log.warning(
+                        "只读检查点拦截 [%d] %s（第 %d 次违规）",
+                        turn, name, read_guard_violations)
+                if intercepted is None and name == "read_file":
                     p_target = ""
                     try:
                         p_args = json.loads(args_json) if isinstance(args_json, str) else (args_json or {})
@@ -630,11 +801,16 @@ class LLMClient:
                         except Exception:  # noqa: BLE001 — 台账旁路
                             pass
 
-                    if produces_code and consecutive_read_turns == 10:
+                    read_warn_at, _read_break_at = _read_thresholds()
+                    if produces_code and consecutive_read_turns >= read_warn_at \
+                            and not read_warning_sent:
+                        read_warning_sent = True
                         result += (
-                            f"\n\n🚨 警告：你已连续 {consecutive_read_turns} 轮只读文件而未动笔写代码！"
-                            "已收集的信息足够推进。请立即停止调研，使用 edit_file 或 write_file 编写实现！"
-                        )
+                            f"\n\n🚨 警告：你已连续 {consecutive_read_turns} 次调用只读/扫描工具"
+                            "而没有任何文件改动！已收集的信息足够推进。"
+                            "如果任务是文档/分析类，请立即创建目标文件并增量写入，"
+                            "不要继续扫描；如果任务过大，请调用 create_tasks 拆分后收尾，"
+                            "或调用 finish（action=blocked）说明剩余工作。")
 
                     # 完全相同参数的重复调用检测：给打转的模型一个止损信号
                     repeat_calls[(name, args_json or "")] += 1
@@ -650,14 +826,37 @@ class LLMClient:
                     log.debug("工具结果 [%d] %s：%s", turn, name, result[:200].replace("\n", " "))
                     self.messages.append(self._tool_result(call_id, result))
 
-                # 防死循环 2：代码生产类角色连续只读未动笔（含被拦截的重读）
-                # 累计达上限 → 强制熔断收尾。用 ctx.produces_code 判定，单兵
-                # （current_role 为空串）也覆盖，PM/QA（False）不误伤。
-                if produces_code and consecutive_read_turns >= 20:
-                    forced_reason = (
-                        f"检测到只读死循环：已连续 {consecutive_read_turns} 轮仅读取文件"
-                        "而未做任何改动，强制熔断收尾")
-                    break
+                # 防死循环 2：代码生产类角色连续只读/扫描未产生文件改动
+                # （含被拦截的重读）累计达上限 → 进入「落盘检查点」，而不是
+                # 立即杀任务。检查点内继续只读会被硬拦截；连续无视超过容忍
+                # 次数才强制收尾。首次落盘前放宽到勘察阈值；一旦写过文件，
+                # 恢复严格阈值。
+                _read_warn_at, read_break_at = _read_thresholds()
+                if produces_code and consecutive_read_turns >= read_break_at:
+                    if not read_guard_tripped:
+                        read_guard_tripped = True
+                        read_guard_notice_pending = True
+                    if read_guard_violations >= _READ_GUARD_MAX_VIOLATIONS:
+                        forced_reason = (
+                            f"检测到只读死循环：已连续 {consecutive_read_turns} 次"
+                            "只读/扫描工具调用而未产生任何文件改动，且在只读"
+                            f"检查点内仍继续读取 {read_guard_violations} 次，"
+                            "强制熔断收尾")
+                        break
+
+            # 检查点提示放在本轮全部工具结果之后，避免插在 assistant/tool
+            # 消息中间破坏协议顺序。
+            if read_guard_notice_pending and not forced_reason:
+                read_guard_notice_pending = False
+                self.messages.append(self._user(
+                    f"🛑 只读/扫描预算已用尽（连续 {_read_thresholds()[1]} 次"
+                    "只读/扫描调用而没有文件改动）。从下一轮起禁止再调用"
+                    " read_file / list_dir / find_files / grep / read_skill；"
+                    "请基于已收集信息立即调用 write_file / edit_file 落地修改，"
+                    "或调用 create_tasks 拆分剩余工作，"
+                    "或调用 finish(action=blocked) 汇报剩余工作。"
+                    f"若继续只读/扫描超过 {_READ_GUARD_MAX_VIOLATIONS} 次将强制收尾。"
+                ))
 
             if forced_reason:
                 break
@@ -691,7 +890,11 @@ class LLMClient:
                     return self._finish_response(self._parse_finish_args(args_json))
         except LLMError:
             pass
-        return AgentResponse.fallback(f"{forced_reason}，模型未给出结论")
+        return AgentResponse(
+            action="blocked", summary="", files_changed=[],
+            commit_message="",
+            notes=(f"强制收尾（{forced_reason}）：模型未在收尾轮给出 finish 结论；"
+                   "请检查任务规模，必要时拆分后重新入队"))
 
     @staticmethod
     def _parse_finish_args(args_json: str | dict) -> dict:

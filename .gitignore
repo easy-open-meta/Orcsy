@@ -40,3 +40,4 @@ deploy/server-config.yaml
 deploy/*.tar.gz
 deploy/linux-smoke.sh
 deploy/redeploy-server.sh
+tools/tasks/

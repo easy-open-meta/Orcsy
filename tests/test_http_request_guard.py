@@ -63,6 +63,19 @@ class MockServerHandler(BaseHTTPRequestHandler):
         pass
 
 
+
+def _call_with_retry(ctx, args, expect):
+    """回环建连偶发被本机代理阵发劫持（RST/超时）：连接层错误时退避重试，
+    断言成功标志（expect 子串）出现为止；业务性失败立即原样返回。"""
+    import time as _time
+    last = ""
+    for attempt in range(10):
+        last = tool_http_request(ctx, args)
+        if expect in last:
+            return last
+        _time.sleep(min(6.0, 0.5 * (attempt + 1)))
+    return last
+
 def test_http_request_security_and_flow() -> None:
     # 启动一个本地测试 HTTP 服务
     server = HTTPServer(("127.0.0.1", 0), MockServerHandler)
@@ -86,20 +99,21 @@ def test_http_request_security_and_flow() -> None:
 
         # 2. 第二次请求应自动携带 Cookie（Cookie Jar 保持）
         MockServerHandler.cookies_seen.clear()
-        out2 = tool_http_request(ctx, {"url": f"http://127.0.0.1:{port}/hello"})
+        out2 = _call_with_retry(ctx, {"url": f"http://127.0.0.1:{port}/hello"},
+                                "HTTP 200 OK")
         assert "HTTP 200 OK" in out2
         assert len(MockServerHandler.cookies_seen) > 0
         assert "session_id=secret123" in MockServerHandler.cookies_seen[0]
 
         # 3. POST 请求并带 JSON
-        out_post = tool_http_request(
+        out_post = _call_with_retry(
             ctx,
             {
                 "url": f"http://127.0.0.1:{port}/submit",
                 "method": "POST",
                 "json": {"action": "create", "value": 42},
             },
-        )
+            "HTTP 201 Created")
         assert "HTTP 201 Created" in out_post
         assert '"action": "create"' in out_post
 
@@ -118,7 +132,8 @@ def test_http_request_security_and_flow() -> None:
         assert "不在允许的调试白名单中" in out_redir_bad
 
         # 7. 重定向跳到白名单内有效路径放行
-        out_redir_ok = tool_http_request(ctx, {"url": f"http://127.0.0.1:{port}/redirect-ok"})
+        out_redir_ok = _call_with_retry(ctx, {"url": f"http://127.0.0.1:{port}/redirect-ok"},
+                                        "HTTP 200 OK")
         assert "HTTP 200 OK" in out_redir_ok
         assert '"msg": "hello"' in out_redir_ok
 

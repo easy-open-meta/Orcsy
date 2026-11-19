@@ -17,6 +17,8 @@ API（均为 GET/POST JSON）：
   POST /api/models       拉取大模型列表 {provider?, base_url?, api_key?}（缺省用已存配置）
   POST /api/llm/test     测试大模型连通性 {provider?, base_url?, api_key?, model?}
                          （一条极短对话；缺省回退已存配置；失败返回 ok:false+原因）
+  POST /api/commit-message  人工把关提交页「AI 生成」：{name} 按项目生效模型读
+                         工作区 diff 生成一条规范 commit message（单轮无工具）
 
 移动端远程访问（docs/design-mobile-remote-access.md）：
   GET  /api/system/endpoints  手机连接向导（免登录白名单）：本机局域网 IP/回环/
@@ -609,7 +611,9 @@ class AppState:
                   or self.token_valid(token)
                   or self.is_valid_api_key(token)
                   or self.is_valid_api_key(api_key))
-        return {"ok": True, "enabled": enabled, "authed": authed}
+        # app 标记供启动时的「已有实例」探测使用：/api/auth 是免登录端点，
+        # 带鉴权也能识别出这是 Orcsy，而不是把 401 当成端口被别的程序占用。
+        return {"ok": True, "app": "orcsy", "enabled": enabled, "authed": authed}
 
     def _prune_sessions(self) -> None:
         """清掉过期会话（调用方须持有 _auth_lock）。"""
@@ -804,7 +808,8 @@ class AppState:
                     dep_info = None if t.error else evaluate_task_dependencies(t, all_statuses, done_ids)
                     all_tasks.append(self._task_dict(t, dep_info))
             is_git = agent.executor.probe_git_repo()
-            pending_git = Git(p.path).pending_changes_summary() if is_git else {"is_git": False, "count": 0, "files": []}
+            pending_git = (git_service.pending_changes(agent) if is_git
+                           else {"is_git": False, "count": 0, "files": [], "repos": []})
             projects.append({
                 "name": name,
                 "path": str(p.path),
@@ -855,6 +860,8 @@ class AppState:
                 # 实时探测而非会话缓存：用户可能事后手动 init git，5s 轮询
                 # 也能看到最新状态（探测带 .git 存在性预判，开销可忽略）
                 "is_git_repo": is_git,
+                # 含 gitlink/嵌套仓库时已回退主工作区串行模式（见 design-nested-repo-compat）
+                "nested_gitlinks": list(getattr(agent.executor, "gitlinks", [])),
                 "guide_file_path": str(p.path / p.guide_file),
                 "guide_exists": (p.path / p.guide_file).exists(),
                 "tasks": all_tasks,
@@ -1403,6 +1410,39 @@ class AppState:
         log.info("Web 测试模型连通：model=%s %.1fs ok", model, r["elapsed_seconds"])
         return {"ok": True, "reply": reply,
                 "elapsed_seconds": r["elapsed_seconds"], "message": message}
+
+    def generate_commit_message(self, data: dict) -> dict:
+        """人工把关提交页「AI 生成」：按项目生效模型读工作区 diff 生成提交说明。
+
+        diff 来源与审查/台账一致（executor._workspace_diff：主仓库 + 嵌套子仓库），
+        单轮无工具请求；模型取项目级 llm 覆盖（与任务执行同模型），请求失败返回
+        ok:false + 原因（不打断页面）。
+        """
+        from .config import resolve_llm
+        from .llm import LLMError, generate_commit_message
+
+        name = str(data.get("name") or data.get("project") or "").strip()
+        agent = self.agents.get(name)
+        if agent is None:
+            raise ValueError(f"未知项目：{name}")
+        # 项目生效模型：项目级覆盖 > 全局（与任务执行一致）
+        cfg = resolve_llm(self.config.llm, agent.project.llm, context="llm")
+        diff = agent.executor._workspace_diff() if agent.executor.is_git_repo else ""
+        if not diff.strip():
+            return {"ok": False,
+                    "message": "当前没有可分析的改动（工作区干净），无法生成提交说明"}
+        try:
+            r = generate_commit_message(cfg.provider, cfg.base_url, cfg.api_key,
+                                        cfg.model, diff, cfg.timeout_seconds,
+                                        enable_thinking=cfg.enable_thinking,
+                                        max_tokens=cfg.max_tokens or 4096)
+        except LLMError as e:
+            log.warning("AI 生成提交说明失败（%s）：%s", name, e)
+            return {"ok": False, "message": str(e)}
+        log.info("Web AI 生成提交说明（%s）：%.1fs model=%s", name,
+                 r["elapsed_seconds"], cfg.model)
+        return {"ok": True, "message": r["message"],
+                "elapsed_seconds": r["elapsed_seconds"]}
 
     def test_browser_api(self, data: dict) -> dict:
         """测试 Chrome / Edge 浏览器连通性与版本探测。"""
@@ -2287,6 +2327,9 @@ class WebHandler(BaseHTTPRequestHandler):
     # HTTP/1.1：启用 keep-alive（看板 5s 轮询少建连），前提是所有响应都带
     # Content-Length —— _json/_html 均已设置
     protocol_version = "HTTP/1.1"
+    # 空闲 keep-alive 连接 75s 自动断（http.server 默认无超时，客户端不复用
+    # 连接时服务端线程会无限堆积：e2e 连发压测下线程耗尽 → 新连接被 reset）
+    timeout = 75
 
     # ---- 基础设施 ----
 
@@ -2724,6 +2767,11 @@ class WebHandler(BaseHTTPRequestHandler):
                     self._json(self.state.test_model(body))
                 except (ValueError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
+            elif path == "/api/commit-message":
+                try:
+                    self._json(self.state.generate_commit_message(body))
+                except (ValueError, OSError) as e:
+                    self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/debug/browser-test":
                 try:
                     self._json(self.state.test_browser_api(body))
@@ -2827,14 +2875,72 @@ class WebHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class OrcsyHTTPServer(ThreadingHTTPServer):
+    """带活动连接跟踪的 ThreadingHTTPServer。
+
+    HTTP/1.1 keep-alive 下，浏览器会保留长连接；只关闭监听 socket 时，
+    这些已建立的连接仍可由请求线程继续服务，表现为「托盘已退出、页面还能
+    操作」。退出时主动 shutdown/close 所有活动连接，确保看板立刻不可用，
+    也避免请求线程拖住进程收尾。
+    """
+
+    daemon_threads = True
+    # 默认 listen backlog 只有 5：e2e/移动端弱网重试等短时并发连发会溢出
+    # accept 队列，Windows 下表现为 ConnectionReset(10054)/拒连。128 是
+    # http.server 高并发场景的常规取值，listen 开销可忽略。
+    request_queue_size = 128
+
+    def __init__(self, server_address, handler_cls):  # type: ignore[no-untyped-def]
+        super().__init__(server_address, handler_cls)
+        self._active_lock = threading.Lock()
+        self._active_sockets: set[socket.socket] = set()
+
+    def process_request(self, request, client_address):  # type: ignore[no-untyped-def]
+        with self._active_lock:
+            self._active_sockets.add(request)
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            with self._active_lock:
+                self._active_sockets.discard(request)
+            raise
+
+    def shutdown_request(self, request):  # type: ignore[no-untyped-def]
+        try:
+            super().shutdown_request(request)
+        finally:
+            with self._active_lock:
+                self._active_sockets.discard(request)
+
+    def close_active_connections(self) -> int:
+        """强制断开所有已建立的连接（含 keep-alive 空闲连接），返回数量。"""
+        with self._active_lock:
+            sockets = list(self._active_sockets)
+            self._active_sockets.clear()
+        for sock in sockets:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+        return len(sockets)
+
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            self.close_active_connections()
+
+
 def make_server(state: AppState, host: str, port: int) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (WebHandler,), {"state": state})
-    server = ThreadingHTTPServer((host, port), handler)
+    server = OrcsyHTTPServer((host, port), handler)
     # 绑定成功写回实际监听地址：连接向导按它（而非可能已被看板保存热更的
     # config.web.host）报告可达性
     state.bound_host = host
-    # 请求线程随主线程退出：否则看板页面的轮询连接会让进程迟迟退不干净
-    server.daemon_threads = True
     return server
 
 

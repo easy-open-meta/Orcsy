@@ -220,6 +220,17 @@ def check_skill_injection() -> None:
         import orcsy.tools as T
         orig_dirs = T._TOOL_PATH_DIRS
         T._TOOL_PATH_DIRS = orig_dirs + (str(exe_dir),)
+        # 隔离前提：_resolve_new_install 对「进程 PATH 已能解析的命令」保持原样
+        # （shutil.which 优先）。本机装了真 go 时测试前提不成立——临时把 PATH
+        # 里的 go 目录摘掉，模拟「go 刚装进自定义目录、PATH 尚无」的场景。
+        orig_path = os.environ.get("PATH", "")
+        real_go = shutil.which("go")
+        path_parts = orig_path.split(os.pathsep) if orig_path else []
+        if real_go:
+            real_dir = str(Path(real_go).parent)
+            path_parts = [p for p in path_parts
+                          if Path(p).resolve() != Path(real_dir).resolve()]
+            os.environ["PATH"] = os.pathsep.join(path_parts)
         try:
             resolved = _resolve_new_install(["go", "version"])
             assert resolved[0].lower().endswith("go.exe"), resolved
@@ -233,6 +244,8 @@ def check_skill_injection() -> None:
             assert _tool_path_dirs(), "真实机器应至少探测到一个工具目录"
         finally:
             T._TOOL_PATH_DIRS = orig_dirs
+            if real_go:
+                os.environ["PATH"] = orig_path
         print("ok: 新装工具可发现（绝对路径 basename 过白名单/目录解析/扩充 PATH）")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

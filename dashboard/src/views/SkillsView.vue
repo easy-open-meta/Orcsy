@@ -3,6 +3,7 @@ import { NButton, NCard, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref } from 'vue'
 import { api, type SkillT } from '../api'
 import { openDirBrowser, openSkillEdit, openSkillNew, openSkillScan, refresh, store } from '../store'
+import { tNow as t, tFmt } from '../lang'
 
 const message = () => window.$message
 
@@ -11,7 +12,7 @@ function importSkill(): void {
   openDirBrowser('', async (path: string) => {
     try {
       const r = await api.skillImport(path)
-      message()?.(r.message || '已导入', 'success')
+      message()?.(r.message || t('已导入'), 'success')
     } catch (e: any) { message()?.(e.message, 'error') }
     void refresh(true)
   })
@@ -52,14 +53,14 @@ function removeSkills(names: string[]): void {
         : '。')
   }
   window.$dialog?.warning({
-    title: '删除技能',
+    title: t('删除技能'),
     content,
-    positiveText: '删除',
-    negativeText: '取消',
+    positiveText: t('删除'),
+    negativeText: t('取消'),
     async onPositiveClick() {
       try {
         const r = await api.skillRemove(names)
-        message()?.(r.message || '已删除', 'success')
+        message()?.(r.message || t('已删除'), 'success')
         selected.value = {}
       } catch (e: any) { message()?.(e.message, 'error') }
       void refresh(true)
@@ -90,12 +91,12 @@ const projectCount = computed(() => store.state?.projects.length ?? 0)
 <template>
   <div class="skills" v-if="store.state">
     <NCard size="small" class="scard">
-        <template #header><i class="ms">extension</i> 技能库</template>
+        <template #header><i class="ms">extension</i> {{ t('技能库') }}</template>
       <template #header-extra>
         <div class="head-ops">
-          <NButton size="small" @click="openSkillScan"><i class="ms sm">search</i> 扫描 AI 工具</NButton>
-          <NButton size="small" @click="importSkill"><i class="ms sm">upload</i> 导入本地技能</NButton>
-          <NButton type="primary" size="small" @click="openSkillNew">＋ 新建技能</NButton>
+          <NButton size="small" @click="openSkillScan"><i class="ms sm">search</i> {{ t('扫描 AI 工具') }}</NButton>
+          <NButton size="small" @click="importSkill"><i class="ms sm">upload</i> {{ t('导入本地技能') }}</NButton>
+          <NButton type="primary" size="small" @click="openSkillNew">{{ t('＋ 新建技能') }}</NButton>
           <NButton v-if="checkedNames.length" size="small" type="error"
                    @click="removeSkills(checkedNames)">删除选中（{{ checkedNames.length }}）</NButton>
         </div>
@@ -106,8 +107,8 @@ const projectCount = computed(() => store.state?.projects.length ?? 0)
         新建技能可选全局或绑定单个项目；当前共 {{ projectCount }} 个受管项目。
       </div>
       <div v-if="store.state.skills.length" class="sel-bar">
-        <NButton size="tiny" quaternary @click="selectAll">全选</NButton>
-        <NButton size="tiny" quaternary @click="invertSelect">反选</NButton>
+        <NButton size="tiny" quaternary @click="selectAll">{{ t('全选') }}</NButton>
+        <NButton size="tiny" quaternary @click="invertSelect">{{ t('反选') }}</NButton>
         <span class="sel-hint">已选 {{ checkedNames.length }} / {{ store.state.skills.length }}</span>
       </div>
       <div v-for="s in store.state.skills" :key="s.name" class="srow">
@@ -123,8 +124,8 @@ const projectCount = computed(() => store.state?.projects.length ?? 0)
                 :type="s.scope === 'global' ? 'success' : (dangling(s) ? 'warning' : 'primary')">
             {{ s.scope === 'global' ? '全局' : `专属·${s.scope}` }}
           </NTag>
-          <NTag v-if="dangling(s)" size="small" type="warning" :bordered="false">项目不存在</NTag>
-          <NTag v-if="s.error" size="small" type="error" :bordered="false">解析失败</NTag>
+          <NTag v-if="dangling(s)" size="small" type="warning" :bordered="false">{{ t('项目不存在') }}</NTag>
+          <NTag v-if="s.error" size="small" type="error" :bordered="false">{{ t('解析失败') }}</NTag>
           <span class="spacer" />
           <label class="swline" :title="s.enabled ? '已启用，点击停用' : '已停用，点击启用'">
             <NSwitch size="small" :value="s.enabled" @update:value="(v: boolean) => toggleEnabled(s, v)" />
@@ -135,12 +136,12 @@ const projectCount = computed(() => store.state?.projects.length ?? 0)
         </div>
         <div class="srow-path">{{ s.path }}</div>
         <div class="ops-row">
-          <NButton size="tiny" @click="openSkillEdit(s.name)">编辑</NButton>
-          <NButton size="tiny" @click="openFolder(s)">打开文件夹</NButton>
+          <NButton size="tiny" @click="openSkillEdit(s.name)">{{ t('编辑') }}</NButton>
+          <NButton size="tiny" @click="openFolder(s)">{{ t('打开文件夹') }}</NButton>
           <NButton v-if="s.origin === 'created'" size="tiny" quaternary type="error"
-                   @click="removeSkills([s.name])">删除</NButton>
+                   @click="removeSkills([s.name])">{{ t('删除') }}</NButton>
           <NButton v-else size="tiny" quaternary type="warning"
-                   @click="removeSkills([s.name])">移除</NButton>
+                   @click="removeSkills([s.name])">{{ t('移除') }}</NButton>
         </div>
       </div>
       <div v-if="!store.state.skills.length" class="empty">

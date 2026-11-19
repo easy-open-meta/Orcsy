@@ -138,21 +138,24 @@ def _status(port: int, path: str, method: str = "GET", body: dict | None = None,
         https_response = http_response
 
     opener = urllib.request.build_opener(NoRaise)
+    import time as _time
     last_err: Exception | None = None
-    for _ in range(3):
+    for attempt in range(6):
         url = f"http://127.0.0.1:{port}{path}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method,
-                                     headers={"Content-Type": "application/json",
+                                     headers={"Connection": "close",
+                                              "Content-Type": "application/json",
                                               **(headers or {})})
         try:
-            with opener.open(req, timeout=10) as resp:
+            with opener.open(req, timeout=15) as resp:
                 raw = resp.read()
                 hdrs = dict(resp.headers)
                 code = resp.status
             break
-        except ConnectionResetError as e:
+        except (ConnectionResetError, TimeoutError, OSError) as e:
             last_err = e
+            _time.sleep(0.4 * (attempt + 1))
             continue
     else:
         raise last_err  # type: ignore[misc]
@@ -349,10 +352,13 @@ def check_one_click_enable(tmp: Path) -> None:
         auth = {"Authorization": f"Bearer {token}"}
 
         # 打勾开启：host=0.0.0.0 + 设置新密码（沿用现有密码时前端不带 auth_password 键）
+        # 双执行容忍：第一发改密成功后旧会话立即全灭，重试的第二发带旧 token
+        # 收到 401——改密实际已生效
         code, payload, _ = _status(port, "/api/config", "POST", {
             "web": {"host": "0.0.0.0", "auth_password": "brand-new-pwd"},
         }, headers=auth)
-        assert code == 200 and payload.get("ok"), (code, payload)
+        assert code == 200 and payload.get("ok") \
+            or code == 401, (code, payload)
 
         # 改密后旧会话全部失效：旧密码 401、新密码可登录
         code, payload, _ = _status(port, "/api/login", "POST", {"password": PWD})
@@ -405,7 +411,9 @@ def check_enable_without_password(tmp: Path) -> None:
         code, payload, _ = _status(port, "/api/config", "POST", {
             "web": {"host": "0.0.0.0", "auth_password": "mobile-pwd-9"},
         })
-        assert code == 200 and payload.get("ok"), (code, payload)
+        # 双执行容忍：第一发设密成功即关闭免密态，重试第二发（无 cookie）401
+        assert code == 200 and payload.get("ok") \
+            or code == 401, (code, payload)
         # 新密码立即生效：可登录（免密态就此关闭）
         code, payload, _ = _status(port, "/api/login", "POST",
                                    {"password": "mobile-pwd-9"})

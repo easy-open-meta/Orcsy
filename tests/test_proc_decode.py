@@ -37,6 +37,25 @@ def test_decode_gbk_high_ratio() -> None:
     print("ok: 高占比 GBK 乱码自愈")
 
 
+def test_decode_gbk_long_output() -> None:
+    """长输出中只夹一段 GBK 中文路径：按连续 U+FFFD 判定，不能受占比稀释。"""
+    gbk_path = r"D:\Repos\caresy\.worktree-arranger\P1-3-frontend-梳理前端页面-CRUD-矩阵并核对前后端接口契约\caresy-api\src"
+    raw = ("X" * 10000 + "\n" + gbk_path + "\n").encode("gbk")
+    text = _decode_proc_output(raw)
+    assert gbk_path in text, repr(text[-200:])
+    assert "\ufffd" not in text
+    print("ok: 长输出中的 GBK 中文路径自愈（不因占比低漏判）")
+
+
+def test_decode_utf8_single_bad_byte() -> None:
+    """真 utf-8 输出偶发 1 个坏字节：保持 utf-8，不误切 ANSI。"""
+    raw = "中文路径测试".encode("utf-8") + b"\xff"
+    text = _decode_proc_output(raw)
+    assert "中文路径测试" in text, repr(text)
+    assert text.count("\ufffd") == 1, repr(text)
+    print("ok: utf-8 单坏字节不误切 ANSI")
+
+
 def test_run_command_chinese_output() -> None:
     """端到端：run_command 捕获含中文输出的原生命令不再乱码。"""
     import tempfile
@@ -57,6 +76,8 @@ def main() -> int:
     test_decode_utf8_native()
     test_decode_gbk_fallback()
     test_decode_gbk_high_ratio()
+    test_decode_gbk_long_output()
+    test_decode_utf8_single_bad_byte()
     test_run_command_chinese_output()
     print("\n子进程输出编码自愈全部测试通过 ✅")
     return 0

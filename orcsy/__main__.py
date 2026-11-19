@@ -590,6 +590,50 @@ def _display_url(host: str, port: int) -> str:
     return f"http://{host}:{port}"
 
 
+def _probe_orcsy_instance(host: str, port: int, timeout: float = 1.0) -> bool:
+    """探测 host:port 上是否已有 Orcsy 看板在监听。
+
+    用免登录的 /api/auth（而不是 /api/state）：开启登录密码后 /api/state
+    会返回 401，曾被误判成「端口被其它程序占用」，随后自动换端口再起一个
+    隐藏实例——两个实例同时扫描/执行同一批任务。这里只认 Orcsy 自己返回
+    的 JSON 结构，旧版本没有 app 字段也能兼容。
+    """
+    import json
+    import time
+    import urllib.request
+
+    probe_host = host
+    if host in ("0.0.0.0", ""):
+        probe_host = "127.0.0.1"
+    elif host == "::":
+        probe_host = "::1"
+    elif host == "localhost":
+        probe_host = "127.0.0.1"
+    url_host = f"[{probe_host}]" if ":" in probe_host else probe_host
+    url = f"http://{url_host}:{port}/api/auth"
+    data = None
+    # 回环探测偶发 RST/端口复用抖动：多试几次，避免误判后另起隐藏实例。
+    # Connection: close 让探测连接用完即断，不占 keep-alive 线程。
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"Connection": "close"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status != 200:
+                    return False
+                data = json.loads(r.read(8192).decode("utf-8"))
+            break
+        except Exception:  # noqa: BLE001 — 不是 Orcsy / 连不上都按「没有」处理
+            if attempt < 3:
+                time.sleep(0.15)
+                continue
+            return False
+    if not isinstance(data, dict):
+        return False
+    return (data.get("ok") is True
+            and isinstance(data.get("enabled"), bool)
+            and isinstance(data.get("authed"), bool))
+
+
 def _print_mobile_access_hint(config, host: str, port: int) -> None:
     """移动端远程访问启动提示：局域网地址清单 + 手机扫码二维码（stderr）。
 
@@ -673,18 +717,24 @@ def cmd_web(args: argparse.Namespace) -> int:
 
     fallback_notice = ""
     if not port_free(host, port):
-        import urllib.request
-
-        # 端口被占：可能是已有的本系统实例，探测一下
-        existing = False
-        try:
-            with urllib.request.urlopen(f"http://{host}:{port}/api/state", timeout=2) as r:
-                existing = r.status == 200
-        except Exception:
-            existing = False
-        if existing and not args.port:
-            print(f"端口 {port} 上已有 Orcsy 看板在运行：http://{host}:{port}")
-            print("如需另起一个实例，用 --port 指定其它端口。")
+        # 端口被占：可能是已有的本系统实例，探测一下。必须用免登录端点，
+        # 否则开了登录密码的实例会被误判成「别的程序」并另起隐藏端口。
+        existing = _probe_orcsy_instance(host, port)
+        if existing:
+            base = _display_url(host, port)
+            print(f"检测到已有 Orcsy 实例在运行：{base}")
+            if args.port:
+                print("该端口已被这个实例占用，请换一个端口再启动另一个实例。")
+            else:
+                print("本次启动已取消，避免两个实例同时扫描/执行同一批任务；"
+                      "如需另起实例，请用 --port 指定其它端口。")
+            # 托盘快捷方式被双击两次时，顺手打开已在运行的看板
+            if getattr(args, "tray", False):
+                try:
+                    import webbrowser
+                    webbrowser.open(base)
+                except Exception:  # noqa: BLE001
+                    pass
             return 0
         if args.port:
             print(f"端口 {port} 被其它程序占用，无法使用。")
@@ -823,6 +873,27 @@ def cmd_web(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        # 退出硬兜底：清理通常 <1s；但运行中的 Agent 任务用的是
+        # ThreadPoolExecutor（非守护线程），解释器会一直等它结束，表现为
+        # 「托盘图标已退出，-web 进程/页面还在」。5 秒内没退干净就强制结束，
+        # 已建立的 keep-alive 连接也已在 server_close 时主动断开。
+        def _force_exit() -> None:
+            __import__("logging").getLogger("orcsy.web").warning(
+                "退出收尾超时（运行中的任务/连接未释放），强制结束进程")
+            try:
+                __import__("logging").shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except Exception:  # noqa: BLE001
+                pass
+            os._exit(0)
+
+        exit_timer = threading.Timer(5.0, _force_exit)
+        exit_timer.daemon = True
+        exit_timer.start()
         _cleanup()
         atexit.unregister(_cleanup)
         print("看板服务已停止", file=sys.stderr, flush=True)

@@ -1,4 +1,6 @@
 // 版本号比较：返回 >0 / 0 / <0（'V0.14.0' 与 '0.14' 等形态均可，缺段按 0 补）
+import { tFmt } from './lang'
+
 export function cmpVersion(a: string, b: string): number {
   const pa = (a || '').replace(/^[Vv]/, '').split(/[.\-+ ]+/).map(x => parseInt(x) || 0)
   const pb = (b || '').replace(/^[Vv]/, '').split(/[.\-+ ]+/).map(x => parseInt(x) || 0)
@@ -10,15 +12,15 @@ export function cmpVersion(a: string, b: string): number {
   return 0
 }
 
-// 相对时间显示：后端时间格式 "YYYY-MM-DD HH:MM[:SS]"
+// 相对时间显示：后端时间格式 "YYYY-MM-DD HH:MM[:SS]"（按当前语言出文案）
 export function relTime(s: string | undefined | null): string {
   if (!s) return '—'
   const d = new Date(s.replace(' ', 'T'))
   const x = (Date.now() - d.getTime()) / 1000
   if (Number.isNaN(x) || x < 0) return s
-  if (x < 60) return '刚刚'
-  if (x < 3600) return `${Math.floor(x / 60)} 分钟前`
-  if (x < 86400) return `${Math.floor(x / 3600)} 小时前`
+  if (x < 60) return tFmt('刚刚', {})
+  if (x < 3600) return tFmt('{n} 分钟前', { n: Math.floor(x / 60) })
+  if (x < 86400) return tFmt('{n} 小时前', { n: Math.floor(x / 3600) })
   return s
 }
 
