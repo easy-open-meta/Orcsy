@@ -77,6 +77,8 @@ export const ui = reactive({
   dragTask: null as string | null,
   // 「手机连接」向导弹窗：局域网地址 + 扫码二维码（桌面顶栏与移动抽屉菜单入口）
   connectDlg: false,
+  // 首次使用引导动画（Onboard.vue）：首启自动弹出；顶栏/抽屉「使用引导」可重看
+  onboard: false,
 })
 
 // ---- 自更新收尾：记录目标版本，应用回归后核对并明确提示成功 ----

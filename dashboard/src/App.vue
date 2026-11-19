@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRouter, RouterView } from 'vue-router'
 import { api } from './api'
 import Dialogs from './components/Dialogs.vue'
+import Onboard from './components/Onboard.vue'
 import { auth, beginRestartWait, clearPendingUpdate, doLogin, doLogout, getPendingUpdate, initAuth, needLogin, openProjectNew, refresh, store, ui } from './store'
 import { isMobile, onPageVisible, useMobileViewport } from './mobile'
 import { cmpVersion } from './utils'
@@ -203,11 +204,21 @@ const updateOverlayVisible = computed(() =>
 // 版本核对 watch 的停止句柄（组件卸载时停表；曾因未赋值导致 onUnmounted ReferenceError）
 let pendingWatch: (() => void) | undefined
 
+// 首次使用引导：localStorage 无 ta-onboarded 标记则自动弹（Onboard.vue 内完成/跳过时写标记）
+function maybeShowOnboard(): void {
+  if (needLogin()) return  // 未登录先登录；登录态就绪后由下方 watch 补弹
+  try {
+    if (!localStorage.getItem('ta-onboarded')) ui.onboard = true
+  } catch { /* 隐私模式禁用存储：不自动弹 */ }
+}
+watch(showLogin, (v) => { if (!v) maybeShowOnboard() })
+
 // 5s 轮询：页面隐藏、弹窗打开或未登录时跳过（未登录时 refresh 内部静默短路）
 let timer: number | undefined
 onMounted(async () => {
   await initAuth()          // 先探鉴权：未登录则不拉状态，直接落登录层
   showMobilePwdHint()       // 一键开放手机访问后重启：登录页横幅提示新生成的密码
+  maybeShowOnboard()        // 首次安装后首次打开：自动弹出使用引导动画
   if (!needLogin()) void refresh(true)
   timer = window.setInterval(() => {
     if (!document.hidden) void refresh()
@@ -257,6 +268,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <NButton :loading="restartingNow" :title="t('重启程序：配置与代码变更即时生效')"
                    @click="askRestart"><i class="ms sm">refresh</i> {{ t('重启') }}</NButton>
           <NButton @click="openProjectNew"><i class="ms sm">add</i> {{ t('新建项目') }}</NButton>
+          <NButton quaternary circle :title="t('使用引导')" @click="ui.onboard = true"><i class="ms">help</i></NButton>
           <NButton quaternary circle :title="t('手机连接：局域网地址与扫码二维码')" @click="ui.connectDlg = true"><i class="ms">smartphone</i></NButton>
           <NButton quaternary circle :title="t('刷新')" @click="refresh(true)"><i class="ms">refresh</i></NButton>
           <NButton quaternary circle :title="tFmt('主题：{p0}（点击切换）', { p0: themeLabel })" @click="toggleTheme">
@@ -294,6 +306,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
         </KeepAlive>
       </RouterView>
       <Dialogs />
+      <Onboard />
       <!-- 移动端右侧抽屉菜单：导航 + 低频操作收纳（顶栏只留最高频三个入口） -->
       <NDrawer v-model:show="menuOpen" placement="right" :width="300">
         <NDrawerContent :title="t('Orcsy 菜单')" closable>
@@ -308,6 +321,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <div class="menu-nav">
             <button class="menu-item" @click="menuOpen = false; openMobileNewTask()"><i class="ms">add</i> {{ t('新建任务') }}</button>
             <button class="menu-item" @click="menuOpen = false; openProjectNew()"><i class="ms">add</i> {{ t('新建项目') }}</button>
+            <button class="menu-item" @click="ui.onboard = true; menuOpen = false"><i class="ms">help</i> {{ t('使用引导') }}</button>
             <button class="menu-item" @click="ui.connectDlg = true; menuOpen = false"><i class="ms">smartphone</i> {{ t('手机连接') }}</button>
             <button class="menu-item" :disabled="scanning" @click="doScan"><i class="ms">play_arrow</i> {{ t('立即扫描') }}</button>
             <button class="menu-item" :disabled="updWorking || updating" @click="checkUpdate">
