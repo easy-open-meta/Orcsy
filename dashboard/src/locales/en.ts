@@ -340,6 +340,8 @@ export default {
   '创建项目': 'Create a project',
   '把开发与修复任务交给 Agent：按优先级自动领取、编码、测试、独立审查，全程留痕可回溯。': 'Hand development and bug-fix tasks to agents: they pick work by priority, code, test and pass independent review — all fully traceable.',
   '欢迎使用 Orcsy': 'Welcome to Orcsy',
+  '「设置」页先接入大模型（协议 / 模型 / API Key）——这是一切功能的基础和底座；再按需启用「多模型项目小组」，为 PM、后端、前端、QA 指定专属模型与能力边界。': 'On the Settings page, connect your LLM first (protocol / model / API key) — it is the foundation of everything; then optionally enable the Multi-model Project Team to assign dedicated models and capability bounds to PM, backend, frontend and QA.',
+  '接入大模型与小组': 'Connect LLM & team',
   '使用引导': 'Getting started',
   '异常': 'Errors',
   '注意：任务文件解析有问题 —— {error}': 'Task file parse problem — {error}',

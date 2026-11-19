@@ -16,6 +16,11 @@ const STEPS: { icon: string; title: string; desc: string }[] = [
     desc: '把开发与修复任务交给 Agent：按优先级自动领取、编码、测试、独立审查，全程留痕可回溯。',
   },
   {
+    icon: 'smart_toy',
+    title: '接入大模型与小组',
+    desc: '「设置」页先接入大模型（协议 / 模型 / API Key）——这是一切功能的基础和底座；再按需启用「多模型项目小组」，为 PM、后端、前端、QA 指定专属模型与能力边界。',
+  },
+  {
     icon: 'folder',
     title: '创建项目',
     desc: '「项目」页新建项目，填入代码仓库路径；自动生成 AGENT.md 指引与任务目录，Agent 即可开始工作。',
