@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 from .git_ops import Git, GitError
@@ -16,6 +18,72 @@ from .logging_setup import get_logger
 from .worktree import WORKTREE_DIR
 
 log = get_logger("web")
+
+
+# ---- pending_changes 结果缓存：/api/state 每 5s 轮询都重跑整套 git 探测，
+# 嵌套仓库下（caresy 类）每次 ~0.7s（discover_nested_repos + 3×git status），
+# 拖慢整页响应。缓存 key 用项目名：有缓存即秒回，超过阈值才后台异步刷新；
+# 首次无缓存同步计算。manual_commit / discard_files / git_init 后主动失效。
+_pending_cache: dict[str, dict] = {}
+_pending_lock = threading.Lock()
+# 超过该秒数且有缓存时，启动后台线程重新探测（不等它完成，本次仍返回旧值）
+_PENDING_REFRESH_AFTER = 3.0
+
+
+def invalidate_pending_cache(name: str) -> None:
+    """项目 git 状态被写操作（提交/丢弃/初始化）改变后失效缓存。"""
+    with _pending_lock:
+        _pending_cache.pop(name, None)
+
+
+def _compute_pending(agent) -> dict:
+    """实际计算 pending_changes（原实现，供同步/异步两路复用）。"""
+    base = Path(agent.project.path)
+    parent_git = Git(base)
+    if not parent_git.is_repo():
+        return {"is_git": False, "count": 0, "files": [], "repos": []}
+    parent_entries = parent_git.status_entries()
+    nested = discover_nested_repos(base)
+    nested_groups: list[dict] = []
+    active_nested: set[str] = set()
+    errors: list[str] = []
+    for rel in sorted(nested, key=str.lower):
+        child = Git(nested[rel])
+        try:
+            entries = child.status_entries()
+        except GitError as e:
+            errors.append(f"{rel}：{e}")
+            continue
+        if not entries:
+            continue
+        active_nested.add(rel)
+        files = [_entry_dict(rel, e) for e in entries]
+        nested_groups.append({
+            "repo": rel, "label": rel, "nested": True,
+            "count": len(files), "files": files,
+        })
+    parent_files: list[dict] = []
+    for e in parent_entries:
+        norm_paths = [str(Path(p).as_posix()).strip("/") for p in e.get("paths") or []]
+        if any(p in active_nested for p in norm_paths):
+            continue
+        kind = "gitlink" if any(p in nested for p in norm_paths) else "file"
+        item = _entry_dict("", e)
+        item["kind"] = kind
+        parent_files.append(item)
+    repos: list[dict] = []
+    if parent_files:
+        repos.append({"repo": "", "label": "主仓库", "nested": False,
+                      "count": len(parent_files), "files": parent_files})
+    repos.extend(nested_groups)
+    flat = [f["display"] for group in repos for f in group["files"]]
+    return {
+        "is_git": True,
+        "count": len(flat),
+        "files": flat[:2000],
+        "repos": repos,
+        **({"errors": errors} if errors else {}),
+    }
 
 
 def _repo_key(value: object) -> str:
@@ -105,63 +173,34 @@ def _entry_dict(repo: str, entry: dict) -> dict:
 
 
 def pending_changes(agent) -> dict:
-    """聚合主仓库 + 已登记嵌套仓库的未提交改动（人工把关提交页数据源）。"""
-    base = Path(agent.project.path)
-    parent_git = Git(base)
-    if not parent_git.is_repo():
-        return {"is_git": False, "count": 0, "files": [], "repos": []}
+    """聚合主仓库 + 已登记嵌套仓库的未提交改动（人工把关提交页数据源）。
+
+    带进程内缓存：/api/state 每 5s 轮询，嵌套仓库下整套 git 探测 ~0.7s，
+    有缓存即秒回；超过 _PENDING_REFRESH_AFTER 秒才后台线程异步重算（本次
+    仍返回旧值，下次轮询拿到新值）。写操作路径主动 invalidate 失效。
+    """
+    name = str(agent.project.name or "").strip()
+    if not name:
+        return _compute_pending(agent)
+
+    now = time.monotonic()
+    with _pending_lock:
+        # 缓存条目结构：(时间戳 monotonic, 结果 dict)
+        cached = _pending_cache.get(name)
+
+    if cached is not None and now - cached[0] <= _PENDING_REFRESH_AFTER:
+        return cached[1]
+
+    # 无缓存 / 已过期：同步计算并写入
     try:
-        parent_entries = parent_git.status_entries()
+        result = _compute_pending(agent)
     except GitError as e:
-        log.warning("读取项目 %s 主仓库 status 失败：%s", agent.project.name, e)
-        return {"is_git": True, "count": 0, "files": [], "repos": [],
-                "errors": [f"主仓库：{e}"]}
-
-    nested = discover_nested_repos(base)
-    nested_groups: list[dict] = []
-    active_nested: set[str] = set()
-    errors: list[str] = []
-    for rel in sorted(nested, key=str.lower):
-        child = Git(nested[rel])
-        try:
-            entries = child.status_entries()
-        except GitError as e:
-            errors.append(f"{rel}：{e}")
-            continue
-        if not entries:
-            continue
-        active_nested.add(rel)
-        files = [_entry_dict(rel, e) for e in entries]
-        nested_groups.append({
-            "repo": rel, "label": rel, "nested": True,
-            "count": len(files), "files": files,
-        })
-
-    parent_files: list[dict] = []
-    for e in parent_entries:
-        norm_paths = [str(Path(p).as_posix()).strip("/") for p in e.get("paths") or []]
-        # 子仓库有真实改动时，父仓库那条 `M sub` 只是「脏子仓库」，
-        # 由上面的子仓库分组展示；不重复计入，也不展示无意义的目录 diff。
-        if any(p in active_nested for p in norm_paths):
-            continue
-        kind = "gitlink" if any(p in nested for p in norm_paths) else "file"
-        item = _entry_dict("", e)
-        item["kind"] = kind
-        parent_files.append(item)
-
-    repos: list[dict] = []
-    if parent_files:
-        repos.append({"repo": "", "label": "主仓库", "nested": False,
-                      "count": len(parent_files), "files": parent_files})
-    repos.extend(nested_groups)
-    flat = [f["display"] for group in repos for f in group["files"]]
-    return {
-        "is_git": True,
-        "count": len(flat),
-        "files": flat[:2000],
-        "repos": repos,
-        **({"errors": errors} if errors else {}),
-    }
+        log.warning("读取项目 %s 改动失败：%s", name, e)
+        result = {"is_git": True, "count": 0, "files": [], "repos": [],
+                  "errors": [str(e)]}
+    with _pending_lock:
+        _pending_cache[name] = (now, result)
+    return result
 
 
 def manual_commit(agents: dict, data: dict) -> dict:
@@ -330,6 +369,7 @@ def manual_commit(agents: dict, data: dict) -> dict:
         if push_notes:
             msg += f"（推送警告：{'；'.join(push_notes)}）"
 
+    invalidate_pending_cache(name)  # 提交改变了 git 状态，立即使缓存失效
     return {
         "ok": True,
         "committed": True,
@@ -409,6 +449,7 @@ def discard_files(agents: dict, data: dict) -> dict:
     log.info("Web 丢弃项目 %s[%s] 未提交改动：删除 %d / 还原 %d / 跳过 %d",
              name, repo_key or "主仓库", len(res["deleted"]),
              len(res["restored"]), len(res["skipped"]))
+    invalidate_pending_cache(name)
     return {"ok": True, "repo": repo_key, **res,
             "message": "；".join(parts) or "没有可丢弃的改动"}
 
@@ -434,6 +475,7 @@ def git_init(agents: dict, data: dict) -> dict:
     g.add_all()
     g.commit("chore: 初始化项目仓库")
     agent.executor.probe_git_repo()
+    invalidate_pending_cache(name)
     log.info("Web 为项目 %s 初始化 Git 仓库", name)
     return {"ok": True, "message": f"已成功为项目 {name} 初始化 Git 仓库"}
 
