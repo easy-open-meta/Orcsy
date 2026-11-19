@@ -558,15 +558,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </div>
         </template>
 
-        <details v-if="hasArchived(p)" class="arch"
-                 @toggle="onArchToggle($event, p)">
+        <details v-if="p.archived.length" class="arch">
           <summary>
             <span class="arch-title">{{ it('已归档') }}</span>
-            <span class="arch-count">{{ archivedCount(p) }} {{ it('个任务') }}</span>
+            <span class="arch-count">{{ p.archived.length }} {{ it('个任务') }}</span>
             <span class="arch-hint" />
           </summary>
-          <div v-if="!p.archived.length" class="arch-loading">{{ it('加载归档列表…') }}</div>
-          <div v-for="tk in [...archivedList(p)].reverse()" :key="tk.id" class="task">
+          <div v-for="tk in [...p.archived].reverse()" :key="tk.id" class="task">
             <div class="t-main clickable" :title="it('点击查看任务详情（只读）')" @click="openTaskView(p.name, tk.id)">
               <NTag size="small" :color="{ color: PRI_COLOR[tk.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ tk.priority }}</NTag>
               <span class="title">{{ tk.title }}</span>
