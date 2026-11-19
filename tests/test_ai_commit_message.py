@@ -2,10 +2,11 @@
 
 覆盖：
 - 工作区干净（无 diff）→ ok:false 且提示干净状态
-- 模型调用成功 → message 单行规范文本填入
+- 模型调用成功 → message 填入（支持多行：标题 + 要点正文）
 - 模型调用失败 → ok:false 不抛异常（页面不打断）
 - 未知项目 → ValueError
-- diff 超长截断（generate_commit_message 单元层）
+- 大改动覆盖：多文件 diff 全部进入 prompt（不再整体截断丢文件）
+- 超预算截断（generate_commit_message 单元层）
 """
 
 from __future__ import annotations
@@ -79,22 +80,26 @@ def check_unknown_project() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def check_success_and_failure(monkeypatched: bool = True) -> None:
+def check_success_and_failure() -> None:
     tmp, state, proj = _make_env()
     orig = llm_mod.generate_commit_message
     try:
         # 有改动（未跟踪新文件 + 修改）
         (proj / "feature.py").write_text("print('feat')\n", encoding="utf-8")
 
-        # 1) 模型成功：单行规范 message
+        # 1) 模型成功：多行规范 message（标题 + 要点正文）
         def fake_ok(provider, base_url, api_key, model, diff, timeout_seconds,
                     enable_thinking=False, max_tokens=4096):
             assert "feature.py" in diff, "diff 应包含改动文件"
-            return {"message": "feat: 新增 feature 模块", "elapsed_seconds": 1.2}
+            return {"message": "feat: 新增 feature 模块\n\n- 新增 feature.py 提供示例入口\n- 同步更新说明文档",
+                    "elapsed_seconds": 1.2}
 
         llm_mod.generate_commit_message = fake_ok
         r = state.generate_commit_message({"name": "proj"})
-        assert r["ok"] is True and r["message"] == "feat: 新增 feature 模块", r
+        assert r["ok"] is True, r
+        assert r["message"].startswith("feat: 新增 feature 模块"), r
+        assert "新增 feature.py" in r["message"], "要点正文应保留"
+        print("ok: 模型成功生成多行 message（标题 + 要点正文）")
 
         # 2) 模型失败：ok:false 不打断页面
         def fake_fail(provider, base_url, api_key, model, diff, timeout_seconds,
@@ -104,13 +109,14 @@ def check_success_and_failure(monkeypatched: bool = True) -> None:
         llm_mod.generate_commit_message = fake_fail
         r2 = state.generate_commit_message({"name": "proj"})
         assert r2["ok"] is False and "连接超时" in r2["message"], r2
-        print("ok: 模型成功生成 / 失败返回 ok:false 不抛异常")
+        print("ok: 模型失败返回 ok:false 不抛异常")
     finally:
         llm_mod.generate_commit_message = orig
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def check_diff_truncation() -> None:
+def check_multi_file_coverage() -> None:
+    """大改动覆盖：多文件 diff 全部进入 prompt（不再整体截断丢后面文件）。"""
     calls = {}
 
     class _FakeClient:
@@ -119,17 +125,52 @@ def check_diff_truncation() -> None:
 
         def _post(self, url, payload, headers):
             calls["prompt"] = payload["messages"][0]["content"]
-            return {"choices": [{"message": {"content": "fix: 修复反斜杠与引号剥离"}}]}
+            return {"choices": [{"message": {"content": "feat: 多文件改动"}}]}
 
     orig_client = llm_mod.LLMClient
     llm_mod.LLMClient = _FakeClient
     try:
+        # 12 个文件，每个 diff 2KB：旧实现整体截 12KB 只能看到前 ~6 个文件
+        files = [f"mod_{i:02d}.py" for i in range(12)]
+        chunks = []
+        for name in files:
+            chunks.append(f"diff --git a/{name} b/{name}\n"
+                          f"index 000..111\n--- a/{name}\n+++ b/{name}\n"
+                          f"@@ -1 +1 @@\n+{name} changed " + "x" * 2000)
+        diff = "\n".join(chunks)
+        r = generate_commit_message("openai", "http://x/v1", "k", "m", diff, 30)
+        assert r["message"], r
+        prompt = calls["prompt"]
+        missing = [n for n in files if n not in prompt]
+        assert not missing, f"以下文件未进入 prompt（覆盖不全）: {missing}"
+        # 文件清单应在（模型据此知道全部改动）
+        assert "Changed files" in prompt and prompt.count("- mod_") >= 12
+        print("ok: 多文件大改动全覆盖进入 prompt（12/12 文件）")
+    finally:
+        llm_mod.LLMClient = orig_client
+
+
+def check_over_budget_truncation() -> None:
+    calls = {}
+
+    class _FakeClient:
+        def __init__(self, cfg):
+            pass
+
+        def _post(self, url, payload, headers):
+            calls["prompt"] = payload["messages"][0]["content"]
+            return {"choices": [{"message": {"content": "fix: 修复"}}]}
+
+    orig_client = llm_mod.LLMClient
+    llm_mod.LLMClient = _FakeClient
+    try:
+        # 单文件 200KB：超出 48K 总预算 → 整体截断且带提示
         r = generate_commit_message("openai", "http://x/v1", "k", "m",
-                                    "x" * 20000, 30)
-        assert r["message"].startswith("fix: 修复反斜杠与引号剥离") or r["message"].startswith("fix: 修复"), r
-        assert len(calls["prompt"]) < 20000, "prompt 应被截断"
-        assert "diff 已截断" in calls["prompt"], "截断提示应在"
-        print("ok: 超长 diff 截断且引号剥离")
+                                    "x" * 200000, 30)
+        assert r["message"], r
+        assert len(calls["prompt"]) < 60000, "prompt 应在预算内截断"
+        assert "已截断" in calls["prompt"], "截断提示应在"
+        print("ok: 超预算单文件 diff 截断且带提示")
     finally:
         llm_mod.LLMClient = orig_client
 
@@ -138,7 +179,8 @@ def main() -> int:
     check_clean_workspace()
     check_unknown_project()
     check_success_and_failure()
-    check_diff_truncation()
+    check_multi_file_coverage()
+    check_over_budget_truncation()
     print("\nAI 生成提交说明全部测试通过 ✅")
     return 0
 

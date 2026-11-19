@@ -149,17 +149,66 @@ def test_connection(provider: str, base_url: str, api_key: str, model: str,
     return {"reply": reply[:200], "elapsed_seconds": elapsed}
 
 
+def _commit_diff_brief(diff_text: str, total_budget: int = 48000,
+                       min_per_file: int = 400) -> str:
+    """把整段 git diff 整理为「改动文件全清单 + 按文件预算截断的 diff」。
+
+    原实现把 diff 整体截断到前 12000 字符：大改动（几十上百个文件）时排在
+    后面的文件模型完全看不到，生成的说明覆盖不全。这里按 diff 的文件分界
+    （diff --git 行）拆块，先给完整文件清单，再按剩余预算均匀分配每文件
+    截断长度（下限 min_per_file），确保大改动也全覆盖。
+    """
+    diff = (diff_text or "").strip()
+    if not diff:
+        return ""
+    # 按 diff --git 行拆文件块（git diff 的标准分界）
+    parts = re.split(r'(?m)^(?=diff --git )', diff)
+    header = parts[0] if parts and not parts[0].startswith("diff --git ") else ""
+    chunks = [p for p in parts if p.startswith("diff --git ")]
+    if len(chunks) <= 1:
+        # 单文件或非标准格式：整体截断即可
+        if len(diff) <= total_budget:
+            return diff
+        return diff[:total_budget] + "\n…（diff 已截断）"
+
+    # 文件清单（从每块的 diff --git a/... b/... 行提取路径）
+    names: list[str] = []
+    for c in chunks:
+        m = re.match(r'diff --git a/(.+?) b/(.+)', c.splitlines()[0])
+        if m:
+            names.append(m.group(2))
+
+    # 均匀分配预算：总预算扣除清单后按块均摊，每块保底 min_per_file
+    listing = ("Changed files ({}):\n" + "\n".join(f"- {n}" for n in names)
+               + "\n\nPer-file diffs:\n").format(len(names))
+    budget = max(total_budget - len(listing), min_per_file * len(chunks))
+    per = max(budget // len(chunks), min_per_file)
+
+    out = [listing]
+    used = 0
+    for c in chunks:
+        seg = c if len(c) <= per else c[:per] + "\n…（该文件 diff 已截断）"
+        out.append(seg)
+        used += len(seg)
+        if used >= total_budget:
+            out.append(f"\n…（剩余 {len(chunks)} 个文件的 diff 因篇幅截断，"
+                       "以文件清单为准）")
+            break
+    return "\n".join(out)[:total_budget + 2000]
+
+
 def generate_commit_message(provider: str, base_url: str, api_key: str,
                             model: str, diff_text: str,
                             timeout_seconds: int = 300,
                             enable_thinking: bool = False,
                             max_tokens: int = 4096) -> dict:
-    """根据工作区改动 diff 生成一条规范 commit message（人工把关提交页「AI 生成」）。
+    """根据工作区改动 diff 生成规范 commit message（人工把关提交页「AI 生成」）。
 
-    单轮无工具请求；diff 截断到 12000 字符（约 4~6k tokens）控制成本。
-    max_tokens 给足 4096：推理模型（DeepSeek-R1 / GLM 思考等）的思考内容也
-    计入输出预算，给小了思考耗尽额度后正文为空。返回 {message, elapsed_seconds}；
-    失败抛 LLMError。
+    单轮无工具请求。diff 组织为「改动文件全清单 + 按文件预算截断的 diff 正文」：
+    大改动（几十上百个文件）时每个文件都保留开头片段让模型知道改了什么，
+    而不是整体截断到前 12KB 导致后面的文件完全不可见。
+    输出为多行规范格式：首行 type(scope): 标题，空行后列要点正文。
+    返回 {message, elapsed_seconds}；失败抛 LLMError。
     """
     provider = provider.strip().lower()
     model = model.strip()
@@ -170,8 +219,7 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
     diff = (diff_text or "").strip()
     if not diff:
         raise LLMError("当前没有可分析的改动内容（工作区为干净状态）")
-    if len(diff) > 12000:
-        diff = diff[:12000] + "\n…（diff 已截断）"
+    body = _commit_diff_brief(diff)
     client = LLMClient(LLMConfig(
         provider=provider, api_key=api_key, base_url=base_url, model=model,
         enable_thinking=enable_thinking,
@@ -181,11 +229,16 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
     prompt = (
         "You are a commit-message generator. Based on the git diff below, "
         "write ONE conventional-commit message in Chinese.\n"
-        "Rules: format 'type: summary' (type = feat/fix/refactor/docs/test/chore); "
-        "summary <= 50 chars, no trailing period; mention the key module/file scope "
-        "when obvious; do NOT invent changes that are not in the diff.\n\n"
-        "Git diff:\n```\n" + diff + "\n```\n\n"
-        "Reply with the commit message text ONLY (no quotes, no explanation)."
+        "Format (multi-line):\n"
+        "Line 1: 'type: summary' (type = feat/fix/refactor/docs/test/chore; "
+        "summary <= 50 chars, no trailing period)\n"
+        "Then an empty line, then 2-6 bullet lines ('- ') summarizing the key "
+        "changes grouped by module/file (merge trivial ones; skip noise).\n"
+        "Cover ALL changed files listed below, not just the first few; "
+        "do NOT invent changes that are not in the diff.\n\n"
+        "Changed files and diffs:\n```\n" + body + "\n```\n\n"
+        "Reply with the commit message text ONLY (no quotes, no explanation, "
+        "no markdown headers)."
     )
     if provider == "anthropic":
         url = _anthropic_base(base_url) + "/messages"
@@ -219,36 +272,32 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
             raise LLMError(
                 f"响应结构异常：{json.dumps(data, ensure_ascii=False)[:300]}") from e
     if reply:
-        # 正文/思考兜底里取「像 commit message 的行」：优先含 conventional 前缀
-        # （feat:/fix:/…）的行；思考块里结论通常带此类前缀或在末尾。
-        lines = [l.strip().strip('"').strip("'") for l in reply.splitlines() if l.strip()]
-        message = ""
-        # 1) 优先：任何行以 conventional 前缀开头（正文首行或思考结论行，
-        #    兼容「结论：feat: xxx」式包装——取最后一个冒号后的 type 段判断）
-        for l in reversed(lines):
+        # 多行规范输出：标题行（conventional 前缀）+ 空行 + 要点正文。
+        # 思考块兜底时结论行常带「结论：feat: xxx」式包装，取结论行到末尾。
+        lines = [l.strip() for l in reply.splitlines() if l.strip()]
+        start = None
+        for i in reversed(range(len(lines))):
+            l = lines[i]
             probe = l
             for sep in ("：", ":"):
                 if sep in probe:
                     tail = probe.rsplit(sep, 1)[1].strip().lower()
-                    head = tail.split(":")[0].strip() if ":" in tail else tail.split("：")[0].strip()
+                    head = (tail.split(":")[0].strip()
+                            if ":" in tail else tail.split("：")[0].strip())
                     if head in ("feat", "fix", "refactor", "docs", "test",
                                 "chore", "style", "perf"):
                         probe = tail
                     break
             first = probe.split('：')[0].split(':')[0].strip().lower()
-            if first in ("feat", "fix", "refactor", "docs", "test", "chore", "style", "perf"):
-                # 剥掉「结论：」等包装前缀
-                for prefix in ("结论：", "结论:", "提交说明：", "提交信息：",
-                               "最终答案：", "commit message:"):
-                    if l.lower().startswith(prefix.lower()):
-                        l = l[len(prefix):].strip()
-                        break
-                message = l
+            if first in ("feat", "fix", "refactor", "docs", "test",
+                         "chore", "style", "perf"):
+                start = i
                 break
-        # 2) 兜底：正文首行（正常非推理模型路径）
-        if not message:
+        if start is not None:
+            message = "\n".join(lines[start:])
+        else:
             message = lines[0] if lines else ""
-        # 3) 思考前缀清理（如「结论：feat: xxx」）
+        # 思考前缀清理（如「结论：feat: xxx」）
         for prefix in ("结论：", "结论:", "提交说明：", "提交信息：",
                        "最终答案：", "commit message:"):
             if message.lower().startswith(prefix.lower()):
@@ -260,7 +309,7 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
         raise LLMError(
             "模型未返回有效的提交说明（思考内容为空或全部超长）；"
             "可在设置页开启「请求侧开启模型思考」后重试，或手动填写")
-    return {"message": message[:200], "elapsed_seconds": elapsed}
+    return {"message": message[:2000], "elapsed_seconds": elapsed}
 
 
 def list_models(provider: str, base_url: str, api_key: str,

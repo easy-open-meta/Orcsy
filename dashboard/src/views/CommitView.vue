@@ -339,7 +339,9 @@ async function submit(): Promise<void> {
                      :title="t('让项目模型阅读当前工作区改动，自动生成一条规范提交说明')"
                      @click="aiGenerate"><i class="ms sm">auto_awesome</i> {{ t('AI 生成') }}</NButton>
           </div>
-          <NInput v-model:value="form.message" :placeholder="t('如 feat: 完成用户登录与前后端联调测试')" />
+          <NInput v-model:value="form.message" type="textarea"
+                  :autosize="{ minRows: 3, maxRows: 10 }"
+                  :placeholder="t('如 feat: 完成用户登录与前后端联调测试（首行标题，AI 生成的要点正文会附在下方）')" />
         </div>
         <div class="cfoot-row cf-actions">
           <label class="checkline">
