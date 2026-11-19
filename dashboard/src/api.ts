@@ -251,6 +251,8 @@ export interface ProjectT {
   tasks: TaskT[]
   parse_errors: { id: string; path: string; error: string }[]
   archived: TaskT[]
+  /** 归档总数：summary 模式（移动端）不返回 archived 列表，靠它显示折叠条并按需拉取 */
+  archived_count?: number
 }
 
 export interface SkillT {
@@ -796,6 +798,11 @@ export const api = {
     post('/api/project/diff', p) as Promise<{
       ok: boolean; repo?: string; file: string; diff: string
       truncated?: boolean; total_chars?: number; lines?: number
+    }>,
+  /** 项目归档任务列表（移动端摘要模式不带归档，展开折叠条时按需拉取） */
+  projectArchived: (name: string) =>
+    post('/api/project/archived', { name }) as Promise<{
+      ok: boolean; project: string; archived: TaskT[]; count: number
     }>,
   /** 人工把关提交页：丢弃指定文件的未提交改动（未跟踪→删除，已跟踪→还原到 HEAD） */
   discardProjectFiles: (p: { name: string; files: string[]; repo?: string }) =>

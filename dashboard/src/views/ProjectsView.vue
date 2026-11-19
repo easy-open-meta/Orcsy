@@ -5,7 +5,7 @@
 import { NButton, NCard, NCheckbox, NEmpty, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref, shallowRef } from 'vue'
 import { api, type ProjectT, type TaskT } from '../api'
-import { openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
+import { openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, loadArchived, refresh, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { tNow as it, tFmt } from '../lang'
 
@@ -28,6 +28,21 @@ function roleBadgeText(role: string): string {
     pm: 'PM', backend: it('后端'), frontend: it('前端'), qa: it('测试'),
   }
   return map[role] || role
+}
+
+// ---- 归档折叠条懒加载：桌面全量 state 自带 archived；移动端摘要模式
+// archived 为空但有 archived_count，展开折叠条时按需拉取（store.loadArchived） ----
+function hasArchived(p: ProjectT): boolean {
+  return p.archived.length > 0 || (p.archived_count ?? 0) > 0
+}
+function archivedCount(p: ProjectT): number {
+  return p.archived.length || (p.archived_count ?? 0)
+}
+function onArchToggle(e: Event, p: ProjectT): void {
+  if ((e.target as HTMLDetailsElement).open
+      && !p.archived.length && (p.archived_count ?? 0) > 0) {
+    void loadArchived(p.name)
+  }
 }
 
 // ---- 任务排序与卡片内分页（与看板页同规则：状态分组 → 优先级 → 拖拽 order） ----
@@ -558,12 +573,14 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </div>
         </template>
 
-        <details v-if="p.archived.length" class="arch">
+        <details v-if="hasArchived(p)" class="arch"
+                 @toggle="onArchToggle($event, p)">
           <summary>
             <span class="arch-title">{{ it('已归档') }}</span>
-            <span class="arch-count">{{ p.archived.length }} {{ it('个任务') }}</span>
+            <span class="arch-count">{{ archivedCount(p) }} {{ it('个任务') }}</span>
             <span class="arch-hint" />
           </summary>
+          <div v-if="!p.archived.length" class="arch-loading">{{ it('加载归档列表…') }}</div>
           <div v-for="tk in [...p.archived].reverse()" :key="tk.id" class="task">
             <div class="t-main clickable" :title="it('点击查看任务详情（只读）')" @click="openTaskView(p.name, tk.id)">
               <NTag size="small" :color="{ color: PRI_COLOR[tk.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ tk.priority }}</NTag>
