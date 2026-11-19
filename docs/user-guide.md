@@ -4,9 +4,9 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.25.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.26.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
-> **v0.25.0 highlights**: the pending-commit page groups nested Git repositories with per-repo diff / exclude / discard; nested repos commit first, the parent records the pointers last. The dashboard UI now supports **Simplified Chinese, Traditional Chinese and English** (translate icon in the top bar; follows the browser language by default). Also fixes the tray exit leaving the web server/process alive and duplicate-instance detection when auth is enabled.
+> **v0.26.0 highlights**: a **first-launch onboarding tour** (7 animated steps, incl. the LLM & team setup step) walks new users through the dashboard; the **archive list is now visible on mobile / narrow windows**; dashboard state is much faster (nested-repo git probe cache, ~0.9s → ~0.17s); a full i18n sweep cleared residual Chinese across all pages and overhauled the Traditional Chinese pack; also fixes the projects-page crash, settings group labels not switching language, and the mobile-connect dialog close button.
 >
 > ℹ️ The dashboard UI is fully translated (zh / zh-TW / en). Backend-returned dynamic messages (e.g. update progress, pause reasons) remain in the original language for now.
 
@@ -23,6 +23,8 @@ English | [简体中文](用户指南.md)
 7. [Create and manage tasks](#7-create-and-manage-tasks)
 8. [Let Orcsy start working](#8-let-orcsy-start-working)
 9. [Dashboard map: what every button does](#9-dashboard-map-what-every-button-does)
+
+> On first launch the dashboard opens a **7-step onboarding tour** walking through create project → add tasks → scan → manual commit → mobile access; the "?" button in the top bar (or "Getting started" in the drawer) replays it anytime.
 10. [Advanced features: approvals, skills, Issues, mirrors](#10-advanced-features-approvals-skills-issues-mirrors)
 11. [Data, backup, and migration](#11-data-backup-and-migration)
 12. [FAQ and troubleshooting](#12-faq-and-troubleshooting)
