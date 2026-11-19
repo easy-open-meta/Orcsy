@@ -130,17 +130,6 @@ export async function refresh(force = false): Promise<void> {
 
 let _navigateHandler: ((name: string, query?: Record<string, string>) => void) | null = null
 
-/** 归档列表懒加载：移动端摘要模式（archived 为空但 count>0）展开折叠条时按需拉取。
- * 结果写回 store.state.projects 对应条目，随后轮询的旧快照不会覆盖（refresh 只整包替换）。 */
-export async function loadArchived(projectName: string): Promise<void> {
-  const p = store.state?.projects.find(x => x.name === projectName)
-  if (!p) return
-  try {
-    const r = await api.projectArchived(projectName)
-    if (r.ok) p.archived = r.archived
-  } catch { /* 拉取失败静默：折叠条保持「点此重试」态 */ }
-}
-
 export function setNavigateHandler(fn: (name: string, query?: Record<string, string>) => void): void {
   _navigateHandler = fn
 }

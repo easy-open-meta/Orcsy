@@ -796,16 +796,16 @@ class AppState:
             open_tasks, errors = scan_tasks(agent.tasks_dir)
             all_statuses, done_ids = collect_task_statuses(agent.tasks_dir)
             archive_dir = agent.tasks_dir / "done"
+            # 归档折叠条只展示 标题/优先级/id：用轻量元数据（不含 2000 字符正文），
+            # summary（移动端）与桌面都返回，30 条约 3KB，不构成流量负担
             archived = []
-            archived_count = 0
             if archive_dir.is_dir():
-                archive_files = sorted(archive_dir.glob("*.md"))
-                archived_count = len(archive_files)
-                # 摘要模式只给数量、不解析归档正文（省流量省 CPU）；
-                # 列表由前端展开归档折叠条时调 /api/project/archived 按需拉取
-                if not summary:
-                    for f in archive_files:
-                        archived.append(self._task_dict(parse_task_file(f)))
+                for f in sorted(archive_dir.glob("*.md")):
+                    t = parse_task_file(f)
+                    archived.append({
+                        "id": t.id, "title": t.title,
+                        "priority": t.priority, "status": t.status,
+                    })
             # 所有文件（含 in_progress/blocked/cancelled），不只是 open
             all_tasks = []
             if agent.tasks_dir.is_dir():
@@ -873,10 +873,7 @@ class AppState:
                 "tasks": all_tasks,
                 "parse_errors": [{"id": t.id, "path": str(t.path), "error": t.error}
                                  for t in errors],
-                "archived": [] if summary else archived[-30:],
-                # 归档数量始终给（只 glob 不解析正文）：移动端摘要模式下前端据此
-                # 显示「已归档 N 个任务」折叠条，展开时再按需拉列表
-                "archived_count": archived_count,
+                "archived": archived[-30:],
             })
         return {
             "version": __version__,
@@ -1268,21 +1265,6 @@ class AppState:
     def get_task(self, params: dict) -> dict:
         """读取单个任务的完整内容（业务实现在 task_service）。"""
         return _svc_get_task(self.agents, params)
-
-    def project_archived(self, params: dict) -> dict:
-        """项目归档任务列表（只读）：移动端摘要模式不带归档正文，
-        前端展开归档折叠条时按需调用本接口拉取（避免每 5s 轮询都传全量正文）。"""
-        name = str(params.get("project") or params.get("name") or "").strip()
-        agent = self.agents.get(name)
-        if agent is None:
-            raise ValueError(f"未知项目：{name}")
-        archive_dir = agent.tasks_dir / "done"
-        items: list[dict] = []
-        if archive_dir.is_dir():
-            for f in sorted(archive_dir.glob("*.md")):
-                items.append(self._task_dict(parse_task_file(f)))
-        return {"ok": True, "project": name, "archived": items[-30:],
-                "count": len(items)}
 
     # ---- 运行台账（V1-R1）：只读回放 ----
 
@@ -2824,11 +2806,6 @@ class WebHandler(BaseHTTPRequestHandler):
             elif path == "/api/project/resume":
                 try:
                     self._json(self.state.resume_project(body))
-                except (ValueError, OSError) as e:
-                    self._json({"ok": False, "message": str(e)}, 400)
-            elif path == "/api/project/archived":
-                try:
-                    self._json(self.state.project_archived(body))
                 except (ValueError, OSError) as e:
                     self._json({"ok": False, "message": str(e)}, 400)
             elif path == "/api/project/diff":

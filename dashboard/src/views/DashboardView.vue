@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NCard, NCheckbox, NInput, NPagination, NSelect, NSpin, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref, shallowRef } from 'vue'
-import { loadArchived, navigateTo, openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
+import { navigateTo, openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
 import { isMobile } from '../mobile'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { parseLogEntries, relTime } from '../utils'
@@ -46,20 +46,6 @@ function stats(p: ProjectT): string {
   if (c.in_progress) parts.push(tFmt('{p0} 执行中', { p0: c.in_progress }))
   if (c.blocked) parts.push(tFmt('{p0} 受阻', { p0: c.blocked }))
   return parts.join(' · ') || it('无待办')
-}
-
-// ---- 归档折叠条懒加载：同 ProjectsView（移动端摘要模式 archived 为空，展开时按需拉取） ----
-function hasArchived(p: ProjectT): boolean {
-  return p.archived.length > 0 || (p.archived_count ?? 0) > 0
-}
-function archivedCount(p: ProjectT): number {
-  return p.archived.length || (p.archived_count ?? 0)
-}
-function onArchToggle(e: Event, p: ProjectT): void {
-  if ((e.target as HTMLDetailsElement).open
-      && !p.archived.length && (p.archived_count ?? 0) > 0) {
-    void loadArchived(p.name)
-  }
 }
 
 const STATUS_ORD: Record<string, number> = { open: 0, in_progress: 1, blocked: 2, cancelled: 3 }
@@ -593,10 +579,8 @@ async function quickAdd(p: ProjectT): Promise<void> {
                        @update:page="(pg: number) => onPageChange(p, pg)" />
         </div>
 
-          <details v-if="hasArchived(p)" class="arch"
-                   @toggle="onArchToggle($event, p)">
-            <summary>{{ it('已归档') }}（{{ archivedCount(p) }}）· {{ it('点击查看详情') }}</summary>
-            <div v-if="!p.archived.length" class="hint">{{ it('加载归档列表…') }}</div>
+          <details v-if="p.archived.length" class="arch">
+            <summary>{{ it('已归档') }}（{{ p.archived.length }}）· {{ it('点击查看详情') }}</summary>
             <div v-for="tk in [...p.archived].reverse()" :key="tk.id" class="task">
               <div class="t-main clickable" :title="it('点击查看任务详情（只读）')" @click="openTaskView(p.name, tk.id)">
                 <NTag size="small" :color="{ color: PRI_COLOR[tk.priority] || '#64748f', textColor: '#fff' }" :bordered="false">{{ tk.priority }}</NTag>
