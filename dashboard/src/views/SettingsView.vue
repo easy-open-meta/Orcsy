@@ -16,56 +16,56 @@ interface SettingGroup { key: string; label: string; icon: string; items: Settin
 
 const SETTING_GROUPS: SettingGroup[] = [
   {
-    key: 'model', label: it('模型与团队'), icon: 'smart_toy',
+    key: 'model', label: '模型与团队', icon: 'smart_toy',
     items: [
-      { key: 'llm', label: it('大模型接入'), icon: 'smart_toy',
-        desc: it('OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。') },
-      { key: 'profiles', label: it('多模型项目小组 (Team)'), icon: 'group',
-        desc: it('配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。') },
-      { key: 'review', label: it('任务审查（Review Agent）'), icon: 'rate_review',
-        desc: it('独立模型合并前审查任务成果；未配置审查模型时审查未启用。') },
+      { key: 'llm', label: '大模型接入', icon: 'smart_toy',
+        desc: 'OpenAI 兼容协议覆盖 DeepSeek / GLM / Kimi / 通义 / Ollama 等；保存后立即生效。' },
+      { key: 'profiles', label: '多模型项目小组 (Team)', icon: 'group',
+        desc: '配置 PM / 后端 / 前端 / QA 角色专属大模型与 API Key 预设池，供各项目 Team 引用。' },
+      { key: 'review', label: '任务审查（Review Agent）', icon: 'rate_review',
+        desc: '独立模型合并前审查任务成果；未配置审查模型时审查未启用。' },
     ],
   },
   {
-    key: 'runtime', label: it('运行与成本'), icon: 'schedule',
+    key: 'runtime', label: '运行与成本', icon: 'schedule',
     items: [
-      { key: 'sched', label: it('调度与看板'), icon: 'schedule',
-        desc: it('扫描间隔、并行数保存后立即生效；看板端口下次启动生效。') },
-      { key: 'budget', label: it('预算与成本'), icon: 'savings',
-        desc: it('任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。') },
-      { key: 'resilience', label: it('熔断与恢复'), icon: 'health_and_safety',
-        desc: it('连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。') },
+      { key: 'sched', label: '调度与看板', icon: 'schedule',
+        desc: '扫描间隔、并行数保存后立即生效；看板端口下次启动生效。' },
+      { key: 'budget', label: '预算与成本', icon: 'savings',
+        desc: '任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。' },
+      { key: 'resilience', label: '熔断与恢复', icon: 'health_and_safety',
+        desc: '连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。' },
     ],
   },
   {
-    key: 'data', label: it('数据与合规'), icon: 'security',
+    key: 'data', label: '数据与合规', icon: 'security',
     items: [
-      { key: 'masking', label: it('数据脱敏'), icon: 'security',
-        desc: it('密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。') },
-      { key: 'runlog', label: it('运行台账'), icon: 'receipt_long',
-        desc: it('每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。') },
-      { key: 'audit', label: it('审计日志'), icon: 'history',
-        desc: it('登录、任务/项目/设置变更、提交确认与 API Key 写调用留痕；只读，不记录密钥与正文。') },
+      { key: 'masking', label: '数据脱敏', icon: 'security',
+        desc: '密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。' },
+      { key: 'runlog', label: '运行台账', icon: 'receipt_long',
+        desc: '每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。' },
+      { key: 'audit', label: '审计日志', icon: 'history',
+        desc: '登录、任务/项目/设置变更、提交确认与 API Key 写调用留痕；只读，不记录密钥与正文。' },
     ],
   },
   {
-    key: 'tools', label: it('工具与网络'), icon: 'handyman',
+    key: 'tools', label: '工具与网络', icon: 'handyman',
     items: [
-      { key: 'tools', label: it('Agent 工具与访问权限'), icon: 'handyman',
-        desc: it('全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。') },
-      { key: 'mirrors', label: it('镜像源管理与测速选源'), icon: 'sync_alt',
-        desc: it('Agent 装环境/拉依赖前测速，哪个快用哪个。') },
-      { key: 'egress', label: it('出网白名单'), icon: 'lan',
-        desc: it('应用自身 HTTP（模型/Issue/镜像/更新/网页抓取）只允许白名单主机；拒绝写审计。') },
+      { key: 'tools', label: 'Agent 工具与访问权限', icon: 'handyman',
+        desc: '全局工具开关、命令白名单与访问权限模式；项目未覆盖时按这里生效。' },
+      { key: 'mirrors', label: '镜像源管理与测速选源', icon: 'sync_alt',
+        desc: 'Agent 装环境/拉依赖前测速，哪个快用哪个。' },
+      { key: 'egress', label: '出网白名单', icon: 'lan',
+        desc: '应用自身 HTTP（模型/Issue/镜像/更新/网页抓取）只允许白名单主机；拒绝写审计。' },
     ],
   },
   {
-    key: 'app', label: it('通知与应用'), icon: 'notifications',
+    key: 'app', label: '通知与应用', icon: 'notifications',
     items: [
-      { key: 'notify', label: it('提醒设置'), icon: 'notifications',
-        desc: it('任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。') },
-      { key: 'app', label: it('应用'), icon: 'settings',
-        desc: it('更新源、自更新检查、看板登录密码与开机自启动。') },
+      { key: 'notify', label: '提醒设置', icon: 'notifications',
+        desc: '任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。' },
+      { key: 'app', label: '应用', icon: 'settings',
+        desc: '更新源、自更新检查、看板登录密码与开机自启动。' },
     ],
   },
 ]
@@ -76,7 +76,7 @@ const openGroups = reactive<Record<string, boolean>>({})
 
 // 移动端：分类下拉 + 子项胶囊（窄屏不渲染整棵手风琴，避免菜单吃掉半屏）
 const mobileGroup = ref(groupOfSection(settingsSection.value))
-const groupOptions = SETTING_GROUPS.map(g => ({ label: g.label, value: g.key }))
+const groupOptions = computed(() => SETTING_GROUPS.map(g => ({ label: it(g.label), value: g.key })))
 const mobileGroupItems = computed(() =>
   SETTING_GROUPS.find(g => g.key === mobileGroup.value)?.items || [])
 
@@ -1458,10 +1458,10 @@ function onModelPick(v: string | null): void {
     message()?.(it('已按该模型的规格自动填充上下文窗口与最大输出（可手改）'))
 }
 
-const providerOptions = [
+const providerOptions = computed(() => [
   { label: it('openai（兼容协议）'), value: 'openai' },
   { label: 'anthropic', value: 'anthropic' },
-]
+])
 </script>
 
 <template>
@@ -1471,9 +1471,9 @@ const providerOptions = [
       <div class="mobile-menu">
         <NSelect v-model:value="mobileGroup" :options="groupOptions" size="small" />
         <div class="mchips">
-          <button v-for="it in mobileGroupItems" :key="it.key" type="button"
-                  class="mchip" :class="{ active: settingsSection === it.key }"
-                  @click="selectSection(it.key)">{{ it.label }}</button>
+          <button v-for="si in mobileGroupItems" :key="si.key" type="button"
+                  class="mchip" :class="{ active: settingsSection === si.key }"
+                  @click="selectSection(si.key)">{{ it(si.label) }}</button>
         </div>
       </div>
       <!-- 左：功能分区手风琴（单开；key 与 settingsSection 联动支持跨页定位） -->
@@ -1482,14 +1482,14 @@ const providerOptions = [
           <button type="button" class="mgroup-head" :class="{ open: openGroups[g.key] }"
                   @click="toggleGroup(g.key)">
             <i class="ms">{{ g.icon }}</i>
-            <span class="mgroup-label">{{ g.label }}</span>
+            <span class="mgroup-label">{{ it(g.label) }}</span>
             <i class="ms mchev">{{ openGroups[g.key] ? 'expand_less' : 'expand_more' }}</i>
           </button>
           <div v-show="openGroups[g.key]" class="mchildren">
-            <button v-for="it in g.items" :key="it.key" type="button"
-                    class="mchild" :class="{ active: settingsSection === it.key }"
-                    :title="it.desc" @click="selectSection(it.key)">
-              <i class="ms">{{ it.icon }}</i><span>{{ it.label }}</span>
+            <button v-for="si in g.items" :key="si.key" type="button"
+                    class="mchild" :class="{ active: settingsSection === si.key }"
+                    :title="it(si.desc)" @click="selectSection(si.key)">
+              <i class="ms">{{ si.icon }}</i><span>{{ it(si.label) }}</span>
             </button>
           </div>
         </div>
@@ -1512,19 +1512,19 @@ const providerOptions = [
           </div></div>
       </div>
       <div class="modelspec" v-if="selectedSpec && (selectedSpec.context_window || selectedSpec.max_output_tokens)">
-        该模型规格：上下文 {{ fmtTokens(selectedSpec.context_window) || '未知' }} ·
-        最大输出 {{ fmtTokens(selectedSpec.max_output_tokens) || '未知' }}（已自动填充到下方，可手改）
+        {{ it('该模型规格：上下文') }} {{ fmtTokens(selectedSpec.context_window) || it('未知') }} ·
+        {{ it('最大输出') }} {{ fmtTokens(selectedSpec.max_output_tokens) || it('未知') }}（{{ it('已自动填充到下方，可手改') }}）
       </div>
       <div class="frow">
         <div class="f2"><label>{{ it('API 地址 base_url') }}</label><NInput v-model:value="draft.base_url" :placeholder="draft.provider === 'anthropic' ? 'https://api.anthropic.com（自动补 /v1）' : 'https://api.deepseek.com/v1'" /></div>
         <div class="f14"><label>API Key</label>
           <NInput v-model:value="draft.api_key" type="password" show-password-on="click"
                   :placeholder="apiKeyConfigured
-                    ? `已配置：${apiKeyMasked}（留空保持不变）` : 'sk-...'"
+                    ? tFmt('已配置：{p0}（留空保持不变）', { p0: apiKeyMasked }) : 'sk-...'"
                   @update:value="apiKeyTouched = true" /></div>
       </div>
       <div class="hint" v-if="draft.provider === 'anthropic'">
-        Anthropic 协议：直接填官方/兼容服务公布的根地址即可，程序自动补 /v1（已含 /v1 则不重复）；多数兼容服务不提供 /models 列表端点，拉取 404 时直接手填模型名即可。
+        {{ it('Anthropic 协议：直接填官方/兼容服务公布的根地址即可，程序自动补 /v1（已含 /v1 则不重复）；多数兼容服务不提供 /models 列表端点，拉取 404 时直接手填模型名即可。') }}
       </div>
       <div class="frow">
         <div class="f1"><label>{{ it('采样温度 temperature') }}</label><NInputNumber v-model:value="draft.temperature" :step="0.1" :min="0" :max="2" /></div>
@@ -1536,7 +1536,7 @@ const providerOptions = [
       </div>
       <label class="checkline" style="margin-bottom: 10px">
         <NSwitch v-model:value="draft.enable_thinking" />
-        请求侧开启模型思考
+        {{ it('请求侧开启模型思考') }}
         <span class="hint">{{ it('默认关闭：DeepSeek-R1 等推理模型会自动返回思考内容，无需开启。anthropic 需此项才会返回 thinking 块（预留一半 max_tokens 作思考预算）；OpenAI 兼容服务按 Qwen（enable_thinking）/ GLM（thinking）约定传参，不支持的服务请勿开启。') }}</span>
       </label>
       <div class="sfoot">
@@ -1550,7 +1550,7 @@ const providerOptions = [
             <div class="team-banner" style="background: rgba(91, 140, 255, 0.08); border: 1px solid rgba(91, 140, 255, 0.25); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text);">
               <div style="font-weight: 600; color: #5b8cff; margin-bottom: 4px;"><i class="ms sm">lightbulb</i> {{ it('多模型 Agent 项目小组模式 (Team) 配置说明') }}</div>
               <div>
-                系统采用<b>「全局角色预设池 + 项目小队自由进驻」</b>的双层架构：
+                {{ it('系统采用') }}<b>{{ it('「全局角色预设池 + 项目小队自由进驻」') }}</b>{{ it('的双层架构：') }}
                 <ul style="margin: 4px 0 0 16px; padding: 0;">
                   <li><b>{{ it('全局层（此处）') }}</b>{{ it('：统一配置') }} <b>{{ it('项目经理 (PM)') }}</b>、<b>{{ it('后端工程师') }}</b>、<b>{{ it('前端工程师') }}</b>、<b>{{ it('测试工程师 (QA)') }}</b> {{ it('各自绑定的专属大模型（如 DeepSeek-R1、Claude 3.7、GPT-4o）与独立 API 密钥，一次配置后全系统共享；') }}</li>
                   <li><b>{{ it('项目层进驻') }}</b>{{ it('：每个项目可独立决定是否启用小组模式。在「项目」页或「看板」卡片点击') }}<b>{{ it('「设置」→「多模型 Agent 项目小组模式 (Team)」') }}</b>{{ it('即可一键勾选启用小队进驻并自由调整成员名单。') }}</li>
@@ -1570,14 +1570,14 @@ const providerOptions = [
                     <span class="group-title">{{ prof.name }}</span>
                     <NTag size="tiny" round type="info">{{ prof.role.toUpperCase() }}</NTag>
                     <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">ID: {{ pid }}</NTag>
-                    <span class="hint" v-if="prof.llm?.model" style="display:inline-flex; align-items:center;">· 模型: {{ prof.llm.model }}</span>
+                    <span class="hint" v-if="prof.llm?.model" style="display:inline-flex; align-items:center;">· {{ it('模型') }}: {{ prof.llm.model }}</span>
                     <span class="hint" v-else style="display:inline-flex; align-items:center;">{{ it('· 继承全局模型') }}</span>
                   </div>
                   <div class="group-ops" @click.stop>
                     <NButton size="tiny" secondary :loading="profileFetchingId === pid" @click="fetchProfileModelList(pid)">{{ it('获取模型列表') }}</NButton>
                     <NButton size="tiny" secondary :loading="profileTestingId === pid" @click="testProfileModel(pid)">{{ it('测试连接') }}</NButton>
                     <NButton size="tiny" quaternary type="error" @click="removeProfile(pid)">{{ it('删除') }}</NButton>
-                    <span style="font-size: 12px; color: var(--dim)"><i class="ms sm">{{ editingProfileId === pid ? 'expand_less' : 'edit' }}</i> {{ editingProfileId === pid ? '收起' : '编辑' }}</span>
+                    <span style="font-size: 12px; color: var(--dim)"><i class="ms sm">{{ editingProfileId === pid ? 'expand_less' : 'edit' }}</i> {{ editingProfileId === pid ? it('收起') : it('编辑') }}</span>
                   </div>
                 </div>
 
@@ -1601,8 +1601,8 @@ const providerOptions = [
                     <div class="f1">
                       <label>{{ it('协议 provider（留空继承全局）') }}</label>
                       <NSelect v-model:value="prof.llm.provider" :options="[
-                        { label: '继承全局', value: '' },
-                        { label: 'openai（兼容协议）', value: 'openai' },
+                        { label: it('继承全局'), value: '' },
+                        { label: it('openai（兼容协议）'), value: 'openai' },
                         { label: 'anthropic', value: 'anthropic' },
                       ]" />
                     </div>
@@ -1617,7 +1617,7 @@ const providerOptions = [
                         filterable
                         tag
                         clearable
-                        :placeholder="'留空继承全局（当前 ' + (draft.model || store.state?.llm?.model || '-') + '）'"
+                        :placeholder="it('留空继承全局（当前 ') + (draft.model || store.state?.llm?.model || '-') + it('）')"
                         @update:value="(v: string | null) => { prof.llm.model = v || '' }"
                       />
                     </div>
@@ -1631,7 +1631,7 @@ const providerOptions = [
                     <div class="f2">
                       <label>{{ it('API Key（留空继承全局或保持已配置密钥）') }}</label>
                       <NInput v-model:value="prof.llm.api_key" type="password" show-password-on="click"
-                              :placeholder="prof.llm.api_key_configured ? `已配置（${prof.llm.api_key_masked}），留空保持` : 'sk-...'"
+                              :placeholder="prof.llm.api_key_configured ? tFmt('已配置（{p0}），留空保持', { p0: prof.llm.api_key_masked }) : 'sk-...'"
                               @update:value="profilesTouchedKeys[pid] = true" />
                     </div>
                     <div class="f1">
@@ -1682,7 +1682,7 @@ const providerOptions = [
         <div class="f1"><label>{{ it('看板登录密码（非空时访问页面/API 均需先登录，保存后立即生效）') }}</label>
           <NInput :value="authPwd" type="password" show-password-on="click"
                   :placeholder="store.state.web_cfg.auth_enabled
-                    ? '已设置，留空保持不变' : '未设置（免登录；外网部署务必设置）'"
+                    ? it('已设置，留空保持不变') : it('未设置（免登录；外网部署务必设置）')"
                   @update:value="onPwdInput" /></div>
         <div class="f0 pwd-btns">
           <NButton v-if="store.state.web_cfg.auth_enabled" size="small" quaternary
@@ -1690,10 +1690,10 @@ const providerOptions = [
         </div>
       </div>
       <div class="hint pwd-hint" v-if="authPwdClear">
-        将在保存后关闭登录鉴权（任何能访问该端口的人都可操作看板）；在上方重新输入密码可取消。
+        {{ it('将在保存后关闭登录鉴权（任何能访问该端口的人都可操作看板）；在上方重新输入密码可取消。') }}
       </div>
       <div class="hint pwd-hint" v-else-if="authPwdTouched">
-        将在保存后启用/更新登录密码，所有已登录会话立即失效，需用新密码重新登录。
+        {{ it('将在保存后启用/更新登录密码，所有已登录会话立即失效，需用新密码重新登录。') }}
       </div>
       <div class="sfoot"><NButton type="primary" @click="saveSched">{{ it('保存调度配置') }}</NButton></div>
           </NCard>
@@ -1704,12 +1704,12 @@ const providerOptions = [
       <div class="frow">
         <div class="f1"><label class="checkline">
           <NSwitch v-model:value="notifyDraft.sound" />
-          提示音
+          {{ it('提示音') }}
           <span class="hint">{{ it('完成/受阻时播程序内置提示音（完成「叮咚」，受阻警示音；随程序分发，不跟随系统声音方案），音频缺失时回退 Windows 系统音。') }}</span>
         </label></div>
         <div class="f1"><label class="checkline">
           <NSwitch v-model:value="notifyDraft.system" />
-          系统通知
+          {{ it('系统通知') }}
           <span class="hint">{{ it('完成/受阻时弹托盘气泡，看板没开也能收到；--no-tray 启动时无渠道。') }}</span>
         </label></div>
       </div>
@@ -1721,12 +1721,12 @@ const providerOptions = [
             <template #header><i class="ms">security</i> {{ it('数据脱敏') }}</template>
       <label class="checkline">
         <NSwitch v-model:value="maskingDraft.enabled" />
-        启用脱敏
+        {{ it('启用脱敏') }}
         <span class="hint">{{ it('发送模型厂商前在本地掩除密码/密钥等敏感信息（高置信规则：sk-/ghp_/glpat-/AKIA/AIza/xox-/JWT/PEM 私钥块/Bearer/URL token 参数/连接串密码段）。处理只在内存中进行，不写磁盘、不进日志；模型写回的占位符在落盘前自动还原原文，任务结束即清除映射。') }}</span>
       </label>
       <label class="checkline">
         <NSwitch v-model:value="maskingDraft.enhanced_rules" />
-        键值对增强规则
+        {{ it('键值对增强规则') }}
         <span class="hint">{{ it('掩除 api_key=xxx、"password": "xxx" 等键值对的值（键保留）。覆盖面广但误伤面也大——文档示例、测试夹具里的假密钥同样会被替换，模型将读到占位符而非原文，默认关闭，确认工作区无此类内容再开启。') }}</span>
       </label>
       <div class="frow">
@@ -1748,12 +1748,12 @@ const providerOptions = [
                          :status="mig?.state === 'failed' ? 'error' : 'default'" />
               <div class="hint" style="margin-top:6px">
                 <template v-if="runlogBusy">
-                  正在迁移 {{ mig?.done_runs || 0 }}/{{ mig?.total_runs || 0 }} 个 run ·
+                  {{ it('正在迁移') }} {{ mig?.done_runs || 0 }}/{{ mig?.total_runs || 0 }} {{ it('个 run') }} ·
                   {{ fmtMB(mig?.done_bytes) }}/{{ fmtMB(mig?.total_bytes) }}
-                  <template v-if="mig?.current"> · 当前 {{ mig.current }}</template>
+                  <template v-if="mig?.current"> · {{ it('当前') }} {{ mig.current }}</template>
                 </template>
                 <template v-else>
-                  迁移失败：{{ mig?.error || '未知错误' }}
+                  {{ it('迁移失败：') }}{{ mig?.error || it('未知错误') }}
                   <NButton size="tiny" type="warning" style="margin-left:8px"
                            @click="retryRunlogMigration">{{ it('重试迁移') }}</NButton>
                 </template>
@@ -1761,7 +1761,7 @@ const providerOptions = [
             </div>
             <label class="checkline">
               <NSwitch v-model:value="draft.runlog_enabled" :disabled="runlogBusy" />
-              启用运行台账
+              {{ it('启用运行台账') }}
               <span class="hint">{{ it('每个任务一轮执行生成一个 run 目录：事件流 + diff + 测试输出 + 审查结论 + 用量。用于看板「任务详情 → 运行记录」回放；关闭后不再记录，不影响任务执行。') }}</span>
             </label>
             <div class="frow">
@@ -1782,8 +1782,8 @@ const providerOptions = [
               </div>
             </div>
             <div class="hint">
-              默认不写入受管仓库；自定义目录建议放本机独立磁盘。切换目录后后台异步迁移，
-              迁移期间台账设置与回放按钮会锁定并显示进度。
+              {{ it('默认不写入受管仓库；自定义目录建议放本机独立磁盘。切换目录后后台异步迁移，') }}
+              {{ it('迁移期间台账设置与回放按钮会锁定并显示进度。') }}
             </div>
             <div class="sfoot"><NButton type="primary" :loading="runlogSaving"
                                         :disabled="runlogBusy" @click="saveRunlog">{{ it('保存运行台账设置') }}</NButton></div>
@@ -1794,7 +1794,7 @@ const providerOptions = [
             <template #header><i class="ms">savings</i> {{ it('预算与成本') }}</template>
             <label class="checkline">
               <NSwitch v-model:value="draft.budget_enabled" />
-              启用预算硬闸
+              {{ it('启用预算硬闸') }}
               <span class="hint">{{ it('超限立即停止本次执行（任务标记为受阻，原因 budget_exceeded），保留 worktree 成果；项目当日用尽后暂停领取新任务。默认关闭。') }}</span>
             </label>
             <div class="frow">
@@ -1806,8 +1806,8 @@ const providerOptions = [
                 <NInputNumber v-model:value="draft.budget_task_cost" :min="0" :max="1000000000" /></div>
             </div>
             <div class="hint">
-              成本只对配置了单价的模型计算（`budget.prices: {模型名: {prompt: 元/百万, completion: 元/百万}}`，单价表当前在 config.yaml 维护）。
-              预算超限不是失败：任务停在受阻，调高预算后重新入队即可续跑。
+              {{ it('成本只对配置了单价的模型计算（`budget.prices` 里配置 模型名→prompt 元/百万、completion 元/百万，单价表当前在 config.yaml 维护）。') }}
+              {{ it('预算超限不是失败：任务停在受阻，调高预算后重新入队即可续跑。') }}
             </div>
             <label style="margin-top:6px">{{ it('各项目今日用量') }}</label>
             <div class="budget-today">
@@ -1826,7 +1826,7 @@ const providerOptions = [
             <template #header><i class="ms">health_and_safety</i> {{ it('熔断与恢复') }}</template>
             <label class="checkline">
               <NSwitch v-model:value="draft.res_enabled" />
-              启用熔断停机
+              {{ it('启用熔断停机') }}
               <span class="hint">{{ it('连续失败或窗口失败率超阈值时，项目暂停领取新任务；正在跑的任务允许收尾。默认需要人工恢复，避免自动重启掩盖系统性故障。') }}</span>
             </label>
             <div class="frow">
@@ -1843,13 +1843,13 @@ const providerOptions = [
             </div>
             <label class="checkline">
               <NSwitch v-model:value="draft.res_auto" />
-              窗口结束后自动恢复
+              {{ it('窗口结束后自动恢复') }}
               <span class="hint">{{ it('默认关闭：熔断后必须人工点「恢复」。开启后暂停满一个窗口自动恢复一次（清空旧失败记录）。') }}</span>
             </label>
             <label style="margin-top:6px">{{ it('当前暂停的项目') }}</label>
             <div class="budget-today">
               <div v-for="p in pausedProjects" :key="p.name" class="budget-row">
-                <span class="budget-name">{{ p.name }} · {{ p.health?.pause_reason || '已暂停' }}</span>
+                <span class="budget-name">{{ p.name }} · {{ p.health?.pause_reason || it('已暂停') }}</span>
                 <NButton size="tiny" type="warning" @click="resumeProject(p.name)">{{ it('恢复') }}</NButton>
               </div>
               <div v-if="!pausedProjects.length" class="hint">{{ it('当前没有暂停的项目') }}</div>
@@ -1881,7 +1881,7 @@ const providerOptions = [
               <div v-if="!auditLoading && !auditEntries.length" class="hint">{{ it('暂无审计记录') }}</div>
             </div>
             <div class="hint">
-              只展示最近记录；完整日志在数据目录 `logs/audit.jsonl`。参数只记摘要，不记密码、API Key 或任务正文。
+              {{ it('只展示最近记录；完整日志在数据目录 `logs/audit.jsonl`。参数只记摘要，不记密码、API Key 或任务正文。') }}
             </div>
           </NCard>
         </div>
@@ -1890,13 +1890,13 @@ const providerOptions = [
             <template #header><i class="ms">rate_review</i> {{ it('任务审查（Review Agent）') }}</template>
       <label class="checkline">
         <NSwitch v-model:value="reviewDraft.enabled" />
-        启用审查（配置审查模型后即对全部项目默认生效；项目可单独关闭）
+        {{ it('启用审查（配置审查模型后即对全部项目默认生效；项目可单独关闭）') }}
       </label>
       <template v-if="reviewDraft.enabled">
         <div class="frow" style="margin-top:8px">
           <div class="f1"><label>{{ it('协议 provider') }}</label>
             <NSelect v-model:value="reviewDraft.provider" :options="[
-              { label: 'openai（兼容协议）', value: 'openai' },
+              { label: it('openai（兼容协议）'), value: 'openai' },
               { label: 'anthropic', value: 'anthropic' },
             ]" /></div>
           <div class="f2"><label>{{ it('审查模型 model（必须与任务模型不同）') }}</label>
@@ -1909,7 +1909,7 @@ const providerOptions = [
             <NInput v-model:value="reviewDraft.base_url" placeholder="https://api.deepseek.com/v1" /></div>
           <div class="f1"><label>{{ it('密钥 api_key') }}</label>
             <NInput v-model:value="reviewDraft.api_key" type="password" show-password-on="click"
-                    :placeholder="reviewKeyConfigured && reviewKeyMasked ? `已配置（${reviewKeyMasked}），留空保持原值` : '审查模型服务密钥'"
+                    :placeholder="reviewKeyConfigured && reviewKeyMasked ? tFmt('已配置（{p0}），留空保持原值', { p0: reviewKeyMasked }) : it('审查模型服务密钥')"
                     @update:value="reviewKeyTouched = true" /></div>
         </div>
         <div class="frow">
@@ -1922,12 +1922,12 @@ const providerOptions = [
         </div>
         <label class="checkline stack">
           <NSwitch v-model:value="reviewDraft.allow_test_commands" />
-          审查可执行测试命令
+          {{ it('审查可执行测试命令') }}
           <span class="hint">{{ it('审查 agent 可用 run_command 实测验证（受项目命令白名单与访问权限审批约束）；关闭=纯只读审查。') }}</span>
         </label>
         <label class="checkline stack">
           <NSwitch v-model:value="reviewDraft.squash_merge" />
-          返工通过后收敛提交
+          {{ it('返工通过后收敛提交') }}
           <span class="hint">{{ it('返工任务的多个 WIP 提交在通过审查后 merge --squash 收敛为单提交；关闭=保留 --no-ff 合并。') }}</span>
         </label>
         <div class="btnrow" style="margin-top:6px">
@@ -1946,7 +1946,7 @@ const providerOptions = [
               <NTabs v-model:value="toolsTab" type="segment" size="small" class="tools-tabs">
                 <NTabPane name="tools">
                   <template #tab>
-                    <i class="ms">handyman</i> Agent 工具能力
+                    <i class="ms">handyman</i> {{ it('Agent 工具能力') }}
                     <NTag size="tiny" round :type="toolsEnabledCount === toolsTotalCount ? 'success' : 'default'" style="margin-left: 6px;">
                       {{ toolsEnabledCount }}/{{ toolsTotalCount }}
                     </NTag>
@@ -1954,7 +1954,7 @@ const providerOptions = [
                 </NTabPane>
                 <NTabPane name="commands">
                   <template #tab>
-                    <i class="ms">terminal</i> 终端命令白名单
+                    <i class="ms">terminal</i> {{ it('终端命令白名单') }}
                     <NTag size="tiny" round :type="cmdsEnabledCount === cmdsTotalCount ? 'success' : 'warning'" style="margin-left: 6px;">
                       {{ cmdsEnabledCount }}/{{ cmdsTotalCount }}
                     </NTag>
@@ -1962,9 +1962,9 @@ const providerOptions = [
                 </NTabPane>
                 <NTabPane name="debug">
                   <template #tab>
-                    <i class="ms">language</i> 本地调试与浏览器
+                    <i class="ms">language</i> {{ it('本地调试与浏览器') }}
                     <NTag size="tiny" round :type="debugActiveCount > 0 ? 'info' : 'default'" style="margin-left: 6px;">
-                      {{ debugActiveCount > 0 ? `${debugActiveCount} 项启用` : '默认关闭' }}
+                      {{ debugActiveCount > 0 ? tFmt('{p0} 项启用', { p0: debugActiveCount }) : it('默认关闭') }}
                     </NTag>
                   </template>
                 </NTabPane>
@@ -1990,7 +1990,7 @@ const providerOptions = [
                     </div>
                     <div class="group-ops">
                       <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
-                        {{ subagentLiveLimit === null ? '尚未建立配额池' : `当前实际并发 ${subagentLiveLimit}` }}
+                        {{ subagentLiveLimit === null ? it('尚未建立配额池') : tFmt('当前实际并发 {p0}', { p0: subagentLiveLimit }) }}
                       </NTag>
                     </div>
                   </div>
@@ -2015,7 +2015,7 @@ const providerOptions = [
                     </div>
                     <div class="group-ops">
                       <NTag size="small" round :type="getGroupToolsCount(cat.tools).enabled === getGroupToolsCount(cat.tools).total ? 'success' : 'warning'">
-                        已启用 {{ getGroupToolsCount(cat.tools).enabled }} / {{ getGroupToolsCount(cat.tools).total }}
+                        {{ it('已启用') }} {{ getGroupToolsCount(cat.tools).enabled }} / {{ getGroupToolsCount(cat.tools).total }}
                       </NTag>
                       <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, true)">{{ it('全选') }}</NButton>
                       <NButton size="tiny" quaternary @click="toggleToolsGroup(cat.tools, false)">{{ it('全关') }}</NButton>
@@ -2048,14 +2048,14 @@ const providerOptions = [
                     </div>
                     <div class="group-ops">
                       <NButton size="small" type="primary" secondary @click="toolsTab = 'debug'">
-                        进入本地调试配置 ({{ debugActiveCount }} 项启用) <i class="ms sm">arrow_forward</i>
+                        {{ it('进入本地调试配置') }} ({{ tFmt('{p0} 项启用', { p0: debugActiveCount }) }}) <i class="ms sm">arrow_forward</i>
                       </NButton>
                     </div>
                   </div>
                 </div>
               </div>
               <div class="hint tool-foot" style="margin-top: 10px;">
-                * finish 为任务结束的协议工具，始终可用；各工具的「变更·需审批」与「高危·需审批」属性受「权限模式与环境」配置约束。
+                {{ it('* finish 为任务结束的协议工具，始终可用；各工具的「变更·需审批」与「高危·需审批」属性受「权限模式与环境」配置约束。') }}
               </div>
             </div>
 
@@ -2063,7 +2063,7 @@ const providerOptions = [
             <div v-show="toolsTab === 'commands'" class="tab-content">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
                 <span class="hint">
-                  按语言和技术生态细分管理默认放行的命令。关闭的命令从默认白名单移除（Agent 调 run_command 会被直接拦截）。
+                  {{ it('按语言和技术生态细分管理默认放行的命令。关闭的命令从默认白名单移除（Agent 调 run_command 会被直接拦截）。') }}
                 </span>
                 <div class="cmd-actions">
                   <NButton size="tiny" secondary @click="toggleAllCommands(true)">{{ it('全部放行') }}</NButton>
@@ -2083,7 +2083,7 @@ const providerOptions = [
                     </div>
                     <div class="group-ops">
                       <NTag size="small" round :type="getGroupCommandsCount(cat.commands).enabled === getGroupCommandsCount(cat.commands).total ? 'success' : 'warning'">
-                        已放行 {{ getGroupCommandsCount(cat.commands).enabled }} / {{ getGroupCommandsCount(cat.commands).total }}
+                        {{ it('已放行') }} {{ getGroupCommandsCount(cat.commands).enabled }} / {{ getGroupCommandsCount(cat.commands).total }}
                       </NTag>
                       <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, true)">{{ it('全选') }}</NButton>
                       <NButton size="tiny" quaternary @click="toggleCommandsGroup(cat.commands, false)">{{ it('全关') }}</NButton>
@@ -2098,7 +2098,7 @@ const providerOptions = [
                 </div>
               </div>
               <div class="hint tool-foot" style="margin-top: 10px;">
-                项目设置对话框中的「命令白名单」仍可输入指定命令列表整表替换全局默认白名单。
+                {{ it('项目设置对话框中的「命令白名单」仍可输入指定命令列表整表替换全局默认白名单。') }}
               </div>
             </div>
 
@@ -2202,7 +2202,7 @@ const providerOptions = [
                     <div class="frow">
                       <div class="f1"><label>{{ it('浏览器引擎') }}</label>
                         <NSelect v-model:value="localDebugDraft.browser" :options="[
-                          { label: 'auto（优先 Chrome，无则回退 Edge）', value: 'auto' },
+                          { label: it('auto（优先 Chrome，无则回退 Edge）'), value: 'auto' },
                           { label: 'Google Chrome', value: 'chrome' },
                           { label: 'Microsoft Edge', value: 'edge' },
                         ]" /></div>
@@ -2231,7 +2231,7 @@ const providerOptions = [
                       </div>
                     </div>
                     <div class="hint tool-foot" style="margin-top:8px; margin-bottom:0">
-                      浏览器顶层导航与 http_request 仅放行上述白名单主机；云元数据等敏感网段强制拦截；项目级设置可额外追加局域网测试机。
+                      {{ it('浏览器顶层导航与 http_request 仅放行上述白名单主机；云元数据等敏感网段强制拦截；项目级设置可额外追加局域网测试机。') }}
                     </div>
                   </div>
                 </div>
@@ -2242,7 +2242,7 @@ const providerOptions = [
             <div v-show="toolsTab === 'perms'" class="tab-content">
               <div class="group-card" style="margin-bottom: 12px; padding: 12px;">
                 <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text);">
-                  <i class="ms sm">security</i> 敏感操作访问权限模式
+                  <i class="ms sm">security</i> {{ it('敏感操作访问权限模式') }}
                 </div>
                 <div class="frow">
                   <div class="f2"><label>{{ it('访问权限模式（敏感操作是否挂起等待看板批准）') }}</label>
@@ -2251,7 +2251,7 @@ const providerOptions = [
                     <NInputNumber v-model:value="permDraft.timeout_minutes" :min="1" :max="1440" /></div>
                 </div>
                 <div class="hint pwd-hint" style="margin-top: 6px;">
-                  询问 = 任务挂起，顶栏出现「待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。
+                  {{ it('询问 = 任务挂起，顶栏出现「待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。') }}
                 </div>
               </div>
 
@@ -2267,20 +2267,20 @@ const providerOptions = [
 
               <div class="group-card" style="padding: 12px;">
                 <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text);">
-                  <i class="ms sm">terminal</i> Agent 子进程环境变量与 PATH 引导
+                  <i class="ms sm">terminal</i> {{ it('Agent 子进程环境变量与 PATH 引导') }}
                 </div>
                 <label style="font-size: 12px; color: var(--dim); margin-bottom: 4px; display: block;">{{ it('自定义环境变量（代理 / 国内镜像，每行 KEY=VALUE）') }}</label>
                 <NInput v-model:value="envDraft" type="textarea" :rows="3"
-                        placeholder="每行一个 KEY=VALUE（也接受 KEY: VALUE），例如：&#10;GOPROXY=https://goproxy.cn,direct&#10;HTTP_PROXY=http://127.0.0.1:7890" />
+                        :placeholder="it('每行一个 KEY=VALUE（也接受 KEY: VALUE），例如：') + '\nGOPROXY=https://goproxy.cn,direct\nHTTP_PROXY=http://127.0.0.1:7890'" />
                 <div class="hint tool-foot" style="margin-top: 6px;">
-                  注入 run_command 子进程：国内网络拉依赖失败时配 GOPROXY、npm registry（HTTP_PROXY）、PIP_INDEX_URL 即可；不允许覆盖 PATH/SYSTEMROOT 等系统变量。
+                  {{ it('注入 run_command 子进程：国内网络拉依赖失败时配 GOPROXY、npm registry（HTTP_PROXY）、PIP_INDEX_URL 即可；不允许覆盖 PATH/SYSTEMROOT 等系统变量。') }}
                 </div>
                 <label class="cmd-chip" style="margin-top: 6px;" :title="it('写入前备份旧值到日志，只增不删，可手动改回')">
                   <NSwitch size="small" v-model:value="pathAutofix" />
                   <span class="cmd-name">{{ it('任务启动时自动把缺失的工具目录写入用户 PATH') }}</span>
                 </label>
                 <div class="hint tool-foot" style="margin-top: 6px;">
-                  启动任务时扫描 node/npm/go/java 等常用命令：不在 PATH 的自动注入 Agent 会话并写进提示词；开启后还会把缺失目录持久写入用户 PATH。
+                  {{ it('启动任务时扫描 node/npm/go/java 等常用命令：不在 PATH 的自动注入 Agent 会话并写进提示词；开启后还会把缺失目录持久写入用户 PATH。') }}
                 </div>
               </div>
             </div>
@@ -2297,21 +2297,21 @@ const providerOptions = [
       <div class="mirror-ops">
         <NButton size="small" :loading="mirrorTesting" @click="testMirrors()">{{ it('测速全部源') }}</NButton>
         <NButton size="small" type="primary" :loading="mirrorApplying" @click="applyMirrors">
-          应用最快源到环境变量</NButton>
-        <span class="hint" v-if="mirrorTestedAt">上次测速：{{ mirrorTestedAtText }}</span>
+          {{ it('应用最快源到环境变量') }}</NButton>
+        <span class="hint" v-if="mirrorTestedAt">{{ it('上次测速：') }}{{ mirrorTestedAtText }}</span>
         <span class="hint" v-else>{{ it('尚未测速（Agent 会按内置默认顺序下载）') }}</span>
       </div>
       <div class="hint tool-foot">
-        测速 = HTTP 直连取首包（绕过系统代理，正是「无代理时」的真实速度）；结果存
-        mirror_speeds.json，Agent 的 env-setup 技能会自动带上「最快源优先」清单。
-        「应用最快源」把代理类（GOPROXY / pip index / npm registry）的冠军写进上方环境变量。
+        {{ it('测速 = HTTP 直连取首包（绕过系统代理，正是「无代理时」的真实速度）；结果存') }}
+        {{ it('mirror_speeds.json，Agent 的 env-setup 技能会自动带上「最快源优先」清单。') }}
+        {{ it('「应用最快源」把代理类（GOPROXY / pip index / npm registry）的冠军写进上方环境变量。') }}
       </div>
 
       <div v-for="cat in mirrorCategories" :key="cat.key" class="mcat">
         <div class="mcat-head">
           <span class="mcat-name">{{ cat.label }}</span>
           <NTag size="tiny" :bordered="false" :type="cat.kind === 'proxy' ? 'info' : 'default'">
-            <template v-if="cat.kind === 'proxy'"><i class="ms sm">arrow_forward</i> 可应用 {{ cat.env_var }}</template>
+            <template v-if="cat.kind === 'proxy'"><i class="ms sm">arrow_forward</i> {{ it('可应用') }} {{ cat.env_var }}</template>
             <template v-else>{{ it('下载源') }}</template></NTag>
           <NButton size="tiny" quaternary :loading="mirrorTestingCat === cat.key"
                    :disabled="mirrorTesting" @click="testMirrors(cat.key)">{{ it('只测这类') }}</NButton>
@@ -2320,7 +2320,7 @@ const providerOptions = [
           <NSwitch size="small" :value="mirrorEnabled(row.url)"
                    @update:value="(v: boolean) => toggleMirror(row.url, v)" />
           <span class="murl">{{ row.url }}</span>
-          <NTag v-if="row.builtin" size="tiny" :bordered="false">内置·{{ row.label }}</NTag>
+          <NTag v-if="row.builtin" size="tiny" :bordered="false">{{ it('内置') }}·{{ row.label }}</NTag>
           <NTag v-else size="tiny" :bordered="false" type="success">{{ it('自定义') }}</NTag>
           <NTag size="tiny" :bordered="false" :type="latencyTag(row.url).type">
             {{ latencyTag(row.url).text }}</NTag>
@@ -2337,8 +2337,8 @@ const providerOptions = [
         <NButton size="small" @click="addCustom">{{ it('添加镜像源') }}</NButton>
       </div>
       <div class="hint tool-foot">
-        添加/禁用需点下方「保存镜像源配置」生效；禁用的源不参与测速、也不会推荐给 Agent；
-        自定义源若是内网镜像通常最快，测速后自动成为首选。
+        {{ it('添加/禁用需点下方「保存镜像源配置」生效；禁用的源不参与测速、也不会推荐给 Agent；') }}
+        {{ it('自定义源若是内网镜像通常最快，测速后自动成为首选。') }}
       </div>
 
       <div class="sfoot">
@@ -2353,8 +2353,8 @@ const providerOptions = [
       <div class="frow">
         <div class="f2"><label>{{ it('模式') }}</label>
           <NSelect v-model:value="draft.egress_mode" :options="[
-            { label: 'allowlist — 只允许白名单主机（默认）', value: 'allowlist' },
-            { label: 'off — 全部放行（仅排障用）', value: 'off' },
+            { label: it('allowlist — 只允许白名单主机（默认）'), value: 'allowlist' },
+            { label: it('off — 全部放行（仅排障用）'), value: 'off' },
           ]" />
         </div>
         <div class="f1"><label>{{ it('拒绝时写审计') }}</label>
@@ -2369,23 +2369,23 @@ const providerOptions = [
           <NDynamicTags v-model:value="draft.egress_extra" :max="30"
                         :placeholder="it('api.example.com（可带 :端口；*.example.com 含子域）')" />
           <div class="hint tool-foot">
-            模型 / Issue / 镜像 / 更新源主机按各自配置自动放行，无需在此重复；
-            网页抓取要访问的文档站需在此添加。回环地址始终放行；Agent 子进程
-            （npm / pip / git）的出网不在应用层拦截范围。
+            {{ it('模型 / Issue / 镜像 / 更新源主机按各自配置自动放行，无需在此重复；') }}
+            {{ it('网页抓取要访问的文档站需在此添加。回环地址始终放行；Agent 子进程') }}
+            {{ it('（npm / pip / git）的出网不在应用层拦截范围。') }}
           </div>
         </div>
       </div>
       <div class="hint tool-foot">
-        已推导白名单（{{ (egressStatus?.derived_hosts || []).length }} 个）：
-        {{ (egressStatus?.derived_hosts || []).join('、') || '（无）' }}
+        {{ it('已推导白名单') }}（{{ (egressStatus?.derived_hosts || []).length }} {{ it('个') }}）：
+        {{ (egressStatus?.derived_hosts || []).join('、') || it('（无）') }}
       </div>
       <div v-if="egressStatus" class="hint tool-foot">
-        运行计数：放行 {{ egressStatus.allowed }} 次 / 拒绝 {{ egressStatus.denied }} 次
+        {{ it('运行计数：放行') }} {{ egressStatus.allowed }} {{ it('次 / 拒绝') }} {{ egressStatus.denied }} {{ it('次') }}
         <template v-if="egressStatus.last_denied.length">
-          ；最近拒绝：{{ egressStatus.last_denied.map(d => `${d.host}（${d.purpose}，${d.ts}）`).join('；') }}
+          {{ it('；最近拒绝：') }}{{ egressStatus.last_denied.map(d => `${d.host}（${d.purpose}，${d.ts}）`).join('；') }}
         </template>
         <template v-if="egressStatus.runtime_hosts.length">
-          ；运行时放行（更新包 CDN）：{{ egressStatus.runtime_hosts.map(h => h.host).join('、') }}
+          {{ it('；运行时放行（更新包 CDN）：') }}{{ egressStatus.runtime_hosts.map(h => h.host).join('、') }}
         </template>
       </div>
       <div class="sfoot">
@@ -2398,11 +2398,11 @@ const providerOptions = [
             <template #header><i class="ms">settings</i> {{ it('应用') }}</template>
       <label class="checkline">
         <NSwitch :value="store.state.app_autostart.enabled" @update:value="toggleAutostart" />
-        开机自动启动（写入当前用户注册表）
+        {{ it('开机自动启动（写入当前用户注册表）') }}
       </label>
       <label class="checkline" style="margin-top:10px">
         <NSwitch v-model:value="updDraft.auto_check" />
-        启动时自动检查更新（Gitee Release 源）
+        {{ it('启动时自动检查更新（Gitee Release 源）') }}
       </label>
       <div class="frow">
         <div class="f2"><label>{{ it('更新源仓库 URL（Gitee，Release 附件放安装包）') }}</label>
@@ -2410,7 +2410,7 @@ const providerOptions = [
         <div class="f1"><label>{{ it('访问 token（私有仓库用）') }}</label>
           <NInput v-model:value="updDraft.token" type="password" show-password-on="click"
                   :placeholder="updTokenConfigured
-                    ? `已配置：${updTokenMasked}（留空保持不变）` : '可选'"
+                    ? tFmt('已配置：{p0}（留空保持不变）', { p0: updTokenMasked }) : it('可选')"
                   @update:value="updTokenTouched = true" /></div>
       </div>
       <div class="sfoot">
@@ -2431,8 +2431,8 @@ const providerOptions = [
         </div>
         <div v-if="localPkg" class="pkg-meta">
           <NTag size="small" :bordered="false" :type="pkgTag.type">{{ pkgTag.text }}</NTag>
-          <span class="hint">{{ pkgName }} · 安装全程静默无 UAC，完成后页面自动刷新；
-            出错自动打开安装日志，无错误则不打开</span>
+          <span class="hint">{{ pkgName }} · {{ it('安装全程静默无 UAC，完成后页面自动刷新；') }}
+            {{ it('出错自动打开安装日志，无错误则不打开') }}</span>
         </div>
       </div>
           </NCard>

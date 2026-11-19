@@ -241,7 +241,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <div>
             <h1>{{ t('Orcsy 任务编排中心') }}</h1>
             <div class="sub" v-if="store.state">
-              v{{ store.state.version }} · 模型 {{ store.state.llm.model }}（{{ store.state.llm.provider }}）{{ store.state.llm.key_configured ? '' : ' · 未配置 api_key' }} · 配置 {{ store.state.config_path }}
+              v{{ store.state.version }} · {{ t('模型') }} {{ store.state.llm.model }}（{{ store.state.llm.provider }}）{{ store.state.llm.key_configured ? '' : t(' · 未配置 api_key') }} · {{ t('配置') }} {{ store.state.config_path }}
             </div>
           </div>
         </div>
@@ -258,10 +258,10 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <NButton v-if="pendingApprovals > 0" size="small" type="error" secondary
                    :loading="false" :title="t('Agent 有操作挂起等待人工审批，点击处理')"
                    @click="ui.approvalDlg = true">
-            <i class="ms sm">notifications</i> 待审批 {{ pendingApprovals }}
+            <i class="ms sm">notifications</i> {{ t('待审批') }} {{ pendingApprovals }}
           </NButton>
           <NButton :loading="updWorking || updating" @click="checkUpdate"
-                   :title="updPhase === 'available' ? '下载并安装新版本' : '检查是否有新版本'">
+                   :title="updPhase === 'available' ? t('下载并安装新版本') : t('检查是否有新版本')">
             <i class="ms sm">update</i> {{ updLabel }}
           </NButton>
           <NButton type="primary" :loading="scanning" @click="doScan"><i class="ms sm">play_arrow</i> {{ t('立即扫描') }}</NButton>
@@ -361,11 +361,11 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
             <button v-for="p in projectsWithoutTasks" :key="p.name" class="pick-item"
                     @click="pickProjectNewTask(p.name)">
               <span class="pick-name"><i class="ms sm">folder</i> {{ p.name }}</span>
-              <span class="pick-meta">{{ p.tasks.filter(t => t.status === 'open').length }} 待办 · {{ p.path }}</span>
+              <span class="pick-meta">{{ p.tasks.filter(t => t.status === 'open').length }} {{ t('待办') }} · {{ p.path }}</span>
             </button>
             <button v-for="p in menuProjects.filter(x => x.tasks.some(t => t.status === 'in_progress'))"
                     :key="'r' + p.name" class="pick-item running" @click="pickProjectNewTask(p.name)">
-              <span class="pick-name"><i class="ms sm">settings</i> {{ p.name }}（执行中）</span>
+              <span class="pick-name"><i class="ms sm">settings</i> {{ p.name }}（{{ t('执行中') }}）</span>
               <span class="pick-meta">{{ p.path }}</span>
             </button>
             <div v-if="!menuProjects.length" class="menu-ver">{{ t('暂无启用的项目，请先在「项目」页新建') }}</div>
@@ -376,8 +376,8 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <div v-if="updateOverlayVisible" class="upd-overlay">
         <div class="upd-box">
           <div class="upd-title">{{ t('应用正常升级中....') }}</div>
-          <div class="upd-sub">升级在后台静默进行（全程无 UAC 弹窗），应用将自动重启，
-            本页将在升级完成后自动刷新以加载新版本页面（请勿关闭本页）</div>
+          <div class="upd-sub">{{ t('升级在后台静默进行（全程无 UAC 弹窗），应用将自动重启，') }}
+            {{ t('本页将在升级完成后自动刷新以加载新版本页面（请勿关闭本页）') }}</div>
           <pre v-if="store.state?.update?.install_log_tail" class="upd-log">{{ store.state.update.install_log_tail }}</pre>
         </div>
       </div>
@@ -394,12 +394,12 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <div v-if="mobilePwdHint" class="login-pwd-hint">
             <span>{{ t('本次开启的访问密码：') }}<code>{{ mobilePwdHint }}</code>{{ t('（请保存，可稍后在设置页修改）') }}</span>
             <span class="pwd-hint-ops">
-              <NButton size="tiny" @click="navigator.clipboard.writeText(mobilePwdHint).then(() => window.$message?.('已复制密码'), () => window.$message?.('复制失败，请手动抄写'))">{{ t('复制') }}</NButton>
+              <NButton size="tiny" @click="navigator.clipboard.writeText(mobilePwdHint).then(() => window.$message?.(t('已复制密码')), () => window.$message?.('复制失败，请手动抄写'))">{{ t('复制') }}</NButton>
               <NButton size="tiny" quaternary @click="dismissMobilePwdHint">{{ t('知道了') }}</NButton>
             </span>
           </div>
           <NCheckbox v-model:checked="loginRemember" size="small" style="margin-top: 10px">
-            记住这台设备（30 天免重复登录）
+            {{ t('记住这台设备（30 天免重复登录）') }}
           </NCheckbox>
           <div v-if="loginErr" class="login-err">{{ loginErr }}</div>
           <NButton type="primary" block :loading="loginBusy" :disabled="!loginPwd"

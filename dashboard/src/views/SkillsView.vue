@@ -98,41 +98,41 @@ const projectCount = computed(() => store.state?.projects.length ?? 0)
           <NButton size="small" @click="importSkill"><i class="ms sm">upload</i> {{ t('导入本地技能') }}</NButton>
           <NButton type="primary" size="small" @click="openSkillNew">{{ t('＋ 新建技能') }}</NButton>
           <NButton v-if="checkedNames.length" size="small" type="error"
-                   @click="removeSkills(checkedNames)">删除选中（{{ checkedNames.length }}）</NButton>
+                   @click="removeSkills(checkedNames)">{{ t('删除选中') }}（{{ checkedNames.length }}）</NButton>
         </div>
       </template>
       <div class="hint">
-        技能集中存放在 {{ store.state.skills_dir }}，绝不写入项目目录。生效方式：系统提示词只注入
-        「名称+描述」索引，Agent 执行任务时按需用 read_skill 工具读取全文。
-        新建技能可选全局或绑定单个项目；当前共 {{ projectCount }} 个受管项目。
+        {{ t('技能集中存放在') }} {{ store.state.skills_dir }}，{{ t('绝不写入项目目录。生效方式：系统提示词只注入') }}
+        {{ t('「名称+描述」索引，Agent 执行任务时按需用 read_skill 工具读取全文。') }}
+        {{ t('新建技能可选全局或绑定单个项目；当前共') }} {{ projectCount }} {{ t('个受管项目。') }}
       </div>
       <div v-if="store.state.skills.length" class="sel-bar">
         <NButton size="tiny" quaternary @click="selectAll">{{ t('全选') }}</NButton>
         <NButton size="tiny" quaternary @click="invertSelect">{{ t('反选') }}</NButton>
-        <span class="sel-hint">已选 {{ checkedNames.length }} / {{ store.state.skills.length }}</span>
+        <span class="sel-hint">{{ t('已选') }} {{ checkedNames.length }} / {{ store.state.skills.length }}</span>
       </div>
       <div v-for="s in store.state.skills" :key="s.name" class="srow">
         <div class="srow-head">
           <input v-model="selected[s.name]" type="checkbox" class="pick"
-                 :title="`选中 ${s.name} 以便批量移除/删除`" />
+                 :title="tFmt('选中 {p0} 以便批量移除/删除', { p0: s.name })" />
           <NTag size="small" :bordered="false" :type="s.enabled ? 'info' : 'default'">{{ s.name }}</NTag>
           <NTag size="small" :bordered="false" :type="s.origin === 'created' ? 'primary' : 'default'"
-                :title="s.origin === 'created' ? '本程序新建：可移除或彻底删除' : '外部导入：只能移除（保留文件）'">
-            {{ s.origin === 'created' ? '自建' : '导入' }}
+                :title="s.origin === 'created' ? t('本程序新建：可移除或彻底删除') : t('外部导入：只能移除（保留文件）')">
+            {{ s.origin === 'created' ? t('自建') : t('导入') }}
           </NTag>
           <NTag size="small" :bordered="false"
                 :type="s.scope === 'global' ? 'success' : (dangling(s) ? 'warning' : 'primary')">
-            {{ s.scope === 'global' ? '全局' : `专属·${s.scope}` }}
+            {{ s.scope === 'global' ? t('全局') : t('专属') + '·' + s.scope }}
           </NTag>
           <NTag v-if="dangling(s)" size="small" type="warning" :bordered="false">{{ t('项目不存在') }}</NTag>
           <NTag v-if="s.error" size="small" type="error" :bordered="false">{{ t('解析失败') }}</NTag>
           <span class="spacer" />
-          <label class="swline" :title="s.enabled ? '已启用，点击停用' : '已停用，点击启用'">
+          <label class="swline" :title="s.enabled ? t('已启用，点击停用') : t('已停用，点击启用')">
             <NSwitch size="small" :value="s.enabled" @update:value="(v: boolean) => toggleEnabled(s, v)" />
           </label>
         </div>
         <div class="srow-meta">
-          {{ s.description || '（无描述）' }}
+          {{ s.description || t('（无描述）') }}
         </div>
         <div class="srow-path">{{ s.path }}</div>
         <div class="ops-row">
@@ -145,7 +145,7 @@ const projectCount = computed(() => store.state?.projects.length ?? 0)
         </div>
       </div>
       <div v-if="!store.state.skills.length" class="empty">
-        还没有技能：点右上「导入本地技能」选择含 SKILL.md 的目录，或「新建技能」从零开始
+        {{ t('还没有技能：点右上「导入本地技能」选择含 SKILL.md 的目录，或「新建技能」从零开始') }}
       </div>
     </NCard>
   </div>

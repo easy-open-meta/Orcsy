@@ -116,7 +116,7 @@ const heat = computed(() => {
   <div class="usage" v-if="store.state">
     <div class="ubar">
       <span class="uhint">{{ t('tokens 单位') }}</span>
-      <div class="useg" role="group" aria-label="tokens 单位">
+      <div class="useg" role="group" :aria-label="t('tokens 单位')">
         <button type="button" :class="{ on: unit === 'zh' }"
                 :aria-pressed="unit === 'zh'" @click="setUnit('zh')">{{ t('万 / 亿') }}</button>
         <button type="button" :class="{ on: unit === 'en' }"
@@ -132,10 +132,10 @@ const heat = computed(() => {
         <div class="usub">{{ t('Agent 工具循环轮次') }}</div></div>
       <div class="ucard"><div class="ulabel">{{ t('输入 tokens') }}</div>
         <div class="uval">{{ fmt(usage?.total.prompt_tokens) }}</div>
-        <div class="usub">精确值 {{ fmtFull(usage?.total.prompt_tokens) }}</div></div>
+        <div class="usub">{{ t('精确值') }} {{ fmtFull(usage?.total.prompt_tokens) }}</div></div>
       <div class="ucard"><div class="ulabel">{{ t('输出 tokens') }}</div>
         <div class="uval">{{ fmt(usage?.total.completion_tokens) }}</div>
-        <div class="usub">精确值 {{ fmtFull(usage?.total.completion_tokens) }}</div></div>
+        <div class="usub">{{ t('精确值') }} {{ fmtFull(usage?.total.completion_tokens) }}</div></div>
     </div>
 
     <NCard size="small" class="scard">
@@ -207,7 +207,7 @@ const heat = computed(() => {
         </div>
         <div class="hm-body">
           <div class="hm-rl">
-            <span v-for="(lb, i) in ['周一', '', '周三', '', '周五', '', '']" :key="i">{{ lb }}</span>
+            <span v-for="(lb, i) in [t('周一'), '', t('周三'), '', t('周五'), '', '']" :key="i">{{ lb }}</span>
           </div>
           <div class="hm-grid">
             <div v-for="(c, i) in heat.cols" :key="i" class="hm-col">
@@ -218,10 +218,10 @@ const heat = computed(() => {
           </div>
         </div>
         <div class="hm-legend">
-          少
+          {{ t('少') }}
           <i class="hm-cell hm-l0"></i><i class="hm-cell hm-l1"></i><i class="hm-cell hm-l2"></i>
           <i class="hm-cell hm-l3"></i><i class="hm-cell hm-l4"></i>
-          多
+          {{ t('多') }}
         </div>
       </div>
       <div v-else class="uempty">{{ t('暂无用量数据。') }}</div>
@@ -232,11 +232,11 @@ const heat = computed(() => {
       <template #header-extra>
         <div class="rec-tabs">
           <button class="rtab" :class="{ on: recTab === 'all' }" @click="recTab = 'all'">
-            全部 {{ recentRows.length }}</button>
+            {{ t('全部') }} {{ recentRows.length }}</button>
           <button class="rtab" :class="{ on: recTab === 'task' }" @click="recTab = 'task'">
-            任务 {{ taskCount }}</button>
+            {{ t('任务') }} {{ taskCount }}</button>
           <button class="rtab" :class="{ on: recTab === 'review' }" @click="recTab = 'review'">
-            审查 {{ reviewCount }}</button>
+            {{ t('审查') }} {{ reviewCount }}</button>
         </div>
       </template>
       <table class="utable" v-if="filteredRecent.length">

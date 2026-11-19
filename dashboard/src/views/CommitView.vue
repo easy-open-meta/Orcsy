@@ -247,9 +247,9 @@ async function submit(): Promise<void> {
     <div class="chead">
       <div class="cleft">
         <NButton size="small" quaternary @click="backToProjects"><i class="ms sm">arrow_back</i> {{ t('返回项目') }}</NButton>
-        <span class="ctitle">人工把关提交 · {{ projectName || '（未知项目）' }}</span>
+        <span class="ctitle">{{ t('人工把关提交') }} · {{ projectName || t('（未知项目）') }}</span>
         <NTag v-if="files.length" size="small" type="info" :bordered="false">
-          {{ files.length }} 个改动文件
+          {{ files.length }} {{ t('个改动文件') }}
         </NTag>
       </div>
       <span v-if="project" class="hint">{{ t('确认无误后以规范 commit 提交至当前主分支（可选推送）') }}</span>
@@ -267,15 +267,15 @@ async function submit(): Promise<void> {
       <div class="cbody">
         <aside class="cfiles">
           <div class="cfiles-head">
-            <span>改动文件（{{ files.length }}）</span>
+            <span>{{ t('改动文件') }}（{{ files.length }}）</span>
             <span class="cfile-actions">
               <NButton v-if="suggestedTemp.length" size="tiny" quaternary type="warning"
-                       :title="`识别到 ${suggestedTemp.length} 个临时/测试产物，一键排除不提交`"
-                       @click="excludeSuggestedTemp">排除临时产物 {{ suggestedTemp.length }}</NButton>
+                       :title="tFmt('识别到 {p0} 个临时/测试产物，一键排除不提交', { p0: suggestedTemp.length })"
+                       @click="excludeSuggestedTemp">{{ t('排除临时产物') }} {{ suggestedTemp.length }}</NButton>
               <NButton v-if="suggestedTemp.length" size="tiny" quaternary type="error"
                        :loading="discarding.length > 0"
-                       :title="`删除 ${suggestedTemp.length} 个临时/测试产物（未跟踪物理删除，已跟踪还原）`"
-                       @click="confirmDiscard(suggestedTemp, true)">删除临时产物 {{ suggestedTemp.length }}</NButton>
+                       :title="tFmt('删除 {p0} 个临时/测试产物（未跟踪物理删除，已跟踪还原）', { p0: suggestedTemp.length })"
+                       @click="confirmDiscard(suggestedTemp, true)">{{ t('删除临时产物') }} {{ suggestedTemp.length }}</NButton>
               <NButton v-if="excludedList.length" size="tiny" quaternary
                        @click="includeAll">{{ t('全部包含') }}</NButton>
             </span>
@@ -286,9 +286,9 @@ async function submit(): Promise<void> {
             <span class="cfile-name">{{ f }}</span>
             <NButton size="tiny" quaternary class="ex-btn"
                      :type="excluded[f] ? 'primary' : 'warning'"
-                     :title="excluded[f] ? '恢复：将纳入本次提交' : '排除：不纳入本次提交（保留在工作区）'"
+                     :title="excluded[f] ? t('恢复：将纳入本次提交') : t('排除：不纳入本次提交（保留在工作区）')"
                      @click.stop="toggleExclude(f)">
-              {{ excluded[f] ? '恢复' : '排除' }}
+              {{ excluded[f] ? t('恢复') : t('排除') }}
             </NButton>
             <NButton size="tiny" quaternary type="error" class="ex-btn"
                      :loading="discarding.includes(f)"
@@ -298,38 +298,38 @@ async function submit(): Promise<void> {
         </aside>
         <main class="cdiff">
           <div class="cdiff-head">
-            <span class="cdiff-name">{{ selected || '选择左侧文件查看 diff' }}</span>
+            <span class="cdiff-name">{{ selected || t('选择左侧文件查看 diff') }}</span>
             <NTag v-if="selected && excluded[selected]" size="small" type="warning" :bordered="false">
-              已排除（不提交）
+              {{ t('已排除（不提交）') }}
             </NTag>
             <NSpin v-if="loading" size="small" />
             <template v-if="selected && diffCache[selected] !== undefined">
               <span class="cdiff-stat" v-if="curMeta">
-                {{ curMeta.lines.toLocaleString() }} 行 · {{ (curMeta.totalChars / 1024).toFixed(1) }} KB
+                {{ curMeta.lines.toLocaleString() }} {{ t('行') }} · {{ (curMeta.totalChars / 1024).toFixed(1) }} KB
               </span>
               <NButton size="tiny" quaternary :type="wrapLines ? 'primary' : 'default'"
-                       :title="wrapLines ? '当前：长行自动折行（点击切换为横向滚动）' : '当前：不折行（点击切换为自动折行）'"
+                       :title="wrapLines ? t('当前：长行自动折行（点击切换为横向滚动）') : t('当前：不折行（点击切换为自动折行）')"
                        @click="wrapLines = !wrapLines">{{ t('自动换行') }}</NButton>
               <NButton size="tiny" quaternary :title="t('下载当前文件的完整补丁（.patch）')"
                        @click="downloadPatch">{{ t('下载补丁') }}</NButton>
             </template>
           </div>
           <div v-if="curMeta?.truncated" class="cdiff-trunc">
-            <i class="ms sm">warning</i> 该文件改动较大（共 {{ curMeta.totalChars.toLocaleString() }} 字符），预览已截断；
-            可点右上「下载补丁」查看完整 diff。
+            <i class="ms sm">warning</i> {{ t('该文件改动较大') }}（{{ t('共') }} {{ curMeta.totalChars.toLocaleString() }} {{ t('字符') }}），{{ t('预览已截断；') }}
+            {{ t('可点右上「下载补丁」查看完整 diff。') }}
           </div>
           <div class="cdiff-body">
             <div v-if="loadErr" class="err">{{ loadErr }}</div>
             <pre v-else-if="selected && diffCache[selected] !== undefined"
                  class="cdiff-pre" :class="{ wrap: wrapLines }">{{ diffCache[selected] }}</pre>
-            <div v-else class="cdiff-hint">{{ loading ? '正在加载 diff…' : '选择左侧文件查看该文件的未提交改动 diff' }}</div>
+            <div v-else class="cdiff-hint">{{ loading ? t('正在加载 diff…') : t('选择左侧文件查看该文件的未提交改动 diff') }}</div>
           </div>
         </main>
       </div>
 
       <div class="cfoot">
         <div v-if="excludedList.length" class="exclude-note">
-          <i class="ms sm">warning</i> 已排除 {{ excludedList.length }} 个文件不纳入本次提交（保留在工作区）：
+          <i class="ms sm">warning</i> {{ t('已排除') }} {{ excludedList.length }} {{ t('个文件不纳入本次提交（保留在工作区）：') }}
           <span class="exclude-names">{{ excludedList.join('、') }}</span>
         </div>
         <div class="cfoot-row">
@@ -347,7 +347,7 @@ async function submit(): Promise<void> {
             <span>{{ t('同时推送到远程仓库 (git push origin)') }}</span>
           </label>
           <div class="spacer" />
-          <span class="commit-count">将提交 {{ includedList.length }} 个文件</span>
+          <span class="commit-count">{{ t('将提交') }} {{ includedList.length }} {{ t('个文件') }}</span>
           <NButton @click="backToProjects">{{ t('取消') }}</NButton>
           <NButton type="primary" :loading="form.submitting"
                    :disabled="!includedList.length" @click="submit">{{ t('确认提交主分支') }}</NButton>

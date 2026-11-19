@@ -51,7 +51,7 @@ function stats(p: ProjectT): string {
   if (c.open) parts.push(tFmt('{p0} 待办', { p0: c.open }))
   if (c.in_progress) parts.push(tFmt('{p0} 执行中', { p0: c.in_progress }))
   if (c.blocked) parts.push(tFmt('{p0} 受阻', { p0: c.blocked }))
-  return parts.join(' · ') || '无待办'
+  return parts.join(' · ') || it('无待办')
 }
 
 // 任务是否有挂起的人工审批（行内「⏸ 待审批」标签）
@@ -365,7 +365,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
 <template>
   <div class="projpage">
     <div class="head" v-if="store.state">
-      <span class="hint">共 {{ total }} 个受管项目 · 每页 {{ PAGE_SIZE }} 个，翻页按需渲染</span>
+      <span class="hint">{{ tFmt('共 {p0} 个受管项目 · 每页 {p1} 个，翻页按需渲染', { p0: total, p1: PAGE_SIZE }) }}</span>
     </div>
     <div v-if="store.state && !total" class="empty">
       <NEmpty :description="it('还没有项目，点右上「＋ 新建项目」添加')" />
@@ -378,19 +378,19 @@ async function quickAdd(p: ProjectT): Promise<void> {
           <div class="phead">
             <NSwitch size="small" :value="p.enabled" @update:value="(v: boolean) => toggleProject(p, v)" />
             <NTag size="small" :type="p.is_git_repo ? 'default' : 'warning'" :bordered="false">
-              {{ p.is_git_repo ? 'git' : '非 git' }}
+              {{ p.is_git_repo ? 'git' : it('非 git') }}
             </NTag>
             <NTag v-if="p.nested_gitlinks?.length" size="small" type="info" :bordered="false"
-                  :title="`含嵌套 Git 仓库：${p.nested_gitlinks.join('、')}；已回退主工作区串行模式，改动需在子仓库内提交`">
-              嵌套仓库 ({{ p.nested_gitlinks.length }})
+                  ":title="tFmt('含嵌套 Git 仓库：{p0}；已回退主工作区串行模式，改动需在子仓库内提交', { p0: p.nested_gitlinks.join('、') })">
+              {{ it('嵌套仓库') }} ({{ p.nested_gitlinks.length }})
             </NTag>
             <NTag v-if="p.budget_paused" size="small" type="warning" :bordered="false"
                   :title="it('项目今日 token 预算已用尽，暂停领取新任务；调高预算或等次日恢复')">
-              预算暂停
+              {{ it('预算暂停') }}
             </NTag>
             <NTag v-if="p.health?.paused" size="small" type="error" :bordered="false"
-                  :title="p.health?.pause_reason || '项目已熔断暂停'">
-              已熔断
+                  :title="p.health?.pause_reason || it('项目已熔断暂停')">
+              {{ it('已熔断') }}
             </NTag>
             <NButton v-if="p.health?.paused" size="tiny" type="warning" secondary
                      @click="resumePaused(p.name)">{{ it('恢复') }}</NButton>
@@ -399,28 +399,28 @@ async function quickAdd(p: ProjectT): Promise<void> {
                      @click="refreshGit(p)"><i class="ms sm">refresh</i></NButton>
             <NTag v-if="!p.guide_exists" size="small" type="error" :bordered="false">{{ it('缺指引') }}</NTag>
             <NTag v-if="p.team_enabled" size="small" type="info" :bordered="false"
-                  :title="'已启用项目小组：' + (p.team_members_effective?.map(m => m.name).join('、') || '')">
-              <i class="ms sm">group</i> 小组 ({{ p.team_members_effective?.length || 0 }})
+                  :title="it('已启用项目小组：') + (p.team_members_effective?.map(m => m.name).join('、') || '')">
+              <i class="ms sm">group</i> {{ it('小组') }} ({{ p.team_members_effective?.length || 0 }})
             </NTag>
             <NButton v-if="p.pending_git_changes && p.pending_git_changes.count > 0"
                      size="tiny" type="warning" secondary
                      :title="it('主工作区有已通过测试但未提交的变更，点此人工把关确认提交')"
                      @click="openCommitDlg(p.name)">
-              待人工提交 ({{ p.pending_git_changes.count }})
+              {{ it('待人工提交') }} ({{ p.pending_git_changes.count }})
             </NButton>
             <NTag v-if="p.review?.warning" size="small" type="error" :bordered="false"
                   :title="p.review.warning">{{ it('审查模型冲突') }}</NTag>
             <NTag v-else-if="p.review?.model_configured && p.review?.enabled_effective"
                   size="small" type="success" :bordered="false"
-                  :title="`审查模型 ${p.review.effective_model} · 返工上限 ${p.review.effective_max_rounds} 次`">
-              审查开启</NTag>
+                  :title="tFmt('审查模型 {p0} · 返工上限 {p1} 次', { p0: p.review.effective_model, p1: p.review.effective_max_rounds })">
+              {{ it('审查开启') }}</NTag>
             <NTag v-else-if="p.review_enabled === false || (p.review?.enabled_effective === false && p.review?.model_configured)"
                   size="small" :bordered="false"
                   :title="it('本项目已关闭审查门（跟随关闭优先于全局开关）')">{{ it('审查关闭') }}</NTag>
             <NTag v-if="p.issue_auto_pull" size="small" :bordered="false"
                   :type="p.issue_auto_pull.last_error ? 'error' : 'success'"
                   :title="p.issue_auto_pull.last_error || undefined">
-              自动拉取 {{ Math.round(p.issue_auto_pull.interval / 60) }}min
+              {{ it('自动拉取') }} {{ Math.round(p.issue_auto_pull.interval / 60) }}min
             </NTag>
           </div>
         </template>
@@ -448,14 +448,14 @@ async function quickAdd(p: ProjectT): Promise<void> {
         </div>
 
         <button type="button" class="tasklist-toggle" :aria-expanded="isTaskListOpen(p)"
-                :title="isTaskListOpen(p) ? '收起任务列表' : '展开任务列表'"
+                :title="isTaskListOpen(p) ? it('收起任务列表') : it('展开任务列表')"
                 @click="toggleTaskList(p)">
           <i class="ms sm tasklist-chev" :class="{ open: isTaskListOpen(p) }">{{ isTaskListOpen(p) ? 'expand_less' : 'expand_more' }}</i>
           <span class="tasklist-title">{{ it('任务列表') }}</span>
           <span class="tasklist-count">
             {{ it('待办') }} {{ p.tasks.length }}<template v-if="p.parse_errors.length"> · {{ it('异常') }} {{ p.parse_errors.length }}</template>
           </span>
-          <span class="tasklist-hint">{{ isTaskListOpen(p) ? '收起' : '展开' }}</span>
+          <span class="tasklist-hint">{{ isTaskListOpen(p) ? it('收起') : it('展开') }}</span>
         </button>
 
         <template v-if="isTaskListOpen(p)">
@@ -463,14 +463,14 @@ async function quickAdd(p: ProjectT): Promise<void> {
           <NCheckbox size="small" :checked="pageAllChecked(p)" :indeterminate="pageSomeChecked(p)"
                      @update:checked="(v: boolean) => checkAllPage(p, v)">{{ it('全选本页') }}</NCheckbox>
           <template v-if="checkedIds(p.name).length">
-            <span class="hint">已选 {{ checkedIds(p.name).length }} 个</span>
+            <span class="hint">{{ it('已选') }} {{ checkedIds(p.name).length }} {{ it('个') }}</span>
             <NButton size="tiny" type="error" :loading="batchDeleting === p.name"
                      @click="batchDel(p)">{{ it('批量删除') }}</NButton>
             <NButton size="tiny" quaternary @click="clearChecked(p.name)">{{ it('取消选择') }}</NButton>
           </template>
           <span class="batchbar-spacer" />
           <NButton size="tiny" type="warning" :loading="clearing === p.name"
-                   @click="clearTasks(p)">清空任务（{{ p.tasks.length }}）</NButton>
+                   @click="clearTasks(p)">{{ it('清空任务') }}（{{ p.tasks.length }}）</NButton>
         </div>
 
         <div class="tasks">
@@ -490,7 +490,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
                @dragstart="onDragStart($event, tk)" @dragend="onDragEnd()"
                @dragover.prevent="onDragOver($event, tk)" @drop.prevent="onDrop(p, tk)">
             <div class="t-main clickable"
-                 :title="tk.status === 'open' ? '点击编辑任务内容' : '点击查看任务内容（只读）'"
+                 :title="tk.status === 'open' ? it('点击编辑任务内容') : it('点击查看任务内容（只读）')"
                  @click="clickTask(p.name, tk)">
               <span class="tcheck" @click.stop>
                 <NCheckbox size="small" :checked="isTaskChecked(p.name, tk.id)"
@@ -500,38 +500,38 @@ async function quickAdd(p: ProjectT): Promise<void> {
                     :bordered="false">{{ tk.priority }}</NTag>
               <span class="title" :title="tk.title">{{ tk.title }}</span>
               <NTag size="small" :type="ST_TYPE[tk.status] || 'default'" :bordered="false">
-                {{ ST_NAME[t.status] || tk.status }}
+                {{ ST_NAME[tk.status] || tk.status }}
               </NTag>
               <NTag v-if="tk.assignee" size="small" type="info" :bordered="false">
                 {{ roleBadgeText(tk.assignee) }}
               </NTag>
               <NTag v-if="tk.dep_state === 'waiting'" size="small" :bordered="false"
                     :title="it('等待前置依赖任务完成')">
-                <i class="ms sm">hourglass_top</i> 等待前置 ({{ tk.dep_done_count }}/{{ tk.dep_total_count }})
+                <i class="ms sm">hourglass_top</i> {{ it('等待前置') }} ({{ tk.dep_done_count }}/{{ tk.dep_total_count }})
               </NTag>
               <NTag v-else-if="tk.dep_state === 'upstream_blocked'" size="small" type="error" :bordered="false"
                     :title="it('前置依赖任务存在受阻/取消')">
-                <i class="ms sm">warning</i> 前置受阻
+                <i class="ms sm">warning</i> {{ it('前置受阻') }}
               </NTag>
               <NTag v-if="(tk.qa_round || 0) > 0" size="small" type="warning" :bordered="false">
-                <i class="ms sm">autorenew</i> 回归 #{{ tk.qa_round }}
+                <i class="ms sm">autorenew</i> {{ it('回归') }} #{{ tk.qa_round }}
               </NTag>
               <NTag v-if="tk.review_pending" size="small" type="info" :bordered="false"
                     :title="it('任务已完成，独立审查进行中或等待补审；审查通过后合并归档')">
-                <i class="ms sm">rate_review</i> 待审查
+                <i class="ms sm">rate_review</i> {{ it('待审查') }}
               </NTag>
               <NTag v-else-if="(tk.review_round || 0) > 0 && tk.status !== 'done' && tk.status !== 'cancelled'"
                     size="small" type="warning" :bordered="false"
-                    :title="`已被审查退回 ${tk.review_round} 次（返工轮）`">
-                <i class="ms sm">rate_review</i> 返工 ×{{ tk.review_round }}
+                    :title="tFmt('已被审查退回 {p0} 次（返工轮）', { p0: tk.review_round })">
+                <i class="ms sm">rate_review</i> {{ it('返工') }} ×{{ tk.review_round }}
               </NTag>
               <NTag v-if="waitingApproval(p.name, tk.id)" size="small" type="warning"
                     :bordered="false" :title="it('Agent 有操作挂起等待人工审批，点顶栏「待审批」处理')">
-                <i class="ms sm">pause_circle</i> 待审批
+                <i class="ms sm">pause_circle</i> {{ it('待审批') }}
               </NTag>
             </div>
             <div class="t-meta">
-              {{ tk.id }}<template v-if="tk.labels.length"> · {{ tk.labels.join(', ') }}</template><template v-if="tk.assignee"> · 角色 {{ tk.assignee }}</template><template v-if="tk.depends_on && tk.depends_on.length"> · 前置 {{ tk.depends_on.join(', ') }}</template>
+              {{ tk.id }}<template v-if="tk.labels.length"> · {{ tk.labels.join(', ') }}</template><template v-if="tk.assignee"> · {{ it('角色') }} {{ tk.assignee }}</template><template v-if="tk.depends_on && tk.depends_on.length"> · {{ it('前置') }} {{ tk.depends_on.join(', ') }}</template>
             </div>
             <details v-if="tk.description" class="tdesc">
               <summary>{{ it('描述') }}</summary>
@@ -550,7 +550,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
           </div>
 
           <div v-if="!p.tasks.length && !p.parse_errors.length" class="empty">
-            暂无任务 · 点项目卡下方「新建任务」添加
+            {{ it('暂无任务 · 点项目卡下方「新建任务」添加') }}
           </div>
           <NPagination v-if="taskTotal(p) > TASK_PAGE_SIZE" size="small"
                        :page="curPage(p)" :page-count="totalPages(p)"
@@ -561,7 +561,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
         <details v-if="p.archived.length" class="arch">
           <summary>
             <span class="arch-title">{{ it('已归档') }}</span>
-            <span class="arch-count">{{ p.archived.length }} 个任务</span>
+            <span class="arch-count">{{ p.archived.length }} {{ it('个任务') }}</span>
             <span class="arch-hint" />
           </summary>
           <div v-for="tk in [...p.archived].reverse()" :key="tk.id" class="task">
