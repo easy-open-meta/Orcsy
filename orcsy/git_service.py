@@ -31,9 +31,13 @@ _PENDING_REFRESH_AFTER = 3.0
 
 
 def invalidate_pending_cache(name: str) -> None:
-    """项目 git 状态被写操作（提交/丢弃/初始化）改变后失效缓存。"""
+    """项目 git 状态被写操作（提交/丢弃/初始化）改变后失效缓存。
+
+    按名字前缀清理：缓存 key 为「name:path」，调用方只知项目名，
+    须清掉该名字下所有路径的条目。"""
     with _pending_lock:
-        _pending_cache.pop(name, None)
+        for key in [k for k in _pending_cache if k.startswith(name + ":")]:
+            _pending_cache.pop(key, None)
 
 
 def _compute_pending(agent) -> dict:
@@ -183,10 +187,15 @@ def pending_changes(agent) -> dict:
     if not name:
         return _compute_pending(agent)
 
+    # 缓存 key = 项目名 + 绝对路径：同项目名但目录移动/改名（看板保存时改
+    # path）后，旧目录的缓存是陈旧数据，只按名做 key 会在 3 秒内返回
+    # 旧目录的探测结果（曾导致串跑的 web 测试同一项目名命中错误缓存）
+    cache_key = f"{name}:{Path(agent.project.path).resolve()}"
+
     now = time.monotonic()
     with _pending_lock:
         # 缓存条目结构：(时间戳 monotonic, 结果 dict)
-        cached = _pending_cache.get(name)
+        cached = _pending_cache.get(cache_key)
 
     if cached is not None and now - cached[0] <= _PENDING_REFRESH_AFTER:
         return cached[1]
@@ -199,7 +208,7 @@ def pending_changes(agent) -> dict:
         result = {"is_git": True, "count": 0, "files": [], "repos": [],
                   "errors": [str(e)]}
     with _pending_lock:
-        _pending_cache[name] = (now, result)
+        _pending_cache[cache_key] = (now, result)
     return result
 
 
