@@ -4,9 +4,9 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.26.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.27.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
-> **v0.26.0 highlights**: a **first-launch onboarding tour** (7 animated steps, incl. the LLM & team setup step) walks new users through the dashboard; the **archive list is now visible on mobile / narrow windows**; dashboard state is much faster (nested-repo git probe cache, ~0.9s → ~0.17s); a full i18n sweep cleared residual Chinese across all pages and overhauled the Traditional Chinese pack; also fixes the projects-page crash, settings group labels not switching language, and the mobile-connect dialog close button.
+<strong>v0.27.0 highlights</strong>: new <code>llm.extra_body</code> passthrough and a text tool-protocol fallback (<code>tool_protocol: text</code>) — tasks now complete even on relays whose server-side parser conflicts with reasoning output (inline <code>think</code> triggering parse 400s); text-protocol robustness fixes (double-escape repair, truncated-thinking recovery); pytest baked into the Docker image so Python projects test out of the box; guide section 4.4.1 on custom tool volume mounts / env.vars injection.
 >
 > ℹ️ The dashboard UI is fully translated (zh / zh-TW / en). Backend-returned dynamic messages (e.g. update progress, pause reasons) remain in the original language for now.
 

@@ -178,9 +178,9 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <p>For first-time, non-technical users: install Orcsy, connect a
 project, create tasks, and understand every part of the dashboard —
 without needing to write code.</p>
-<p>Version: <strong>0.26.0</strong>　|　Default dashboard: <strong><a
+<p>Version: <strong>0.27.0</strong>　|　Default dashboard: <strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
-<p><strong>v0.26.0 highlights</strong>: a first-launch onboarding tour (7 animated steps, incl. the LLM &amp; team setup step); the archive list is now visible on mobile / narrow windows; dashboard state is much faster (git probe cache, ~0.9s to ~0.17s); a full i18n sweep across all pages plus fixes for the projects/settings page crashes and the mobile-connect dialog close button.</p>
+<strong>v0.27.0 highlights</strong>: new <code>llm.extra_body</code> passthrough and a text tool-protocol fallback (<code>tool_protocol: text</code>) — tasks now complete even on relays whose server-side parser conflicts with reasoning output (inline <code>think</code> triggering parse 400s); text-protocol robustness fixes (double-escape repair, truncated-thinking recovery); pytest baked into the Docker image so Python projects test out of the box; guide section 4.4.1 on custom tool volume mounts / env.vars injection.
 </blockquote>
 <hr />
 <h2 id="1-quick-start-your-first-task-in-5-minutes">1. Quick start: your
@@ -396,7 +396,7 @@ required, but then you lose automatic commit/merge).</li>
 </ul>
 <h4 id="steps">Steps</h4>
 <ol type="1">
-<li>Download <code>orcsy-setup-0.26.0-windows-amd64.exe</code> from the release page:
+<li>Download <code>orcsy-setup-0.27.0-windows-amd64.exe</code> from the release page:
 <ul>
 <li>Gitee: <a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -776,7 +776,7 @@ change.</strong></li>
 <h3 id="55-save">5.5 Save</h3>
 <p>Click <strong>Save model settings</strong>. The top bar will show the
 current model, for example:</p>
-<pre><code>v0.26.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.27.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>If it says <strong>api_key not configured</strong>, the key was not
 saved. Go back and check.</p>
 <hr />
