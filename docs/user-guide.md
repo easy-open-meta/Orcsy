@@ -721,7 +721,7 @@ Shows only the managed project cards (6 per page, paginated with lazy rendering)
 A two-level menu on the left (click a category to expand; the right side shows only the selected item), grouped by purpose:
 
 1. **🤖 Models & team**: LLM access, multi-model Team, task review (Review Agent);
-2. **⏱ Runtime & cost**: scheduler & dashboard (interval, parallelism, port, log retention, login password), budget & cost, circuit breaker & recovery;
+2. **⏱ Runtime & cost**: scheduler & dashboard (interval, parallelism, port, log retention), budget & cost, circuit breaker & recovery;
 3. **🛡 Data & compliance**: data masking, run ledger, audit log;
 4. **🛠 Tools & network**: Agent tools & permissions (approval mode, tool switches, command whitelist, environment variables, PATH auto-fix), mirror management & speed test, egress allowlist;
 5. **🔔 Notifications & app**: notifications, app (autostart, auto-update check, update source, manual package import).
