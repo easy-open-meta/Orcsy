@@ -1866,7 +1866,7 @@ const protocolOptions = computed(() => [
               </div>
             </template>
             <span class="hint">{{ it('限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；厂商不公开并发上限，撞 429 自动对半降并发，成功后逐步爬回。保存后立即生效。') }}</span>
-            <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-end; margin-top:12px;">
+            <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-end; margin-top:12px; margin-bottom:14px;">
               <div class="f1" style="margin:0;">
                 <label>{{ it('最大并发请求数（1~16，同一模型+密钥共享）') }}</label>
                 <NInputNumber v-model:value="subagentDraft.max_parallel" :min="1" :max="16" style="width: 160px;" />
