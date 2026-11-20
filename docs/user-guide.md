@@ -260,6 +260,38 @@ Important rules:
 - Stop: `docker compose down`;
 - Upgrade: back up `./orcsy-data`, pull the new source, then `docker compose up -d --build`.
 
+#### 4.4.1 Providing build/test tools for Agents (volume mounts / env.vars)
+
+All tools Agents use to run tests and builds live inside the container. Three ways to fill the gaps:
+
+**(1) Volume mounts (self-contained tools)** — edit `volumes` in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - ./orcsy-data:/data
+  - ./projects:/projects
+  - ./team-tools:/usr/local/bin/team-tools   # custom tool directory
+```
+
+- Command execution automatically appends common dirs to `PATH`: `/usr/local/bin`, `/usr/local/go/bin`, `/opt/homebrew/bin`, etc. Put (or symlink) executables under `/usr/local/bin` and Agents can call them by bare name;
+- Mounting elsewhere also works — Agents call tools by absolute path (they can browse the container filesystem);
+- Best for self-contained binaries: Node.js, Go toolchains, JDK, single-file test runners.
+
+**(2) env.vars injection** — any key/value pairs in `env.vars` of `config.yaml` (or Settings → Environment) are injected into every Agent subprocess (command execution, tests, builds, subagents), overriding defaults:
+
+```yaml
+env:
+  vars:
+    JAVA_HOME: /opt/jdk
+    PATH: /opt/team-tools:/usr/local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+Note `PATH` is **replaced wholesale** (no `$PATH` expansion) — write it out in full. Dashboard saves take effect immediately.
+
+**(3) Let the Agent install it (env-setup skill)** — configure nothing; when a tool is missing the Agent installs it per task: precheck → mirror speed-test → install → PATH fix → verify. Quite reliable with mainstream models.
+
+**Boundary note**: volume mounts suit **self-contained binaries**. **Python package tools (pytest etc.) cannot be mounted from the host** — the interpreter and site-packages do not match across the container boundary, so imports fail. For Python tools, in order of preference: extend the image (`FROM orcsy:latest` then `RUN pip install pytest ...`; cleanest for team standardization) → let env-setup install it on the spot → install manually in the container (`docker exec -it orcsy sh -c "python -m ensurepip -q; pip install -q pytest"`; the venv has no pip by default, hence ensurepip; reinstall after container recreation).
+
 ### 4.5 Option 4: Linux systemd service
 
 Prerequisites: Linux server, root access, `git` installed.

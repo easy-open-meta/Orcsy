@@ -562,6 +562,29 @@ repository;</li>
 <li>Upgrade: back up <code>./orcsy-data</code>, pull the new source,
 then <code>docker compose up -d --build</code>.</li>
 </ul>
+<h4 id="441-providing-buildtest-tools-for-agents-volume-mounts--envvars">4.4.1 Providing build/test tools for Agents (volume mounts / env.vars)</h4>
+<p>All tools Agents use to run tests and builds live inside the container. Three ways to fill the gaps:</p>
+<p><strong>(1) Volume mounts (self-contained tools)</strong> — edit <code>volumes</code> in <code>docker-compose.yml</code>:</p>
+<pre class="yaml"><code>volumes:
+  - ./orcsy-data:/data
+  - ./projects:/projects
+  - ./team-tools:/usr/local/bin/team-tools   # custom tool directory
+</code></pre>
+<ul>
+<li>Command execution automatically appends common dirs to <code>PATH</code>: <code>/usr/local/bin</code>, <code>/usr/local/go/bin</code>, <code>/opt/homebrew/bin</code>, etc. Put (or symlink) executables under <code>/usr/local/bin</code> and Agents can call them by bare name;</li>
+<li>Mounting elsewhere also works — Agents call tools by absolute path (they can browse the container filesystem);</li>
+<li>Best for self-contained binaries: Node.js, Go toolchains, JDK, single-file test runners.</li>
+</ul>
+<p><strong>(2) env.vars injection</strong> — any key/value pairs in <code>env.vars</code> of <code>config.yaml</code> (or Settings → Environment) are injected into every Agent subprocess (command execution, tests, builds, subagents), overriding defaults:</p>
+<pre class="yaml"><code>env:
+  vars:
+    JAVA_HOME: /opt/jdk
+    PATH: /opt/team-tools:/usr/local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+</code></pre>
+<p>Note <code>PATH</code> is <strong>replaced wholesale</strong> (no <code>$PATH</code> expansion) — write it out in full. Dashboard saves take effect immediately.</p>
+<p><strong>(3) Let the Agent install it (env-setup skill)</strong> — configure nothing; when a tool is missing the Agent installs it per task: precheck → mirror speed-test → install → PATH fix → verify. Quite reliable with mainstream models.</p>
+<p><strong>Boundary note</strong>: volume mounts suit <strong>self-contained binaries</strong>. <strong>Python package tools (pytest etc.) cannot be mounted from the host</strong> — the interpreter and site-packages do not match across the container boundary, so imports fail. For Python tools, in order of preference: extend the image (<code>FROM orcsy:latest</code> then <code>RUN pip install pytest ...</code>; cleanest for team standardization) → let env-setup install it on the spot → install manually in the container (<code>docker exec -it orcsy sh -c "python -m ensurepip -q; pip install -q pytest"</code>; the venv has no pip by default, hence ensurepip; reinstall after container recreation).</p>
+
 <h3 id="45-option-4-linux-systemd-service">4.5 Option 4: Linux systemd
 service</h3>
 <p>Prerequisites: Linux server, root access, <code>git</code>

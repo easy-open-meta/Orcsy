@@ -508,6 +508,29 @@ docker compose restart
 <li>升级：备份 <code>./orcsy-data</code>，拉取新源码后重新
 <code>docker compose up -d --build</code>。</li>
 </ul>
+<h4 id="441-给-agent-补齐测试与构建工具卷挂载--envvars">4.4.1 给 Agent 补齐测试与构建工具（卷挂载 / env.vars）</h4>
+<p>Agent 执行测试、构建命令用的工具都在容器里找。缺什么有三种补法：</p>
+<p><strong>(1) 卷挂载（适合自包含工具）</strong>——编辑 <code>docker-compose.yml</code> 的 <code>volumes</code>，把宿主机的工具目录挂进容器：</p>
+<pre class="yaml"><code>volumes:
+  - ./orcsy-data:/data
+  - ./projects:/projects
+  - ./team-tools:/usr/local/bin/team-tools   # 自定义工具目录
+</code></pre>
+<ul>
+<li>执行命令时 PATH 会自动追加 <code>/usr/local/bin</code>、<code>/usr/local/go/bin</code>、<code>/opt/homebrew/bin</code> 等常见目录——把可执行文件放（或软链）到 <code>/usr/local/bin</code> 下，Agent 直接裸名调用；</li>
+<li>挂到其他位置也可以，Agent 用绝对路径调用（它能浏览容器文件系统）；</li>
+<li>适合自包含二进制：Node.js、Go 工具链、JDK、打包好的单文件测试器。</li>
+</ul>
+<p><strong>(2) env.vars 环境变量注入</strong>——<code>config.yaml</code> 的 <code>env.vars</code>（或「设置 → 环境变量」）里配的任意键值对会注入 Agent 的全部子进程（执行命令、跑测试、构建、子代理），且优先于默认值：</p>
+<pre class="yaml"><code>env:
+  vars:
+    JAVA_HOME: /opt/jdk
+    PATH: /opt/team-tools:/usr/local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+</code></pre>
+<p>注意 <code>PATH</code> 是<strong>整体替换</strong>（不展开 <code>$PATH</code>），写全即可；看板保存即热生效。</p>
+<p><strong>(3) 让 Agent 自己装（env-setup 技能）</strong>——什么都不配，Agent 发现缺工具时会按任务自动安装：预检诊断 → 镜像源测速选源 → 安装 → PATH 修复 → 验证后继续。对主流模型很可靠。</p>
+<p><strong>边界提醒</strong>：卷挂载适合<strong>自包含二进制</strong>；pytest 这类 <strong>Python 包工具不能用宿主机挂载</strong>——容器内外解释器与 site-packages 不匹配，挂了也 import 不了。Python 工具按优先级：扩展镜像（<code>FROM orcsy:latest</code> 后 <code>RUN pip install pytest ...</code>，团队标准化最干净）→ 交给 env-setup 现场装 → 在容器里手动装一次（<code>docker exec -it orcsy sh -c "python -m ensurepip -q; pip install -q pytest"</code>，容器 venv 默认无 pip 需先引导；重建容器后需重装）。</p>
+
 <h3 id="45-方式四linux-原生部署systemd">4.5 方式四：Linux
 原生部署（systemd）</h3>
 <p>前提：Linux 服务器、root 权限、已安装 <code>git</code>。</p>
