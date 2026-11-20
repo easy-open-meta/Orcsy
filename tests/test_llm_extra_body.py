@@ -154,6 +154,17 @@ def check_text_protocol() -> None:
         '"content": "real\\nnext\\\\nliteral"}}]\n<<END>>')
     v8 = _json.loads(c8[0][2])["content"]
     assert "\n" in v8 and "\\n" in v8, v8
+    # 8) 思考-only 轮不硬失败：未闭合 think 整段剥离后返回空轮（不 raise）
+    cfg8 = LLMConfig(api_key="sk-x", tool_protocol="text")
+    c8 = LLMClient(cfg8)
+    c8.reset("sys")
+    c8._enabled_tools = frozenset({"finish"})
+    c8._ensure_text_protocol()
+    c8._post = lambda url, payload, headers: {"choices": [{"message": {
+        "role": "assistant", "content": "<think>" + "长思考" * 5000,
+        "reasoning_content": ""}}], "usage": {}}
+    msg8, calls8, rc8 = c8._step_openai(True)
+    assert calls8 == [] and msg8.get("content") is None
     print("tool_protocol=text 文本协议 ✅")
 
 

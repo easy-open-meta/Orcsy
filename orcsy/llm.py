@@ -1166,11 +1166,15 @@ class LLMClient:
         reasoning = str(msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
         if text_mode:
             # 文本协议：指令块从正文解析（think 先剥离，见 _parse_text_tool_calls）
+            raw_had_text = bool(content.strip())
             content, tool_calls = self._parse_text_tool_calls(content)
-            if not content and not tool_calls and not reasoning:
+            if not content and not tool_calls:
+                if raw_had_text or reasoning:
+                    # 思考-only 轮（推理烧满 max_tokens 被截断，think 未闭合被
+                    # 整段剥离）：返回空轮走「未调用工具」nudge 恢复，不整任务
+                    # 硬失败——实测模型下一轮即可直接给出结论/调用
+                    return {"role": "assistant", "content": None}, [], reasoning
                 raise LLMError("大模型返回了空内容")
-            # 思考-only 轮（length 截断等）：留空内容走「未调用工具」nudge，
-            # 不整任务硬失败
             assistant_dict: dict = {"role": "assistant", "content": content or None}
             return assistant_dict, tool_calls, reasoning
         tool_calls = []
