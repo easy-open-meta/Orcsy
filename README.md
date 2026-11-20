@@ -380,6 +380,11 @@ See `config.example.yaml` at the repo root for the full annotated config (kept i
 # One-click packaging (version -> frontend build -> PyInstaller dual exe -> Inno Setup installer + zip update package)
 build.bat
 
+# Dashboard frontend: `npm run build` first runs `vue-tsc --noEmit` (strict type check);
+# any single error aborts the build. Use `npm run typecheck` to check only. After frontend
+# changes, run `uv run python tools/gen_page.py` to sync dist/index.html into orcsy/dashboard_html.py.
+cd dashboard && npm install && npm run build
+
 # Publish a Gitee Release with ALL THREE assets at once (setup exe + zip update
 # package + its .sha256 checksum; online update refuses to install without it):
 uv run python build/release.py

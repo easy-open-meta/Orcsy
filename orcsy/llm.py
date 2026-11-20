@@ -223,8 +223,8 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
     client = LLMClient(LLMConfig(
         provider=provider, api_key=api_key, base_url=base_url, model=model,
         enable_thinking=enable_thinking,
-        timeout_seconds=(30 if int(timeout_seconds) <= 0
-                         else max(10, min(int(timeout_seconds), 120))),
+        # 生成不是短连接探活：保留长超时和 <=0 不超时的配置语义。
+        timeout_seconds=int(timeout_seconds),
     ))
     prompt = (
         "You are a commit-message generator. Based on the git diff below, "
@@ -255,7 +255,16 @@ def generate_commit_message(provider: str, base_url: str, api_key: str,
         payload["enable_thinking"] = True
         payload["thinking"] = {"type": "enabled"}
     started = time.monotonic()
-    data = client._post(url, payload, headers)
+    try:
+        data = client._post(url, payload, headers)
+    except LLMTimeoutError as e:
+        detail = f"{e.timeout_seconds} 秒内未返回" if e.timeout_seconds > 0 else "连接或读取等待超时"
+        retried = f"（含自动重试共 {e.attempts} 次尝试）" if e.attempts > 1 else ""
+        raise LLMTimeoutError(
+            f"AI 生成提交说明超时：{detail}。{retried}"
+            "可在设置页「大模型接入」调整「超时秒数」（如 600~900；-1 = 不超时）后重试，"
+            "或手动填写提交说明。本次失败不会修改任务状态、提交或推送代码。",
+            timeout_seconds=e.timeout_seconds, attempts=e.attempts) from e
     elapsed = round(time.monotonic() - started, 1)
     if provider == "anthropic":
         reply = "".join(b.get("text", "") for b in data.get("content") or []
@@ -397,6 +406,15 @@ def _clip_thinking(text: str) -> str:
 
 class LLMError(RuntimeError):
     pass
+
+
+class LLMTimeoutError(LLMError):
+    """保留超时与重试信息，供调用场景提供准确的恢复指引。"""
+
+    def __init__(self, message: str, timeout_seconds: int, attempts: int = 1) -> None:
+        super().__init__(message)
+        self.timeout_seconds = timeout_seconds
+        self.attempts = attempts
 
 
 # ---- 瞬时故障有界重试：单次超时/网关抖动不应判死整个任务 ----
@@ -1134,16 +1152,17 @@ class LLMClient:
         """httpx 超时值：timeout_seconds <= 0（约定 -1）= 不超时，无限等待响应。"""
         return None if self.cfg.timeout_seconds <= 0 else self.cfg.timeout_seconds
 
-    def _timeout_error(self, e: Exception, attempts: int = 1) -> LLMError:
+    def _timeout_error(self, e: Exception, attempts: int = 1) -> LLMTimeoutError:
         # 可行动指引：思考型模型 + 长上下文时单轮 300s 常不够，用户需要
         # 知道去哪儿调、任务怎么恢复，而不是只看到一个裸的 timed out
         retried = f"（含自动重试共 {attempts} 次尝试）" if attempts > 1 else ""
-        return LLMError(
+        return LLMTimeoutError(
             f"请求大模型超时：{self.cfg.timeout_seconds} 秒内未返回。{retried}"
             "思考型模型/长上下文单轮生成常需更久，可在看板设置页「大模型接入」"
             "把「超时秒数」调大（如 600~900；-1 = 不超时，挂起时靠「强制停止」"
             "打断）后重试；本任务会被标为 blocked，重置为待办即可按原优先级重跑"
-            "（已完成的进度不受影响）。")
+            "（已完成的进度不受影响）。",
+            timeout_seconds=self.cfg.timeout_seconds, attempts=attempts)
 
     def _post(self, url: str, payload: dict, headers: dict) -> dict:
         # 出网白名单（V1-R6）：模型调用也必须经统一出口；拒绝按 LLMError

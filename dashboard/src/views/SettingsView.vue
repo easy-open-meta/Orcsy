@@ -41,7 +41,7 @@ const SETTING_GROUPS: SettingGroup[] = [
     key: 'data', label: '数据与合规', icon: 'security',
     items: [
       { key: 'masking', label: '数据脱敏', icon: 'security',
-        desc: '密码/密钥等敏感信息发送模型厂商前在本地掩除；只在内存处理、不写磁盘，任务结束即清除。' },
+        desc: '启用后，在模型请求正文发送前本地替换识别到的敏感值；映射表仅保存在任务内存中，结束后清除。' },
       { key: 'runlog', label: '运行台账', icon: 'receipt_long',
         desc: '每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。' },
       { key: 'audit', label: '审计日志', icon: 'history',
@@ -56,7 +56,7 @@ const SETTING_GROUPS: SettingGroup[] = [
       { key: 'mirrors', label: '镜像源管理与测速选源', icon: 'sync_alt',
         desc: 'Agent 装环境/拉依赖前测速，哪个快用哪个。' },
       { key: 'egress', label: '出网白名单', icon: 'lan',
-        desc: '应用自身 HTTP（模型/Issue/镜像/更新/网页抓取）只允许白名单主机；拒绝写审计。' },
+        desc: '应用自身的 HTTP 请求（模型/Issue/镜像/更新/网页抓取）只允许访问白名单主机；请求被拒绝时写入审计日志。' },
     ],
   },
   {
@@ -944,7 +944,7 @@ async function saveSched(): Promise<void> {
       web,
       logging: { retention_days: draft.retention, max_total_mb: draft.max_total_mb },
     })
-    if (authPwdClear.value) message()?.(it('已保存：看板登录鉴权已关闭'), 'success')
+    if (authPwdClear.value) message()?.(it('已保存：看板密码保护已关闭'), 'success')
     else if (authPwdTouched.value) message()?.(it('已保存：登录密码已更新，旧会话已失效，请重新登录'), 'success')
     else message()?.(it('已保存（端口下次启动生效；日志归档清理立即按新天数执行）'))
     authPwd.value = ''
@@ -1826,7 +1826,7 @@ const providerOptions = computed(() => [
             <template #header><i class="ms">health_and_safety</i> {{ it('熔断与恢复') }}</template>
             <label class="checkline">
               <NSwitch v-model:value="draft.res_enabled" />
-              {{ it('启用熔断停机') }}
+              {{ it('启用失败熔断（暂停项目）') }}
               <span class="hint">{{ it('连续失败或窗口失败率超阈值时，项目暂停领取新任务；正在跑的任务允许收尾。默认需要人工恢复，避免自动重启掩盖系统性故障。') }}</span>
             </label>
             <div class="frow">
@@ -1990,7 +1990,7 @@ const providerOptions = computed(() => [
                     </div>
                     <div class="group-ops">
                       <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
-                        {{ subagentLiveLimit === null ? it('尚未建立配额池') : tFmt('当前实际并发 {p0}', { p0: subagentLiveLimit }) }}
+                        {{ subagentLiveLimit === null ? it('尚未建立配额池') : tFmt('当前生效的并发上限 {p0}', { p0: subagentLiveLimit }) }}
                       </NTag>
                     </div>
                   </div>
@@ -2218,7 +2218,7 @@ const providerOptions = computed(() => [
                     </div>
                     <div class="frow" style="margin-top:10px">
                       <div class="f2">
-                        <label>{{ it('允许访问的主机白名单（每行一个，防内网穿透；默认仅限回环）') }}</label>
+                        <label>{{ it('允许访问的主机白名单（每行一个，限制未经授权的内网访问；默认仅允许回环地址）') }}</label>
                         <NInput v-model:value="localDebugDraft.hosts_text" type="textarea" :rows="3"
                                 placeholder="localhost&#10;127.0.0.1&#10;::1" />
                       </div>
@@ -2251,7 +2251,7 @@ const providerOptions = computed(() => [
                     <NInputNumber v-model:value="permDraft.timeout_minutes" :min="1" :max="1440" /></div>
                 </div>
                 <div class="hint pwd-hint" style="margin-top: 6px;">
-                  {{ it('询问 = 任务挂起，顶栏出现「待审批」入口，批准/拒绝后继续；项目对话框可按项目覆盖模式。') }}
+                  {{ it('询问模式会暂停当前操作并显示「待审批」入口：批准后执行该操作，拒绝后将拒绝结果交给 Agent 处理；可在项目设置中单独覆盖此模式。') }}
                 </div>
               </div>
 
@@ -2302,7 +2302,7 @@ const providerOptions = computed(() => [
         <span class="hint" v-else>{{ it('尚未测速（Agent 会按内置默认顺序下载）') }}</span>
       </div>
       <div class="hint tool-foot">
-        {{ it('测速 = HTTP 直连取首包（绕过系统代理，正是「无代理时」的真实速度）；结果存') }}
+        {{ it('测速结果为绕过系统代理的 HTTP 首包响应时延，仅用于比较直连延迟；结果保存至') }}
         {{ it('mirror_speeds.json，Agent 的 env-setup 技能会自动带上「最快源优先」清单。') }}
         {{ it('「应用最快源」把代理类（GOPROXY / pip index / npm registry）的冠军写进上方环境变量。') }}
       </div>

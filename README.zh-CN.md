@@ -378,6 +378,11 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意设置登录密�
 # 一键打包（版本号 -> 前端构建 -> PyInstaller 双 exe -> Inno Setup 安装包 + zip 更新包）
 build.bat
 
+# 看板前端：`npm run build` 先跑 `vue-tsc --noEmit` 严格类型检查，任何一处报错都会中止构建；
+# 需要单独检查时用 `npm run typecheck`。改完前端后运行 `uv run python tools/gen_page.py`
+# 把 dist/index.html 同步进 orcsy/dashboard_html.py。
+cd dashboard && npm install && npm run build
+
 # 发布 Gitee Release：一条命令同时上传三个附件（首次安装 exe + 自更新 zip
 # + 同名 zip.sha256 校验文件；缺 sha256 时在线更新会拒绝安装）；
 # token 用 --token / 环境变量 GITEE_TOKEN / 配置 update.token 三选一：

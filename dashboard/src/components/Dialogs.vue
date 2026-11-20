@@ -6,6 +6,7 @@ import { isMobile, viewportHeight } from '../mobile'
 import { miIcon } from '../mi'
 import { beginRestartWait, navigateTo, openTaskView, refresh, ui, store } from '../store'
 import { tNow as t, tFmt } from '../lang'
+import ProjectFormSection from './project/ProjectFormSection.vue'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
 // bridge 兼容两种用法：message('文本') 默认 info；message.success('文本') 等——
@@ -15,8 +16,8 @@ const message = ((content: string, type: 'success' | 'warning' | 'error' | 'info
   (messageApi as any)[type]?.(content)
 }) as any
 Object.assign(message, messageApi)
-window.$message = message
-window.$dialog = useDialog() as any
+;(window as any).$message = message
+;(window as any).$dialog = useDialog() as any
 
 // ---------- 项目对话框 ----------
 const pDraft = reactive({
@@ -57,8 +58,6 @@ const pDraft = reactive({
 
 const teamMemberKeyTouched = reactive<Record<string, boolean>>({})
 const gitIniting = shallowRef(false)
-// 项目小组卡片默认收起以节省弹窗高度，点击头部展开/收起
-const teamCardOpen = ref(false)
 
 const roleSelectOptions = [
   { label: t('项目经理 (PM)'), value: 'pm' },
@@ -411,7 +410,6 @@ watch(() => ui.projectDlg, (dlg) => {
   }
 
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''
-  teamCardOpen.value = false   // 每次打开弹窗都先收起，避免小组配置占满首屏
 })
 
 // ---- 专属模型绑定：拉取列表 / 测试连接（未填字段回退全局 llm 配置） ----
@@ -507,7 +505,7 @@ const availableTeamModelOptions = computed(() => {
 
 function getMemberModelPlaceholder(m: any): string {
   if (m.profile && store.state?.agent_profiles?.[m.profile]?.llm?.model) {
-    return `继承预设（${store.state.agent_profiles[m.profile].llm.model}）`
+    return `继承预设（${store.state?.agent_profiles?.[m.profile]?.llm?.model}）`
   }
   if (pDraft.use_llm && pDraft.ll_model?.trim()) {
     return `继承项目（${pDraft.ll_model.trim()}）`
@@ -871,10 +869,10 @@ const projectTaskOptions = computed(() => {
   if (!activeTaskProject.value) return []
   const currentId = tDraft.id
   return (activeTaskProject.value.tasks || [])
-    .filter(t => t.id !== currentId)
-    .map(t => ({
-      label: `[${t.priority}] ${t.title || t.id} (${t.status === 'done' ? t('已完成') : t.status})`,
-      value: t.id,
+    .filter(tk => tk.id !== currentId)
+    .map(tk => ({
+      label: `[${tk.priority}] ${tk.title || tk.id} (${tk.status === 'done' ? t('已完成') : tk.status})`,
+      value: tk.id,
     }))
 })
 
@@ -1067,11 +1065,11 @@ async function saveTask(force = false): Promise<void> {
   } catch (e: any) {
     if (e instanceof ConflictError) {
       tDraft.err = ''
-      const latest = e.latestTask || {}
-      window.$dialog?.warning({
+      const latest: Record<string, any> = e.latestTask || {}
+      ;(window as any).$dialog?.warning({
         title: t('任务已被修改'),
         content: `${e.message}\n\n当前最新状态：[${latest.priority || '?'}] ${latest.title || latest.id || ''}`
-          + tFmt('（{p0}）。\\n\\n选择「保留我的修改」将覆盖最新内容；「采用最新状态」会放弃本页未保存的输入。', { p0: latest.status || '?' }),
+          + tFmt('（{p0}）。\n\n选择「保留我的修改」将覆盖最新内容；「采用最新状态」会放弃本页未保存的输入。', { p0: latest.status || '?' }),
         positiveText: t('保留我的修改'),
         negativeText: t('采用最新状态'),
         onPositiveClick() { void saveTask(true) },
@@ -1171,12 +1169,14 @@ function onEnableToggle(on: boolean): void {
   if (!on || cEnableBusy.value || cEnabled.value) return
   // 未配置登录密码时自动生成一个（沿用现有密码时留空 = 不改）
   const pwd = cPasswordConfigured.value ? '' : genPassword()
+  // 两种分支都走翻译；未配置密码时把一次性密码作为参数注入，避免普通引号下的字面量 ${pwd}
+  const body = cPasswordConfigured.value
+    ? t('看板将监听所有网络接口（web.host: 0.0.0.0），并沿用现有登录密码。')
+    : tFmt('看板将绑定全部网卡（web.host: 0.0.0.0），并设置访问密码：\n\n{p0}\n\n请先复制保存该密码（手机登录要用；配置里只存密文，此弹窗关闭后不可再查看，重启后登录页会再提示一次）。', { p0: pwd })
   window.$dialog?.warning({
     title: t('开放手机局域网访问？'),
-    content: (cPasswordConfigured.value
-      ? '看板将绑定全部网卡（web.host: 0.0.0.0），沿用现有登录密码。'
-      : '看板将绑定全部网卡（web.host: 0.0.0.0），并设置访问密码：\n\n${pwd}\n\n请先复制保存该密码（手机登录要用；配置里只存密文，此弹窗关闭后不可再查看，重启后登录页会再提示一次）。'
-      + t('\n\n配置保存后应用会自动重启（数秒离线），重启后重新打开本向导即可看到可扫码的局域网地址。')),
+    content: body
+      + t('\n\n配置保存后应用会自动重启（数秒离线），重启后重新打开本向导即可看到可扫码的局域网地址。'),
     positiveText: t('开启并自动重启'),
     negativeText: t('取消'),
     onPositiveClick() { void doEnable(pwd) },
@@ -1401,8 +1401,16 @@ async function newFolder(): Promise<void> {
 <template>
   <!-- 项目 新建/编辑 -->
   <NModal v-model:show="pVisible" preset="card" :title="ui.projectDlg?.original ? t('编辑项目') : t('新建项目')"
-          style="width: min(560px, 92vw)">
-    <div class="err" v-if="pDraft.err">{{ pDraft.err }}</div>
+          class="project-dialog" :class="{ 'project-dialog-mobile': isMobile }"
+          :style="isMobile
+            ? { width: '100vw', height: viewportHeight + 'px', maxHeight: viewportHeight + 'px' }
+            : { width: 'min(800px, calc(100vw - 48px))', maxHeight: 'min(880px, calc(100dvh - 48px))' }"
+          :header-style="{ flexShrink: 0 }"
+          :content-style="{ flex: '1 1 auto', padding: '0', minHeight: '0', overflowY: 'auto', overscrollBehavior: 'contain' }"
+          :footer-style="{ padding: '0', flexShrink: 0 }">
+    <div class="project-content">
+    <section class="project-basics">
+    <h3 class="project-basics-title">{{ t('基础信息') }}</h3>
     <div class="duo">
       <div class="f1"><label>{{ t('项目名（字母/数字/连字符）') }}</label><NInput v-model:value="pDraft.name" placeholder="my-app" /></div>
       <div class="f1"><label>{{ t('每轮最多任务数') }}</label><NInputNumber v-model:value="pDraft.max_tasks" :min="1" :max="50" /></div>
@@ -1416,6 +1424,8 @@ async function newFolder(): Promise<void> {
       <div class="f1"><label>{{ t('任务目录（相对项目根）') }}</label><NInput v-model:value="pDraft.tasks_dir" /></div>
       <div class="f1"><label>{{ t('指引文件') }}</label><NInput v-model:value="pDraft.guide_file" /></div>
     </div>
+    </section>
+    <ProjectFormSection :title="t('执行设置')" icon="tune" :summary="pDraft.branch || t('工作分支（可选，默认当前分支）')">
     <div class="duo">
       <div class="f1"><label>{{ t('工具循环轮数上限（-1 = 不设上限）') }}</label>
         <NInputNumber v-model:value="pDraft.max_turns" :min="-1" :max="200"
@@ -1424,28 +1434,33 @@ async function newFolder(): Promise<void> {
     </div>
     <label>{{ t('命令白名单（逗号分隔，留空用默认：python/pytest/node/npm/git…）') }}</label>
     <NInput v-model:value="pDraft.cmds" placeholder="python, pytest, npm, dotnet" />
-    <!-- 多模型 Agent 项目小组模式切换 -->
-    <div style="margin-top:12px; padding: 10px 12px; background: rgba(0,128,255,0.05); border: 1px solid rgba(0,128,255,0.25); border-radius: 8px;">
-      <div class="teamcard-head" role="button" tabindex="0" :title="t('点击展开/收起小组配置')"
-           :aria-expanded="teamCardOpen"
-           @click="teamCardOpen = !teamCardOpen"
-           @keydown.enter.prevent="teamCardOpen = !teamCardOpen"
-           @keydown.space.prevent="teamCardOpen = !teamCardOpen">
-        <div style="display:flex; align-items:center; gap:8px; min-width:0;">
-          <span style="display:inline-flex; flex:none;" @click.stop>
-            <NSwitch v-model:value="pDraft.team.enabled" />
-          </span>
-          <span class="teamcard-title"><i class="ms sm">group</i> {{ t('多模型 Agent 项目小组模式 (Team)') }}</span>
-        </div>
-        <div class="teamcard-ops">
-          <NTag size="tiny" round :type="pDraft.team.enabled ? 'info' : 'default'">
-            {{ pDraft.team.enabled ? t('小组协同模式已启用') : t('传统单兵模式') }}
-          </NTag>
-          <i class="ms sm teamcard-chev">{{ teamCardOpen ? 'expand_less' : 'expand_more' }}</i>
-        </div>
+    <template v-if="!ui.projectDlg?.original">
+      <label style="margin-top:10px">
+        {{ t('技术栈（按路径自动探测预填，可修改；保存时写入 AGENT.md 的 Project 节，留空不填）') }}
+      </label>
+      <div class="duo">
+        <div class="f1"><label>{{ t('技术栈 Stack') }}</label><NInput v-model:value="pDraft.stack" placeholder="Node.js (Vue)" /></div>
+        <div class="f1"><label>{{ t('本地运行 Run') }}</label><NInput v-model:value="pDraft.run" placeholder="npm run dev" /></div>
+        <div class="f1"><label>{{ t('测试 Test') }}</label><NInput v-model:value="pDraft.test" placeholder="npm test" /></div>
       </div>
-
-      <template v-if="teamCardOpen">
+    </template>
+    <label class="checkline" style="margin-top:12px">
+      <NSwitch v-model:value="pDraft.use_cam" />
+      {{ t('覆盖 Git 代码提交与合并策略') }}（{{ t('关闭 = 跟随全局设置') }}{{ store.state?.git_cfg?.commit_and_merge ? t('开启') : t('关闭') }}）
+    </label>
+    <template v-if="pDraft.use_cam">
+      <label class="checkline" style="margin-top:6px">
+        <NSwitch size="small" v-model:value="pDraft.cam_enabled" />
+        {{ t('任务完成后自动提交并合并代码（开启 = worktree 分支提交合并；关闭 = 直接保留在工作区）') }}
+      </label>
+    </template>
+    </ProjectFormSection>
+    <ProjectFormSection :title="t('多模型 Agent 项目小组模式 (Team)')" icon="group"
+                        :summary="pDraft.team.enabled ? t('小组协同模式已启用') : t('传统单兵模式')">
+      <label class="checkline">
+        <NSwitch v-model:value="pDraft.team.enabled" />
+        {{ t('多模型 Agent 项目小组模式 (Team)') }}
+      </label>
         <div v-if="!pDraft.team.enabled" class="hint" style="margin-top:8px">
           {{ t('小组模式当前关闭；开启上方开关后可配置并发策略、QA 回归轮数与成员名册。收起不影响已保存的配置。') }}
         </div>
@@ -1501,7 +1516,6 @@ async function newFolder(): Promise<void> {
                   <NTag size="tiny" round :bordered="false" style="font-family:Consolas, monospace; font-size:10.5px; background:rgba(128,128,160,0.12); color:var(--dim);">id: {{ m.id }}</NTag>
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
-                  <NButton size="tiny" secondary :loading="memberFetchingId === m.id" @click="fetchMemberModels(m)">{{ t('获取模型列表') }}</NButton>
                   <NButton size="tiny" quaternary type="error" @click="removeTeamMember(mIdx)">{{ t('删除') }}</NButton>
                 </div>
               </div>
@@ -1553,10 +1567,10 @@ async function newFolder(): Promise<void> {
           </div>
         </div>
         </template>
-      </template>
-    </div>
-
-    <label class="checkline" style="margin-top:12px">
+    </ProjectFormSection>
+    <ProjectFormSection :title="t('专属模型')" icon="smart_toy"
+                        :summary="pDraft.use_llm ? (pDraft.ll_model || t('项目覆盖')) : t('跟随全局')">
+    <label class="checkline">
       <NSwitch v-model:value="pDraft.use_llm" />
       {{ t('绑定专属模型（仅该模型处理本项目任务；关闭=跟随全局大模型配置）') }}
     </label>
@@ -1585,7 +1599,10 @@ async function newFolder(): Promise<void> {
         <span class="hint">{{ t('未填写的字段自动继承全局「大模型接入」配置') }}</span>
       </div>
     </template>
-    <label class="checkline" style="margin-top:12px">
+    </ProjectFormSection>
+    <ProjectFormSection :title="t('审查 Agent')" icon="fact_check"
+                        :summary="pDraft.use_review ? (pDraft.review_ll_model || t('项目覆盖')) : t('跟随全局')">
+    <label class="checkline">
       <NSwitch v-model:value="pDraft.use_review" />
       {{ t('审查 Agent（任务合并前由独立模型审查，通过才归档；关闭=跟随全局开关）') }}
     </label>
@@ -1616,7 +1633,10 @@ async function newFolder(): Promise<void> {
       <div class="hint" v-if="reviewModelConflict" style="color:#d03050"><i class="ms sm">warning</i> {{ reviewModelConflict }}</div>
       <div class="hint" v-else>{{ t('审查模型必须与任务模型不同；返工轮数留空 = 跟随全局') }}（{{ t('当前') }} {{ store.state?.review_cfg?.max_review_rounds === -1 ? t('不上限') : (store.state?.review_cfg?.max_review_rounds ?? 2) + t(' 次') }}）。{{ t('输入 -1 表示不设上限持续返工。') }}</div>
     </template>
-    <label style="margin-top:12px">{{ t('访问权限（人工审批模式）') }}</label>
+    </ProjectFormSection>
+    <ProjectFormSection :title="t('工具与权限')" icon="security"
+                        :summary="pDraft.use_tools || pDraft.perm_mode || pDraft.debug_hosts_text.trim() ? t('项目覆盖') : t('跟随全局')">
+    <label>{{ t('访问权限（人工审批模式）') }}</label>
     <NSelect v-model:value="pDraft.perm_mode" :options="permOptions" />
     <div class="hint">{{ t('询问 = 任务挂起等待看板顶栏「待审批」批准/拒绝；超时自动拒绝，任务不会永久挂起。') }}</div>
     <label class="checkline" style="margin-top:12px">
@@ -1641,7 +1661,7 @@ async function newFolder(): Promise<void> {
           </label>
         </div>
       </div>
-      <div class="ptools-grouped" style="margin-top:6px; max-height:280px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px 10px;">
+      <div class="ptools-grouped" style="margin-top:6px; border:1px solid var(--line); border-radius:8px; padding:6px 10px;">
         <div v-for="cat in projectToolCategories" :key="cat.key" class="pcat-group">
           <div class="pcat-head">
             <div style="display:flex;align-items:center;gap:6px">
@@ -1677,17 +1697,10 @@ async function newFolder(): Promise<void> {
               :placeholder="t('每行一个主机名或IP（如 192.168.1.50 或 dev.local，只追加，全局回环地址默认放行）')" />
       <div class="hint">{{ t('该项目测试时允许额外访问的主机白名单；链路本地与云元数据等硬禁区强制拦截。') }}</div>
     </div>
-    <label class="checkline" style="margin-top:12px">
-      <NSwitch v-model:value="pDraft.use_cam" />
-      {{ t('覆盖 Git 代码提交与合并策略') }}（{{ t('关闭 = 跟随全局设置') }}{{ store.state?.git_cfg?.commit_and_merge ? t('开启') : t('关闭') }}）
-    </label>
-    <template v-if="pDraft.use_cam">
-      <label class="checkline" style="margin-top:6px;margin-left:16px">
-        <NSwitch size="small" v-model:value="pDraft.cam_enabled" />
-        {{ t('任务完成后自动提交并合并代码（开启 = worktree 分支提交合并；关闭 = 直接保留在工作区）') }}
-      </label>
-    </template>
-    <label class="checkline" style="margin-top:12px">
+    </ProjectFormSection>
+    <ProjectFormSection :title="t('远程仓库 Issues')" icon="cloud_sync"
+                        :summary="pDraft.use_repo ? (repoPlatform || t('已绑定')) : t('未绑定')">
+    <label class="checkline">
       <NSwitch v-model:value="pDraft.use_repo" />
       {{ t('绑定远程仓库 Issues（把 open Issue 拉取为任务；单向导入，状态不回写）') }}
     </label>
@@ -1725,24 +1738,21 @@ async function newFolder(): Promise<void> {
         {{ t('填写间隔后后台线程每 N 分钟自动把 open Issue 拉取为任务（去重规则与手动拉取相同）。') }}
       </div>
     </template>
-    <template v-if="!ui.projectDlg?.original">
-      <label style="margin-top:10px">
-        {{ t('技术栈（按路径自动探测预填，可修改；保存时写入 AGENT.md 的 Project 节，留空不填）') }}
-      </label>
-      <div class="duo">
-        <div class="f1"><label>{{ t('技术栈 Stack') }}</label><NInput v-model:value="pDraft.stack" placeholder="Node.js (Vue)" /></div>
-        <div class="f1"><label>{{ t('本地运行 Run') }}</label><NInput v-model:value="pDraft.run" placeholder="npm run dev" /></div>
-        <div class="f1"><label>{{ t('测试 Test') }}</label><NInput v-model:value="pDraft.test" placeholder="npm test" /></div>
+    </ProjectFormSection>
+    </div>
+    <template #footer>
+      <div v-if="pDraft.err" class="err project-error" role="alert">{{ pDraft.err }}</div>
+      <div class="project-footer">
+        <label class="checkline project-enabled" :title="t('启用该项目（停用后调度器跳过，配置保留）')">
+          <NSwitch v-model:value="pDraft.enabled" :aria-label="t('启用项目')" />
+          <span>{{ t('启用项目') }}</span>
+        </label>
+        <div class="project-actions">
+          <NButton @click="ui.projectDlg = null">{{ t('取消') }}</NButton>
+          <NButton type="primary" @click="saveProject">{{ t('保存') }}</NButton>
+        </div>
       </div>
     </template>
-    <label class="checkline" style="margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line);">
-      <NSwitch v-model:value="pDraft.enabled" />
-      {{ t('启用该项目（停用后调度器跳过，配置保留）') }}
-    </label>
-    <div class="dlg-actions">
-      <NButton @click="ui.projectDlg = null">{{ t('取消') }}</NButton>
-      <NButton type="primary" @click="saveProject">{{ t('保存') }}</NButton>
-    </div>
   </NModal>
 
   <!-- 任务 编辑/新建/只读查看。
@@ -1812,9 +1822,9 @@ async function newFolder(): Promise<void> {
       <button type="button" @click="mdInsert('## ', '')">H2</button>
       <button type="button" @click="mdInsert('- [ ] ', '')"><i class="ms sm">check_box</i> {{ t('待办') }}</button>
       <button type="button" @click="mdInsert('- ', '')"><i class="ms sm">format_list_bulleted</i> {{ t('列表') }}</button>
-      <button type="button" @click="mdInsert('**', '**', '')">{{ t('B 粗体') }}</button>
-      <button type="button" :title="t('行内代码')" @click="mdInsert('`', '`', '')"><i class="ms sm">code</i></button>
-      <button type="button" :title="t('代码块')" @click="mdInsert('\n```\n', '\n```\n', '')"><i class="ms sm">integration_instructions</i></button>
+      <button type="button" @click="mdInsert('**', '**')">{{ t('B 粗体') }}</button>
+      <button type="button" :title="t('行内代码')" @click="mdInsert('`', '`')"><i class="ms sm">code</i></button>
+      <button type="button" :title="t('代码块')" @click="mdInsert('\n```\n', '\n```\n')"><i class="ms sm">integration_instructions</i></button>
     </div>
     <NInput ref="descInputRef" v-model:value="tDraft.description" type="textarea" :disabled="tReadonly" :autosize="{ minRows: 7, maxRows: 16 }" />
     <!-- 结构化审查意见（从正文「## 审查结果」节解析）：severity 色标条目列表 -->
@@ -2075,14 +2085,50 @@ async function newFolder(): Promise<void> {
 .hint { font-size: 12px; color: var(--faint); margin-bottom: 8px; }
 .duo { display: flex; gap: 10px; }
 .duo > div { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-/* 项目小组卡片：整个头部可点击展开/收起，收起时只保留开关与状态标签 */
-.teamcard-head { display: flex; flex-wrap: wrap; justify-content: space-between;
-  align-items: center; gap: 8px 10px; cursor: pointer; user-select: none; }
-.teamcard-head:hover .teamcard-title { color: var(--acc, #5b8cff); }
-.teamcard-title { font-weight: 600; font-size: 13px; color: var(--text);
-  min-width: 0; }
-.teamcard-ops { display: flex; align-items: center; gap: 8px; flex: none; }
-.teamcard-chev { color: var(--faint); }
+/* 项目弹窗只滚动正文；折叠配置不改动草稿或功能开关。 */
+.project-content { display: flex; flex-direction: column; gap: 10px; padding: 0 24px 16px; }
+.project-basics { min-width: 0; padding-bottom: 4px; }
+.project-basics-title { margin: 0 0 8px; color: var(--text); font-size: 13px; font-weight: 600; }
+.project-content .duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px; margin-top: 8px; }
+.project-content .duo > *, .project-content .tm-grid > * { min-width: 0; }
+.project-content .duo .duo { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
+.project-content .pathline { margin-top: 4px; min-width: 0; }
+.project-content .pathline > :first-child { flex: 1; min-width: 0; }
+.project-content .pathline > :last-child { flex: none; }
+.project-content label { line-height: 1.5; overflow-wrap: anywhere; }
+.project-content .checkline { flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
+.project-content :deep(.n-switch) { flex-shrink: 0; }
+.project-content .btnrow { flex-wrap: wrap; }
+.project-content .btnrow .hint { flex: 1 1 220px; margin-bottom: 0; }
+.project-content .hint { line-height: 1.6; margin: 6px 0 0; overflow-wrap: anywhere; }
+.project-content .tm-head { flex-wrap: wrap; gap: 8px; }
+.project-content .tm-head > div { flex-wrap: wrap; min-width: 0; }
+.project-content .tm-head > div:first-child { flex: 1 1 240px; }
+.project-content .tm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+.project-content .pcat-head { flex-wrap: wrap; gap: 6px; }
+.project-content .ptool-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; }
+.project-content .ptool-name { min-width: 0; overflow-wrap: anywhere; }
+.project-content .ptool-desc { grid-column: 2 / -1; margin: 0; }
+.project-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  padding: 14px 24px; border-top: 1px solid var(--line); }
+.project-enabled { flex: 1; margin: 0; min-width: 0; }
+.project-actions { display: flex; gap: 8px; margin-left: auto; flex: none; }
+.project-error { padding: 8px 24px 0; margin: 0; max-height: 80px; overflow-y: auto; overflow-wrap: anywhere; }
+@media (max-width: 768px) {
+  .project-content { padding: 0 12px 12px; gap: 8px; }
+  .project-content .duo, .project-content .tm-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .project-content .duo { gap: 8px; }
+  .project-content .tm-head > div:first-child { flex-basis: 100%; }
+  .project-content .pathline :deep(.n-button), .project-actions :deep(.n-button) { min-height: 40px; }
+  .project-footer { gap: 10px; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .project-error { padding: 8px 12px 0; }
+}
+@media (max-width: 380px) {
+  .project-enabled { flex-basis: 100%; }
+  .project-actions { width: 100%; }
+  .project-actions :deep(.n-button) { flex: 1; }
+}
 label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .pathline { display: flex; gap: 8px; }
@@ -2272,6 +2318,12 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 <!-- NModal 瞬移到 body 后 scoped :deep() 够不到 NCard 内部节点：这两条须全局。
      类名 tsheet 是本组件专属（移动端任务全屏抽屉），不与其它样式冲突 -->
 <style>
+/* 项目卡片由固定标题、可滚动正文和固定操作区组成。 */
+.project-dialog.n-card { display: flex; flex-direction: column; overflow: hidden; margin: 24px auto; }
+@media (max-width: 768px) {
+  .project-dialog-mobile.n-card { margin: 0; border-radius: 0; }
+  .project-dialog-mobile.n-card > .n-card-header { padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 14px max(12px, env(safe-area-inset-left)); }
+}
 .tsheet .n-card-header { display: none; }
 .tsheet .n-card__content {
   display: flex; flex-direction: column;

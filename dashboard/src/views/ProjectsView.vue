@@ -522,7 +522,7 @@ async function quickAdd(p: ProjectT): Promise<void> {
               </NTag>
               <NTag v-else-if="(tk.review_round || 0) > 0 && tk.status !== 'done' && tk.status !== 'cancelled'"
                     size="small" type="warning" :bordered="false"
-                    :title="tFmt('已被审查退回 {p0} 次（返工轮）', { p0: tk.review_round })">
+                    :title="tFmt('已被审查退回 {p0} 次（返工轮）', { p0: tk.review_round ?? 0 })">
                 <i class="ms sm">rate_review</i> {{ it('返工') }} ×{{ tk.review_round }}
               </NTag>
               <NTag v-if="waitingApproval(p.name, tk.id)" size="small" type="warning"

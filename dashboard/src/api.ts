@@ -483,6 +483,8 @@ export interface AppStateT {
   role_prompt_templates?: Record<string, string>
   /** Agent 子进程自定义环境变量（代理 / 国内镜像，注入 run_command） */
   env_cfg: Record<string, string>
+  /** 任务启动时是否把缺失的工具目录写入用户 PATH（只增不删，可手动改回） */
+  env_path_autofix?: boolean
   /** 镜像源管理：类别表（kind=proxy 的类别参与「应用最快源」写 env.vars） */
   mirror_categories: MirrorCategoryT[]
   /** 各类别源清单：内置在前、用户添加在后，含启用态（disabled 的 enabled=false） */

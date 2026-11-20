@@ -7,6 +7,8 @@
 - 未知项目 → ValueError
 - 大改动覆盖：多文件 diff 全部进入 prompt（不再整体截断丢文件）
 - 超预算截断（generate_commit_message 单元层）
+- 两种协议的超时配置透传（含不超时）及专属超时提示
+- Web 生成失败不修改任务状态与工作区
 """
 
 from __future__ import annotations
@@ -15,8 +17,11 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import httpx
 
 import orcsy.llm as llm_mod
 from orcsy.config import load_config
@@ -46,6 +51,8 @@ llm:
   api_key: sk-test
   base_url: http://127.0.0.1:9/v1
   model: test-model
+update:
+  auto_check: false
 projects:
   - name: proj
     path: {proj.as_posix()}
@@ -175,12 +182,95 @@ def check_over_budget_truncation() -> None:
         llm_mod.LLMClient = orig_client
 
 
+def _commit_response() -> httpx.Response:
+    message = "feat: 汇总当前改动\n\n- 保留多行提交说明"
+    return httpx.Response(200, json={
+        "choices": [{"message": {"content": message}}],
+        "content": [{"type": "text", "text": message}],
+    })
+
+
+def check_generation_timeout_values() -> None:
+    """完整请求链路遵循配置，不把生成请求当作短连接探活。"""
+    with patch.object(httpx, "post", return_value=_commit_response()) as post:
+        for provider in ("openai", "anthropic"):
+            for seconds, expected in ((-1, None), (0, None), (300, 300),
+                                      (600, 600), (900, 900), (30, 30), (1, 1)):
+                result = generate_commit_message(
+                    provider, "http://localhost:9/v1", "k", "m",
+                    "diff --git a/a.py b/a.py\n+changed", seconds)
+                actual = post.call_args.kwargs["timeout"]
+                assert actual == expected, (provider, seconds, actual)
+                assert "保留多行提交说明" in result["message"], result
+    print("ok: 两种协议生成请求遵循超时配置（长超时原样 / -1 与 0 不超时）")
+
+
+def check_generation_timeout_errors() -> None:
+    """保留重试次数，但手动生成不得显示任务受阻/强制停止指引。"""
+    with patch.object(llm_mod, "_LLM_RETRY_BACKOFF", (0, 0, 0)):
+        for provider in ("openai", "anthropic"):
+            for seconds in (900, -1):
+                with patch.object(httpx, "post", side_effect=httpx.ReadTimeout("timed out")) as post:
+                    try:
+                        generate_commit_message(
+                            provider, "http://localhost:9/v1", "k", "m",
+                            "diff --git a/a.py b/a.py\n+changed", seconds)
+                        raise AssertionError("超时应返回 LLMError")
+                    except llm_mod.LLMError as e:
+                        assert isinstance(e, llm_mod.LLMTimeoutError), type(e)
+                        assert e.timeout_seconds == seconds and e.attempts == 4
+                        text = str(e)
+                        assert "AI 生成提交说明超时" in text and "4 次尝试" in text, text
+                        assert "手动填写" in text and "超时秒数" in text, text
+                        assert not any(s in text for s in ("blocked", "重置为待办", "强制停止")), text
+                        if seconds > 0:
+                            assert "900 秒" in text, text
+                        else:
+                            assert "-1 秒内" not in text, text
+                    assert post.call_count == 4, post.call_count
+    print("ok: 生成超时保留重试信息，不误报任务 blocked 或强制停止")
+
+
+def check_api_timeout_configuration_and_safety() -> None:
+    tmp, state, proj = _make_env()
+    try:
+        (proj / "feature.py").write_text("print('pending')\n", encoding="utf-8")
+        task = proj / "tasks" / "P2-pending.md"
+        task.parent.mkdir(exist_ok=True)
+        task.write_text("---\ntitle: 保留待办状态\npriority: P2\nstatus: open\n---\n\n尚未执行\n",
+                        encoding="utf-8")
+        before = {p.relative_to(proj): p.read_bytes() for p in proj.rglob("*")
+                  if p.is_file() and ".git" not in p.relative_to(proj).parts}
+        with patch.object(httpx, "post", return_value=_commit_response()) as post:
+            for seconds, expected in ((-1, None), (900, 900)):
+                state.config.llm.timeout_seconds = seconds
+                result = state.generate_commit_message({"name": "proj"})
+                assert result["ok"] is True, result
+                assert post.call_args.kwargs["timeout"] == expected
+        with (patch.object(llm_mod, "_LLM_RETRY_BACKOFF", (0, 0, 0)),
+              patch.object(httpx, "post", side_effect=httpx.ReadTimeout("timed out")) as post):
+            result = state.generate_commit_message({"name": "proj"})
+            assert result["ok"] is False, result
+            assert "AI 生成提交说明超时" in result["message"], result
+            assert "blocked" not in result["message"], result
+            assert post.call_count == 4
+        after = {p.relative_to(proj): p.read_bytes() for p in proj.rglob("*")
+                 if p.is_file() and ".git" not in p.relative_to(proj).parts}
+        assert after == before, "手动生成失败不能修改工作区或任务状态"
+        print("ok: Web API 透传超时配置，生成失败不修改任务与工作区")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     check_clean_workspace()
     check_unknown_project()
     check_success_and_failure()
     check_multi_file_coverage()
     check_over_budget_truncation()
+    check_generation_timeout_values()
+    check_generation_timeout_errors()
+    check_api_timeout_configuration_and_safety()
     print("\nAI 生成提交说明全部测试通过 ✅")
     return 0
 

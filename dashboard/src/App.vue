@@ -47,6 +47,16 @@ function dismissMobilePwdHint(): void {
   mobilePwdHint.value = ''
 }
 
+// 模板里裸写 navigator/window 会被解析成组件实例属性（Volar 报错），统一走这里。
+async function copyMobilePwdHint(): Promise<void> {
+  try {
+    await window.navigator.clipboard.writeText(mobilePwdHint.value)
+    window.$message?.(t('已复制密码'))
+  } catch {
+    window.$message?.('复制失败，请手动抄写')
+  }
+}
+
 async function submitLogin(): Promise<void> {
   if (!loginPwd.value || loginBusy.value) return
   loginBusy.value = true
@@ -237,7 +247,9 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       <!-- 未登录时隐藏顶栏：登录层视觉已遮住，但键盘 Tab 不应能触达后面的按钮 -->
       <header class="top" v-show="!showLogin && !isMobile">
         <div class="brand">
-          <img class="logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
+          <button type="button" class="logo-home" :title="t('看板')" :aria-label="t('看板')" @click="go('dash')">
+            <img class="logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
+          </button>
           <div>
             <h1>{{ t('Orcsy 任务编排中心') }}</h1>
             <div class="sub" v-if="store.state">
@@ -283,7 +295,9 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       </header>
       <!-- 移动端极简吸顶顶栏：Logo + 待审批徽标 + 刷新 + 抽屉菜单入口 -->
       <header class="mtop" v-show="!showLogin && isMobile">
-        <img class="logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
+        <button type="button" class="logo-home" :title="t('看板')" :aria-label="t('看板')" @click="go('dash')">
+          <img class="logo" src="./assets/logo.png" alt="Orcsy" draggable="false">
+        </button>
         <div class="mtitle">
           Orcsy
           <span class="msub" v-if="store.view === 'dash'">{{ t('看板') }}</span>
@@ -394,7 +408,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
           <div v-if="mobilePwdHint" class="login-pwd-hint">
             <span>{{ t('本次开启的访问密码：') }}<code>{{ mobilePwdHint }}</code>{{ t('（请保存，可稍后在设置页修改）') }}</span>
             <span class="pwd-hint-ops">
-              <NButton size="tiny" @click="navigator.clipboard.writeText(mobilePwdHint).then(() => window.$message?.(t('已复制密码')), () => window.$message?.('复制失败，请手动抄写'))">{{ t('复制') }}</NButton>
+              <NButton size="tiny" @click="copyMobilePwdHint">{{ t('复制') }}</NButton>
               <NButton size="tiny" quaternary @click="dismissMobilePwdHint">{{ t('知道了') }}</NButton>
             </span>
           </div>
@@ -476,7 +490,12 @@ body {
 .brand { display: flex; gap: 12px; align-items: center; min-width: 0; flex: 1 1 220px; }
 /* 关键：内层 div 也要允许收缩，否则 .sub 的 nowrap 撑破父级、文字溢出到页签下 */
 .brand > div { min-width: 0; }
+.logo-home { display: inline-flex; align-items: center; justify-content: center; flex: none;
+  appearance: none; padding: 7px; margin: -7px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+.logo-home:hover { background: rgba(128, 128, 160, 0.12); }
+.logo-home:focus-visible { outline: 2px solid var(--acc, #5b8cff); outline-offset: 2px; }
 .brand .logo { width: 30px; height: 30px; flex: none; display: block; border-radius: 6px; }
+.mtop .logo-home { padding: 9px; margin: -9px; }
 .brand h1 { margin: 0; font-size: 17px; line-height: 1.3; color: var(--text); }
 .brand .sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actions { display: flex; gap: 8px; align-items: center; flex: 1 1 auto; min-width: 0;

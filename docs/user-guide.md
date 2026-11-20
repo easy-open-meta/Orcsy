@@ -328,6 +328,8 @@ Click **Projects & Settings** in the top bar, then find the first card: **🤖 L
 | timeout_seconds | Default `300` seconds | Use `600`–`900` for long/thinking models; `-1` means no timeout |
 | Enable model thinking | Off by default | Only turn on if you want to see the thinking process; unsupported models may fail |
 
+Each AI commit-message generation request follows this timeout setting, including `-1` for no timeout; it does not use the short-request caps for connection tests or model-list queries. If generation times out, retry or enter the commit message manually. Task status and workspace contents remain unchanged, so there is no need to reset any task to open.
+
 ### 5.3 Common providers
 
 | Provider | Protocol | base_url | Example model |
@@ -364,6 +366,8 @@ If it says **api_key not configured**, the key was not saved. Go back and check.
 ### 6.1 Create a project
 
 Click **＋ New project** at the top right (or the button of the same name under **📁 Managed projects** in Settings).
+
+When creating or editing a project, advanced settings are grouped and collapsed by default; expanding or collapsing a group does not enable or disable its settings. On phones, the dialog uses a single-column layout with its action buttons fixed at the bottom. Click the Orcsy logo in the upper-left corner of desktop or mobile pages to return to the dashboard.
 
 Fill in, in order:
 
