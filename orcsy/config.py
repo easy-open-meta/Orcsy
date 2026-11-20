@@ -25,6 +25,7 @@ TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
 _LLM_FIELDS = (
     "provider", "api_key", "base_url", "model", "temperature",
     "max_tokens", "max_context_tokens", "enable_thinking", "timeout_seconds",
+    "extra_body",
 )
 
 
@@ -226,6 +227,11 @@ class LLMConfig:
     # 无限等待响应，挂起时靠看板「强制停止」打断（HTTP 请求在子线程执行、
     # 主线程轮询停止信号，见 llm.py）。思考型模型/长任务建议 600~900 或 -1
     timeout_seconds: int = 300
+    # 扩展请求体（OpenAI 兼容协议）：逐键合并进 chat/completions 请求，
+    # 同名键覆盖本模块生成的字段。用于中转/自建服务的兼容开关，例如
+    # {"tool_choice": "required", "enable_thinking": false}——部分 vLLM 系
+    # 中转在 auto 工具选择下不返回结构化 tool_calls，必须显式 required
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -669,6 +675,10 @@ def _coerce_llm(data: dict[str, Any], *, require_api_key: bool = False,
         timeout = 300 if raw_timeout is None else int(raw_timeout)
         if timeout <= 0:
             timeout = -1
+        raw_extra = data.get("extra_body") or {}
+        if not isinstance(raw_extra, dict):
+            raise ValueError(
+                f"{context}.extra_body 必须是对象（键值对），当前：{type(raw_extra).__name__}。")
         cfg = LLMConfig(
             provider=provider,  # type: ignore[arg-type]
             api_key=str(data.get("api_key") or ""),
@@ -679,6 +689,7 @@ def _coerce_llm(data: dict[str, Any], *, require_api_key: bool = False,
             max_context_tokens=int(data.get("max_context_tokens", 131072)),
             enable_thinking=bool(data.get("enable_thinking", False)),
             timeout_seconds=timeout,
+            extra_body=dict(raw_extra),
         )
     except (TypeError, ValueError) as e:
         raise ValueError(f"{context} 配置项类型有误：{e}") from e

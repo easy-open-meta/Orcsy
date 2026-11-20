@@ -890,6 +890,7 @@ class AppState:
                 "max_context_tokens": self.config.llm.max_context_tokens,
                 "enable_thinking": self.config.llm.enable_thinking,
                 "timeout_seconds": self.config.llm.timeout_seconds,
+                "extra_body": self.config.llm.extra_body,
             },
             # 全局审查配置：模型掩码同规则（api_key 不出明文）；model_configured
             # = 审查未启用默认态判定（设置页中性提示「配置一个不同模型即开启」）

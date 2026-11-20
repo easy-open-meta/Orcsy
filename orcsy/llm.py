@@ -1025,6 +1025,10 @@ class LLMClient:
             payload["thinking"] = {"type": "enabled"}
         if use_tools:
             payload["tools"] = tool_definitions_openai(self._enabled_tools)
+        # 扩展请求体最后合并：用户配置的兼容开关（如 tool_choice/enable_thinking）
+        # 有意覆盖上面生成的默认字段
+        if self.cfg.extra_body:
+            payload.update(self.cfg.extra_body)
         return payload
 
     def _step_openai(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]], str]:

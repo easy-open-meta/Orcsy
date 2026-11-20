@@ -325,6 +325,8 @@ export interface AppStateT {
     max_context_tokens: number
     enable_thinking: boolean
     timeout_seconds: number
+    /** 扩展请求体（OpenAI 兼容）：逐键合并进 chat/completions 请求 */
+    extra_body?: Record<string, unknown> | null
   }
   /** 全局审查（Review Agent）配置：model_configured=false = 审查未启用默认态 */
   review_cfg: {

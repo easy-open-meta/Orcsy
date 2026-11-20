@@ -126,6 +126,15 @@ def save_settings(state: AppState, data: dict) -> dict:
         api_key = state.config.llm.api_key
         if "api_key" in llm:
             api_key = str(llm.get("api_key") or "").strip()
+        # extra_body 三态：键缺失=保持原值；必须是对象（前端 textarea 解析为
+        # JSON 对象后上报，非法 JSON 在前端就拦截）
+        raw_extra = llm.get("extra_body")
+        if raw_extra is None:
+            extra_body = dict(state.config.llm.extra_body)
+        elif isinstance(raw_extra, dict):
+            extra_body = dict(raw_extra)
+        else:
+            raise ValueError("llm.extra_body 必须是 JSON 对象（键值对）。")
         state.config.llm = LLMConfig(
             provider=provider,
             api_key=api_key,
@@ -136,6 +145,7 @@ def save_settings(state: AppState, data: dict) -> dict:
             enable_thinking=bool(llm.get("enable_thinking",
                                          state.config.llm.enable_thinking)),
             timeout_seconds=ts,
+            extra_body=extra_body,
         )
     state.config.scheduler = SchedulerConfig(
         interval_seconds=interval, max_parallel_agents=parallel,

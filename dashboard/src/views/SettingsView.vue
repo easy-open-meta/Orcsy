@@ -121,6 +121,8 @@ const draft = reactive({
   model: '', base_url: '', api_key: '',
   temperature: 0.2, max_tokens: 8192, max_context_tokens: 131072,
   enable_thinking: false, timeout_seconds: 300,
+  // 扩展请求体（OpenAI 兼容）：textarea 里编辑 JSON 文本，保存时解析上报
+  extra_body_json: '',
   interval: 300, parallel: 1, port: 5116, retention: 7, max_total_mb: 200,
   // 运行台账（V1-R1）：开关 + 保留期 + 占用上限 + 自定义目录（留空 = 默认）
   runlog_enabled: true, runlog_retention: 30, runlog_max_mb: 500, runlog_dir: '',
@@ -576,6 +578,8 @@ watch(() => store.state, (s) => {
   draft.max_context_tokens = s.llm.max_context_tokens
   draft.enable_thinking = s.llm.enable_thinking
   draft.timeout_seconds = s.llm.timeout_seconds
+  draft.extra_body_json = s.llm.extra_body && Object.keys(s.llm.extra_body).length
+    ? JSON.stringify(s.llm.extra_body, null, 2) : ''
   // 审查 Agent 配置回填（api_key 只回掩码；模型未配置时字段留空）
   reviewDraft.enabled = s.review_cfg?.enabled ?? true
   reviewDraft.provider = (s.review_cfg?.provider as 'openai' | 'anthropic') ?? 'openai'
@@ -833,6 +837,15 @@ async function saveProfiles(): Promise<void> {
 }
 
 async function saveLlm(): Promise<void> {
+  // 扩展请求体：留空 = 清空；非法 JSON 拦截在本地，不上报后端
+  let extraBody: Record<string, unknown> = {}
+  const raw = draft.extra_body_json.trim()
+  if (raw) {
+    try { extraBody = JSON.parse(raw) } catch { message()?.(it('扩展请求体不是合法 JSON，请修正后再保存'), 'error'); return }
+    if (!extraBody || typeof extraBody !== 'object' || Array.isArray(extraBody)) {
+      message()?.(it('扩展请求体必须是 JSON 对象（键值对）'), 'error'); return
+    }
+  }
   try {
     const llm: Record<string, unknown> = {
       provider: draft.provider, model: draft.model, base_url: draft.base_url,
@@ -840,6 +853,7 @@ async function saveLlm(): Promise<void> {
       max_tokens: draft.max_tokens, max_context_tokens: draft.max_context_tokens,
       enable_thinking: draft.enable_thinking,
       timeout_seconds: draft.timeout_seconds,
+      extra_body: extraBody,
     }
     // 三态：未触碰不带键（后端保留已存密钥）；触碰过按输入上报，空串 = 清除
     if (apiKeyTouched.value) llm.api_key = draft.api_key.trim()
@@ -1539,6 +1553,12 @@ const providerOptions = computed(() => [
         {{ it('请求侧开启模型思考') }}
         <span class="hint">{{ it('默认关闭：DeepSeek-R1 等推理模型会自动返回思考内容，无需开启。anthropic 需此项才会返回 thinking 块（预留一半 max_tokens 作思考预算）；OpenAI 兼容服务按 Qwen（enable_thinking）/ GLM（thinking）约定传参，不支持的服务请勿开启。') }}</span>
       </label>
+      <div class="f1" style="margin-bottom: 10px">
+        <label>{{ it('扩展请求体 extra_body（JSON 对象，可选；逐键合并进 chat/completions 请求，同名键覆盖内置字段）') }}</label>
+        <NInput v-model:value="draft.extra_body_json" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }"
+                placeholder='{"tool_choice": "required", "enable_thinking": false}' />
+        <div class="hint">{{ it('中转/自建服务兼容开关。例：部分 vLLM 系中转 auto 工具选择下不返回结构化 tool_calls（或 <think> 混入正文导致解析 400），需 {"tool_choice": "required", "enable_thinking": false}。留空 = 不透传。') }}</div>
+      </div>
       <div class="sfoot">
         <NButton type="primary" @click="saveLlm">{{ it('保存模型配置') }}</NButton>
       </div>
