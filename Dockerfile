@@ -21,6 +21,11 @@ COPY orcsy/ ./orcsy/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
+# 测试环境开箱即用:Agent 跑 Python 项目时 pytest 直接可用,不用每次现装
+# (venv 里没有 pip,uv 直装;刻意不进 uv.lock——这是运行时工具不是应用依赖)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python .venv/bin/python pytest
+
 # ---------- 运行阶段 ----------
 FROM python:3.12-slim-bookworm
 
