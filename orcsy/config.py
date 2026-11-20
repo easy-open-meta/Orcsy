@@ -1712,6 +1712,8 @@ def save_config(cfg: AppConfig) -> None:
             "max_context_tokens": cfg.llm.max_context_tokens,
             "enable_thinking": cfg.llm.enable_thinking,
             "timeout_seconds": cfg.llm.timeout_seconds,
+            # 扩展请求体：整体写回，漏写会在看板任意保存时静默重置回空
+            "extra_body": dict(cfg.llm.extra_body),
         },
         "scheduler": {
             "interval_seconds": cfg.scheduler.interval_seconds,
@@ -1801,7 +1803,8 @@ def save_config(cfg: AppConfig) -> None:
                      "max_tokens": cfg.review.llm.max_tokens,
                      "max_context_tokens": cfg.review.llm.max_context_tokens,
                      "enable_thinking": cfg.review.llm.enable_thinking,
-                     "timeout_seconds": cfg.review.llm.timeout_seconds}
+                     "timeout_seconds": cfg.review.llm.timeout_seconds,
+                     "extra_body": dict(cfg.review.llm.extra_body)}
                     if cfg.review.llm else None),
             "max_turns": cfg.review.max_turns,
             "max_review_rounds": cfg.review.max_review_rounds,

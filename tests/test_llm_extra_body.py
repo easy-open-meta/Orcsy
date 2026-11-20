@@ -72,8 +72,36 @@ def check_resolve_override() -> None:
     print("resolve_llm 项目绑定透传 ✅")
 
 
+def check_save_roundtrip() -> None:
+    """存盘往返：save_config 漏写 extra_body 会让看板任意保存静默重置（实测踩坑）。"""
+    import tempfile
+    from orcsy.config import AppConfig, load_config, save_config
+
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "config.yaml"
+        p.write_text(
+            "llm:\n"
+            "  api_key: sk-x\n"
+            "  extra_body:\n"
+            "    tool_choice: required\n"
+            "    enable_thinking: false\n",
+            encoding="utf-8",
+        )
+        cfg = load_config(p)
+        assert cfg.llm.extra_body == {"tool_choice": "required",
+                                      "enable_thinking": False}
+        cfg.web.host = "127.0.0.1"  # 触发一次与 llm 无关的修改后存盘
+        save_config(cfg)
+        cfg2 = load_config(p)
+        assert cfg2.llm.extra_body == {"tool_choice": "required",
+                                       "enable_thinking": False}, \
+            f"存盘后 extra_body 被静默重置：{cfg2.llm.extra_body!r}"
+    print("save_config 存盘往返 ✅")
+
+
 if __name__ == "__main__":
     check_coerce()
     check_payload_merge()
     check_resolve_override()
+    check_save_roundtrip()
     print("test_llm_extra_body: 全部通过")
