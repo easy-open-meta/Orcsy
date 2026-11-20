@@ -951,19 +951,27 @@ function effTaskModel(): { value: string } {
 
 async function saveSched(): Promise<void> {
   try {
-    const web: Record<string, unknown> = { port: draft.port }
-    // 登录密码三态：默认不带键（保持原值）；点过「清除」带空串（关闭鉴权）；
-    // 输入过新密码则带上（后端保存后注销全部旧会话）
-    if (authPwdClear.value) web.auth_password = ''
-    else if (authPwdTouched.value) web.auth_password = authPwd.value
     await api.config({
       scheduler: { interval_seconds: draft.interval, max_parallel_agents: draft.parallel },
-      web,
+      web: { port: draft.port },
       logging: { retention_days: draft.retention, max_total_mb: draft.max_total_mb },
     })
+    message()?.(it('已保存（端口下次启动生效；日志归档清理立即按新天数执行）'))
+  } catch (e: any) { message()?.(e.message, 'error') }
+  void import('../store').then(m => m.refresh(true))
+}
+
+// ---- 看板访问密码保存：只带 auth_password 键（后端 web 其余字段键缺失=保持现
+// 值），与调度/端口/日志保留解耦——改密码不再顺带提交半编辑的其它草稿值 ----
+async function saveAuthPwd(): Promise<void> {
+  if (!authPwdTouched.value && !authPwdClear.value) {
+    message()?.(it('密码未修改，无需保存'), 'info')
+    return
+  }
+  try {
+    await api.config({ web: { auth_password: authPwdClear.value ? '' : authPwd.value } })
     if (authPwdClear.value) message()?.(it('已保存：看板密码保护已关闭'), 'success')
-    else if (authPwdTouched.value) message()?.(it('已保存：登录密码已更新，旧会话已失效，请重新登录'), 'success')
-    else message()?.(it('已保存（端口下次启动生效；日志归档清理立即按新天数执行）'))
+    else message()?.(it('已保存：登录密码已更新，旧会话已失效，请重新登录'), 'success')
     authPwd.value = ''
     authPwdTouched.value = false
     authPwdClear.value = false
@@ -1713,23 +1721,6 @@ const protocolOptions = computed(() => [
         <div class="f1"><label>{{ it('日志总占用上限（MB，超出从最旧删起，0 为不限制）') }}</label>
           <NInputNumber v-model:value="draft.max_total_mb" :min="0" :max="100000" /></div>
       </div>
-      <div class="frow">
-        <div class="f1"><label>{{ it('看板登录密码（非空时访问页面/API 均需先登录，保存后立即生效）') }}</label>
-          <NInput :value="authPwd" type="password" show-password-on="click"
-                  :placeholder="store.state.web_cfg.auth_enabled
-                    ? it('已设置，留空保持不变') : it('未设置（免登录；外网部署务必设置）')"
-                  @update:value="onPwdInput" /></div>
-        <div class="f0 pwd-btns">
-          <NButton v-if="store.state.web_cfg.auth_enabled" size="small" quaternary
-                   type="error" :disabled="authPwdClear" @click="clearAuthPwd">{{ it('清除密码（关闭鉴权）') }}</NButton>
-        </div>
-      </div>
-      <div class="hint pwd-hint" v-if="authPwdClear">
-        {{ it('将在保存后关闭登录鉴权（任何能访问该端口的人都可操作看板）；在上方重新输入密码可取消。') }}
-      </div>
-      <div class="hint pwd-hint" v-else-if="authPwdTouched">
-        {{ it('将在保存后启用/更新登录密码，所有已登录会话立即失效，需用新密码重新登录。') }}
-      </div>
       <div class="sfoot"><NButton type="primary" @click="saveSched">{{ it('保存调度配置') }}</NButton></div>
           </NCard>
         </div>
@@ -2470,6 +2461,30 @@ const protocolOptions = computed(() => [
             {{ it('出错自动打开安装日志，无错误则不打开') }}</span>
         </div>
       </div>
+          </NCard>
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">lock</i> {{ it('看板访问密码') }}</template>
+      <div class="frow">
+        <div class="f1"><label>{{ it('看板登录密码（非空时访问页面/API 均需先登录，保存后立即生效）') }}</label>
+          <NInput :value="authPwd" type="password" show-password-on="click"
+                  :placeholder="store.state.web_cfg.auth_enabled
+                    ? it('已设置，留空保持不变') : it('未设置（免登录；外网部署务必设置）')"
+                  @update:value="onPwdInput" /></div>
+        <div class="f0 pwd-btns">
+          <NButton v-if="store.state.web_cfg.auth_enabled" size="small" quaternary
+                   type="error" :disabled="authPwdClear" @click="clearAuthPwd">{{ it('清除密码（关闭鉴权）') }}</NButton>
+        </div>
+      </div>
+      <div class="hint pwd-hint" v-if="authPwdClear">
+        {{ it('将在保存后关闭登录鉴权（任何能访问该端口的人都可操作看板）；在上方重新输入密码可取消。') }}
+      </div>
+      <div class="hint pwd-hint" v-else-if="authPwdTouched">
+        {{ it('将在保存后启用/更新登录密码，所有已登录会话立即失效，需用新密码重新登录。') }}
+      </div>
+      <div class="hint pwd-hint" v-else>
+        {{ it('与调度/端口/日志保留解耦：此处的保存只提交密码改动。建议外网部署时设置强密码。') }}
+      </div>
+      <div class="sfoot"><NButton type="primary" @click="saveAuthPwd">{{ it('保存访问密码') }}</NButton></div>
           </NCard>
         </div>
       </section>
