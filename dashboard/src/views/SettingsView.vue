@@ -30,9 +30,11 @@ const SETTING_GROUPS: SettingGroup[] = [
     key: 'runtime', label: '运行与成本', icon: 'schedule',
     items: [
       { key: 'sched', label: '调度与看板', icon: 'schedule',
-        desc: '扫描间隔、并行数保存后立即生效；看板端口下次启动生效。' },
+        desc: '扫描间隔、并行数与日志保留（orcsy.log）保存后立即生效；看板端口下次启动生效；运行台账保留期在「数据与合规」。' },
       { key: 'budget', label: '预算与成本', icon: 'savings',
         desc: '任务级 token/成本上限与项目当日上限；超限停止执行，未配置单价时只算 token。' },
+      { key: 'conc', label: '子代理并发预算', icon: 'bolt',
+        desc: '限制真正打给厂商的在途请求数；撞 429 自动对半降并发，成功后逐步爬回。保存后立即生效。' },
       { key: 'resilience', label: '熔断与恢复', icon: 'health_and_safety',
         desc: '连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。' },
     ],
@@ -43,7 +45,7 @@ const SETTING_GROUPS: SettingGroup[] = [
       { key: 'masking', label: '数据脱敏', icon: 'security',
         desc: '启用后，在模型请求正文发送前本地替换识别到的敏感值；映射表仅保存在任务内存中，结束后清除。' },
       { key: 'runlog', label: '运行台账', icon: 'receipt_long',
-        desc: '每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。' },
+        desc: '每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。orcsy.log 的保留在「调度与看板」。' },
       { key: 'audit', label: '审计日志', icon: 'history',
         desc: '登录、任务/项目/设置变更、提交确认与 API Key 写调用留痕；只读，不记录密钥与正文。' },
     ],
@@ -65,7 +67,7 @@ const SETTING_GROUPS: SettingGroup[] = [
       { key: 'notify', label: '提醒设置', icon: 'notifications',
         desc: '任务完成/受阻时提醒；手动停止不打扰。保存后立即生效。' },
       { key: 'app', label: '应用', icon: 'settings',
-        desc: '更新源、自更新检查、看板登录密码与开机自启动。' },
+        desc: '更新源、自更新检查、看板访问密码与开机自启动。' },
     ],
   },
 ]
@@ -469,6 +471,16 @@ const subagentLiveLimit = computed<number | null>(() => {
   if (!pools.length) return null
   return Math.min(...pools.map(p => p.limit))
 })
+
+// ---- 子代理并发预算保存：只带 subagent 键（后端分块保存，其余分区不受影响），
+// 与工具/命令/权限等大包解耦；后端同步进程级配额池，无需重启 ----
+async function saveConc(): Promise<void> {
+  try {
+    await api.config({ subagent: { max_parallel: subagentDraft.max_parallel, adaptive: subagentDraft.adaptive } })
+    message()?.(it('已保存并生效'), 'success')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  void import('../store').then(m => m.refresh(true))
+}
 const testingBrowser = shallowRef(false)
 async function onTestBrowser(): Promise<void> {
   testingBrowser.value = true
@@ -1198,10 +1210,6 @@ async function saveTools(): Promise<void> {
       env: { vars: envVars, path_autofix: pathAutofix.value },
       permissions: { mode: permDraft.mode, timeout_minutes: permDraft.timeout_minutes },
       git: { commit_and_merge: gitCommitAndMergeDraft.value },
-      subagent: {
-        max_parallel: subagentDraft.max_parallel,
-        adaptive: subagentDraft.adaptive,
-      },
       local_debug: {
         browser: localDebugDraft.browser,
         browser_executable: localDebugDraft.browser_executable.trim(),
@@ -1847,6 +1855,30 @@ const protocolOptions = computed(() => [
             <div class="sfoot"><NButton type="primary" :loading="budgetSaving" @click="saveBudget">{{ it('保存预算设置') }}</NButton></div>
           </NCard>
         </div>
+        <div v-if="settingsSection === 'conc'">
+          <NCard size="small" class="scard">
+            <template #header>
+              <div style="display:flex; align-items:center; gap:10px; flex:1; justify-content:space-between; flex-wrap:wrap;">
+                <span><i class="ms">bolt</i> {{ it('子代理并发预算') }}</span>
+                <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
+                  {{ subagentLiveLimit === null ? it('尚未建立配额池') : tFmt('当前生效的并发上限 {p0}', { p0: subagentLiveLimit }) }}
+                </NTag>
+              </div>
+            </template>
+            <span class="hint">{{ it('限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；厂商不公开并发上限，撞 429 自动对半降并发，成功后逐步爬回。保存后立即生效。') }}</span>
+            <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-end; margin-top:12px;">
+              <div class="f1" style="margin:0;">
+                <label>{{ it('最大并发请求数（1~16，同一模型+密钥共享）') }}</label>
+                <NInputNumber v-model:value="subagentDraft.max_parallel" :min="1" :max="16" style="width: 160px;" />
+              </div>
+              <div class="f1" style="margin:0;">
+                <label>{{ it('按 429 / Retry-After 自适应降速（厂商不返回限流头时也有效）') }}</label>
+                <NSwitch v-model:value="subagentDraft.adaptive" />
+              </div>
+            </div>
+            <div class="sfoot"><NButton type="primary" @click="saveConc">{{ it('保存并发预算') }}</NButton></div>
+          </NCard>
+        </div>
         <div v-if="settingsSection === 'resilience'">
           <NCard size="small" class="scard">
             <template #header><i class="ms">health_and_safety</i> {{ it('熔断与恢复') }}</template>
@@ -2006,32 +2038,6 @@ const protocolOptions = computed(() => [
               </div>
 
               <div class="tool-groups-container">
-                <!-- 子代理并发预算：厂商不公开并发上限，靠 429 反馈自适应逼近 -->
-                <div class="group-card">
-                  <div class="group-header">
-                    <div class="group-title-wrap">
-                      <span class="group-icon"><i class="ms sm">bolt</i></span>
-                      <span class="group-title">{{ it('子代理并发预算') }}</span>
-                      <span class="group-desc">{{ it('限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；撞 429 自动对半降并发，成功后逐步爬回。') }}</span>
-                    </div>
-                    <div class="group-ops">
-                      <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
-                        {{ subagentLiveLimit === null ? it('尚未建立配额池') : tFmt('当前生效的并发上限 {p0}', { p0: subagentLiveLimit }) }}
-                      </NTag>
-                    </div>
-                  </div>
-                  <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-end; padding-top: 2px;">
-                    <div class="f1" style="margin:0;">
-                      <label>{{ it('最大并发请求数（1~16，同一模型+密钥共享）') }}</label>
-                      <NInputNumber v-model:value="subagentDraft.max_parallel" :min="1" :max="16" size="small" style="width: 120px;" />
-                    </div>
-                    <div class="f1" style="margin:0;">
-                      <label>{{ it('按 429 / Retry-After 自适应降速（厂商不返回限流头时也有效）') }}</label>
-                      <NSwitch size="small" v-model:value="subagentDraft.adaptive" />
-                    </div>
-                  </div>
-                </div>
-
                 <div v-for="cat in filteredToolCategories" :key="cat.key" class="group-card">
                   <div class="group-header">
                     <div class="group-title-wrap">
