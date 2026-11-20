@@ -135,6 +135,10 @@ def save_settings(state: AppState, data: dict) -> dict:
             extra_body = dict(raw_extra)
         else:
             raise ValueError("llm.extra_body 必须是 JSON 对象（键值对）。")
+        protocol = str(llm.get("tool_protocol")
+                       or state.config.llm.tool_protocol)
+        if protocol not in ("native", "text"):
+            raise ValueError(f"llm.tool_protocol 只能是 native 或 text（当前：{protocol}）。")
         state.config.llm = LLMConfig(
             provider=provider,
             api_key=api_key,
@@ -146,6 +150,7 @@ def save_settings(state: AppState, data: dict) -> dict:
                                          state.config.llm.enable_thinking)),
             timeout_seconds=ts,
             extra_body=extra_body,
+            tool_protocol=protocol,  # type: ignore[arg-type]
         )
     state.config.scheduler = SchedulerConfig(
         interval_seconds=interval, max_parallel_agents=parallel,

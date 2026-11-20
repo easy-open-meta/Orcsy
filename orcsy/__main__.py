@@ -35,6 +35,8 @@ llm:
   enable_thinking: false     # 请求侧开启模型思考（anthropic 必须；多数兼容服务默认返回）
   timeout_seconds: 300       # 单次模型请求超时（秒）；-1 = 不超时（挂起时看板「强制停止」
                              # 可打断）；思考型模型/长任务建议 600~900 或 -1
+  tool_protocol: native      # 工具调用协议：native=原生 function calling；text=文本
+                             # 协议兜底（服务端工具解析器与推理输出互斥的中转用）
   extra_body: {}             # 扩展请求体（OpenAI 兼容）：逐键合并进 chat/completions；
                              # 中转兼容开关，例 {"tool_choice": "required",
                              # "enable_thinking": false}

@@ -123,6 +123,7 @@ const draft = reactive({
   enable_thinking: false, timeout_seconds: 300,
   // 扩展请求体（OpenAI 兼容）：textarea 里编辑 JSON 文本，保存时解析上报
   extra_body_json: '',
+  tool_protocol: 'native' as 'native' | 'text',
   interval: 300, parallel: 1, port: 5116, retention: 7, max_total_mb: 200,
   // 运行台账（V1-R1）：开关 + 保留期 + 占用上限 + 自定义目录（留空 = 默认）
   runlog_enabled: true, runlog_retention: 30, runlog_max_mb: 500, runlog_dir: '',
@@ -580,6 +581,7 @@ watch(() => store.state, (s) => {
   draft.timeout_seconds = s.llm.timeout_seconds
   draft.extra_body_json = s.llm.extra_body && Object.keys(s.llm.extra_body).length
     ? JSON.stringify(s.llm.extra_body, null, 2) : ''
+  draft.tool_protocol = (s.llm.tool_protocol as 'native' | 'text') || 'native'
   // 审查 Agent 配置回填（api_key 只回掩码；模型未配置时字段留空）
   reviewDraft.enabled = s.review_cfg?.enabled ?? true
   reviewDraft.provider = (s.review_cfg?.provider as 'openai' | 'anthropic') ?? 'openai'
@@ -854,6 +856,7 @@ async function saveLlm(): Promise<void> {
       enable_thinking: draft.enable_thinking,
       timeout_seconds: draft.timeout_seconds,
       extra_body: extraBody,
+      tool_protocol: draft.tool_protocol,
     }
     // 三态：未触碰不带键（后端保留已存密钥）；触碰过按输入上报，空串 = 清除
     if (apiKeyTouched.value) llm.api_key = draft.api_key.trim()
@@ -1476,6 +1479,11 @@ const providerOptions = computed(() => [
   { label: it('openai（兼容协议）'), value: 'openai' },
   { label: 'anthropic', value: 'anthropic' },
 ])
+
+const protocolOptions = computed(() => [
+  { label: it('native — 原生 function calling（默认）'), value: 'native' },
+  { label: it('text — 文本协议兜底（解析器互斥的中转用）'), value: 'text' },
+])
 </script>
 
 <template>
@@ -1553,6 +1561,13 @@ const providerOptions = computed(() => [
         {{ it('请求侧开启模型思考') }}
         <span class="hint">{{ it('默认关闭：DeepSeek-R1 等推理模型会自动返回思考内容，无需开启。anthropic 需此项才会返回 thinking 块（预留一半 max_tokens 作思考预算）；OpenAI 兼容服务按 Qwen（enable_thinking）/ GLM（thinking）约定传参，不支持的服务请勿开启。') }}</span>
       </label>
+      <div class="frow" style="margin-bottom: 10px">
+        <div class="f1">
+          <label>{{ it('工具调用协议（OpenAI 兼容协议）') }}</label>
+          <NSelect v-model:value="draft.tool_protocol" :options="protocolOptions" />
+          <div class="hint">{{ it('native = 原生 function calling（默认，官方/主流服务用这个）。text = 文本协议兜底：请求不带 tools，工具清单注入 system，模型在正文输出 <<TOOL_CALLS>> 标记块由程序解析执行——用于服务端工具解析器与推理输出互斥的中转（think 混入正文导致解析 400）。') }}</div>
+        </div>
+      </div>
       <div class="f1" style="margin-bottom: 10px">
         <label>{{ it('扩展请求体 extra_body（JSON 对象，可选；逐键合并进 chat/completions 请求，同名键覆盖内置字段）') }}</label>
         <NInput v-model:value="draft.extra_body_json" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }"

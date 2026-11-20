@@ -25,7 +25,7 @@ TaskStatus = Literal["open", "in_progress", "done", "blocked", "cancelled"]
 _LLM_FIELDS = (
     "provider", "api_key", "base_url", "model", "temperature",
     "max_tokens", "max_context_tokens", "enable_thinking", "timeout_seconds",
-    "extra_body",
+    "extra_body", "tool_protocol",
 )
 
 
@@ -232,6 +232,11 @@ class LLMConfig:
     # {"tool_choice": "required", "enable_thinking": false}——部分 vLLM 系
     # 中转在 auto 工具选择下不返回结构化 tool_calls，必须显式 required
     extra_body: dict[str, Any] = field(default_factory=dict)
+    # 工具调用协议：native = 原生 function calling（默认）；text = 文本协议
+    # 兜底——请求不带 tools，工具清单注入 system 指令，模型在正文输出
+    # <<TOOL_CALLS>> 标记块由客户端解析。用于服务端工具解析器与推理输出
+    # 互斥的中转（think 混入正文触发解析 400，任何参数组合都跑不完任务）
+    tool_protocol: Literal["native", "text"] = "native"
 
 
 @dataclass
@@ -679,6 +684,10 @@ def _coerce_llm(data: dict[str, Any], *, require_api_key: bool = False,
         if not isinstance(raw_extra, dict):
             raise ValueError(
                 f"{context}.extra_body 必须是对象（键值对），当前：{type(raw_extra).__name__}。")
+        protocol = str(data.get("tool_protocol") or LLMConfig.tool_protocol)
+        if protocol not in ("native", "text"):
+            raise ValueError(
+                f"{context}.tool_protocol 只能是 native 或 text（当前：{protocol}）。")
         cfg = LLMConfig(
             provider=provider,  # type: ignore[arg-type]
             api_key=str(data.get("api_key") or ""),
@@ -690,6 +699,7 @@ def _coerce_llm(data: dict[str, Any], *, require_api_key: bool = False,
             enable_thinking=bool(data.get("enable_thinking", False)),
             timeout_seconds=timeout,
             extra_body=dict(raw_extra),
+            tool_protocol=protocol,  # type: ignore[arg-type]
         )
     except (TypeError, ValueError) as e:
         raise ValueError(f"{context} 配置项类型有误：{e}") from e
@@ -1714,6 +1724,7 @@ def save_config(cfg: AppConfig) -> None:
             "timeout_seconds": cfg.llm.timeout_seconds,
             # 扩展请求体：整体写回，漏写会在看板任意保存时静默重置回空
             "extra_body": dict(cfg.llm.extra_body),
+            "tool_protocol": cfg.llm.tool_protocol,
         },
         "scheduler": {
             "interval_seconds": cfg.scheduler.interval_seconds,
@@ -1804,7 +1815,8 @@ def save_config(cfg: AppConfig) -> None:
                      "max_context_tokens": cfg.review.llm.max_context_tokens,
                      "enable_thinking": cfg.review.llm.enable_thinking,
                      "timeout_seconds": cfg.review.llm.timeout_seconds,
-                     "extra_body": dict(cfg.review.llm.extra_body)}
+                     "extra_body": dict(cfg.review.llm.extra_body),
+                     "tool_protocol": cfg.review.llm.tool_protocol}
                     if cfg.review.llm else None),
             "max_turns": cfg.review.max_turns,
             "max_review_rounds": cfg.review.max_review_rounds,

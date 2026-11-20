@@ -404,6 +404,34 @@ def _clip_thinking(text: str) -> str:
     return text[:_THINKING_LOG_CHARS] + f"\n…（思考内容超过 {_THINKING_LOG_CHARS} 字，已截断）"
 
 
+# ---- 文本工具协议（tool_protocol="text"）----
+# 服务端不支持原生 function calling 时的兜底：请求不带 tools，工具清单写进
+# system 指令，模型在正文用标记块输出 JSON 调用，客户端解析后走与原生完全
+# 相同的分发/护栏/finish 路径。标记用 <<TOOL_CALLS>>/<<END>> 而非 ``` 围栏：
+# write_file 参数常携带 markdown 代码，围栏会提前闭合截断 JSON。
+_TEXT_PROTO_MARKER = "工具调用协议（文本模式）"
+_TEXT_OPEN, _TEXT_CLOSE = "<<TOOL_CALLS>>", "<<END>>"
+_TEXT_THINK_RE = re.compile(r"<think>[\s\S]*?</think>")
+
+
+def _text_protocol_block(tools_json: str) -> str:
+    return (
+        f"## {_TEXT_PROTO_MARKER}\n"
+        "当前大模型服务不支持原生 function calling，工具调用改用文本协议：\n"
+        "1. 可用工具定义（JSON Schema）：\n" + tools_json + "\n"
+        "2. 需要调用工具时，在回复末尾输出：\n"
+        f"{_TEXT_OPEN}\n"
+        '[{"tool": "工具名", "args": {参数对象}}]\n'
+        f"{_TEXT_CLOSE}\n"
+        "- 数组内多个调用按顺序执行；单个调用也可只写对象 {\"tool\": ..., \"args\": ...}\n"
+        "- 除上述标记块外不要输出其他 JSON；标记块前可写简短说明\n"
+        "- 工具执行结果以「【工具结果 call_N】」开头的用户消息回传\n"
+        "- 任务完成或受阻时必须调用 finish 工具（action=completed/blocked，"
+        "summary 概述，files_changed 列改动文件）；禁止用纯文本代替 finish\n"
+        "- args 里的文件内容原样写入，不要为转义换行而改变代码语义\n"
+    )
+
+
 class LLMError(RuntimeError):
     pass
 
@@ -640,9 +668,71 @@ class LLMClient:
             }],
         }
 
-    @staticmethod
-    def _tool_result(call_id: str, content: str) -> dict:
+    def _tool_result(self, call_id: str, content: str) -> dict:
+        if self.cfg.tool_protocol == "text":
+            # 文本协议没有 tools/tool 角色可用：结果以用户消息回传
+            return {"role": "user", "content": f"【工具结果 {call_id}】\n{content}"}
         return {"role": "tool", "tool_call_id": call_id, "content": content}
+
+    # ---- 文本工具协议（tool_protocol="text"）----
+
+    def _ensure_text_protocol(self) -> None:
+        """把文本协议指令注入 system 消息（幂等：按标记判重）。
+
+        任务循环与审查循环都走 _step_openai，指令随首次请求注入一次；
+        工具清单按当前 _enabled_tools 渲染（任务/审查各自的启用集）。
+        """
+        if not self.messages or self.messages[0].get("role") != "system":
+            return
+        if _TEXT_PROTO_MARKER in str(self.messages[0].get("content") or ""):
+            return
+        tools_json = json.dumps(
+            tool_definitions_openai(self._enabled_tools),
+            ensure_ascii=False, separators=(",", ":"))
+        self.messages[0]["content"] += "\n\n" + _text_protocol_block(tools_json)
+
+    @staticmethod
+    def _parse_text_tool_calls(content: str) -> tuple[str, list[tuple[str, str, str]]]:
+        """从回复正文解析文本协议工具调用，返回 (剥离后的正文, 调用列表)。
+
+        兼容三种形态：<<TOOL_CALLS>>...<<END>> 标记块（推荐，正文可含代码
+        而不受嵌套围栏影响）；裸 JSON 数组/对象；以及 think 内联泄漏
+        （<think>...</think> 先剥离——部分中转不分离推理内容）。
+        """
+        text = _TEXT_THINK_RE.sub("", content)
+        if text.lstrip().startswith("<think>"):
+            # 未闭合的 think（length 截断在思考中途）：整段视为思考
+            text = ""
+        clean = text.strip()
+        calls: list[tuple[str, str, str]] = []
+        candidates: list[str] = []
+        start = text.rfind(_TEXT_OPEN)
+        if start >= 0:
+            end = text.find(_TEXT_CLOSE, start + len(_TEXT_OPEN))
+            if end > start:
+                candidates.append(text[start + len(_TEXT_OPEN):end])
+        # 围栏兜底（模型无视标记约定时）：取最后一个 ```json 块
+        for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", text, re.I):
+            candidates.append(m.group(1))
+        if not candidates and clean:
+            # 兜底：整段正文直接是 JSON（模型漏写标记时）
+            candidates.append(clean)
+        for raw in candidates:
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            items = parsed if isinstance(parsed, list) else [parsed]
+            for i, item in enumerate(items):
+                if not isinstance(item, dict) or "tool" not in item:
+                    continue
+                args = item.get("args")
+                args_json = args if isinstance(args, str) else json.dumps(
+                    args if args is not None else {}, ensure_ascii=False)
+                calls.append((f"call_{i + 1}", str(item["tool"]), args_json))
+            if calls:
+                break
+        return clean, calls
 
     # ---- Agent 循环 ----
 
@@ -1023,15 +1113,24 @@ class LLMClient:
             # 对不支持思考的模型请勿开此开关
             payload["enable_thinking"] = True
             payload["thinking"] = {"type": "enabled"}
-        if use_tools:
+        if use_tools and self.cfg.tool_protocol != "text":
             payload["tools"] = tool_definitions_openai(self._enabled_tools)
         # 扩展请求体最后合并：用户配置的兼容开关（如 tool_choice/enable_thinking）
         # 有意覆盖上面生成的默认字段
         if self.cfg.extra_body:
             payload.update(self.cfg.extra_body)
+        if self.cfg.tool_protocol == "text":
+            # 文本协议：请求不带 tools，部分服务对「有 tool_choice 无 tools」
+            # 直接 400，这里兜底剥掉
+            payload.pop("tool_choice", None)
+            payload.pop("tools", None)
         return payload
 
     def _step_openai(self, use_tools: bool) -> tuple[dict, list[tuple[str, str, str]], str]:
+        text_mode = self.cfg.tool_protocol == "text"
+        if text_mode:
+            # 文本协议指令要在请求发出前注入 system（幂等：按标记判重）
+            self._ensure_text_protocol()
         data = self._post(
             self.cfg.base_url.rstrip("/") + "/chat/completions",
             self._payload_openai(use_tools),
@@ -1045,6 +1144,15 @@ class LLMClient:
         content = msg.get("content") or ""
         # 推理模型的思考内容：DeepSeek/GLM 等走 reasoning_content，个别服务叫 reasoning
         reasoning = str(msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+        if text_mode:
+            # 文本协议：指令块从正文解析（think 先剥离，见 _parse_text_tool_calls）
+            content, tool_calls = self._parse_text_tool_calls(content)
+            if not content and not tool_calls and not reasoning:
+                raise LLMError("大模型返回了空内容")
+            # 思考-only 轮（length 截断等）：留空内容走「未调用工具」nudge，
+            # 不整任务硬失败
+            assistant_dict: dict = {"role": "assistant", "content": content or None}
+            return assistant_dict, tool_calls, reasoning
         tool_calls = []
         for tc in msg.get("tool_calls") or []:
             fn = tc.get("function", {})
@@ -1052,7 +1160,7 @@ class LLMClient:
                                fn.get("name", ""), fn.get("arguments") or "{}"))
         if not content and not tool_calls and not reasoning:
             raise LLMError("大模型返回了空内容")
-        assistant_dict: dict = {"role": "assistant", "content": content or None}
+        assistant_dict = {"role": "assistant", "content": content or None}
         if tool_calls:
             assistant_dict["tool_calls"] = [
                 {

@@ -327,6 +327,8 @@ export interface AppStateT {
     timeout_seconds: number
     /** 扩展请求体（OpenAI 兼容）：逐键合并进 chat/completions 请求 */
     extra_body?: Record<string, unknown> | null
+    /** 工具调用协议：native=原生 function calling；text=文本协议兜底 */
+    tool_protocol?: 'native' | 'text'
   }
   /** 全局审查（Review Agent）配置：model_configured=false = 审查未启用默认态 */
   review_cfg: {

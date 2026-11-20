@@ -99,9 +99,70 @@ def check_save_roundtrip() -> None:
     print("save_config 存盘往返 ✅")
 
 
+def check_text_protocol() -> None:
+    """tool_protocol=text：请求不带 tools/tool_choice、指令注入、正文解析。"""
+    import json as _json
+    cfg = LLMConfig(api_key="sk-x", tool_protocol="text")
+    client = LLMClient(cfg)
+    client.reset("你是负责项目的开发 Agent。")
+    client._enabled_tools = frozenset({"read_file", "finish"})
+
+    # 1) 载荷：无 tools、无 tool_choice；extra_body 的 tool_choice 被剥掉
+    p = client._payload_openai(True)
+    assert "tools" not in p and "tool_choice" not in p, p.keys()
+
+    # 2) 指令注入：system 带协议标记 + 工具清单（幂等）
+    client._ensure_text_protocol()
+    sys1 = client.messages[0]["content"]
+    assert "工具调用协议（文本模式）" in sys1 and "read_file" in sys1
+    client._ensure_text_protocol()
+    assert client.messages[0]["content"] == sys1, "重复注入应被标记判重拦截"
+
+    # 3) 正文解析：标记块 + think 内联剥离 + 多调用
+    body = ('<think>先想想</think>我来写文件。\n<<TOOL_CALLS>>\n'
+            '[{"tool": "write_file", "args": {"path": "a.py", "content": "x=1"}},'
+            ' {"tool": "finish", "args": {"action": "completed", "summary": "ok"}}]\n'
+            '<<END>>')
+    clean, calls = LLMClient._parse_text_tool_calls(body)
+    assert "<think>" not in clean and "先想想" not in clean
+    assert [c[1] for c in calls] == ["write_file", "finish"], calls
+    assert _json.loads(calls[0][2])["path"] == "a.py"
+    assert _json.loads(calls[1][2])["action"] == "completed"
+
+    # 4) 单对象形态 + 裸 JSON 兜底
+    _, c2 = LLMClient._parse_text_tool_calls('{"tool": "finish", "args": {"action": "blocked"}}')
+    assert [c[1] for c in c2] == ["finish"]
+    _, c3 = LLMClient._parse_text_tool_calls('```json\n[{"tool": "grep", "args": {"pattern": "x"}}]\n```')
+    assert [c[1] for c in c3] == ["grep"]
+
+    # 5) 工具结果以用户消息回传（无 tool 角色）
+    tr = client._tool_result("call_1", "文件内容")
+    assert tr["role"] == "user" and "【工具结果 call_1】" in tr["content"]
+
+    # 6) 未闭合 think（length 截断）→ 无调用，正文空（循环走 nudge 不炸）
+    clean6, c6 = LLMClient._parse_text_tool_calls("<think>思考到一半被截断")
+    assert clean6 == "" and c6 == []
+    print("tool_protocol=text 文本协议 ✅")
+
+
+def check_protocol_coerce() -> None:
+    cfg = _coerce_llm({"api_key": "sk-x", "tool_protocol": "text"})
+    assert cfg.tool_protocol == "text"
+    assert _coerce_llm({"api_key": "sk-x"}).tool_protocol == "native"
+    for bad in ("json", "xml", 1):
+        try:
+            _coerce_llm({"api_key": "sk-x", "tool_protocol": bad})
+            raise AssertionError(f"tool_protocol={bad!r} 应报错")
+        except ValueError as e:
+            assert "tool_protocol" in str(e), e
+    print("tool_protocol 解析/校验 ✅")
+
+
 if __name__ == "__main__":
     check_coerce()
     check_payload_merge()
     check_resolve_override()
     check_save_roundtrip()
+    check_text_protocol()
+    check_protocol_coerce()
     print("test_llm_extra_body: 全部通过")
