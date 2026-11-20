@@ -428,8 +428,26 @@ def _text_protocol_block(tools_json: str) -> str:
         "- 工具执行结果以「【工具结果 call_N】」开头的用户消息回传\n"
         "- 任务完成或受阻时必须调用 finish 工具（action=completed/blocked，"
         "summary 概述，files_changed 列改动文件）；禁止用纯文本代替 finish\n"
-        "- args 里的文件内容原样写入，不要为转义换行而改变代码语义\n"
+        "- 标记块内是标准 JSON：字符串里的换行就是 \\n（单反斜杠），"
+        "不要写成 \\\\n 双重转义\n"
     )
+
+
+def _repair_double_escaped(args: dict) -> dict:
+    """修复弱模型在文本协议 JSON 里的双重转义（\\n 写成字面反斜杠 n）。
+
+    启发式（保守）：字符串值完全不含真实换行、且字面 \\n 出现 ≥2 次
+    才整体还原 \\n/\\t——真实换行与字面序列并存的输出不动（无法可靠
+    区分作者意图），native 协议不受影响。
+    """
+    for key, value in args.items():
+        if not isinstance(value, str):
+            continue
+        if "\n" in value or value.count("\\n") < 2:
+            continue
+        args[key] = (value.replace("\\n", "\n")
+                          .replace("\\t", "\t"))
+    return args
 
 
 class LLMError(RuntimeError):
@@ -727,6 +745,8 @@ class LLMClient:
                 if not isinstance(item, dict) or "tool" not in item:
                     continue
                 args = item.get("args")
+                if isinstance(args, dict):
+                    args = _repair_double_escaped(args)
                 args_json = args if isinstance(args, str) else json.dumps(
                     args if args is not None else {}, ensure_ascii=False)
                 calls.append((f"call_{i + 1}", str(item["tool"]), args_json))

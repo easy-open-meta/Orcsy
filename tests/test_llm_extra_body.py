@@ -142,6 +142,18 @@ def check_text_protocol() -> None:
     # 6) 未闭合 think（length 截断）→ 无调用，正文空（循环走 nudge 不炸）
     clean6, c6 = LLMClient._parse_text_tool_calls("<think>思考到一半被截断")
     assert clean6 == "" and c6 == []
+
+    # 7) 双重转义修复：模型把 \n 写成字面 \\n → 解码后还原真实换行
+    _, c7 = LLMClient._parse_text_tool_calls(
+        '<<TOOL_CALLS>>\n[{"tool": "write_file", "args": {"path": "a.py", '
+        '"content": "x = 1\\\\n\\\\ny = 2\\\\n"}}]\n<<END>>')
+    assert c7 and "\n" in _json.loads(c7[0][2])["content"], c7
+    # 真实换行与字面序列并存：保守不动
+    _, c8 = LLMClient._parse_text_tool_calls(
+        '<<TOOL_CALLS>>\n[{"tool": "write_file", "args": {"path": "a.py", '
+        '"content": "real\\nnext\\\\nliteral"}}]\n<<END>>')
+    v8 = _json.loads(c8[0][2])["content"]
+    assert "\n" in v8 and "\\n" in v8, v8
     print("tool_protocol=text 文本协议 ✅")
 
 
