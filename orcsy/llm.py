@@ -425,6 +425,7 @@ def _text_protocol_block(tools_json: str) -> str:
         f"{_TEXT_CLOSE}\n"
         "- 数组内多个调用按顺序执行；单个调用也可只写对象 {\"tool\": ..., \"args\": ...}\n"
         "- 除上述标记块外不要输出其他 JSON；标记块前可写简短说明\n"
+        "- 标记块必须出现在回复正文——思考/推理内容里不要输出标记块（会被剥离丢弃）\n"
         "- 工具执行结果以「【工具结果 call_N】」开头的用户消息回传\n"
         "- 任务完成或受阻时必须调用 finish 工具（action=completed/blocked，"
         "summary 概述，files_changed 列改动文件）；禁止用纯文本代替 finish\n"
@@ -852,10 +853,20 @@ class LLMClient:
                     forced_reason = (f"连续 {no_tool_turns} 轮未调用任何工具"
                                      "（疑似卡住）")
                     break
-                self.messages.append(self._user(
-                    "请调用 finish 工具给出任务结论（action/summary 等字段）。"
-                    "不要用纯文本回复。"
-                ))
+                if self.cfg.tool_protocol == "text":
+                    # 文本协议专用提醒：推理模型常把标记块写进思考区（被剥离后
+                    # 正文为空），明确指出格式模板与「必须出现在正文」
+                    self.messages.append(self._user(
+                        "上一轮没有输出任何工具调用标记块。请调用 finish 工具给出任务结论，"
+                        "格式：在回复正文末尾输出 <<TOOL_CALLS>>\\n"
+                        '[{"tool": "finish", "args": {"action": "completed|blocked", "summary": "..."}}]\\n'
+                        "<<END>>。标记块必须出现在回复正文（不要只写在思考里）。"
+                    ))
+                else:
+                    self.messages.append(self._user(
+                        "请调用 finish 工具给出任务结论（action/summary 等字段）。"
+                        "不要用纯文本回复。"
+                    ))
                 continue
 
             no_tool_turns = 0
