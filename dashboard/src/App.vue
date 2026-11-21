@@ -350,7 +350,9 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
             </button>
             <button v-if="auth.enabled && auth.authed" class="menu-item" @click="onLogout"><i class="ms">logout</i> {{ t('退出登录') }}</button>
           </div>
-          <div class="menu-ver" v-if="store.state">v{{ store.state.version }}</div>
+          <div class="menu-ver" v-if="store.state">
+          v{{ store.state.version }} · <a class="menu-af-link" href="https://orcsy.oscode.top" target="_blank" rel="noopener">{{ t('产品主页') }}</a> · <a class="menu-af-link" href="https://github.com/easy-open-meta/Orcsy/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
+        </div>
         </NDrawerContent>
       </NDrawer>
       <!-- 移动端底部导航：看板 / 项目 / ＋新建（呼出项目选择） / 更多 -->
@@ -422,6 +424,15 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
       </div>
     </NDialogProvider></NMessageProvider>
   </NConfigProvider>
+  <!-- 版权栏：桌面/移动端通用，登录层之下（登录页不显示版权避免干扰） -->
+  <footer class="app-footer" v-show="!showLogin && !isMobile">
+    <span class="af-copy">© 2024–2026 Orcsy</span>
+    <a class="af-link" href="https://orcsy.oscode.top" target="_blank" rel="noopener">产品主页</a>
+    <span class="af-sep">·</span>
+    <a class="af-link" href="https://www.oscode.top" target="_blank" rel="noopener">组织主页</a>
+    <span class="af-sep">·</span>
+    <a class="af-link" href="https://github.com/easy-open-meta/Orcsy/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
+  </footer>
 </template>
 
 <style>
@@ -546,6 +557,23 @@ body {
   color: var(--dim); font: inherit; padding: 4px 0;
 }
 .mbottom button.on { color: var(--acc, #5b8cff); }
+
+/* ---- 版权栏 ---- */
+.app-footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 800;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 5px 12px; font-size: 11px; color: var(--dim, #94a2be);
+  background: var(--card, #1a2235); border-top: 1px solid var(--line, #253048);
+  pointer-events: none; }
+.app-footer a, .app-footer .af-copy, .app-footer .af-sep { pointer-events: auto; }
+.app-footer .af-link { color: var(--dim, #94a2be); text-decoration: none; }
+.app-footer .af-link:hover { color: var(--acc, #5b8cff); }
+.app-footer .af-sep { color: var(--line, #3a4560); }
+@media (max-width: 768px) {
+  .app-footer { display: none; }
+}
+.menu-af-link { color: var(--dim, #94a2be); text-decoration: none; font-size: 11px; }
+.menu-af-link:hover { color: var(--acc, #5b8cff); }
+
 .mbottom .mi { font-size: 18px; line-height: 1.2; }
 .mbottom .ml { font-size: 11px; }
 .mbottom .fab {
