@@ -374,6 +374,12 @@ def _collect_urls(config: object) -> list[str]:
             add(repo.get("url"))
             add(repo.get("api_base"))
     add(getattr(getattr(config, "update", None), "repo", ""))
+    # GitHub 更新源的 API 独立域名：repo 填 github.com 时 releases 查询走
+    # api.github.com（updater 也会运行时放行兜底，这里提前推导可让审计/快照
+    # 在首次检查更新前就可见）
+    upd_repo = str(getattr(getattr(config, "update", None), "repo", "") or "")
+    if "github.com" in upd_repo.lower():
+        add("https://api.github.com")
     try:
         from .mirrors import BUILTIN_MIRRORS
         for mirrors in BUILTIN_MIRRORS.values():

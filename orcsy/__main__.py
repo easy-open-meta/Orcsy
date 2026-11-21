@@ -153,7 +153,7 @@ permissions:
   timeout_minutes: 30        # 审批挂起超时（分钟，1~1440）：无人响应自动拒绝，任务不会永久挂起
 
 update:
-  repo: https://gitee.com/java-and-net/Orcsy   # Gitee 更新源仓库（默认官方源，可改成自己的镜像；Release 附件放安装包）
+  repo: https://gitee.com/java-and-net/Orcsy   # 更新源仓库：Gitee / GitHub 均可（默认官方 Gitee 源，可改成自己的镜像；Release 附件放安装包）
   token: ""                    # 私有仓库的私人令牌；公开仓库可留空
   auto_check: true             # 启动后自动检查一次更新
 

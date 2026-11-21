@@ -2471,11 +2471,11 @@ const protocolOptions = computed(() => [
       </label>
       <label class="checkline" style="margin-top:10px">
         <NSwitch v-model:value="updDraft.auto_check" />
-        {{ it('启动时自动检查更新（Gitee Release 源）') }}
+        {{ it('启动时自动检查更新（Gitee / GitHub Release 源）') }}
       </label>
       <div class="frow">
-        <div class="f2"><label>{{ it('更新源仓库 URL（Gitee，Release 附件放安装包）') }}</label>
-          <NInput v-model:value="updDraft.repo" placeholder="https://gitee.com/xxx/orcsy" /></div>
+        <div class="f2"><label>{{ it('更新源仓库 URL（Gitee / GitHub，Release 附件放安装包）') }}</label>
+          <NInput v-model:value="updDraft.repo" placeholder="https://gitee.com/xxx/orcsy 或 https://github.com/xxx/orcsy" /></div>
         <div class="f1"><label>{{ it('访问 token（私有仓库用）') }}</label>
           <NInput v-model:value="updDraft.token" type="password" show-password-on="click"
                   :placeholder="updTokenConfigured

@@ -370,6 +370,75 @@ def check_check_update() -> None:
         srv.shutdown()
 
 
+def check_check_update_github() -> None:
+    """GitHub 更新源：API 域名切换、Bearer 头鉴权、digest 哈希、无查询串 token。"""
+    RELEASE = {
+        "tag_name": "V0.15.0",
+        "body": "GitHub Release",
+        "assets": [
+            {"name": "orcsy-update-0.15.0.zip",
+             "browser_download_url": "https://github.com/o/r/releases/download/V0.15.0/orcsy-update-0.15.0.zip",
+             "digest": "sha256:" + "ab" * 32},
+            {"name": "orcsy-update-0.15.0.zip.sha256",
+             "browser_download_url": "https://github.com/o/r/releases/download/V0.15.0/orcsy-update-0.15.0.zip.sha256"},
+        ],
+    }
+
+    class FakeGitHub(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            AUTH["gh_ua"] = self.headers.get("User-Agent") or ""
+            AUTH["gh_auth"] = self.headers.get("Authorization") or ""
+            AUTH["gh_accept"] = self.headers.get("Accept") or ""
+            body = json.dumps(RELEASE).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a): pass
+
+    class _Srv(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    srv = _Srv(("127.0.0.1", 0), FakeGitHub)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        # api_base 指向假服务器（真实 api.github.com 不可测）；token 走 Bearer 头
+        r = check_update({"repo": "https://github.com/o/r", "api_base": base,
+                          "token": "gh-tok"}, current_version="0.14.0")
+        assert r["has_update"] and r["latest"] == "V0.15.0", r
+        assert r["provider"] == "github", r
+        assert AUTH["gh_auth"] == "Bearer gh-tok", AUTH["gh_auth"]
+        assert "vnd.github+json" in AUTH["gh_accept"], AUTH["gh_accept"]
+        assert AUTH["gh_ua"].startswith("Orcsy/"), AUTH["gh_ua"]
+        # GitHub 不做 access_token 查询串拼接（Gitee 专属）
+        assert "access_token" not in r["download_url"], r
+        # API digest 字段直接采信为 sha256_value
+        assert r["sha256_value"] == "ab" * 32, r
+        # 下载鉴权头构建
+        from orcsy.updater import download_auth_headers
+        assert download_auth_headers(r, "gh-tok") == {"Authorization": "Bearer gh-tok"}
+        assert download_auth_headers(r, "") == {}
+        gitee_info = {"provider": "gitee"}
+        assert download_auth_headers(gitee_info, "tk") == {}  # Gitee 走查询串
+        # 匿名（无 token）也不带 Authorization 头
+        r2 = check_update({"repo": "https://github.com/o/r", "api_base": base},
+                          current_version="0.15.0")
+        assert AUTH["gh_auth"] == "", AUTH["gh_auth"]
+        assert not r2["has_update"]
+        # Gitee URL 回归：不带 api_base 时仍按 Gitee v1 路径解析（origin 拼接）
+        r3 = check_update({"repo": "https://gitee.com/o/r",
+                           "api_base": base, "token": "tk"}, "0.13.0")
+        assert r3["provider"] == "gitee" and r3["has_update"], r3
+        assert "access_token=tk" in r3["download_url"], r3
+        print("check_update GitHub（Bearer 头/digest/无查询串 token/Gitee 回归）✅")
+    finally:
+        srv.shutdown()
+
+
 def check_config_roundtrip() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="orcsy-upd-cfg-"))
     try:
@@ -854,6 +923,7 @@ def main() -> int:
     check_update_result_marker()
     check_install_log()
     check_check_update()
+    check_check_update_github()
     check_config_roundtrip()
     check_is_writable()
     check_copier_script()

@@ -4,6 +4,14 @@
 **1.0.0 起承诺向后兼容契约**：破坏配置/数据的变更必须升 major。条目按用户可感知
 的维度归类（新增/修复/变更），工程细节见 `docs/` 设计文档与各版本路线图。
 
+## [0.32.0] — 2026-11-22
+
+### 新增
+- **更新源仓库 URL 支持 GitHub**：自更新源此前硬编码按 Gitee 解析（API 路径与 access_token 查询串鉴权），填 GitHub URL 会拼出死地址。现按仓库 URL 的 host 识别平台——host 含 `github` 走 `api.github.com/repos/{o}/{r}/releases/latest` + `Authorization: Bearer` 头鉴权（带 `X-GitHub-Api-Version` 固定版本头）；其余（gitee.com / 自托管 Gitea 等 v1 兼容源）保持既有 Gitee 行为，自托管镜像不受影响。两平台 Release JSON 的 tag_name / assets / browser_download_url / digest 字段结构一致，附件仍认 `orcsy-update-*.zip` + 同名 `.sha256`（或 API `digest` 字段）
+  - GitHub 私有仓库：附件下载鉴权头仅在内存留存（不进 update_state、不随 /api/state 外发）；httpx 跨域重定向自动剥离 Authorization，匹配 302 落预签名 CDN 的要求
+  - GitHub 的 API 域名（api.github.com）与仓库域名不同：出网白名单在 repo 含 github.com 时自动推导放行，updater 另有运行时放行兜底，无需手工补 egress.extra_hosts
+  - 看板设置页「应用」的更新源标签/占位符与 en / 繁中语言包同步更新；config.example.yaml 注释同步
+
 ## [0.31.1] — 2026-11-22
 
 ### 修复

@@ -1,4 +1,4 @@
-"""程序自更新：Gitee Release 检查 / 下载 / 手动导入 / 静默换名安装。
+"""程序自更新：Gitee / GitHub Release 检查 / 下载 / 手动导入 / 静默换名安装。
 
 更新包为 ZIP（orcsy-update-*.zip，含 orcsy-web.exe / orcsy-tray.exe / README*）。
 安装目录用户可写时走零 UAC 静默升级：后台线程「换名落位」——解压到安装目录
@@ -67,19 +67,55 @@ def version_newer(candidate: str, current: str) -> bool:
 
 
 def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, Any]:
-    """查询 Gitee Release 最新版本，与当前版本比较。
+    """查询 Gitee / GitHub Release 最新版本，与当前版本比较。
 
-    update_cfg: {repo: 'https://gitee.com/xxx/orcsy', token?: str}
+    update_cfg: {repo: 'https://gitee.com/xxx/orcsy' 或 'https://github.com/xxx/orcsy',
+                 token?: str}
+    按仓库 URL 的 host 识别平台：host 含 github 走 api.github.com + Bearer 头
+    鉴权；其余（gitee.com / 自托管 Gitea 等 Gitee v1 兼容源）保持既有 Gitee
+    行为（/api/v1 + access_token 查询串）。两平台 Release JSON 的 tag_name /
+    assets / browser_download_url / digest 字段结构一致。
     返回 {has_update, current, latest, notes, asset_name, download_url,
           sha256_url, sha256_value}。附件只认 orcsy-update-*.zip 更新包及
     同名 .sha256 校验文件（exe 安装包仅首次安装用，不走在线更新）。
     """
-    info = detect_repo(str(update_cfg.get("repo") or ""), "gitee")
+    repo_url = str(update_cfg.get("repo") or "")
+    host = urlparse(repo_url).hostname or ""
+    # host 含 github 关键词 → GitHub；其余（含自托管 Gitea/Gitee v1 兼容源、
+    # 甚至识别不了的 host）沿用既有 Gitee v1 行为——与旧版 detect_repo(url,
+    # "gitee") 全按 Gitee 解析的语义一致，不破坏自托管镜像
+    if "github" in host.lower():
+        info = {"provider": "github", "owner": "", "repo": "", "origin": ""}
+        m = re.match(r"^(https?://)([^/]+)/(.+?)/?$", repo_url.strip())
+        if m:
+            parts = [p for p in m.group(3).split("/") if p and p != "-"]
+            if len(parts) >= 2:
+                info["owner"], info["repo"] = parts[0], parts[1].removesuffix(".git")
+    else:
+        info = detect_repo(repo_url, "gitee")
     token = str(update_cfg.get("token") or "").strip()
-    params = {"access_token": token} if token else None
-    api_base = str(update_cfg.get("api_base") or "").rstrip("/")
-    url = f"{api_base or info['origin']}/api/v1/repos/{info['owner']}/{info['repo']}/releases/latest"
+    params: dict[str, str] | None = None
+    headers = {"User-Agent": USER_AGENT}
+    if info["provider"] == "github":
+        # GitHub：API 独立域名（api.github.com），鉴权用 Bearer 头（Gitee 的
+        # access_token 查询串它不认）；固定版本头防 API 演进造成行为突变
+        api_base = str(update_cfg.get("api_base") or "").rstrip("/") \
+            or "https://api.github.com"
+        url = f"{api_base}/repos/{info['owner']}/{info['repo']}/releases/latest"
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        headers["Accept"] = "application/vnd.github+json"
+        headers["X-GitHub-Api-Version"] = "2022-11-28"
+    else:  # gitee（默认，保持既有行为）
+        api_base = str(update_cfg.get("api_base") or "").rstrip("/")
+        url = f"{api_base or info['origin']}/api/v1/repos/{info['owner']}/{info['repo']}/releases/latest"
+        params = {"access_token": token} if token else None
 
+    if info["provider"] == "github" and not update_cfg.get("api_base"):
+        # GitHub 的 API 域名（api.github.com）与仓库域名（github.com）不同，
+        # 而白名单只从 update.repo 推导出后者；API 地址是仓库 URL 的确定性
+        # 推导结果（同源信任），按运行时放行，免得用户手工补 egress.extra_hosts
+        allow_runtime_host(url, purpose="update_check")
     try:
         egress_check(url, purpose="update_check")
     except EgressDenied as e:
@@ -90,8 +126,8 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
     trust_env = urlparse(url).hostname not in ("127.0.0.1", "localhost", "::1")
     for attempt in range(5):  # 本机回环竞态重试（RST 成串出现，加深重试覆盖突发窗口）
         try:
-            resp = httpx.get(url, params=params, timeout=30, trust_env=trust_env,
-                             headers={"User-Agent": USER_AGENT})
+            resp = httpx.get(url, params=params, headers=headers, timeout=30,
+                             trust_env=trust_env)
             break
         except httpx.HTTPError as e:
             last_err = e
@@ -127,7 +163,9 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
     download_url = str(asset.get("browser_download_url") or "")
     if not download_url:
         raise UpdateError(f"Release {latest} 的附件缺少下载地址。")
-    if token:
+    if token and info["provider"] != "github":
+        # Gitee 仅支持查询串鉴权；GitHub 附件下载（公开仓库）无需 token，
+        # 私有仓库下载走带 Bearer 头的 API 附件端点（下方 sha256 旁处理）
         sep = "&" if "?" in download_url else "?"
         download_url += f"{sep}access_token={token}"
 
@@ -144,13 +182,16 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
         "download_url": download_url,
         "sha256_url": "",     # .sha256 附件的下载地址（空 = 无附件）
         "sha256_value": "",   # API digest 字段给的哈希值本身（空 = 无）
+        "provider": info["provider"],  # 下载鉴权方式随平台不同（GitHub 走 Bearer 头）
     }
     zip_name = str(asset.get("name") or "")
     sha_asset = next((a for a in assets
                       if str(a.get("name", "")).lower() == f"{zip_name}.sha256"), None)
     if sha_asset is not None:
         sha_url = str(sha_asset.get("browser_download_url") or "")
-        if sha_url and token:
+        if sha_url and token and info["provider"] != "github":
+            # 同下载地址：Gitee 查询串鉴权；GitHub 附件无需 token（私有仓库
+            # 走 digest 字段校验，不依赖 .sha256 附件）
             sep = "&" if "?" in sha_url else "?"
             sha_url += f"{sep}access_token={token}"
         result["sha256_url"] = sha_url
@@ -169,11 +210,14 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
 def download_installer(download_url: str, dest_dir: Path,
                        progress_cb: Callable[[int], None] | None = None,
                        filename: str = "orcsy-update-download.zip",
-                       expected_sha256: str = "") -> Path:
+                       expected_sha256: str = "",
+                       headers: dict[str, str] | None = None) -> Path:
     """流式下载更新包到 dest_dir，progress_cb 收到 0~100 的百分比。
 
     expected_sha256 非空时下载完成后校验（安全审计 2026-11-04 M2）：不符则
     删除落盘文件并抛 UpdateError——哈希不符的包绝不能留在磁盘上进安装环节。
+    headers：额外请求头（GitHub 私有仓库附件下载带 Bearer token；httpx 跨域
+    重定向会自动剥离 Authorization，302 落到的预签名 CDN 地址本就不该带它）。
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / filename
@@ -187,7 +231,8 @@ def download_installer(download_url: str, dest_dir: Path,
     for attempt in range(5):  # 本机回环 RST 成串出现，退避重试覆盖突发窗口
         try:
             with httpx.stream("GET", download_url, timeout=60, follow_redirects=True,
-                              headers={"User-Agent": USER_AGENT}, trust_env=trust_env) as resp:
+                              headers={"User-Agent": USER_AGENT, **(headers or {})},
+                              trust_env=trust_env) as resp:
                 if resp.status_code != 200:
                     raise UpdateError(f"下载更新包失败：HTTP {resp.status_code}")
                 total = int(resp.headers.get("content-length") or 0)
@@ -221,6 +266,17 @@ def download_installer(download_url: str, dest_dir: Path,
     return dest
 
 
+def download_auth_headers(update_info: dict[str, Any], token: str = "") -> dict[str, str]:
+    """按更新源平台构建附件下载的鉴权头。
+
+    Gitee：token 已拼进查询串（check_update 阶段），无需请求头。
+    GitHub：私有仓库附件下载需 Bearer 头；公开仓库匿名即可（无 token 不带）。
+    """
+    if token and str(update_info.get("provider") or "") == "github":
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
 def parse_sha256_file(path: Path) -> str:
     """解析 .sha256 校验文件：sha256sum 标准格式「<hex>  <文件名>」，取首个字段。
 
@@ -236,12 +292,14 @@ def parse_sha256_file(path: Path) -> str:
     return value
 
 
-def fetch_expected_sha256(sha256_url: str, dest_dir: Path) -> str:
+def fetch_expected_sha256(sha256_url: str, dest_dir: Path,
+                          headers: dict[str, str] | None = None) -> str:
     """下载并解析 .sha256 校验文件，返回期望的 sha256 十六进制值。
 
     下载或解析失败抛 UpdateError——调用方应中止在线更新（缺校验不装）。
     """
-    dest = download_installer(sha256_url, dest_dir, filename="checksum.sha256")
+    dest = download_installer(sha256_url, dest_dir, filename="checksum.sha256",
+                              headers=headers)
     return parse_sha256_file(dest)
 
 

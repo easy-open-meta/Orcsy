@@ -440,7 +440,7 @@ DEFAULT_UPDATE_REPO = "https://gitee.com/java-and-net/Orcsy"
 
 @dataclass
 class UpdateConfig:
-    """程序自更新配置：从 Gitee Release 检查并下载新版本安装包。"""
+    """程序自更新配置：从 Gitee / GitHub Release 检查并下载新版本安装包。"""
 
     # 默认官方 Gitee 源：装好即可用「检查更新」，免用户手动填写
     repo: str = DEFAULT_UPDATE_REPO

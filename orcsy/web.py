@@ -69,7 +69,7 @@ API（均为 GET/POST JSON）：
   POST /api/logout       退出登录；服务端注销当前会话并清除 Cookie
 
 程序自更新（零 UAC 静默换名安装，详见 orcsy/updater.py）：
-  POST /api/update/check   检查 Gitee Release 是否有新版本
+  POST /api/update/check   检查 Gitee / GitHub Release 是否有新版本
   POST /api/update/apply   在线更新：下载 zip 更新包后走本地安装引擎
   POST /api/update/install 手动导入本地 zip 更新包 {path}，后台线程静默安装
                            （校验后立即返回；成功自动重启，出错写安装日志并自动打开）
@@ -488,6 +488,9 @@ class AppState:
         self.agents = self._build_agents(config)
         # 程序自更新状态机：idle / checking / latest / available / downloading / restarting / error
         self.update_state: dict = {"phase": "idle"}
+        # 附件下载鉴权头（GitHub 私有仓库 Bearer；Gitee 为空 dict）：仅在
+        # check_update 成功后内存留存，不进 update_state、不随 /api/state 外发
+        self._download_auth: dict[str, str] = {}
         # 实际监听地址（make_server 绑定成功后写回）：web.host 可在看板保存后热更
         # （内存值），但监听 socket 只在进程启动时确定——连接向导必须按实际绑定
         # 报告可达性，否则保存后未重启时会把「还没监听的局域网地址」标成可扫码
@@ -1959,7 +1962,7 @@ class AppState:
                                     updater.read_install_log(self.install_log)})
 
     def update_check(self, data: dict) -> dict:
-        """检查 Gitee Release 是否有新版本；结果写入 update_state 供头部展示。"""
+        """检查 Gitee / GitHub Release 是否有新版本；结果写入 update_state 供头部展示。"""
         self._set_update_state({"phase": "checking"})
         try:
             info = updater.check_update(
@@ -1969,6 +1972,10 @@ class AppState:
             self._set_update_state({"phase": "error", "message": str(e)})
             raise ValueError(str(e)) from e
         phase = "available" if info["has_update"] else "latest"
+        # 下载鉴权头随 token 现算（GitHub 私有仓库附件需 Bearer 头；Gitee 走
+        # 查询串）不落 update_state：token 只留在本进程，不随 /api/state 外发
+        self._download_auth = updater.download_auth_headers(
+            info, self.config.update.token)
         self._set_update_state({"phase": phase, **info})
         log.info("检查更新：当前 %s，最新 %s%s", __version__, info["latest"],
                  "（可更新）" if info["has_update"] else "（已是最新）")
@@ -2088,7 +2095,8 @@ class AppState:
             # 一版不能在线更新，不可无校验提权执行（手动导入不受影响）
             if not expected:
                 if sha_url:
-                    expected = updater.fetch_expected_sha256(sha_url, dest)
+                    expected = updater.fetch_expected_sha256(sha_url, dest,
+                                                             headers=self._download_auth)
             if not expected:
                 raise updater.UpdateError(
                     "本次 Release 未提供 sha256 校验文件，在线更新已拒绝；"
@@ -2097,7 +2105,8 @@ class AppState:
             path = updater.download_installer(
                 dl_url, dest, progress_cb=lambda pct: self.update_state.update(
                     {"phase": "downloading", "percent": pct}),
-                filename=name, expected_sha256=expected)
+                filename=name, expected_sha256=expected,
+                headers=self._download_auth)
             return self._start_install_thread(path)
         except updater.UpdateError as e:
             if dest is not None:
