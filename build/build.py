@@ -752,10 +752,18 @@ def main() -> int:
     if not args.linux_only:
         if sys.platform == "win32":
             run([sys.executable, "-m", "PyInstaller", "orcsy.spec", "--noconfirm"], cwd=ROOT)
-            iscc = Path(sys.executable).parents[1] / "Programs" / "Inno Setup 6" / "ISCC.exe"
-            if not iscc.exists():
-                iscc = Path.home() / "AppData" / "Local" / "Programs" / "Inno Setup 6" / "ISCC.exe"
-            if iscc.exists():
+            iscc = shutil.which("ISCC.exe")
+            if not iscc:
+                for cand in (
+                    Path(sys.executable).parents[1] / "Programs" / "Inno Setup 6" / "ISCC.exe",
+                    Path.home() / "AppData" / "Local" / "Programs" / "Inno Setup 6" / "ISCC.exe",
+                    Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe"),
+                    Path("C:/Program Files/Inno Setup 6/ISCC.exe"),
+                ):
+                    if cand.exists():
+                        iscc = str(cand)
+                        break
+            if iscc:
                 run([iscc, "installer.iss"], cwd=BUILD)
                 artifacts_done.append(f"Windows 首次安装包 build/Setup/orcsy-setup-{v_str}-windows-amd64.exe")
             else:
