@@ -213,7 +213,7 @@ masking:
 # agent_profiles:              # 全局 Agent 角色预设池（多模型项目小组使用，可选）：
 #   pm_default:                #   预设 ID
 #     name: "项目经理 PM"        #   显示名称
-#     role: pm                 #   角色类型：pm | backend | frontend | qa | custom
+#     role: pm                 #   角色类型：pm | backend | frontend | qa | devops | ui_critic | security | custom
 #     llm:                     #   独立模型绑定（缺省字段继承全局 llm）
 #       model: claude-3-7-sonnet-20250219
 #     max_turns: 20            #   工具循环轮数上限

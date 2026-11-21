@@ -705,6 +705,7 @@ def _auto_backup_config(log: Path) -> None:
     找不到配置就跳过（桌面 portable 等场景由用户自行 backup-config）。
     """
     import os as _os
+    from pathlib import Path as _Path
     from .backup import create_backup
 
     candidates = []

@@ -139,6 +139,18 @@ class WorktreeManager:
         is_rework = bool(task and (task.review_round > 0 or task.review_pending
                                    or getattr(task, "resume_run", False)))
 
+        def _add() -> None:
+            if self.per_task_worktree:
+                if is_rework and self.branch_exists(target_branch):
+                    self.git.run("worktree", "add", str(target_path), target_branch)
+                else:
+                    self.git.run("worktree", "add", "-B", target_branch, str(target_path), base_branch)
+            else:
+                if self.branch_exists(target_branch):
+                    self.git.run("worktree", "add", str(target_path), target_branch)
+                else:
+                    self.git.run("worktree", "add", "-b", target_branch, str(target_path), base_branch)
+
         if target_path.exists() and (target_path / ".git").exists():
             if not self.per_task_worktree:
                 if self.branch_exists(target_branch):
@@ -150,6 +162,7 @@ class WorktreeManager:
             else:
                 wt_git.run("checkout", "-B", target_branch, base_branch)
             wt_git.run("clean", "-fd")
+            self._heal_empty_worktree(target_path, base_branch, _add)
             return target_branch
 
         if target_path.exists():
@@ -158,17 +171,30 @@ class WorktreeManager:
         with contextlib.suppress(Exception):
             self.git.run("worktree", "prune")
 
-        if self.per_task_worktree:
-            if is_rework and self.branch_exists(target_branch):
-                self.git.run("worktree", "add", str(target_path), target_branch)
-            else:
-                self.git.run("worktree", "add", "-B", target_branch, str(target_path), base_branch)
-        else:
-            if self.branch_exists(target_branch):
-                self.git.run("worktree", "add", str(target_path), target_branch)
-            else:
-                self.git.run("worktree", "add", "-b", target_branch, str(target_path), base_branch)
+        _add()
+        self._heal_empty_worktree(target_path, base_branch, _add)
         return target_branch
+
+    def _heal_empty_worktree(self, target_path: Path, base_branch: str, add_fn) -> None:
+        """空工作区自愈：实测偶发（1/8 运行）worktree 检出后零跟踪文件，Agent 面对
+        空目录只能诚实 blocked。setup 末尾统一校验一次，异常空区强制移除重建。"""
+        try:
+            if Git(target_path).run("ls-files").strip():
+                return
+            # 基准分支本身是空树（零提交新仓库）时空区属正常，不算故障
+            if not self.git.run("ls-tree", "--name-only", base_branch).strip():
+                return
+        except GitError as e:
+            log.warning("空 worktree 校验失败（%s）：%s", target_path, e)
+            return
+        log.warning("检测到空 worktree（%s），强制移除重建", target_path)
+        try:
+            self.git.run("worktree", "remove", "--force", str(target_path))
+            with contextlib.suppress(Exception):
+                self.git.run("worktree", "prune")
+            add_fn()
+        except GitError as e:
+            log.warning("空 worktree 重建失败（%s）：%s", target_path, e)
 
     def cleanup(self, wt_path: Path | None = None) -> None:
         """任务结束后清空 Worktree 的未提交改动。"""

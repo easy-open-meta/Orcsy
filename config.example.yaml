@@ -21,10 +21,9 @@ llm:
                              # 可打断）；思考型模型/长任务建议 600~900 或 -1
   tool_protocol: native      # 工具调用协议：native=原生 function calling；text=文本
                              # 协议兜底（服务端工具解析器与推理输出互斥的中转用）
-  extra_body: {}             # 扩展请求体（OpenAI 兼容）：逐键合并进 chat/completions，
-                             # 同名键覆盖内置字段。中转兼容开关，例如部分 vLLM 系中转
-                             # auto 工具选择下不返回结构化 tool_calls 时：
-                             # {"tool_choice": "required", "enable_thinking": false}
+  extra_body: {}             # 扩展请求体（OpenAI 兼容）：逐键合并进 chat/completions；
+                             # 中转兼容开关，例 {"tool_choice": "required",
+                             # "enable_thinking": false}
 
 scheduler:
   interval_seconds: 300      # 每轮扫描间隔（秒）
@@ -198,7 +197,7 @@ masking:
 # agent_profiles:              # 全局 Agent 角色预设池（多模型项目小组使用，可选）：
 #   pm_default:                #   预设 ID
 #     name: "项目经理 PM"        #   显示名称
-#     role: pm                 #   角色类型：pm | backend | frontend | qa | custom
+#     role: pm                 #   角色类型：pm | backend | frontend | qa | devops | ui_critic | security | custom
 #     llm:                     #   独立模型绑定（缺省字段继承全局 llm）
 #       model: claude-3-7-sonnet-20250219
 #     max_turns: 20            #   工具循环轮数上限

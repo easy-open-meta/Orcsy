@@ -115,7 +115,8 @@ class ProjectConfig:
 
 # ---- 多模型 Agent 项目小组（Project Team）角色体系 ----
 
-VALID_AGENT_ROLES = ("pm", "backend", "frontend", "qa", "custom")
+VALID_AGENT_ROLES = ("pm", "backend", "frontend", "qa",
+                     "devops", "ui_critic", "security", "custom")
 VALID_TEAM_EXECUTION_MODES = ("parallel_worktree", "sequential")
 
 
@@ -193,6 +194,50 @@ BUILT_IN_ROLES: dict[str, dict[str, Any]] = {
             "reassign_task": False, "report_bug": False,
         },
         "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("custom", ""),
+    },
+    # Phase 2 扩展专业职能角色（roadmap §3.1）
+    "devops": {
+        "role": "devops",
+        "label": "运维/DevOps 工程师",
+        "icon": "dns",
+        "description": "负责 Dockerfile、docker-compose、CI/CD 流水线脚本、K8s 声明与环境配置的编写维护",
+        "produces_code": True,
+        "default_max_turns": 40,
+        "default_tools": {
+            "create_tasks": False, "reassign_task": False, "report_bug": False,
+        },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("devops", ""),
+    },
+    "ui_critic": {
+        "role": "ui_critic",
+        "label": "UI 视觉审查专家",
+        "icon": "visibility",
+        "description": "利用本地浏览器截图工具对前端页面排版、间距与响应式做纯视觉审美与体验把关",
+        "produces_code": False,
+        "default_max_turns": 35,
+        "default_tools": {
+            "write_file": False, "edit_file": False, "multi_edit": False,
+            "delete_file": False, "move_file": False, "run_command": False,
+            "create_tasks": False, "reassign_task": False,
+            "report_bug": True,
+            "dev_server": True, "http_request": True, "browser": True,
+        },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("ui_critic", ""),
+    },
+    "security": {
+        "role": "security",
+        "label": "安全合规审计工程师",
+        "icon": "gpp_maybe",
+        "description": "合并前执行静态代码扫描与依赖 CVE 检索，识别 SQL 注入、越权与硬编码密钥风险",
+        "produces_code": False,
+        "default_max_turns": 35,
+        "default_tools": {
+            "write_file": False, "edit_file": False, "multi_edit": False,
+            "delete_file": False, "move_file": False,
+            "create_tasks": False, "reassign_task": False,
+            "report_bug": True,
+        },
+        "default_prompt_template": ROLE_PROMPT_TEMPLATES.get("security", ""),
     },
 }
 
@@ -822,9 +867,8 @@ def resolve_review_llm(global_review: ReviewConfig,
     """
     if not override:
         return global_review.llm
-    merged: dict[str, Any] = asdict(global_review.llm) if global_review.llm else {
-        k: LLMConfig.__dataclass_fields__[k].default for k in _LLM_FIELDS
-    }
+    merged: dict[str, Any] = asdict(global_review.llm) if global_review.llm \
+        else asdict(LLMConfig())
     applied = False
     for key in _REVIEW_LLM_FIELDS:
         value = override.get(key)

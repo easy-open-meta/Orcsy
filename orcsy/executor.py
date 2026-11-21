@@ -50,6 +50,10 @@ from .tools import (
 )
 from .worktree import WORKTREE_DIR, WorktreeManager, safe_wt_name  # noqa: F401
 
+# 只读验证型角色：报 Bug 后必须等待回归（completed 不直接归档），且无文件改动时
+# 报 completed 属正常验收而非空转（与 QA 同语义）。Phase 2 新增 ui_critic / security。
+READONLY_VERIFY_ROLES = ("qa", "ui_critic", "security")
+
 
 @dataclass
 class TaskResult:
@@ -356,9 +360,11 @@ class TaskExecutor:
                     self._cleanup_worktree_changes(wt_path)
                 result.outcome = "open"
             elif response.action == "wait_retest" or (
-                self.team_role == "qa" and created_bugs and response.action == "completed"
+                self.team_role in READONLY_VERIFY_ROLES
+                and created_bugs and response.action == "completed"
             ):
-                # QA 新建了 Bug 任务后必须等待前置 Bug 修复再回归，不能直接归档 done
+                # 只读验证角色（QA/ui_critic/security）新建了 Bug 任务后必须等待
+                # 前置 Bug 修复再回归，不能直接归档 done
                 if use_worktree:
                     self._cleanup_worktree_changes(wt_path)
                 result.wait_retest = True
@@ -1059,8 +1065,9 @@ class TaskExecutor:
                     self._mark_review_resume(task, result)
                     return self._run_review_gate(task, result, branch, wt_path,
                                                  base_branch, _finish_merge)
-            if self.team_role == "qa":
-                # QA 开启 allow_test_scripts 但当轮验证通过无需新增脚本时，不应误判 blocked
+            if self.team_role in READONLY_VERIFY_ROLES:
+                # 只读验证角色（QA/ui_critic/security）当轮验证通过无需改动文件时，
+                # 不应误判 blocked
                 return "done", self._skipped_review("QA 联调验证通过，无代码或脚本文件改动")
             self.log.warning("模型报告 completed 但 worktree 无任何改动（任务 %s）", task.id)
             result.notes = (result.notes + "\n" if result.notes else "") + \
