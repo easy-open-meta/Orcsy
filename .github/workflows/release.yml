@@ -24,12 +24,12 @@ jobs:
         run: |
           VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' orcsy/__init__.py)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
+          if git rev-parse "refs/tags/V$VERSION" >/dev/null 2>&1; then
             echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "Tag v$VERSION already exists — skipping release"
+            echo "Tag V$VERSION already exists — skipping release"
           else
             echo "should_release=true" >> "$GITHUB_OUTPUT"
-            echo "New version detected: v$VERSION"
+            echo "New version detected: V$VERSION"
           fi
 
   # ---- Windows 构建：PyInstaller + Inno Setup 安装包 + 自更新 zip ----
@@ -174,12 +174,6 @@ jobs:
           # 写入临时文件（多行安全）
           echo "$NOTES" > release_notes.md
           echo "Extracted notes: $(wc -l < release_notes.md) lines"
-
-      - name: Create tag
-        run: |
-          VERSION="${{ needs.version.outputs.version }}"
-          git tag "V$VERSION"
-          git push origin "V$VERSION"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
