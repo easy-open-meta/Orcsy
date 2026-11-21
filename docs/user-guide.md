@@ -1166,6 +1166,45 @@ Orcsy detects this layout and switches to a compatible mode:
 
 Limitations: no worktree isolation/parallelism in this mode; nested repos commit on their current branch and every repo shares one Commit Message. New projects should use proper submodules or separate managed projects instead.
 
+
+### 10.23 Merge conflict self-healing
+
+When multiple team roles work in parallel and their worktree branches touch the same files, merging into the main workspace may conflict. Orcsy now auto-heals instead of failing:
+
+1. **Auto-resume**: worktree results are preserved (no code dropped), task marked `resume_run`;
+2. **Conflict synced to sandbox**: main workspace uncommitted changes are applied `--3way` into the Agent's worktree (conflict markers `<<<<<<<` land in Agent-editable files);
+3. **Agent resolves**: same role re-enters next cycle with conflict context in the prompt, resolves markers, re-runs tests, then re-completes;
+4. **Attempt cap**: up to 2 auto-heal attempts; persistent conflicts escalate to blocked for manual intervention.
+
+### 10.24 Dependency graph visualization (DAG)
+
+Expand "Dependency Graph (DAG)" on the project card to see task dependency topology:
+
+- **Layered layout**: rooted at tasks with no dependencies, arranged by longest path;
+- **Status colors**: open (blue) / in-progress (orange) / blocked (red) / done (green);
+- **Dependency edges**: arrows point to downstream tasks, colored by target status;
+- **Click a node**: opens task details (read-only).
+- On mobile, scroll horizontally to see the full graph.
+
+### 10.25 Agent commit identity
+
+When "Git auto-commit & merge" is enabled, Agent-generated commits can have a distinct author identity:
+
+- **Global**: Settings → Tools & Network → Agent Tools → "Commit author name / email";
+- **Per-project**: project settings → "Override Git commit & merge" → fill in project-specific author name/email (leave empty to inherit global).
+
+Typical use: set `Orcsy Agent` + `orcsy@example.com` globally so `git log --author="Orcsy"` filters all Agent commits at a glance.
+
+### 10.26 Full-process log replay
+
+Task run details now include a full-process event stream replay: beyond existing tool calls and progress events, it records:
+
+- **Model message content** (each Agent turn's reply, truncated);
+- **Model reasoning summary** (thinking content, truncated);
+- **Planned tool calls** (tool names + argument summaries);
+- **Tool execution results** (full result text, 4KB truncation).
+
+Open task details → "Run records" → click a run_id to expand the event stream. Events are sanitized (API keys and sensitive values never leave local).
 ## 11. Data, backup, and migration
 
 ### 11.1 Where data lives
