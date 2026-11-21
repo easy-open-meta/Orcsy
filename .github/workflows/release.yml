@@ -189,3 +189,20 @@ jobs:
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove .sha256.sha256 duplicates from Release
+        run: |
+          RELEASE_TAG="V${{ needs.version.outputs.version }}"
+          ASSETS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG")
+          echo "$ASSETS" | python3 -c "
+          import json, sys, urllib.request
+          assets = json.load(sys.stdin)
+          if isinstance(assets, list):
+              for a in assets:
+                  if '.sha256.sha256' in a['name']:
+                      req = urllib.request.Request(a['url'], method='DELETE',
+                          headers={'Authorization': 'token ${{ secrets.GITHUB_TOKEN }}'})
+                      urllib.request.urlopen(req)
+                      print('deleted:', a['name'])
+          " || true
