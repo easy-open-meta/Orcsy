@@ -1,0 +1,6 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": ["."],
+  "exclude": ["tests", "traceE*.py", "dashboard", "deploy", "package", "website", "**/node_modules/**"]
+}
