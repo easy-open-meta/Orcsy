@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NCard, NDynamicTags, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane } from 'naive-ui'
+import { NButton, NCard, NDynamicTags, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane, NTooltip } from 'naive-ui'
 import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type AuditEntryT, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
@@ -1870,9 +1870,19 @@ const protocolOptions = computed(() => [
             <template #header>
               <div style="display:flex; align-items:center; gap:10px; flex:1; justify-content:space-between; flex-wrap:wrap;">
                 <span><i class="ms">bolt</i> {{ it('子代理并发预算') }}</span>
-                <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
-                  {{ subagentLiveLimit === null ? it('尚未建立配额池') : tFmt('当前生效的并发上限 {p0}', { p0: subagentLiveLimit }) }}
-                </NTag>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <NTag size="small" round :type="subagentLiveLimit === null ? 'default' : 'info'">
+                    {{ subagentLiveLimit === null ? it('尚未建立配额池') : tFmt('当前生效的并发上限 {p0}', { p0: subagentLiveLimit }) }}
+                  </NTag>
+                  <NTooltip trigger="hover" placement="top" :style="{ maxWidth: '320px' }">
+                    <template #trigger>
+                      <i class="ms sm" style="cursor:help; color: var(--dim, #8891a5); font-size:16px;" tabindex="0">help_outline</i>
+                    </template>
+                    {{ subagentLiveLimit === null
+                      ? it('配额池在 Agent 首次发起 LLM 请求时自动创建（按 base_url + api_key + model 分池），无需手动建立。跑一轮任务后此处会显示实际生效的并发上限。')
+                      : it('当前生效的并发上限——可能低于配置值（自适应降速撞 429 后会临时对半砍，成功后逐步爬回）。多个模型/密钥各有独立配额池，取最小值为瓶颈。') }}
+                  </NTooltip>
+                </div>
               </div>
             </template>
             <span class="hint">{{ it('限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；厂商不公开并发上限，撞 429 自动对半降并发，成功后逐步爬回。保存后立即生效。') }}</span>
