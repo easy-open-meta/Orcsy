@@ -44,6 +44,7 @@ const pDraft = reactive({
   debug_hosts_text: '',
   use_cam: false,
   cam_enabled: false,
+  git_author_name: '', git_author_email: '',
   team: {
     enabled: false,
     execution_mode: 'parallel_worktree' as 'parallel_worktree' | 'sequential',
@@ -368,6 +369,8 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.review_rounds = p?.review_max_rounds ?? null
   pDraft.debug_hosts_text = (p?.debug_allowed_hosts ?? []).join('\n')
   pDraft.use_cam = p?.commit_and_merge !== undefined && p?.commit_and_merge !== null
+  pDraft.git_author_name = p?.git_author_name ?? ''
+  pDraft.git_author_email = p?.git_author_email ?? ''
   pDraft.cam_enabled = p?.commit_and_merge ?? false
 
   for (const k of Object.keys(teamMemberKeyTouched)) delete teamMemberKeyTouched[k]
@@ -697,6 +700,8 @@ async function saveProject(): Promise<void> {
         ? pDraft.debug_hosts_text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)
         : null,
       commit_and_merge: pDraft.use_cam ? pDraft.cam_enabled : null,
+      git_author_name: pDraft.git_author_name?.trim() || null,
+      git_author_email: pDraft.git_author_email?.trim() || null,
       team: pDraft.team.enabled ? {
         enabled: true,
         execution_mode: pDraft.team.execution_mode,
@@ -1453,6 +1458,12 @@ async function newFolder(): Promise<void> {
         <NSwitch size="small" v-model:value="pDraft.cam_enabled" />
         {{ t('任务完成后自动提交并合并代码（开启 = worktree 分支提交合并；关闭 = 直接保留在工作区）') }}
       </label>
+      <div class="frow" style="margin-top:8px">
+        <div class="f1"><label>{{ t('提交作者名（留空 = 跟随全局）') }}</label>
+          <NInput v-model:value="pDraft.git_author_name" :placeholder="store.state?.git_cfg?.author_name || 'Orcsy Agent'" /></div>
+        <div class="f1"><label>{{ t('提交作者邮箱（留空 = 跟随全局）') }}</label>
+          <NInput v-model:value="pDraft.git_author_email" :placeholder="store.state?.git_cfg?.author_email || 'orcsy@example.com'" /></div>
+      </div>
     </template>
     </ProjectFormSection>
     <ProjectFormSection :title="t('多模型 Agent 项目小组模式 (Team)')" icon="group"

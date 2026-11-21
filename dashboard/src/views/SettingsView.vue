@@ -509,6 +509,8 @@ const permOptions = [
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
 // ---- Git 提交与合并开关（默认关闭：改动直接保留在工作区） ----
 const gitCommitAndMergeDraft = shallowRef(false)
+const gitAuthorName = shallowRef('')
+const gitAuthorEmail = shallowRef('')
 // ---- 任务结束提醒草稿（完成/受阻时提示音 + 系统通知；cancelled 不提醒） ----
 const notifyDraft = reactive({ sound: true, system: true })
 const notifySaving = shallowRef(false)
@@ -568,6 +570,8 @@ watch(() => store.state, (s) => {
     localDebugDraft.artifacts_retention_days = dbg.artifacts_retention_days ?? 7
   }
   gitCommitAndMergeDraft.value = s.git_cfg?.commit_and_merge ?? false
+  gitAuthorName.value = s.git_cfg?.author_name ?? ''
+  gitAuthorEmail.value = s.git_cfg?.author_email ?? ''
   subagentDraft.max_parallel = s.subagent_cfg?.max_parallel ?? 4
   subagentDraft.adaptive = s.subagent_cfg?.adaptive ?? true
   notifyDraft.sound = s.notify_cfg?.sound ?? true
@@ -1209,7 +1213,8 @@ async function saveTools(): Promise<void> {
       commands: cmdsOff,
       env: { vars: envVars, path_autofix: pathAutofix.value },
       permissions: { mode: permDraft.mode, timeout_minutes: permDraft.timeout_minutes },
-      git: { commit_and_merge: gitCommitAndMergeDraft.value },
+      git: { commit_and_merge: gitCommitAndMergeDraft.value,
+             author_name: gitAuthorName.value.trim(), author_email: gitAuthorEmail.value.trim() },
       local_debug: {
         browser: localDebugDraft.browser,
         browser_executable: localDebugDraft.browser_executable.trim(),
@@ -2295,6 +2300,13 @@ const protocolOptions = computed(() => [
                   </div>
                   <span class="hint" style="margin-top: 6px;">{{ it('默认关闭：Agent 直接在项目工作区修改代码，不自动产生 Git 提交与主分支合并，方便人工检查与自主提交；开启后在独立 worktree 分支完成开发并自动提交合并。') }}</span>
                 </label>
+                <div class="frow" style="margin-top: 10px;">
+                  <div class="f1"><label>{{ it('提交作者名（Agent 自动提交的 git user.name；留空跟随环境）') }}</label>
+                    <NInput v-model:value="gitAuthorName" placeholder="Orcsy Agent" /></div>
+                  <div class="f1"><label>{{ it('提交作者邮箱（git user.email；留空跟随环境）') }}</label>
+                    <NInput v-model:value="gitAuthorEmail" placeholder="orcsy@example.com" /></div>
+                </div>
+                <div class="hint">{{ it('企业审计用它区分「Agent 提交」与「人工提交」；项目可在项目设置里单独覆盖。') }}</div>
               </div>
 
               <div class="group-card" style="padding: 12px;">

@@ -199,6 +199,9 @@ export interface ProjectT {
   /** 代码提交与合并开关：任务完成后是否自动 commit 并 merge 到主分支；null = 跟随全局（全局默认 false 关闭） */
   commit_and_merge?: boolean | null
   commit_and_merge_effective?: boolean
+  /** 项目级提交身份覆盖（null = 继承全局） */
+  git_author_name?: string | null
+  git_author_email?: string | null
   /** 审查门生效状态（后端两级解析）：开关/模型/返工上限/互斥冲突提示 */
   review?: {
     enabled_effective: boolean
@@ -462,6 +465,9 @@ export interface AppStateT {
   /** Git 自动化工作流配置：任务完成后的提交与合并策略 */
   git_cfg?: {
     commit_and_merge: boolean
+    /** Agent 自动提交身份（空 = 跟随环境 git config） */
+    author_name: string
+    author_email: string
   }
   /** 全局访问权限：模式 + 审批超时（分钟） */
   permissions_cfg: { mode: PermissionMode; timeout_minutes: number }

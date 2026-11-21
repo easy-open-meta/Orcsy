@@ -27,6 +27,7 @@ from .config import (
     AppConfig,
     resolve_commands,
     resolve_commit_and_merge,
+    resolve_git_author,
     resolve_llm,
     resolve_permission_mode,
     resolve_tools,
@@ -86,6 +87,7 @@ class Scheduler:
                          review_cfg=config.review,
                          local_debug=config.local_debug,
                          commit_and_merge=resolve_commit_and_merge(config.git, p),
+                         git_author=resolve_git_author(cfg.git, p),
                          agent_profiles=config.agent_profiles,
                          global_tools=config.tools)
             for p in config.projects
@@ -197,6 +199,7 @@ class Scheduler:
                          review_cfg=cfg.review,
                          local_debug=cfg.local_debug,
                          commit_and_merge=resolve_commit_and_merge(cfg.git, p),
+                         git_author=resolve_git_author(cfg.git, p),
                          agent_profiles=cfg.agent_profiles,
                          global_tools=cfg.tools)
             for p in cfg.projects

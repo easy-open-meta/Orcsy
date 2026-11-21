@@ -101,6 +101,9 @@ class ProjectConfig:
     # 项目级返工次数覆盖：审查不通过的最大累计轮数；None = 跟随全局
     # review.max_review_rounds（两级均校验 1~10）
     review_max_rounds: int | None = None
+    # 项目级提交身份覆盖：None/空 = 继承全局 git.author_*（三态语义同 commit_and_merge）
+    git_author_name: str | None = None
+    git_author_email: str | None = None
     # 项目级调试主机白名单追加：仅限裸主机名或 IP，合并到全局 local_debug.allowed_hosts 之上
     # （只增不减，None/空 = 仅用全局配置）
     debug_allowed_hosts: list[str] | None = None
@@ -585,6 +588,10 @@ class GitConfig:
 
     # 任务完成后是否自动提交代码并合并回主分支（默认 False 关闭：改动直接保留在工作区供人工检查）
     commit_and_merge: bool = False
+    # Agent 自动提交的作者身份（空 = 跟随环境/仓库现有 git config）；
+    # 企业审计场景用它区分「Agent 提交」与「人工提交」
+    author_name: str = ""
+    author_email: str = ""
 
 
 @dataclass
@@ -598,6 +605,17 @@ class BackupConfig:
     username: str = ""
     password: str = ""
     keep_last: int = 10
+
+
+def resolve_git_author(global_git: GitConfig, project: ProjectConfig) -> tuple[str, str] | None:
+    """生效提交身份：项目覆盖（非空）优先，其次全局；两者皆空返回 None（跟随环境）。"""
+    name = (project.git_author_name if project.git_author_name is not None
+            else global_git.author_name) or ""
+    email = (project.git_author_email if project.git_author_email is not None
+             else global_git.author_email) or ""
+    if name.strip() and email.strip():
+        return (name.strip(), email.strip())
+    return None
 
 
 def resolve_commit_and_merge(global_git: GitConfig, project: ProjectConfig) -> bool:
@@ -1572,6 +1590,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         raise ValueError("git 配置必须是字典（键值对）。")
     git_cfg = GitConfig(
         commit_and_merge=bool(git_raw.get("commit_and_merge", False)),
+        author_name=str(git_raw.get("author_name") or "").strip(),
+        author_email=str(git_raw.get("author_email") or "").strip(),
     )
 
     # 全局 Agent 角色预设池（可选，未配置时单兵模式照常运行）
@@ -1906,6 +1926,8 @@ def save_config(cfg: AppConfig) -> None:
         # Git 自动化工作流配置
         "git": {
             "commit_and_merge": cfg.git.commit_and_merge,
+            "author_name": cfg.git.author_name,
+            "author_email": cfg.git.author_email,
         },
         # 全局 Agent 角色预设池整体写回（漏写会在看板任意保存时静默丢失）
         "backup": {
@@ -1938,6 +1960,10 @@ def save_config(cfg: AppConfig) -> None:
                    if p.debug_allowed_hosts is not None else {}),
                 **({"commit_and_merge": p.commit_and_merge}
                    if p.commit_and_merge is not None else {}),
+                **({"git_author_name": p.git_author_name}
+                   if p.git_author_name is not None else {}),
+                **({"git_author_email": p.git_author_email}
+                   if p.git_author_email is not None else {}),
                 **({"repo": p.repo} if p.repo else {}),
                 **({"tools": p.tools} if p.tools else {}),
                 **({"permission_mode": p.permission_mode} if p.permission_mode else {}),

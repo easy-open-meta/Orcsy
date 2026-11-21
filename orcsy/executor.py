@@ -91,6 +91,7 @@ class TaskExecutor:
                  review_llm: LLMConfig | None = None,
                  local_debug: LocalDebugConfig | None = None,
                  commit_and_merge: bool = False,
+                 git_author: tuple[str, str] | None = None,
                  *,
                  worktree_isolation: bool | None = None,
                  per_task_worktree: bool = False,
@@ -109,6 +110,7 @@ class TaskExecutor:
         # 任务指纹/租约（V1-R2）；None = 未启用（单元测试直构/兼容旧调用）
         self.claims = claims
         self.commit_and_merge = bool(commit_and_merge)
+        self.git_author = git_author or None
         # worktree_isolation：默认跟随 commit_and_merge（单兵模式保持历史语义）；
         # 项目小组模式下可强制开启 True，在独立 worktree 中开发并仅落地主分支工作区（不默认 commit）
         self.worktree_isolation = (self.commit_and_merge if worktree_isolation is None
@@ -1019,7 +1021,7 @@ class TaskExecutor:
             return self._mark_stale_claim(task, result, reason)
 
         # 第一步提交（提交仅落在该任务的沙盒 worktree 分支内，绝不触碰主分支历史）
-        committed = wt_git.commit(message)
+        committed = wt_git.commit(message, author=self.git_author)
         if not committed:
             # 无新增改动：可能是审查服务故障后的恢复性重跑——成果早已提交在
             # 沙盒分支上，只差审查/合并收尾。此时直接补走审查门，而不是误判
@@ -1228,7 +1230,7 @@ class TaskExecutor:
                     self.git.run("merge", "--squash", branch)
                     commit_msg = (f"{message.splitlines()[0][:200]}\n\n"
                                   f"Task: {task.id}（审查返工后合并，squash 自 {branch}）")
-                    self.git.commit(commit_msg)
+                    self.git.commit(commit_msg, author=self.git_author)
                 else:
                     self.git.run("merge", "--no-ff", "-m",
                                  f"Merge arranger work for {task.id}", result.wip_commit or branch)
@@ -1270,7 +1272,7 @@ class TaskExecutor:
     def _commit_and_merge(self, task: Task, response: AgentResponse, result: TaskResult) -> bool:
         """提交 worktree 改动并合回主分支。返回是否成功完成合并。"""
         message = response.commit_message or f"fix: {task.title}"
-        committed = self.worktree_git.commit(message)
+        committed = self.worktree_git.commit(message, author=self.git_author)
         if not committed:
             self.log.warning("模型报告 completed 但 worktree 无任何改动（任务 %s）", task.id)
             result.notes = (result.notes + "\n" if result.notes else "") + \

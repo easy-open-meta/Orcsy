@@ -200,13 +200,21 @@ class Git:
     def add_all(self) -> None:
         self._run("add", "-A")
 
-    def commit(self, message: str) -> bool:
-        """提交全部变更。工作区干净时返回 False（不产生空提交）。"""
+    def commit(self, message: str, author: tuple[str, str] | None = None) -> bool:
+        """提交全部变更。工作区干净时返回 False（不产生空提交）。
+
+        author=(name, email) 时以 -c user.name/email 注入身份（Agent 提交与
+        人工提交区分，企业审计用）；None = 跟随环境/仓库现有 git config。
+        """
         if not self.is_dirty():
             return False
         self._run("add", "-A")
+        cmd = ["git", "-C", str(self.repo)]
+        if author:
+            cmd += ["-c", f"user.name={author[0]}", "-c", f"user.email={author[1]}"]
+        cmd += ["commit", "-m", message]
         proc = subprocess.run(
-            ["git", "-C", str(self.repo), "commit", "-m", message],
+            cmd,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         if proc.returncode != 0:

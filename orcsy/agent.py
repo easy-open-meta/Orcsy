@@ -151,6 +151,7 @@ class ProjectAgent:
                  review_cfg: ReviewConfig | None = None,
                  local_debug: LocalDebugConfig | None = None,
                  commit_and_merge: bool = False,
+                 git_author: tuple[str, str] | None = None,
                  *,
                  agent_profiles: dict[str, AgentProfileConfig] | None = None,
                  global_tools: ToolsConfig | None = None) -> None:
@@ -177,6 +178,7 @@ class ProjectAgent:
         self.review_cfg = review_cfg or ReviewConfig()
         self.local_debug = local_debug or LocalDebugConfig()
         self.commit_and_merge = bool(commit_and_merge)
+        self.git_author = git_author or None
         self.review_llm = resolve_review_llm(self.review_cfg, project.review_llm,
                                              context=f"项目 {project.name} 的 review_llm")
         if self.review_llm is not None:
@@ -201,6 +203,7 @@ class ProjectAgent:
                                      review_llm=self.review_llm,
                                      local_debug=self.local_debug,
                                      commit_and_merge=commit_and_merge,
+                                     git_author=git_author,
                                      skills_base=skills_base,
                                      claims=self.claims)
         self.log = get_logger(f"agent.{project.name}")
@@ -265,6 +268,7 @@ class ProjectAgent:
                     review_llm=mem_review_llm,
                     local_debug=self.local_debug,
                     commit_and_merge=commit_and_merge,
+                    git_author=git_author,
                     worktree_isolation=True,
                     per_task_worktree=True,
                     produces_code=m["produces_code"],

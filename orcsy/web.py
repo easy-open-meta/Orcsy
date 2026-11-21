@@ -130,6 +130,7 @@ from .config import (
     normalize_review_llm,
     resolve_commands,
     resolve_commit_and_merge,
+    resolve_git_author,
     resolve_llm,
     resolve_permission_mode,
     resolve_project_team_members,
@@ -844,6 +845,8 @@ class AppState:
                 "debug_allowed_hosts": p.debug_allowed_hosts or None,
                 "commit_and_merge": p.commit_and_merge,
                 "commit_and_merge_effective": resolve_commit_and_merge(self.config.git, p),
+                "git_author_name": p.git_author_name,
+                "git_author_email": p.git_author_email,
                 "worktree_isolation_effective": resolve_worktree_isolation(self.config.git, p),
                 "pending_git_changes": pending_git,
                 "team": self._team_public(p.team),
@@ -1020,6 +1023,8 @@ class AppState:
             # Git 提交与合并配置（默认关闭，改动直接保留在工作区）
             "git_cfg": {
                 "commit_and_merge": self.config.git.commit_and_merge,
+                "author_name": self.config.git.author_name,
+                "author_email": self.config.git.author_email,
             },
             # 访问权限：全局配置 + 当前挂起的审批请求（看板 5s 轮询刷新，
             # 顶栏「待审批」徽标与审批面板都读这里）
@@ -1634,6 +1639,11 @@ class AppState:
         )
         cam_raw = data.get("commit_and_merge")
         commit_and_merge = bool(cam_raw) if cam_raw is not None else None
+        # 提交身份覆盖：null/缺失 = 继承全局；非空串 = 覆盖
+        git_author_name = (str(data.get("git_author_name")).strip()
+                           if data.get("git_author_name") is not None else None)
+        git_author_email = (str(data.get("git_author_email")).strip()
+                            if data.get("git_author_email") is not None else None)
 
         # 项目小组编排：null / 缺失 = 沿用单兵模式；成员 llm.api_key 三态同其它密钥字段
         # （键缺失=保持原值；带键含空串=新值/清除）
@@ -1678,6 +1688,8 @@ class AppState:
             review_max_rounds=review_rounds,
             debug_allowed_hosts=debug_hosts,
             commit_and_merge=commit_and_merge,
+            git_author_name=git_author_name or None,
+            git_author_email=git_author_email or None,
             team=team,
         )
         # 审查模型互斥校验（R4）：配置了审查模型且开关生效时，与该项目生效
@@ -1731,6 +1743,7 @@ class AppState:
                                      review_cfg=cfg.review,
                                      local_debug=cfg.local_debug,
                                      commit_and_merge=resolve_commit_and_merge(cfg.git, p),
+                                     git_author=resolve_git_author(cfg.git, p),
                                      agent_profiles=cfg.agent_profiles,
                                      global_tools=cfg.tools)
                 for p in cfg.projects}
