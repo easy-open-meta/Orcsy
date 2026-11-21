@@ -169,19 +169,59 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <main class="guide-wrap">
   <aside class="guide-toc">
     <div class="toc-title">On this page</div>
-    <nav id="TOC" aria-label="目录"><ul><li class="toc-h2"><a href="#contents">Contents</a></li><li class="toc-h2"><a href="#1-quick-start-your-first-task-in-5-minutes">1. Quick start: your first task in 5 minutes</a></li><li class="toc-h2"><a href="#2-what-orcsy-is-and-what-it-can-do-for-you">2. What Orcsy is and what it can do for you</a><ul class="toc-sub"><li class="toc-h3"><a href="#21-one-sentence">2.1 One sentence</a></li><li class="toc-h3"><a href="#22-what-it-is-good-at">2.2 What it is good at</a></li><li class="toc-h3"><a href="#23-what-it-is-not-good-at">2.3 What it is not good at</a></li><li class="toc-h3"><a href="#24-do-i-need-to-know-how-to-code">2.4 Do I need to know how to code?</a></li></ul></li><li class="toc-h2"><a href="#3-three-core-ideas-in-plain-english">3. Three core ideas in plain English</a><ul class="toc-sub"><li class="toc-h3"><a href="#31-project">3.1 Project</a></li><li class="toc-h3"><a href="#32-task">3.2 Task</a></li><li class="toc-h3"><a href="#33-agent">3.3 Agent</a></li></ul></li><li class="toc-h2"><a href="#4-installation-choose-the-path-that-fits-you">4. Installation: choose the path that fits you</a><ul class="toc-sub"><li class="toc-h3"><a href="#41-pick-a-method">4.1 Pick a method</a></li><li class="toc-h3"><a href="#42-option-1-windows-installer-recommended">4.2 Option 1: Windows installer (recommended)</a></li><li class="toc-h3"><a href="#43-option-2-run-from-source-for-people-who-want-the-source">4.3 Option 2: run from source (for people who want the source)</a></li><li class="toc-h3"><a href="#44-option-3-docker-server--nas">4.4 Option 3: Docker (server / NAS)</a></li><li class="toc-h3"><a href="#45-option-4-linux-systemd-service">4.5 Option 4: Linux systemd service</a></li><li class="toc-h3"><a href="#46-post-install-checklist">4.6 Post-install checklist</a></li></ul></li><li class="toc-h2"><a href="#5-first-launch-connect-your-llm">5. First launch: connect your LLM</a><ul class="toc-sub"><li class="toc-h3"><a href="#51-open-settings">5.1 Open Settings</a></li><li class="toc-h3"><a href="#52-fill-in-the-fields">5.2 Fill in the fields</a></li><li class="toc-h3"><a href="#53-common-providers">5.3 Common providers</a></li><li class="toc-h3"><a href="#54-what-the-two-buttons-do">5.4 What the two buttons do</a></li><li class="toc-h3"><a href="#55-save">5.5 Save</a></li></ul></li><li class="toc-h2"><a href="#6-add-your-first-project">6. Add your first project</a><ul class="toc-sub"><li class="toc-h3"><a href="#61-create-a-project">6.1 Create a project</a></li><li class="toc-h3"><a href="#62-what-the-badges-mean">6.2 What the badges mean</a></li><li class="toc-h3"><a href="#63-what-agentmd-is-and-why-it-matters">6.3 What AGENT.md is and why it matters</a></li><li class="toc-h3"><a href="#64-optional-project-settings">6.4 Optional project settings</a></li></ul></li><li class="toc-h2"><a href="#7-create-and-manage-tasks">7. Create and manage tasks</a><ul class="toc-sub"><li class="toc-h3"><a href="#71-fastest-way-quick-add-on-the-card">7.1 Fastest way: quick add on the card</a></li><li class="toc-h3"><a href="#72-full-way-the-new-task-dialog">7.2 Full way: the New task dialog</a></li><li class="toc-h3"><a href="#73-how-to-choose-a-priority">7.3 How to choose a priority</a></li><li class="toc-h3"><a href="#74-what-a-task-file-looks-like">7.4 What a task file looks like</a></li><li class="toc-h3"><a href="#75-task-lifecycle">7.5 Task lifecycle</a></li><li class="toc-h3"><a href="#76-actions-on-the-task-list">7.6 Actions on the task list</a></li><li class="toc-h3"><a href="#77-archived-tasks">7.7 Archived tasks</a></li><li class="toc-h3"><a href="#78-five-tips-for-writing-good-tasks">7.8 Five tips for writing good tasks</a></li></ul></li><li class="toc-h2"><a href="#8-let-orcsy-start-working">8. Let Orcsy start working</a><ul class="toc-sub"><li class="toc-h3"><a href="#81-two-ways-to-trigger-work">8.1 Two ways to trigger work</a></li><li class="toc-h3"><a href="#82-top-status-chips">8.2 Top status chips</a></li><li class="toc-h3"><a href="#83-what-happens-while-a-task-runs">8.3 What happens while a task runs</a></li><li class="toc-h3"><a href="#84-read-the-run-log">8.4 Read the run log</a></li><li class="toc-h3"><a href="#85-after-a-task-ends">8.5 After a task ends</a></li></ul></li><li class="toc-h2"><a href="#9-dashboard-map-what-every-button-does">9. Dashboard map: what every button does</a><ul class="toc-sub"><li class="toc-h3"><a href="#91-top-toolbar">9.1 Top toolbar</a></li><li class="toc-h3"><a href="#92-dashboard-tab">9.2 Dashboard tab</a></li><li class="toc-h3"><a href="#93-projects-tab">9.3 Projects tab</a></li><li class="toc-h3"><a href="#94-settings-tab">9.4 Settings tab</a></li><li class="toc-h3"><a href="#95-skills-tab">9.5 Skills tab</a></li><li class="toc-h3"><a href="#96-usage-tab">9.6 Usage tab</a></li></ul></li><li class="toc-h2"><a href="#10-advanced-features-approvals-skills-issues-mirrors">10. Advanced features: approvals, skills, Issues, mirrors</a><ul class="toc-sub"><li class="toc-h3"><a href="#101-human-approval-permission-modes">10.1 Human approval (permission modes)</a></li><li class="toc-h3"><a href="#102-tool-switches-and-command-whitelist">10.2 Tool switches and command whitelist</a></li><li class="toc-h3"><a href="#103-skill-library">10.3 Skill library</a></li><li class="toc-h3"><a href="#104-issue-import">10.4 Issue import</a></li><li class="toc-h3"><a href="#105-mirrors-and-slow-networks">10.5 Mirrors and slow networks</a></li><li class="toc-h3"><a href="#106-multiple-projects-parallelism-dedicated-models">10.6 Multiple projects, parallelism, dedicated models</a></li><li class="toc-h3"><a href="#107-notifications">10.7 Notifications</a></li><li class="toc-h3"><a href="#108-data-masking-secrets-never-leave-the-machine">10.8 Data masking (secrets never leave the machine)</a></li><li class="toc-h3"><a href="#109-auto-update-and-restart">10.9 Auto-update and restart</a></li><li class="toc-h3"><a href="#1010-dashboard-login-password">10.10 Dashboard login password</a></li><li class="toc-h3"><a href="#1011-logs-autostart-and-port">10.11 Logs, autostart, and port</a></li><li class="toc-h3"><a href="#1012-task-review-review-agent-a-second-model-as-gatekeeper">10.12 Task review (Review Agent): a second model as gatekeeper</a></li><li class="toc-h3"><a href="#1013-multi-model-agent-project-team">10.13 Multi-Model Agent Project Team</a></li><li class="toc-h3"><a href="#1014-local-debugging--chromium-cdp-automation">10.14 Local Debugging &amp; Chromium CDP Automation</a></li><li class="toc-h3"><a href="#1015-human-gated-commit-pending-commit--dedicated-review-page">10.15 Human-gated commit (Pending commit → dedicated review page)</a></li><li class="toc-h3"><a href="#1016-mobile-remote-access-phone-dashboard--pwa">10.16 Mobile remote access (phone dashboard / PWA)</a></li><li class="toc-h3"><a href="#1017-budget-and-cost-limits-budget-guard">10.17 Budget and cost limits (Budget Guard)</a></li><li class="toc-h3"><a href="#1018-circuit-breaker-and-recovery">10.18 Circuit breaker and recovery</a></li><li class="toc-h3"><a href="#1019-write-audit-log">10.19 Write audit log</a></li><li class="toc-h3"><a href="#1020-egress-allowlist">10.20 Egress allowlist</a></li><li class="toc-h3"><a href="#1021-team-memory-phase-1">10.21 Team memory (Phase 1)</a></li><li class="toc-h3"><a href="#1022-nested-git-repositories">10.22 Nested Git repositories</a></li></ul></li><li class="toc-h2"><a href="#11-data-backup-and-migration">11. Data, backup, and migration</a><ul class="toc-sub"><li class="toc-h3"><a href="#111-where-data-lives">11.1 Where data lives</a></li><li class="toc-h3"><a href="#112-backup">11.2 Backup</a></li><li class="toc-h3"><a href="#113-move-to-another-computer">11.3 Move to another computer</a></li></ul></li><li class="toc-h2"><a href="#12-faq-and-troubleshooting">12. FAQ and troubleshooting</a><ul class="toc-sub"><li class="toc-h3"><a href="#121-the-dashboard-does-not-open--port-is-in-use">12.1 The dashboard does not open / port is in use</a></li><li class="toc-h3"><a href="#122-a-task-stays-blocked">12.2 A task stays &quot;Blocked&quot;</a></li><li class="toc-h3"><a href="#123-will-a-task-hang-forever-if-nobody-handles-an-approval">12.3 Will a task hang forever if nobody handles an approval?</a></li><li class="toc-h3"><a href="#124-will-tasks-be-lost-if-i-shut-down-or-kill-the-process">12.4 Will tasks be lost if I shut down or kill the process?</a></li><li class="toc-h3"><a href="#125-dependency-downloads-fail-on-a-slow-network">12.5 Dependency downloads fail on a slow network</a></li><li class="toc-h3"><a href="#126-which-models-are-supported">12.6 Which models are supported?</a></li><li class="toc-h3"><a href="#127-what-should-i-watch-out-for-when-exposing-the-dashboard">12.7 What should I watch out for when exposing the dashboard?</a></li><li class="toc-h3"><a href="#128-merge-conflict--push-failure">12.8 Merge conflict / push failure</a></li><li class="toc-h3"><a href="#129-does-updating-on-windows-need-administrator-rights">12.9 Does updating on Windows need administrator rights?</a></li><li class="toc-h3"><a href="#1210-can-i-use-it-as-a-command-line-scheduler-without-the-dashboard">12.10 Can I use it as a command-line scheduler without the dashboard?</a></li><li class="toc-h3"><a href="#1211-the-tray-icon-is-missing--i-do-not-want-a-tray">12.11 The tray icon is missing / I do not want a tray</a></li><li class="toc-h3"><a href="#1212-where-did-the-code-go-after-a-task-finishes">12.12 Where did the code go after a task finishes?</a></li></ul></li><li class="toc-h2"><a href="#13-glossary">13. Glossary</a></li><li class="toc-h2"><a href="#14-appendix-task-template-and-command-reference">14. Appendix: task template and command reference</a><ul class="toc-sub"><li class="toc-h3"><a href="#141-general-task-template">14.1 General task template</a></li><li class="toc-h3"><a href="#142-command-reference">14.2 Command reference</a></li><li class="toc-h3"><a href="#143-minimal-configuration">14.3 Minimal configuration</a></li></ul></li></ul></nav>
+    <nav id="TOC" aria-label="目录"><ul><li class="toc-h2"><a href="#contents">Contents</a></li><li class="toc-h2"><a href="#1-quick-start-your-first-task-in-5-minutes">1. Quick start: your first task in 5 minutes</a></li><li class="toc-h2"><a href="#2-what-orcsy-is-and-what-it-can-do-for-you">2. What Orcsy is and what it can do for you</a><ul class="toc-sub"><li class="toc-h3"><a href="#21-one-sentence">2.1 One sentence</a></li><li class="toc-h3"><a href="#22-what-it-is-good-at">2.2 What it is good at</a></li><li class="toc-h3"><a href="#23-what-it-is-not-good-at">2.3 What it is not good at</a></li><li class="toc-h3"><a href="#24-do-i-need-to-know-how-to-code">2.4 Do I need to know how to code?</a></li></ul></li><li class="toc-h2"><a href="#3-three-core-ideas-in-plain-english">3. Three core ideas in plain English</a><ul class="toc-sub"><li class="toc-h3"><a href="#31-project">3.1 Project</a></li><li class="toc-h3"><a href="#32-task">3.2 Task</a></li><li class="toc-h3"><a href="#33-agent">3.3 Agent</a></li></ul></li><li class="toc-h2"><a href="#4-installation-choose-the-path-that-fits-you">4. Installation: choose the path that fits you</a><ul class="toc-sub"><li class="toc-h3"><a href="#41-pick-a-method">4.1 Pick a method</a></li><li class="toc-h3"><a href="#42-option-1-windows-installer-recommended">4.2 Option 1: Windows installer (recommended)</a></li><li class="toc-h3"><a href="#43-option-2-run-from-source-for-people-who-want-the-source">4.3 Option 2: run from source (for people who want the source)</a></li><li class="toc-h3"><a href="#44-option-3-docker-server--nas">4.4 Option 3: Docker (server / NAS)</a></li><li class="toc-h3"><a href="#45-option-4-linux-systemd-service">4.5 Option 4: Linux systemd service</a></li><li class="toc-h3"><a href="#46-post-install-checklist">4.6 Post-install checklist</a></li></ul></li><li class="toc-h2"><a href="#5-first-launch-connect-your-llm">5. First launch: connect your LLM</a><ul class="toc-sub"><li class="toc-h3"><a href="#51-open-settings">5.1 Open Settings</a></li><li class="toc-h3"><a href="#52-fill-in-the-fields">5.2 Fill in the fields</a></li><li class="toc-h3"><a href="#53-common-providers">5.3 Common providers</a></li><li class="toc-h3"><a href="#54-what-the-two-buttons-do">5.4 What the two buttons do</a></li><li class="toc-h3"><a href="#55-save">5.5 Save</a></li></ul></li><li class="toc-h2"><a href="#6-add-your-first-project">6. Add your first project</a><ul class="toc-sub"><li class="toc-h3"><a href="#61-create-a-project">6.1 Create a project</a></li><li class="toc-h3"><a href="#62-what-the-badges-mean">6.2 What the badges mean</a></li><li class="toc-h3"><a href="#63-what-agentmd-is-and-why-it-matters">6.3 What AGENT.md is and why it matters</a></li><li class="toc-h3"><a href="#64-optional-project-settings">6.4 Optional project settings</a></li></ul></li><li class="toc-h2"><a href="#7-create-and-manage-tasks">7. Create and manage tasks</a><ul class="toc-sub"><li class="toc-h3"><a href="#71-fastest-way-quick-add-on-the-card">7.1 Fastest way: quick add on the card</a></li><li class="toc-h3"><a href="#72-full-way-the-new-task-dialog">7.2 Full way: the New task dialog</a></li><li class="toc-h3"><a href="#73-how-to-choose-a-priority">7.3 How to choose a priority</a></li><li class="toc-h3"><a href="#74-what-a-task-file-looks-like">7.4 What a task file looks like</a></li><li class="toc-h3"><a href="#75-task-lifecycle">7.5 Task lifecycle</a></li><li class="toc-h3"><a href="#76-actions-on-the-task-list">7.6 Actions on the task list</a></li><li class="toc-h3"><a href="#77-archived-tasks">7.7 Archived tasks</a></li><li class="toc-h3"><a href="#78-five-tips-for-writing-good-tasks">7.8 Five tips for writing good tasks</a></li></ul></li><li class="toc-h2"><a href="#8-let-orcsy-start-working">8. Let Orcsy start working</a><ul class="toc-sub"><li class="toc-h3"><a href="#81-two-ways-to-trigger-work">8.1 Two ways to trigger work</a></li><li class="toc-h3"><a href="#82-top-status-chips">8.2 Top status chips</a></li><li class="toc-h3"><a href="#83-what-happens-while-a-task-runs">8.3 What happens while a task runs</a></li><li class="toc-h3"><a href="#84-read-the-run-log">8.4 Read the run log</a></li><li class="toc-h3"><a href="#85-after-a-task-ends">8.5 After a task ends</a></li></ul></li><li class="toc-h2"><a href="#9-dashboard-map-what-every-button-does">9. Dashboard map: what every button does</a><ul class="toc-sub"><li class="toc-h3"><a href="#91-top-toolbar">9.1 Top toolbar</a></li><li class="toc-h3"><a href="#92-dashboard-tab">9.2 Dashboard tab</a></li><li class="toc-h3"><a href="#93-projects-tab">9.3 Projects tab</a></li><li class="toc-h3"><a href="#94-settings-tab">9.4 Settings tab</a></li><li class="toc-h3"><a href="#95-skills-tab">9.5 Skills tab</a></li><li class="toc-h3"><a href="#96-usage-tab">9.6 Usage tab</a></li></ul></li><li class="toc-h2"><a href="#10-advanced-features-approvals-skills-issues-mirrors">10. Advanced features: approvals, skills, Issues, mirrors</a><ul class="toc-sub"><li class="toc-h3"><a href="#101-human-approval-permission-modes">10.1 Human approval (permission modes)</a></li><li class="toc-h3"><a href="#102-tool-switches-and-command-whitelist">10.2 Tool switches and command whitelist</a></li><li class="toc-h3"><a href="#103-skill-library">10.3 Skill library</a></li><li class="toc-h3"><a href="#104-issue-import">10.4 Issue import</a></li><li class="toc-h3"><a href="#105-mirrors-and-slow-networks">10.5 Mirrors and slow networks</a></li><li class="toc-h3"><a href="#106-multiple-projects-parallelism-dedicated-models">10.6 Multiple projects, parallelism, dedicated models</a></li><li class="toc-h3"><a href="#107-notifications">10.7 Notifications</a></li><li class="toc-h3"><a href="#108-data-masking-secrets-never-leave-the-machine">10.8 Data masking (secrets never leave the machine)</a></li><li class="toc-h3"><a href="#109-auto-update-and-restart">10.9 Auto-update and restart</a></li><li class="toc-h3"><a href="#1010-dashboard-login-password">10.10 Dashboard login password</a></li><li class="toc-h3"><a href="#1011-logs-autostart-and-port">10.11 Logs, autostart, and port</a></li><li class="toc-h3"><a href="#1012-task-review-review-agent-a-second-model-as-gatekeeper">10.12 Task review (Review Agent): a second model as gatekeeper</a></li><li class="toc-h3"><a href="#1013-multi-model-agent-project-team">10.13 Multi-Model Agent Project Team</a></li><li class="toc-h3"><a href="#1014-local-debugging--chromium-cdp-automation">10.14 Local Debugging &amp; Chromium CDP Automation</a></li><li class="toc-h3"><a href="#1015-human-gated-commit-pending-commit--dedicated-review-page">10.15 Human-gated commit (Pending commit → dedicated review page)</a></li><li class="toc-h3"><a href="#1016-mobile-remote-access-phone-dashboard--pwa">10.16 Mobile remote access (phone dashboard / PWA)</a></li><li class="toc-h3"><a href="#1017-budget-and-cost-limits-budget-guard">10.17 Budget and cost limits (Budget Guard)</a></li><li class="toc-h3"><a href="#1018-circuit-breaker-and-recovery">10.18 Circuit breaker and recovery</a></li><li class="toc-h3"><a href="#1019-write-audit-log">10.19 Write audit log</a></li><li class="toc-h3"><a href="#1020-egress-allowlist">10.20 Egress allowlist</a></li><li class="toc-h3"><a href="#1021-team-memory-phase-1">10.21 Team memory (Phase 1)</a></li><li class="toc-h3"><a href="#1022-nested-git-repositories-gitlinks--unregistered-submodules">10.22 Nested Git repositories (gitlinks / unregistered submodules)</a></li><li class="toc-h3"><a href="#1023-merge-conflict-self-healing">10.23 Merge conflict self-healing</a></li><li class="toc-h3"><a href="#1024-dependency-graph-visualization-dag">10.24 Dependency graph visualization (DAG)</a></li><li class="toc-h3"><a href="#1025-agent-commit-identity">10.25 Agent commit identity</a></li><li class="toc-h3"><a href="#1026-full-process-log-replay">10.26 Full-process log replay</a></li></ul></li><li class="toc-h2"><a href="#11-data-backup-and-migration">11. Data, backup, and migration</a><ul class="toc-sub"><li class="toc-h3"><a href="#111-where-data-lives">11.1 Where data lives</a></li><li class="toc-h3"><a href="#112-backup">11.2 Backup</a></li><li class="toc-h3"><a href="#113-move-to-another-computer">11.3 Move to another computer</a></li></ul></li><li class="toc-h2"><a href="#12-faq-and-troubleshooting">12. FAQ and troubleshooting</a><ul class="toc-sub"><li class="toc-h3"><a href="#121-the-dashboard-does-not-open--port-is-in-use">12.1 The dashboard does not open / port is in use</a></li><li class="toc-h3"><a href="#122-a-task-stays-blocked">12.2 A task stays &quot;Blocked&quot;</a></li><li class="toc-h3"><a href="#123-will-a-task-hang-forever-if-nobody-handles-an-approval">12.3 Will a task hang forever if nobody handles an approval?</a></li><li class="toc-h3"><a href="#124-will-tasks-be-lost-if-i-shut-down-or-kill-the-process">12.4 Will tasks be lost if I shut down or kill the process?</a></li><li class="toc-h3"><a href="#125-dependency-downloads-fail-on-a-slow-network">12.5 Dependency downloads fail on a slow network</a></li><li class="toc-h3"><a href="#126-which-models-are-supported">12.6 Which models are supported?</a></li><li class="toc-h3"><a href="#127-what-should-i-watch-out-for-when-exposing-the-dashboard">12.7 What should I watch out for when exposing the dashboard?</a></li><li class="toc-h3"><a href="#128-merge-conflict--push-failure">12.8 Merge conflict / push failure</a></li><li class="toc-h3"><a href="#129-does-updating-on-windows-need-administrator-rights">12.9 Does updating on Windows need administrator rights?</a></li><li class="toc-h3"><a href="#1210-can-i-use-it-as-a-command-line-scheduler-without-the-dashboard">12.10 Can I use it as a command-line scheduler without the dashboard?</a></li><li class="toc-h3"><a href="#1211-the-tray-icon-is-missing--i-do-not-want-a-tray">12.11 The tray icon is missing / I do not want a tray</a></li><li class="toc-h3"><a href="#1212-where-did-the-code-go-after-a-task-finishes">12.12 Where did the code go after a task finishes?</a></li></ul></li><li class="toc-h2"><a href="#13-glossary">13. Glossary</a></li><li class="toc-h2"><a href="#14-appendix-task-template-and-command-reference">14. Appendix: task template and command reference</a><ul class="toc-sub"><li class="toc-h3"><a href="#141-general-task-template">14.1 General task template</a></li><li class="toc-h3"><a href="#142-command-reference">14.2 Command reference</a></li><li class="toc-h3"><a href="#143-minimal-configuration">14.3 Minimal configuration</a></li></ul></li></ul></nav>
   </aside>
   <article class="guide-body">
     <div class="lang-switch"><span>English</span><span>|</span><a href="guide.html">简体中文</a></div>
-    <h1 id="orcsy-user-guide">Orcsy User Guide</h1>
+<h1 id="orcsy-user-guide">Orcsy User Guide</h1>
+<p>English | <a href="用户指南.md">简体中文</a></p>
 <blockquote>
 <p>For first-time, non-technical users: install Orcsy, connect a
 project, create tasks, and understand every part of the dashboard —
 without needing to write code.</p>
-<p>Version: <strong>0.30.0</strong>　|　Default dashboard: <strong><a
+<p>Version: <strong>0.32.0</strong>　|　Default dashboard: <strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
-<strong>v0.29.0 highlights</strong>: per-agent commit identity (global + per-project override) for audit trails; team completion-claim verification (hallucinated splits are now intercepted and downgraded to blocked); per-role tool-protocol settings across team presets/members and review config; API contract documented (docs/api.md).config schema versioning (<code>config_version</code> + migrator) with a historical-config regression set — a systematic guard against silent settings resets; config backup/restore (<code>orcsy backup-config</code> / <code>orcsy restore-config</code>, WebDAV push, pre-upgrade auto backup) — stability roadmap S1/S2 delivered.
 </blockquote>
+<hr />
+<h2 id="contents">Contents</h2>
+<ol type="1">
+<li><a href="#1-quick-start-your-first-task-in-5-minutes">Quick start:
+your first task in 5 minutes</a></li>
+<li><a href="#2-what-orcsy-is-and-what-it-can-do-for-you">What Orcsy is
+and what it can do for you</a></li>
+<li><a href="#3-three-core-ideas-in-plain-english">Three core ideas in
+plain English</a></li>
+<li><a
+href="#4-installation-choose-the-path-that-fits-you">Installation:
+choose the path that fits you</a></li>
+<li><a href="#5-first-launch-connect-your-llm">First launch: connect
+your LLM</a></li>
+<li><a href="#6-add-your-first-project">Add your first project</a></li>
+<li><a href="#7-create-and-manage-tasks">Create and manage
+tasks</a></li>
+<li><a href="#8-let-orcsy-start-working">Let Orcsy start
+working</a></li>
+<li><a href="#9-dashboard-map-what-every-button-does">Dashboard map:
+what every button does</a></li>
+</ol>
+<blockquote>
+<p>On first launch the dashboard opens a <strong>7-step onboarding
+tour</strong> walking through create project → add tasks → scan → manual
+commit → mobile access; the "?" button in the top bar (or "Getting
+started" in the drawer) replays it anytime.</p>
+</blockquote>
+<ol start="10" type="1">
+<li><a
+href="#10-advanced-features-approvals-skills-issues-mirrors">Advanced
+features: approvals, skills, Issues, mirrors</a></li>
+<li><a href="#11-data-backup-and-migration">Data, backup, and
+migration</a></li>
+<li><a href="#12-faq-and-troubleshooting">FAQ and
+troubleshooting</a></li>
+<li><a href="#13-glossary">Glossary</a></li>
+<li><a href="#14-appendix-task-template-and-command-reference">Appendix:
+task template and command reference</a></li>
+</ol>
 <hr />
 <h2 id="1-quick-start-your-first-task-in-5-minutes">1. Quick start: your
 first task in 5 minutes</h2>
@@ -226,9 +266,10 @@ what it can do for you</h2>
 you.</strong> You describe what you want in a Markdown file. Orcsy
 periodically checks the task list, hands the task to an AI agent, and
 lets it read code, edit files, and run tests inside your project. When
-it finishes, a <strong>second model reviews the work independently</strong>,
-the changes land in the working tree <strong>awaiting your confirmation
-to commit</strong> — and every step leaves a run ledger you can replay.</p>
+it finishes, a <strong>second model reviews the work
+independently</strong>, the changes land in the working tree
+<strong>awaiting your confirmation to commit</strong> — and every step
+leaves a run ledger you can replay.</p>
 <p>A simple way to picture the roles:</p>
 <ul>
 <li><strong>You</strong> are the product owner: you write down what to
@@ -396,7 +437,8 @@ required, but then you lose automatic commit/merge).</li>
 </ul>
 <h4 id="steps">Steps</h4>
 <ol type="1">
-<li>Download <code>orcsy-setup-0.30.0-windows-amd64.exe</code> from the release page:
+<li>Download <code>orcsy-setup-0.32.0-windows-amd64.exe</code> from the
+release page:
 <ul>
 <li>Gitee: <a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -562,29 +604,55 @@ repository;</li>
 <li>Upgrade: back up <code>./orcsy-data</code>, pull the new source,
 then <code>docker compose up -d --build</code>.</li>
 </ul>
-<h4 id="441-providing-buildtest-tools-for-agents-volume-mounts--envvars">4.4.1 Providing build/test tools for Agents (volume mounts / env.vars)</h4>
-<p>All tools Agents use to run tests and builds live inside the container. Three ways to fill the gaps:</p>
-<p><strong>(1) Volume mounts (self-contained tools)</strong> — edit <code>volumes</code> in <code>docker-compose.yml</code>:</p>
+<h4
+id="441-providing-buildtest-tools-for-agents-volume-mounts--envvars">4.4.1
+Providing build/test tools for Agents (volume mounts / env.vars)</h4>
+<p>All tools Agents use to run tests and builds live inside the
+container. Three ways to fill the gaps:</p>
+<p><strong>(1) Volume mounts (self-contained tools)</strong> — edit
+<code>volumes</code> in <code>docker-compose.yml</code>:</p>
 <pre class="yaml"><code>volumes:
   - ./orcsy-data:/data
   - ./projects:/projects
-  - ./team-tools:/usr/local/bin/team-tools   # custom tool directory
-</code></pre>
+  - ./team-tools:/usr/local/bin/team-tools   # custom tool directory</code></pre>
 <ul>
-<li>Command execution automatically appends common dirs to <code>PATH</code>: <code>/usr/local/bin</code>, <code>/usr/local/go/bin</code>, <code>/opt/homebrew/bin</code>, etc. Put (or symlink) executables under <code>/usr/local/bin</code> and Agents can call them by bare name;</li>
-<li>Mounting elsewhere also works — Agents call tools by absolute path (they can browse the container filesystem);</li>
-<li>Best for self-contained binaries: Node.js, Go toolchains, JDK, single-file test runners.</li>
+<li>Command execution automatically appends common dirs to
+<code>PATH</code>: <code>/usr/local/bin</code>,
+<code>/usr/local/go/bin</code>, <code>/opt/homebrew/bin</code>, etc. Put
+(or symlink) executables under <code>/usr/local/bin</code> and Agents
+can call them by bare name;</li>
+<li>Mounting elsewhere also works — Agents call tools by absolute path
+(they can browse the container filesystem);</li>
+<li>Best for self-contained binaries: Node.js, Go toolchains, JDK,
+single-file test runners.</li>
 </ul>
-<p><strong>(2) env.vars injection</strong> — any key/value pairs in <code>env.vars</code> of <code>config.yaml</code> (or Settings → Environment) are injected into every Agent subprocess (command execution, tests, builds, subagents), overriding defaults:</p>
+<p><strong>(2) env.vars injection</strong> — any key/value pairs in
+<code>env.vars</code> of <code>config.yaml</code> (or Settings →
+Environment) are injected into every Agent subprocess (command
+execution, tests, builds, subagents), overriding defaults:</p>
 <pre class="yaml"><code>env:
   vars:
     JAVA_HOME: /opt/jdk
-    PATH: /opt/team-tools:/usr/local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-</code></pre>
-<p>Note <code>PATH</code> is <strong>replaced wholesale</strong> (no <code>$PATH</code> expansion) — write it out in full. Dashboard saves take effect immediately.</p>
-<p><strong>(3) Let the Agent install it (env-setup skill)</strong> — configure nothing; when a tool is missing the Agent installs it per task: precheck → mirror speed-test → install → PATH fix → verify. Quite reliable with mainstream models.</p>
-<p><strong>Boundary note</strong>: volume mounts suit <strong>self-contained binaries</strong>. <strong>Python package tools (pytest etc.) cannot be mounted from the host</strong> — the interpreter and site-packages do not match across the container boundary, so imports fail. For Python tools, in order of preference: extend the image (<code>FROM orcsy:latest</code> then <code>RUN pip install pytest ...</code>; cleanest for team standardization) → let env-setup install it on the spot → install manually in the container (<code>docker exec -it orcsy sh -c "python -m ensurepip -q; pip install -q pytest"</code>; the venv has no pip by default, hence ensurepip; reinstall after container recreation).</p>
-
+    PATH: /opt/team-tools:/usr/local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin</code></pre>
+<p>Note <code>PATH</code> is <strong>replaced wholesale</strong> (no
+<code>$PATH</code> expansion) — write it out in full. Dashboard saves
+take effect immediately.</p>
+<p><strong>(3) Let the Agent install it (env-setup skill)</strong> —
+configure nothing; when a tool is missing the Agent installs it per
+task: precheck → mirror speed-test → install → PATH fix → verify. Quite
+reliable with mainstream models.</p>
+<p><strong>Boundary note</strong>: volume mounts suit
+<strong>self-contained binaries</strong>. <strong>Python package tools
+(pytest etc.) cannot be mounted from the host</strong> — the interpreter
+and site-packages do not match across the container boundary, so imports
+fail. For Python tools, in order of preference: extend the image
+(<code>FROM orcsy:latest</code> then
+<code>RUN pip install pytest ...</code>; cleanest for team
+standardization) → let env-setup install it on the spot → install
+manually in the container
+(<code>docker exec -it orcsy sh -c "python -m ensurepip -q; pip install -q pytest"</code>;
+the venv has no pip by default, hence ensurepip; reinstall after
+container recreation).</p>
 <h3 id="45-option-4-linux-systemd-service">4.5 Option 4: Linux systemd
 service</h3>
 <p>Prerequisites: Linux server, root access, <code>git</code>
@@ -703,6 +771,12 @@ models may fail</td>
 </tr>
 </tbody>
 </table>
+<p>Each AI commit-message generation request follows this timeout
+setting, including <code>-1</code> for no timeout; it does not use the
+short-request caps for connection tests or model-list queries. If
+generation times out, retry or enter the commit message manually. Task
+status and workspace contents remain unchanged, so there is no need to
+reset any task to open.</p>
 <h3 id="53-common-providers">5.3 Common providers</h3>
 <table>
 <thead>
@@ -776,7 +850,7 @@ change.</strong></li>
 <h3 id="55-save">5.5 Save</h3>
 <p>Click <strong>Save model settings</strong>. The top bar will show the
 current model, for example:</p>
-<pre><code>v0.29.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.22.0 · model deepseek-chat (openai) · config C:\Users\you\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>If it says <strong>api_key not configured</strong>, the key was not
 saved. Go back and check.</p>
 <hr />
@@ -785,6 +859,12 @@ saved. Go back and check.</p>
 <p>Click <strong>＋ New project</strong> at the top right (or the button
 of the same name under <strong>📁 Managed projects</strong> in
 Settings).</p>
+<p>When creating or editing a project, advanced settings are grouped and
+collapsed by default; expanding or collapsing a group does not enable or
+disable its settings. On phones, the dialog uses a single-column layout
+with its action buttons fixed at the bottom. Click the Orcsy logo in the
+upper-left corner of desktop or mobile pages to return to the
+dashboard.</p>
 <p>Fill in, in order:</p>
 <ol type="1">
 <li><strong>Project name</strong>: use letters, digits, and hyphens
@@ -844,8 +924,8 @@ project (if they did not exist);</li>
 <tr>
 <td><code>git</code></td>
 <td>The project is a Git repository. By default reviewed changes land in
-the working tree for your manual commit (auto commit/merge/push only when
-<code>commit_and_merge</code> is enabled)</td>
+the working tree for your manual commit (auto commit/merge/push only
+when <code>commit_and_merge</code> is enabled)</td>
 </tr>
 <tr>
 <td><code>non-git</code></td>
@@ -894,8 +974,8 @@ folders not to touch, and the definition of done.</p>
 <p>Click <strong>Settings</strong> on a project card to change:</p>
 <ul>
 <li>name, path, tasks directory, guide file;</li>
-<li>max tasks per cycle, max turns, working branch, command
-whitelist;</li>
+<li>max tasks per cycle, max turns (accepts <code>-1</code> =
+unlimited), working branch, command whitelist;</li>
 <li>dedicated model;</li>
 <li>permission mode;</li>
 <li>tool overrides;</li>
@@ -904,6 +984,11 @@ whitelist;</li>
 </ul>
 <p>Renaming a project also updates skills bound to that project, so they
 do not become orphaned.</p>
+<blockquote>
+<p>Tip: saving settings never waits for a running task — the change
+takes effect immediately and is applied automatically on the next
+scheduler cycle; the task currently running is unaffected.</p>
+</blockquote>
 <hr />
 <h2 id="7-create-and-manage-tasks">7. Create and manage tasks</h2>
 <h3 id="71-fastest-way-quick-add-on-the-card">7.1 Fastest way: quick add
@@ -1134,8 +1219,9 @@ order</td>
 <tr>
 <td>Mark done</td>
 <td>Open/in-progress task</td>
-<td>Mark complete manually and archive it to <code>tasks/done/</code> (same
-location as agent completions; appears in the Archived list immediately)</td>
+<td>Mark complete manually and archive it to <code>tasks/done/</code>
+(same location as agent completions; appears in the Archived list
+immediately)</td>
 </tr>
 <tr>
 <td>Force stop</td>
@@ -1334,7 +1420,7 @@ in the dashboard):</p>
 </tr>
 <tr>
 <td>Theme</td>
-<td>☀ / ☾ / ◐ (dark / light / follow system)</td>
+<td>☀ / ☾</td>
 </tr>
 <tr>
 <td>Pending approvals</td>
@@ -1396,8 +1482,8 @@ in the dashboard):</p>
 </thead>
 <tbody>
 <tr>
-<td>Dashboard / Projects / Settings / Skills / Usage</td>
-<td>Switch between the five main tabs</td>
+<td>Dashboard / Projects &amp; Settings / Skills / Usage</td>
+<td>Switch between the four main tabs</td>
 </tr>
 <tr>
 <td>Check for updates</td>
@@ -1422,8 +1508,10 @@ tasks are interrupted and can be requeued after restart</td>
 <td>Refresh dashboard data</td>
 </tr>
 <tr>
-<td>☀ / ☾ / ◐ (dark / light / follow system)</td>
-<td>Toggle light/dark theme</td>
+<td>☀ / ☾ / ◐</td>
+<td>Theme three-state cycle: dark → light → follow system (icon shows
+current mode; in follow-system mode the dashboard tracks the phone
+appearance in real time)</td>
 </tr>
 <tr>
 <td>🔔 Pending approvals N</td>
@@ -1465,8 +1553,8 @@ side shows only the selected item), grouped by purpose:</p>
 <li><strong>🤖 Models &amp; team</strong>: LLM access, multi-model Team,
 task review (Review Agent);</li>
 <li><strong>⏱ Runtime &amp; cost</strong>: scheduler &amp; dashboard
-(interval, parallelism, port, log retention, login password), budget
-&amp; cost, circuit breaker &amp; recovery;</li>
+(interval, parallelism, port, log retention), budget &amp; cost, circuit
+breaker &amp; recovery;</li>
 <li><strong>🛡 Data &amp; compliance</strong>: data masking, run ledger,
 audit log;</li>
 <li><strong>🛠 Tools &amp; network</strong>: Agent tools &amp;
@@ -1681,23 +1769,55 @@ the dashboard is closed;</li>
 <li>With <code>--no-tray</code>, there is no tray and therefore no
 system-notification channel.</li>
 </ul>
-<h3 id="108-data-masking-secrets-never-leave-the-machine">10.8 Data masking (secrets never leave the machine)</h3>
-<p>When an Agent works, it reads workspace files, runs commands, and receives task descriptions — if any of them contain API keys or database passwords, the raw text would be sent to your configured model provider. Data masking removes such content locally <strong>before sending</strong>:</p>
+<h3 id="108-data-masking-secrets-never-leave-the-machine">10.8 Data
+masking (secrets never leave the machine)</h3>
+<p>When an Agent works, it reads workspace files, runs commands, and
+receives task descriptions — if any of them contain API keys or database
+passwords, the raw text would be sent to your configured model provider.
+Data masking removes such content locally <strong>before
+sending</strong>:</p>
 <ul>
-<li><strong>Processing happens only in memory</strong>: no temp files, never logged, mapping cleared as soon as the task ends — no masking data ever touches disk;</li>
-<li><strong>High-confidence rules on by default</strong>: only tokens whose format proves they are sensitive — <code>sk-</code>-style API keys, GitHub/GitLab tokens, AWS/Google/Slack keys, JWTs, PEM private-key blocks, <code>Bearer</code> headers, <code>token=</code> URL parameters, database-connection-string passwords;</li>
-<li><strong>Readable placeholders</strong>: the model sees <code>[REDACTED:api_key:{{API_KEY_6mnvbp6t}}]</code> — distinct placeholders let it tell multiple keys apart;</li>
-<li><strong>Write-back restores the original</strong>: when the model writes a placeholder into a file ("copy the key into the CI script", "rewrite .env"), the real value is restored before it hits disk — key-copying tasks still work;</li>
-<li><strong>finish summaries stay masked</strong>: task summaries contain placeholders, so keys never land in task files;</li>
-<li><strong>Key-value enhanced rules off by default</strong>: rules like <code>api_key=xxx</code> / <code>"password": "xxx"</code> are broad but also replace the fake keys in docs and test fixtures (the model then reads placeholders instead of the original text) — enable only when your workspace has no such content;</li>
-<li><strong>Custom regex</strong>: for tokens in in-house formats (e.g. <code>PROJECT_SECRET_xxx</code>), add one regex per line; changes take effect immediately after saving.</li>
+<li><strong>Processing happens only in memory</strong>: no temp files,
+never logged, mapping cleared as soon as the task ends — no masking data
+ever touches disk;</li>
+<li><strong>High-confidence rules on by default</strong>: only tokens
+whose format proves they are sensitive — <code>sk-</code>-style API
+keys, GitHub/GitLab tokens, AWS/Google/Slack keys, JWTs, PEM private-key
+blocks, <code>Bearer</code> headers, <code>token=</code> URL parameters,
+database-connection-string passwords;</li>
+<li><strong>Readable placeholders</strong>: the model sees
+<code>[REDACTED:api_key:{{API_KEY_6mnvbp6t}}]</code> — distinct
+placeholders let it tell multiple keys apart;</li>
+<li><strong>Write-back restores the original</strong>: when the model
+writes a placeholder into a file ("copy the key into the CI script",
+"rewrite .env"), the real value is restored before it hits disk —
+key-copying tasks still work;</li>
+<li><strong>finish summaries stay masked</strong>: task summaries
+contain placeholders, so keys never land in task files;</li>
+<li><strong>Key-value enhanced rules off by default</strong>: rules like
+<code>api_key=xxx</code> / <code>"password": "xxx"</code> are broad but
+also replace the fake keys in docs and test fixtures (the model then
+reads placeholders instead of the original text) — enable only when your
+workspace has no such content;</li>
+<li><strong>Custom regex</strong>: for tokens in in-house formats (e.g.
+<code>PROJECT_SECRET_xxx</code>), add one regex per line; changes take
+effect immediately after saving.</li>
 </ul>
-<p>Configure it in the dashboard under <strong>Settings → 🛡 Data masking</strong>, or in the <code>masking</code> section of config.yaml (<code>enabled</code> / <code>enhanced_rules</code> / <code>custom_patterns</code>).</p>
-<h3 id="108-auto-update-and-restart">10.8 Auto-update and restart</h3>
+<p>Configure it in the dashboard under <strong>Settings → 🛡 Data
+masking</strong>, or in the <code>masking</code> section of config.yaml
+(<code>enabled</code> / <code>enhanced_rules</code> /
+<code>custom_patterns</code>).</p>
+<h3 id="109-auto-update-and-restart">10.9 Auto-update and restart</h3>
 <ul>
 <li>Auto-check for updates on startup (can be turned off);</li>
 <li>Top bar <strong>Check for updates</strong> → when a new version
 exists, click <strong>Update to x.y.z</strong>;</li>
+<li>The update source repo URL supports <strong>both Gitee and
+GitHub</strong> (Settings → 🔔 Notifications &amp; App, new in 0.32.0):
+the default is the official Gitee source; point it to your own GitHub
+mirror (e.g. <code>https://github.com/xxx/orcsy</code>) if you prefer;
+for private repos fill in an access token next to it (GitHub uses a
+Personal Access Token);</li>
 <li>The update installs silently in the background, the app restarts,
 and the page reloads;</li>
 <li>If installed under <code>Program Files</code> or another system
@@ -1709,18 +1829,19 @@ log;</li>
 downgrade are supported.</li>
 </ul>
 <blockquote>
-<p>⚠️ <strong>Downgrade note (run ledger)</strong>: the run ledger is new
-in 0.25 and uses the <code>runlog</code> config section plus the
+<p>⚠️ <strong>Downgrade note (run ledger)</strong>: the run ledger is
+new in 0.25 and uses the <code>runlog</code> config section plus the
 <code>runs/</code> directory. Older versions do not know that section:
-after downgrading, do <strong>not</strong> change ledger-related settings
-in the older build — saving any settings may drop the
+after downgrading, do <strong>not</strong> change ledger-related
+settings in the older build — saving any settings may drop the
 <code>runlog</code> section together with a custom directory. Ledger
 data files are never deleted. Back up <code>config.yaml</code> and the
 ledger directory before downgrading; after upgrading again, the app
 reconnects the history automatically from the config and the last used
 directory.</p>
 </blockquote>
-<h3 id="1010-dashboard-login-password">10.10 Dashboard login password</h3>
+<h3 id="1010-dashboard-login-password">10.10 Dashboard login
+password</h3>
 <p>By default the dashboard only listens on <code>127.0.0.1</code>, so
 only this machine can reach it and no password is needed.</p>
 <p>You <strong>must set a password</strong> if you:</p>
@@ -1734,12 +1855,20 @@ refuses to start. If that protection were bypassed and the port exposed,
 anyone who can reach it could operate the dashboard, change
 configuration, and start/stop tasks (keys are shown only as masks, but
 they can still be replaced).</p>
-<p>Where to set it:</p>
+<p>Where to set and reset it:</p>
 <ul>
-<li>Settings → <strong>⏱ Scheduler &amp; dashboard</strong> →
-<strong>Dashboard login password</strong>;</li>
-<li>or edit <code>web.auth_password</code> in
-<code>config.yaml</code>.</li>
+<li>Settings → <strong>⚙️ Application</strong> → <strong>Dashboard login
+password</strong>;</li>
+<li>Passwords in <code>config.yaml</code> are stored securely using
+<strong>PBKDF2-HMAC-SHA256 (100,000 iterations)</strong> ciphertext;
+plaintext is never persisted;</li>
+<li><strong>Forgotten password recovery</strong>: an administrator can
+log into the server and run <code>orcsy reset-password</code> (or
+<code>orcsy passwd</code>) to securely reset the password, or use
+<code>--clear</code> to return to local passwordless mode:
+<pre class="bash"><code>orcsy reset-password                    # Interactive hidden input with confirmation
+orcsy reset-password &lt;new_password&gt;     # Specify new password directly
+orcsy reset-password --clear            # Clear password to return to local passwordless mode</code></pre></li>
 </ul>
 <p>After it is set, opening the dashboard shows a login page: enter the
 password and click <strong>Log in</strong>. A <strong>Log out</strong>
@@ -1790,124 +1919,367 @@ rights;</li>
 href="#121-the-dashboard-does-not-open--port-is-in-use">12.1</a>.</li>
 </ul>
 <hr />
-<h3 id="1012-task-review-review-agent-a-second-model-as-gatekeeper">10.12 Task
-review (Review Agent): a second model as gatekeeper</h3>
+<h3
+id="1012-task-review-review-agent-a-second-model-as-gatekeeper">10.12
+Task review (Review Agent): a second model as gatekeeper</h3>
 <p>After a task finishes and before its changes are merged and archived,
 Orcsy can have an <strong>independent review Agent</strong> (<strong>a
-different model</strong> from the one that executed the task) inspect the
-result: it checks the implementation against the requirements and acceptance
-criteria, optionally running tests for real verification. Only a passed
-review gets merged into the main branch and archived; a failed review sends
-the task back for automatic rework with the issue list attached.</p>
+different model</strong> from the one that executed the task) inspect
+the result: it checks the implementation against the requirements and
+acceptance criteria, optionally running tests for real verification.
+Only a passed review gets merged into the main branch and archived; a
+failed review sends the task back for automatic rework with the issue
+list attached.</p>
 <p><strong>Default state: review is off.</strong> Without a review model
 configured, everything works as before (tasks are merged and archived on
 completion). To enable it, just give the system a <strong>second
 model</strong> (a cheap small model works fine):</p>
-<ol>
+<ol type="1">
 <li>Open the <strong>🔍 Task review (Review Agent)</strong> card on the
 settings page;</li>
-<li>Fill in the review model's provider / base_url / api_key / model (click
-<strong>Fetch model list</strong> to pull candidates);</li>
+<li>Fill in the review model's provider / base_url / api_key / model
+(click <strong>Fetch model list</strong> to pull candidates);</li>
 <li>Save. The review gate immediately applies to <strong>all
 projects</strong> by default (to opt a project out, open that project's
-<strong>Settings</strong> → <strong>Review Agent</strong> and turn it off
-there).</li>
+<strong>Settings</strong> → <strong>Review Agent</strong> and turn it
+off there).</li>
 </ol>
-<p><strong>Hard rule: the review model must differ from the task model.</strong>
-The task model is configured under <strong>LLM access</strong> on the
-settings page (projects may bind a dedicated model); saving a review model
-with the same name is rejected — two different models cross-check each other
-so the system never lets the executor grade its own work.</p>
+<p><strong>Hard rule: the review model must differ from the task
+model.</strong> The task model is configured under <strong>LLM
+access</strong> on the settings page (projects may bind a dedicated
+model); saving a review model with the same name is rejected — two
+different models cross-check each other so the system never lets the
+executor grade its own work.</p>
 <p><strong>How the review works:</strong></p>
 <ul>
-<li>When the task Agent reports completion, the changes are committed to the
-working branch first (<strong>not merged yet</strong>);</li>
+<li>When the task Agent reports completion, the changes are committed to
+the working branch first (<strong>not merged yet</strong>);</li>
 <li>The review Agent inspects the code read-only: it goes through the
 acceptance criteria in the task one by one, and actually runs tests when
 <strong>Allow test commands</strong> is on (default);</li>
 <li>Pass → merged into the main branch automatically → archived to
 <strong>Completed</strong>;</li>
 <li>Fail → the task is <strong>automatically reworked</strong> with the
-review comments (written into the task body, so the task Agent sees them on
-its next run); rework is allowed 2 times by default (globally adjustable
-1–10, overridable per project); when the limit is reached the task becomes
-<strong>Blocked</strong> for human judgment — the work stays on the working
-branch, ready to inspect or merge manually;</li>
-<li>If the program is shut down mid-review, nothing is lost: the changes are
-already committed on the branch, and the review resumes automatically on the
-next start without re-running the task.</li>
+review comments (written into the task body, so the task Agent sees them
+on its next run); rework is allowed 2 times by default (globally
+adjustable 1–10, overridable per project); when the limit is reached the
+task becomes <strong>Blocked</strong> for human judgment — the work
+stays on the working branch, ready to inspect or merge manually;</li>
+<li>If the program is shut down mid-review, nothing is lost: the changes
+are already committed on the branch, and the review resumes
+automatically on the next start without re-running the task.</li>
 </ul>
-<p><strong>Rework and commits:</strong> after a reworked task finally passes
-review, its multiple WIP commits are squashed into a single commit before
-merging (<strong>Squash commits after rework passes</strong>, on by default),
-keeping the main-branch history clean.</p>
-<p><strong>Badges on the dashboard:</strong> <code>🔍 Pending review</code>
-on a task card means it has finished and is being reviewed or waiting for a
-re-review; <code>🔍 Rework ×N</code> means it has been sent back by review N
-times. Project cards show a <strong>Review on / Review off / Review model
-conflict</strong> status.</p>
+<p><strong>Rework and commits:</strong> after a reworked task finally
+passes review, its multiple WIP commits are squashed into a single
+commit before merging (<strong>Squash commits after rework
+passes</strong>, on by default), keeping the main-branch history
+clean.</p>
+<p><strong>Limits can be unlimited:</strong> both the rework limit
+(default 2) and the per-task turn limit (<code>max_agent_turns</code>)
+accept <strong><code>-1</code> = no limit</strong>:</p>
+<ul>
+<li>Rework limit <code>-1</code>: a failed review keeps sending the task
+back <strong>forever</strong> instead of blocking it for humans (use for
+"must pass" work; it keeps consuming tokens);</li>
+<li>Turn limit <code>-1</code>: the task may run any number of rounds.
+Loop guards still protect you (the same file read more than 5 times is
+blocked; a coding role reading 20 consecutive turns without writing is
+force-stopped; 3 turns without any tool call counts as stuck), so it
+will not spin forever, but long tasks really can run many rounds.</li>
+</ul>
+<p><strong>Badges on the dashboard:</strong>
+<code>🔍 Pending review</code> on a task card means it has finished and
+is being reviewed or waiting for a re-review; <code>🔍 Rework ×N</code>
+means it has been sent back by review N times. Project cards show a
+<strong>Review on / Review off / Review model conflict</strong>
+status.</p>
 <p><strong>Cost note:</strong> one review costs roughly 3–8 rounds of
-read-only calls; on the settings <strong>Usage</strong> view it is recorded
-separately under the review kind, so you can account it apart from
-execution.</p>
+read-only calls; on the settings <strong>Usage</strong> view it is
+recorded separately under the review kind, so you can account it apart
+from execution.</p>
 <hr />
-<h3 id="1013-multi-model-agent-project-team">10.13 Multi-Model Agent Project Team</h3>
-<p>Orcsy 0.23.0 introduces <strong>Multi-Model Agent Project Teams</strong>. You can assemble specialized AI crews (Project Manager, Backend, Frontend, QA, and Custom Roles) for any project:</p>
+<h3 id="1013-multi-model-agent-project-team">10.13 Multi-Model Agent
+Project Team</h3>
+<p>Orcsy 0.22.0 introduces <strong>Multi-Model Agent Project
+Teams</strong>. You can assemble specialized AI crews (Project Manager,
+Backend, Frontend, QA, and Custom Roles) for any project:</p>
 <ul>
-<li><strong>👑 Project Manager (PM)</strong>: reads and explores codebase architecture read-only, decomposes requirements into DAG subtasks using <code>depends_on_refs</code>, or dispatches single-component tasks directly via <code>reassign_task</code>.</li>
-<li><strong>⚙️ Backend / 🎨 Frontend Developers</strong>: code and unit-test inside task-isolated Git Worktree sandboxes, with upstream delivery summaries automatically injected into prompts.</li>
-<li><strong>🧪 Test Engineer (QA)</strong>: spins up local dev servers and automated Chromium browsers for end-to-end integration testing; files structured defects using <code>report_bug</code>, automatically binds regression dependencies, and triggers automated retesting once bugs are resolved.</li>
-<li><strong>🛡️ Sandboxed Worktree + Human-Gated Final Commit</strong>: all coding runs inside a per-task worktree (<code>.worktree-arranger/&lt;task-id&gt;</code>, branch <code>orcsy/task/&lt;project&gt;/&lt;task-id&gt;</code>) and merges into the main working tree unstaged/uncommitted — <strong>Orcsy never auto-commits or auto-pushes to main branch by default</strong>, leaving 100% of final commit and push authority to the human reviewer (see <a href="#1015-human-gated-commit-pending-commit--dedicated-review-page">10.15 Human-gated commit</a>)!</li>
-<li><strong>🧠 Concurrent sub-agent exploration (<code>delegate_explore</code>)</strong>: the Project Manager and every developer role can spawn 2–4 <strong>read-only sub-agents</strong> in one call to explore different modules (data layer, routing, auth, existing tests) in parallel and get a consolidated report in one round; sub-agents are strictly read-only, capped in fan-out and rounds, and honour <strong>Force stop</strong>.</li>
-<li><strong>⚡ Quota-aware adaptive concurrency (<code>subagent.max_parallel</code> / <code>adaptive</code>)</strong>: in-flight requests actually sent to the provider are capped by the sub-agent concurrency budget (default 4 — independent of the 4-sub-agent fan-out fuse). Providers never publish their concurrency ceiling, so adaptation is on by default: an HTTP 429 immediately halves the limit and puts the whole quota pool into a quiet period (honouring <code>Retry-After</code> when present), then gradually climbs back after consecutive successes. <strong>On low-tier plans this degrades to "slower", never "some sub-agents failed"</strong>. Pools are shared per <code>base_url + api_key + model</code>, so parallel projects don't throttle separately.</li>
-<li><strong>📦 Split parent task is archived</strong>: once the PM finishes decomposing a requirement, the parent task is marked <strong>done</strong> and archived into <code>tasks/done/</code>, so the active list only shows the hand-off subtasks.</li>
-<li><strong>⚡ Intra-Cycle Chaining (<code>chain_within_cycle</code>)</strong>: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.</li>
-<li><strong>👥 Two-Tier Configuration</strong>: the global <strong>Multi-Model Team</strong> section configures each role's dedicated model and responsibility prompt template once; project settings reference it with local overrides.</li>
+<li><strong>👑 Project Manager (PM)</strong>: reads and explores
+codebase architecture read-only, decomposes requirements into DAG
+subtasks using <code>depends_on_refs</code>, or dispatches
+single-component tasks directly via <code>reassign_task</code>.</li>
+<li><strong>⚙️ Backend / 🎨 Frontend Developers</strong>: code and
+unit-test inside task-isolated Git Worktree sandboxes, with upstream
+delivery summaries automatically injected into prompts.</li>
+<li><strong>🧪 Test Engineer (QA)</strong>: spins up local dev servers
+and automated Chromium browsers for end-to-end integration testing;
+files structured defects using <code>report_bug</code>, automatically
+binds regression dependencies, and triggers automated retesting once
+bugs are resolved.</li>
+<li><strong>🛡️ Sandboxed Worktree + Human-Gated Final Commit</strong>:
+all coding runs inside a per-task worktree
+(<code>.worktree-arranger/&lt;task-id&gt;</code>, branch
+<code>orcsy/task/&lt;project&gt;/&lt;task-id&gt;</code>) and merges into
+the main working tree unstaged/uncommitted — <strong>Orcsy never
+auto-commits or auto-pushes to main branch by default</strong>, leaving
+100% of final commit and push authority to the human reviewer (see <a
+href="#1014-human-gated-commit-pending-commit--dedicated-review-page">10.14
+Human-gated commit</a>)!</li>
+<li><strong>🧠 Concurrent sub-agent exploration
+(<code>delegate_explore</code>)</strong>: the Project Manager and every
+developer role can spawn 2–4 <strong>read-only sub-agents</strong> in
+one call to explore different modules (data layer, routing, auth,
+existing tests) in parallel and get a consolidated report in one round,
+dramatically cutting serial file reading. Sub-agents are strictly
+read-only, capped in fan-out and rounds, and honour <strong>Force
+stop</strong>.</li>
+<li><strong>⚡ Quota-aware adaptive concurrency
+(<code>subagent.max_parallel</code> / <code>adaptive</code>)</strong>:
+in-flight requests actually sent to the provider are capped by the
+sub-agent concurrency budget (default 4 — independent of the 4-sub-agent
+fan-out fuse). Providers never publish their concurrency ceiling, so
+adaptation is on by default: an HTTP 429 immediately halves the limit
+and puts the whole quota pool into a quiet period (honouring
+<code>Retry-After</code> when present), then gradually climbs back after
+consecutive successes. <strong>On low-tier plans this degrades to
+"slower", never "some sub-agents failed"</strong>. Pools are shared per
+<code>base_url + api_key + model</code>, so parallel projects don't
+throttle separately.</li>
+<li><strong>📦 Split parent task is archived</strong>: once the PM
+finishes decomposing a requirement, the parent task is marked
+<strong>done</strong> and archived into <code>tasks/done/</code>, so the
+active list only shows the hand-off subtasks.</li>
+<li><strong>⚡ Intra-Cycle Chaining
+(<code>chain_within_cycle</code>)</strong>: downstream tasks execute
+immediately within the same cycle once dependencies are resolved,
+completing multi-phase requirements in minutes.</li>
+<li><strong>🛠️ DevOps Engineer (<code>devops</code>, 0.31.0)</strong>:
+owns infrastructure-as-code — Dockerfiles, docker-compose, CI/CD
+pipeline scripts, Kubernetes manifests and environment configuration.
+Produces code (infra files), follows the project's existing
+image/registry/tag conventions, and never embeds plaintext secrets in
+manifests.</li>
+<li><strong>👁️ UI Visual Critic (<code>ui_critic</code>,
+0.31.0)</strong>: read-only visual reviewer — renders pages in a real
+browser (dev server + screenshots/snapshots) and judges layout, spacing,
+and responsive behaviour; files each visual defect via
+<code>report_bug</code> with severity and viewport details for the
+frontend to fix, never edits business source itself, and waits for
+regression after reporting.</li>
+<li><strong>🔒 Security Auditor (<code>security</code>,
+0.31.0)</strong>: read-only security reviewer — static-scans the changed
+scope, traces user-input-to-sink data flows (SQL injection, access
+control, hardcoded secrets), and looks up dependency CVEs for changed
+manifests; confirmed risks are filed via <code>report_bug</code> with
+attack scenario and fix suggestion, theoretical issues without evidence
+are never blockers.</li>
+<li><strong>👥 Two-Tier Configuration</strong>: the global
+<strong>Multi-Model Team</strong> section configures each role's
+dedicated model once, and project settings reference it with local
+overrides; every role ships with a built-in responsibility prompt
+template you can load with one click or customise.</li>
+</ul>
+<blockquote>
+<p><strong>Read-only verify-role semantics</strong>:
+<code>ui_critic</code> / <code>security</code> share QA's semantics —
+after filing bugs via <code>report_bug</code> the task stays open
+awaiting regression (never archived as done prematurely), and a clean
+acceptance with zero file changes completes normally (never misjudged as
+a stalled round).</p>
+</blockquote>
+<hr />
+<h3 id="1014-local-debugging--chromium-cdp-automation">10.14 Local
+Debugging &amp; Chromium CDP Automation</h3>
+<p>For Web and API projects, Orcsy ships built-in tools for end-to-end
+verification:</p>
+<ul>
+<li><strong>Chromium Browser Automation
+(<code>browser_*</code>)</strong>: native Python CDP client connected to
+local Google Chrome or Microsoft Edge (zero external drivers required),
+providing element snapshots with <code>ref</code> addressing, clicking,
+typing, waiting, screenshots, and console/network log listening.</li>
+<li><strong>Dev Server Management (<code>dev_server_*</code>)</strong>:
+runs background services with dynamic <code>{PORT}</code> allocation and
+readiness probing, terminating child processes cleanly on task end.</li>
+<li><strong>Local HTTP API Client (<code>http_request</code>)</strong>:
+tests local/LAN REST and GraphQL endpoints with cookie jars and host
+allowlist enforcement to block intranet penetration.</li>
 </ul>
 <hr />
-<h3 id="1014-local-debugging-chromium-cdp-automation">10.14 Local Debugging & Chromium CDP Automation</h3>
-<p>For Web and API projects, Orcsy ships built-in tools for end-to-end verification:</p>
+<h3
+id="1015-human-gated-commit-pending-commit--dedicated-review-page">10.15
+Human-gated commit (Pending commit → dedicated review page)</h3>
+<p>When the Project Team or Worktree isolation is enabled, agent output
+is only <strong>applied incrementally to the main working tree</strong>
+— it never auto-commits or auto-pushes. A red <strong>"Pending commit
+(N)"</strong> button on the project card opens the <strong>dedicated
+commit-review page</strong> (<code>#/commit?project=&lt;name&gt;</code>,
+a full tab rather than a dialog):</p>
+<p><strong>Left: changed-file list</strong></p>
 <ul>
-<li><strong>Chromium Browser Automation (<code>browser_*</code>)</strong>: native Python CDP client connected to local Google Chrome or Microsoft Edge (zero external drivers required), providing element snapshots with <code>ref</code> addressing, clicking, typing, waiting, screenshots, and console/network log listening.</li>
-<li><strong>Dev Server Management (<code>dev_server_*</code>)</strong>: runs background services with dynamic <code>{PORT}</code> allocation and readiness probing, terminating child processes cleanly on task end.</li>
-<li><strong>Local HTTP API Client (<code>http_request</code>)</strong>: tests local/LAN REST and GraphQL endpoints with cookie jars and host allowlist enforcement to block intranet penetration.</li>
+<li>Lists every uncommitted change; click a file to see its diff on the
+right;</li>
+<li>If the project has nested gitlink sub-repositories (e.g.
+<code>caresy-api</code> / <code>caresy-web</code> in caresy), files are
+grouped by repo and the count is the sum of real files across all
+repos;</li>
+<li>Each row has <strong><code>Exclude</code></strong> (don't commit,
+keep in the working tree) and <strong><code>Delete</code></strong>;</li>
+<li>The list header offers bulk actions:
+<strong><code>Exclude temp artifacts (N)</code></strong> and
+<strong><code>Delete temp artifacts (N)</code></strong>; each action
+applies only to the file's own repo.</li>
 </ul>
-<hr />
-<h3 id="1015-human-gated-commit-pending-commit--dedicated-review-page">10.15 Human-gated commit (Pending commit → dedicated review page)</h3>
-<p>When the Project Team or Worktree isolation is enabled, agent output is only <b>applied incrementally to the main working tree</b> — it never auto-commits or auto-pushes. A red <b>“Pending commit (N)”</b> button on the project card opens a <b>dedicated commit-review page</b> (<code>#/commit?project=&lt;name&gt;</code>, a full tab instead of a dialog):</p>
+<p><strong>Right: code diff</strong></p>
 <ul>
-<li><b>Left: changed-file list</b> — click any file to see its diff on the right; with nested gitlink sub-repositories, files are grouped by repo and the count is the sum of real files; each row offers <b>Exclude</b> and <b>Delete</b>; the header adds bulk actions <b>Exclude temp artifacts (N)</b> and <b>Delete temp artifacts (N)</b>, each scoped to the file's own repo;</li>
-<li><b>Right: code diff</b> — <b>wrap is on by default</b> so very long lines fold instead of being cut off (toggle to “no wrap + horizontal scrolling”); the header shows “N lines · X KB” and a <b>Download patch</b> button; extremely large changes show a truncated notice, and <b>Download patch</b> gives you the full <code>.patch</code>;</li>
-<li><b>Exclude vs Delete</b>: exclude = not committed and kept in the working tree (restorable); delete = untracked files/directories are <b>physically removed</b>, tracked files are <b>restored to HEAD</b> (change discarded, the file itself kept); both ask for confirmation first;</li>
-<li><b>Automatic temp/test artifact detection</b> — <code>*.log</code>, <code>*.tmp</code>, <code>*.pyc</code>, <code>__pycache__/</code>, <code>.pytest_cache/</code>, <code>node_modules/</code>, <code>coverage/</code> and similar; real test sources such as <code>*_test.go</code> or <code>*.spec.ts</code> are never matched;</li>
-<li><b>Commit</b> — fill in the message (optionally tick push to remote) and click <b>Confirm commit to all repos</b>; only non-excluded files are committed and the working tree becomes clean; with nested repositories Orcsy commits nested repos first and the parent gitlink pointers last, and pushes nested repos before the parent (if a nested push fails or has no remote, the parent push is skipped); if some files remain excluded the page stays open and tells you exactly which ones; when everything is excluded the confirm button is disabled so no empty commit can be created.</li>
+<li><strong>Wrap is on by default</strong>, so very long lines fold
+instead of being cut off; the <strong>Wrap</strong> toggle in the header
+switches to "no wrap + horizontal scrolling";</li>
+<li>The header shows <strong>"N lines · X KB"</strong> plus a
+<strong>Download patch</strong> button (exports the file's full
+<code>.patch</code>);</li>
+<li>For extremely large changes (over 1,000,000 characters) a banner
+says the preview is truncated — use <strong>Download patch</strong> for
+the complete text.</li>
 </ul>
-<p>This page is the <b>final human gate</b> of the delivery pipeline: Orcsy will never commit or push on your behalf.</p>
-
+<p><strong>Exclude vs Delete (both keep test artifacts out of the main
+branch)</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Action</th>
+<th style="text-align: left;">Untracked new file/dir (e.g.
+<code>test-output.log</code>, <code>__pycache__/</code>)</th>
+<th style="text-align: left;">Tracked file (e.g. modified source)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Exclude</strong></td>
+<td style="text-align: left;">Not committed, <strong>kept in the working
+tree</strong>, can be included later</td>
+<td style="text-align: left;">This change is not committed; edits stay
+in the working tree</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Delete</strong></td>
+<td style="text-align: left;"><strong>Physically deleted</strong>
+(directories removed recursively, unrecoverable)</td>
+<td style="text-align: left;"><strong>Restored to HEAD</strong> (change
+discarded, the file itself is kept)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Automatic temp/test artifact detection</strong>:
+<code>*.log</code>, <code>*.tmp</code>, <code>*.temp</code>,
+<code>*.orig</code>, <code>*.rej</code>, <code>*.bak</code>,
+<code>*.pyc</code>, <code>__pycache__/</code>,
+<code>.pytest_cache/</code>, <code>.mypy_cache/</code>,
+<code>.ruff_cache/</code>, <code>node_modules/</code>,
+<code>coverage/</code>, <code>htmlcov/</code>,
+<code>.nyc_output/</code>, <code>.coverage</code>, <code>tmp/</code>,
+<code>.DS_Store</code> and similar; it deliberately
+<strong>never</strong> matches real test sources such as
+<code>*_test.go</code> or <code>*.spec.ts</code>;</li>
+<li>Every delete asks for confirmation first and lists exactly what will
+be processed.</li>
+</ul>
+<p><strong>Committing</strong></p>
+<ul>
+<li>Fill in the Commit Message; tick <strong>Push to remote</strong> to
+also run <code>git push origin</code>;</li>
+<li>Click <strong>Confirm commit to all repos</strong> — only
+non-excluded files are committed; the working tree becomes clean and the
+internal stage branch is synced;</li>
+<li>With nested repositories Orcsy orchestrates the order automatically:
+<strong>nested repos commit first → parent commits the updated gitlink
+pointers last</strong>. Pushes also go nested-first; the parent is
+pushed only after every nested push succeeds (if a nested push fails or
+has no remote, the parent push is skipped so the remote never points at
+an unavailable child commit);</li>
+<li>All repos share the current Commit Message; the page header shows
+the repo/file counts actually being committed;</li>
+<li>If some files remain excluded, the page stays open and tells you
+exactly which ones were skipped (<strong>"N file(s) excluded and not
+committed (kept in the working tree)"</strong>);</li>
+<li>When every file is excluded, the confirm button is disabled so no
+empty commit can be created.</li>
+</ul>
+<blockquote>
+<p>This page is the <strong>final human gate</strong> of the delivery
+pipeline: Orcsy will never commit or push on your behalf.</p>
+</blockquote>
 <hr />
-<h3 id="1016-mobile-remote-access-phone-dashboard-pwa">10.16 Mobile remote access (phone dashboard / PWA)</h3>
-<p>Orcsy can be operated from a phone browser — watch Agent progress on the go, unblock a stuck task with a one-line note, or capture a new idea straight into the queue.</p>
+<h3 id="1016-mobile-remote-access-phone-dashboard--pwa">10.16 Mobile
+remote access (phone dashboard / PWA)</h3>
+<p>Orcsy can be operated from a phone browser — watch Agent progress on
+the go, unblock a stuck task with a one-line note, or capture a new idea
+straight into the queue.</p>
 <p><strong>Step 1: open access + set a password</strong></p>
-<p>The easiest way: click the 📱 button in the desktop top bar to open the "Phone connect" wizard. While the dashboard only listens on loopback, the wizard offers a one-click "Enable phone access" checkbox — tick it and confirm: Orcsy rewrites the config (<code>web.host: 0.0.0.0</code> + an auto-generated strong password, stored hashed only) and restarts automatically. After the restart, the login screen shows the password once more — copy it, log in, done.</p>
-<p>Manual alternative: set <code>web.host</code> to <code>0.0.0.0</code> and <code>web.auth_password</code> in <code>config.yaml</code>, then restart.</p>
+<p>The easiest way: click the <strong>📱 button</strong> in the desktop
+top bar (mobile: in the bottom-nav "More" drawer menu) to open the
+"Phone connect" wizard. While the dashboard only listens on loopback,
+the wizard offers a <strong>one-click "Enable phone access"</strong>
+checkbox — tick it and confirm: Orcsy rewrites the config
+(<code>web.host: 0.0.0.0</code> + an auto-generated strong password,
+stored hashed only) and <strong>restarts automatically</strong>. After
+the restart, the login screen shows the password once more — copy it,
+log in, done.</p>
+<p>Manual alternative: set <code>web.host</code> to <code>0.0.0.0</code>
+and <code>web.auth_password</code> in <code>config.yaml</code>, then
+restart. The wizard lists every reachable URL, renders the QR code, and
+copies the address; after a restart the terminal also prints the LAN
+addresses plus a <strong>scan-to-connect QR code</strong>.</p>
 <p><strong>Step 2: connect from the phone</strong></p>
 <ul>
-<li>Phone on the same Wi-Fi: scan the code (or type the address), enter the login password;</li>
-<li>Tick "Remember this device (30 days)": a long session + a Bearer token are issued side by side with the cookie, so screen-off, network switching, or reverse-proxy cookie loss rarely logs you out;</li>
-<li>Cross-network access works via an HTTPS reverse proxy, tunnels (FRP / Tailscale / Cloudflare Tunnel), or a public VPS; set <code>web.public_url</code> and the wizard/terminal will prefer your public domain.</li>
+<li>Phone on the <strong>same Wi-Fi</strong>: scan the code (or type the
+address), enter the login password;</li>
+<li>Tick <strong>"Remember this device (30 days)"</strong>: a long
+session + a Bearer token are issued side by side with the cookie, so
+screen-off, network switching, or reverse-proxy cookie loss rarely logs
+you out;</li>
+<li>Cross-network access works via an HTTPS reverse proxy (Nginx /
+Caddy), tunnels (FRP / Tailscale / Cloudflare Tunnel), or a public VPS;
+set <code>web.public_url</code> and the wizard/terminal will prefer your
+public domain.</li>
 </ul>
-<p><strong>Mobile-specific UI</strong> (auto-enabled at viewport width ≤ 768px; desktop layout unchanged):</p>
+<p><strong>Mobile-specific UI</strong> (auto-enabled at viewport width ≤
+768px; desktop layout unchanged):</p>
 <ul>
-<li><strong>Slim sticky top bar</strong>: only the approval badge and refresh — low-frequency actions live in the drawer;</li>
-<li><strong>Bottom navigation</strong>: Dashboard / Projects / <strong>＋ New task</strong> (pick a project, then a fullscreen sheet) / More (drawer menu: navigation, theme cycle, scan, restart, logout);</li>
-<li><strong>Fullscreen task sheet</strong>: Save / Cancel stay pinned at the very top — the on-screen keyboard can never cover them; a Markdown toolbar sits above the body;</li>
-<li><strong>Touch reorder</strong>: ▲▼ buttons on each task card move it within its priority group (desktop keeps drag-and-drop);</li>
-<li><strong>Draft protection</strong>: edits are auto-stashed locally every 0.3 s; if the browser is killed, reopening shows "unsaved draft found" with one-tap restore;</li>
-<li><strong>No clobbering</strong>: saving runs an optimistic-lock check — if the Agent just modified the task, the server returns 409 and you choose "keep my changes" or "take the latest";</li>
-<li><strong>Weak-network friendly</strong>: polling pauses when the screen is off and self-heals on return; mobile polling uses a lightweight summary; the run log loads on demand;</li>
-<li><strong>Add to home screen (PWA)</strong>: "Install / Add to home screen" opens Orcsy like a standalone app.</li>
+<li><strong>Slim sticky top bar</strong>: only the approval badge and
+refresh — low-frequency actions live in the drawer;</li>
+<li><strong>Bottom navigation</strong>: Dashboard / Projects /
+<strong>＋ New task</strong> (pick a project, then a fullscreen sheet) /
+More (drawer menu: navigation, theme cycle, scan, restart, logout);</li>
+<li><strong>Fullscreen task sheet</strong>: Save / Cancel stay pinned at
+the very top — the on-screen keyboard can never cover them; a
+<strong>Markdown toolbar</strong> (headings, checklist, list, bold, code
+block) sits above the body;</li>
+<li><strong>Touch reorder</strong>: ▲▼ buttons on each task card move it
+within its priority group (desktop keeps drag-and-drop);</li>
+<li><strong>Draft protection</strong>: edits are auto-stashed locally
+every 0.3 s; if the browser is killed (incoming call, backgrounded),
+reopening shows "unsaved draft found" with one-tap restore;</li>
+<li><strong>No clobbering</strong>: saving runs an
+<strong>optimistic-lock check</strong> — if the Agent just modified the
+task, the server returns 409 and you choose "keep my changes" or "take
+the latest"; Agent write-backs are never silently overwritten;</li>
+<li><strong>Weak-network friendly</strong>: polling pauses when the
+screen is off and self-heals with an instant refresh on return; mobile
+polling uses a lightweight summary (log tail and archives omitted, ~80
+KB → a few KB per poll); the run log loads on demand;</li>
+<li><strong>Add to home screen (PWA)</strong>: "Install / Add to home
+screen" in the phone browser menu opens Orcsy like a standalone app
+(icon + splash).</li>
 </ul>
-<p><strong>Reverse proxy deployments (optional)</strong>: login throttling resolves the real client IP from X-Forwarded-For only if the proxy is listed in <code>web.trusted_proxies</code> — loopback is trusted by default, so a lockout can never pin 127.0.0.1 and lock the local machine out too.</p>
+<p><strong>Reverse proxy deployments (optional)</strong>: when the peer
+address is always the proxy, login throttling resolves the real client
+IP from <code>X-Forwarded-For</code> only if the proxy is listed in
+<code>web.trusted_proxies</code> — loopback is trusted by default
+(same-host Nginx/Caddy/FRP works out of the box), so a lockout can never
+pin <code>127.0.0.1</code> and lock the local machine out too.</p>
+<hr />
 <h3 id="1017-budget-and-cost-limits-budget-guard">10.17 Budget and cost
 limits (Budget Guard)</h3>
 <p>Enable it under <strong>Settings → Budget &amp; cost</strong>, or in
@@ -1916,21 +2288,22 @@ default):</p>
 <ul>
 <li><strong>Per-task token limit</strong>: execution stops once prompt +
 completion reaches the limit;</li>
-<li><strong>Per-task cost limit</strong>: converted to CNY with the model
-prices in <code>budget.prices</code>; models without a price are not
-costed;</li>
+<li><strong>Per-task cost limit</strong>: converted to CNY with the
+model prices in <code>budget.prices</code>; models without a price are
+not costed;</li>
 <li><strong>Per-project daily limit</strong>: accumulated per local
 calendar day; once exhausted the scheduler stops claiming new tasks for
 that project (running tasks may finish);</li>
 <li>Exceeding a limit is not a failure: the task is marked
-<strong>Blocked</strong> with <code>block_reason: budget_exceeded</code>,
-the worktree is kept; raise the budget or wait for the next day, then
-click <strong>Requeue</strong> to resume;</li>
+<strong>Blocked</strong> with
+<code>block_reason: budget_exceeded</code>, the worktree is kept; raise
+the budget or wait for the next day, then click <strong>Requeue</strong>
+to resume;</li>
 <li>Usage lives in <code>state/budget.json</code> and only counts model
 calls made after the budget was enabled;</li>
 <li>Prices are CNY per million tokens:</li>
 </ul>
-<pre><code>budget:
+<pre class="yaml"><code>budget:
   enabled: true
   max_tokens_per_task: 300000
   max_tokens_per_project_per_day: 5000000
@@ -1964,98 +2337,195 @@ write operations:</p>
 CRUD/reorder/stop, settings saves, project CRUD, commit confirmation,
 discard, Issues pulls, approvals, skills/mirrors/updates,
 circuit-breaker resume, and API-key writes;</li>
-<li><strong>Each entry</strong>: time, action, actor
-(<code>user</code> / <code>api_key:&lt;hash prefix&gt;</code> /
-<code>local</code>), IP, target, result;</li>
+<li><strong>Each entry</strong>: time, action, actor (<code>user</code>
+/ <code>api_key:&lt;hash prefix&gt;</code> / <code>local</code>), IP,
+target, result;</li>
 <li>Only summaries are recorded (status code, key names) — <strong>never
 passwords, API keys, repo tokens or task bodies</strong>;</li>
 <li>The full log lives in <code>logs/audit.jsonl</code> under the data
 directory; it rotates at 5MB and keeps the latest 5 files;</li>
 <li>Direct edits to <code>config.yaml</code> or task files bypass the
-dashboard and therefore are not audited (Git/filesystem remain the source
-of truth).</li>
+dashboard and therefore are not audited (Git/filesystem remain the
+source of truth).</li>
 </ul>
 <h3 id="1020-egress-allowlist">10.20 Egress allowlist</h3>
 <p>Every HTTP request the application itself makes goes through the
 egress allowlist: model calls, Issue sync, mirror speed tests, web
 fetches, update checks and update-package downloads. Configure it under
-<strong>Settings → Tools &amp; network → Egress allowlist</strong>, or in
-the <code>egress</code> section of <code>config.yaml</code>:</p>
-<pre><code>egress:
+<strong>Settings → Tools &amp; network → Egress allowlist</strong>, or
+in the <code>egress</code> section of <code>config.yaml</code>:</p>
+<pre class="yaml"><code>egress:
   mode: allowlist      # allowlist (default) | off (troubleshooting only: allow all, no deny audit)
   extra_hosts: []      # extra hosts, e.g. api.example.com / *.example.com / host:8443
   audit: true          # write logs/audit.jsonl on deny (action=egress.deny)</code></pre>
 <ul>
 <li><strong>Automatic entries</strong>: model endpoints, Issue repos
-(including <code>api_base</code>), mirrors (built-in plus custom/disabled
-lists) and the update source are derived from configuration, so changing
-models or adding projects needs no extra host names;</li>
+(including <code>api_base</code>), mirrors (built-in plus
+custom/disabled lists) and the update source are derived from
+configuration, so changing models or adding projects needs no extra host
+names;</li>
 <li><strong>Loopback</strong> (<code>127.0.0.1</code> /
 <code>localhost</code> / <code>::1</code>) is not egress and is always
-allowed — local dev servers, browser CDP and test stubs keep working;</li>
-<li><strong>Extra hosts</strong>: third-party documentation sites used by
-<code>web_fetch</code>, intranet proxies, etc. Add them under
+allowed — local dev servers, browser CDP and test stubs keep
+working;</li>
+<li><strong>Extra hosts</strong>: third-party documentation sites used
+by <code>web_fetch</code>, intranet proxies, etc. Add them under
 <code>extra_hosts</code> or as tags in Settings.
 <code>*.example.com</code> matches both the apex and subdomains;
 <code>:port</code> restricts a host to that port;</li>
 <li><strong>On denial</strong>: model/Issue/update paths report "blocked
-by egress allowlist" with a fix hint; mirror speed tests mark that source
-unreachable; <code>web_fetch</code> returns the hint to the model; every
-denial is audited;</li>
-<li><strong>Subprocesses are not intercepted</strong>: <code>npm</code> /
-<code>pip</code> / <code>git</code> started via <code>run_command</code>
-can reach the network outside the application layer; mirrors/proxy
-environment variables and the run ledger provide the constraints. The
-docs make no "zero outbound requests" claim;</li>
+by egress allowlist" with a fix hint; mirror speed tests mark that
+source unreachable; <code>web_fetch</code> returns the hint to the
+model; every denial is audited;</li>
+<li><strong>Subprocesses are not intercepted</strong>: <code>npm</code>
+/ <code>pip</code> / <code>git</code> started via
+<code>run_command</code> can reach the network outside the application
+layer; mirrors/proxy environment variables and the run ledger provide
+the constraints. The docs make no "zero outbound requests" claim;</li>
 <li><strong>Troubleshooting</strong>: temporarily set
 <code>mode: off</code> (allow all, no deny audit), then switch back to
 <code>allowlist</code>. The settings page shows the derived host count,
 process-wide allow/deny counters and recent denials.</li>
 </ul>
 <h3 id="1021-team-memory-phase-1">10.21 Team memory (Phase 1)</h3>
-<p><strong>Architecture blackboard <code>ARCHITECTURE.md</code></strong>:
-the project root keeps core layers, module boundaries, technology choices,
-shared data models and key routes; <strong>write the body in English to save
-tokens</strong> (keep API paths/identifiers as-is); the first 3000 chars are
-injected read-only into every task prompt. The PM creates/updates it with
-<code>update_architecture(mode="replace")</code> on first decomposition;
-developers append a ≤200-char English note after major API/schema changes
-with <code>mode="append"</code>. The tool can only write that one file.</p>
-<p><strong>Requirement-batch shared clipboard</strong>: roles under the same
-<code>parent_id</code> tree share a batch. Developers use
-<code>session_share(key, value)</code> for temporary ports, test accounts,
-dynamic JWTs or temporary DSNs; QA reads them with
-<code>session_read(key)</code> (empty key lists available keys). Data lives
-under <code>&lt;data dir&gt;/state/session_bus/</code>, never in task files
-or Git, and is deleted when the batch is archived/terminated (7-day TTL
-fallback).</p>
-<p><strong>One-click dependency results</strong>: task details list upstream
-status and result summaries; clicking a task ID/title opens that task
-(archived tasks read-only), and the parent requirement is clickable too.</p>
-<h3 id="1022-nested-git-repositories">10.22 Nested Git repositories</h3>
-<p>When a parent repo records subdirectories as gitlinks (mode
-<code>160000</code>) without a <code>.gitmodules</code> file (e.g.
-<code>caresy-api</code>/<code>caresy-web</code> in caresy), a worktree
-checkout leaves those directories empty and changes cannot be carried by the
-parent merge. Orcsy detects this and switches to a compatible mode:</p>
+<p><strong>Architecture blackboard
+<code>ARCHITECTURE.md</code></strong></p>
 <ul>
-<li>Projects with gitlinks do not use worktree isolation; tasks edit the real
-nested working trees in the main workspace;</li>
-<li>The project runs serially to avoid concurrent edits to the same nested
-repo;</li>
-<li>Run ledger/review combine the parent gitlink pointer with each nested
-repo's <code>git status/diff</code>;</li>
-<li>The <b>Pending commit</b> page groups changes by repo with per-file
-diff, exclude and delete support;</li>
-<li>Manual commit runs nested repos first and the parent gitlink pointers
-last, with optional push; if any nested push does not succeed, the parent
-push is skipped.</li>
+<li>Lives in the project root: core layers, module boundaries,
+technology choices, shared data models and key routes; <strong>write the
+body in English</strong> (keep API paths/identifiers as-is) to save
+tokens;</li>
+<li>Injected read-only into every task prompt (first 3000 chars) so all
+roles share the same project picture; omitted when the file does not
+exist;</li>
+<li>The PM creates/updates it with
+<code>update_architecture(mode="replace")</code> on first decomposition;
+developers append a short English note (≤200 chars) after major
+API/schema changes with <code>mode="append"</code>; small changes need
+no update;</li>
+<li>The tool can only write <code>ARCHITECTURE.md</code> — it does not
+give PM/QA arbitrary file-write access.</li>
+</ul>
+<p><strong>Requirement-batch shared clipboard</strong></p>
+<ul>
+<li>PM subtasks, developers, QA and bug-fix tasks under the same
+<code>parent_id</code> tree share one batch;</li>
+<li>Developers use <code>session_share(key, value)</code> for temporary
+ports, test accounts, dynamic JWTs or temporary DSNs;</li>
+<li>QA reads them with <code>session_read(key)</code> (empty key lists
+available keys without values) instead of guessing from logs;</li>
+<li>Data lives under <code>&lt;data dir&gt;/state/session_bus/</code>,
+never in task files or Git; it is deleted when the whole batch is
+archived/terminated, with a 7-day TTL fallback;</li>
+<li>Only put temporary runtime state there — no long-lived secrets or
+large blobs.</li>
+</ul>
+<p><strong>One-click dependency results</strong></p>
+<ul>
+<li>The task detail shows each upstream dependency's status (done/in
+progress/blocked/deleted) and result summary;</li>
+<li>Click the task ID/title to open that task (archived tasks open
+read-only); the parent requirement/source task is also clickable.</li>
+</ul>
+<h3
+id="1022-nested-git-repositories-gitlinks--unregistered-submodules">10.22
+Nested Git repositories (gitlinks / unregistered submodules)</h3>
+<p>Some parent repos record subdirectories as gitlinks (mode
+<code>160000</code>) without a <code>.gitmodules</code> file (e.g.
+<code>caresy-api</code> / <code>caresy-web</code> in caresy). A
+<code>git worktree</code> checkout leaves those directories empty, and
+changes cannot be carried by the parent merge — the task can look “done”
+while the code never reaches the main workspace.</p>
+<p>Orcsy detects this layout and switches to a compatible mode:</p>
+<ul>
+<li>Projects with gitlinks <strong>do not use worktree
+isolation</strong>; tasks run directly in the main workspace and edit
+the real nested working trees;</li>
+<li>The project runs <strong>serially</strong> to prevent concurrent
+edits to the same nested repo;</li>
+<li>The run ledger/review combine the parent gitlink pointer with each
+nested repo's <code>git status/diff</code>, so the diff is not
+empty;</li>
+<li>The <strong>Pending commit</strong> page groups changes by repo,
+with per-file diff, exclude and delete support;</li>
+<li>Manual commit automatically runs <strong>nested repos first → parent
+gitlink pointers last</strong>, with optional push; if any nested push
+does not succeed, the parent push is skipped.</li>
 </ul>
 <p>Limitations: no worktree isolation/parallelism in this mode; nested
 repos commit on their current branch and every repo shares one Commit
 Message. New projects should use proper submodules or separate managed
-projects.</p>
-
+projects instead.</p>
+<h3 id="1023-merge-conflict-self-healing">10.23 Merge conflict
+self-healing</h3>
+<p>When multiple team roles work in parallel and their worktree branches
+touch the same files, merging into the main workspace may conflict.
+Orcsy now auto-heals instead of failing:</p>
+<ol type="1">
+<li><strong>Auto-resume</strong>: worktree results are preserved (no
+code dropped), task marked <code>resume_run</code>;</li>
+<li><strong>Conflict synced to sandbox</strong>: main workspace
+uncommitted changes are applied <code>--3way</code> into the Agent's
+worktree (conflict markers <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code>
+land in Agent-editable files);</li>
+<li><strong>Agent resolves</strong>: same role re-enters next cycle with
+conflict context in the prompt, resolves markers, re-runs tests, then
+re-completes;</li>
+<li><strong>Attempt cap</strong>: up to 2 auto-heal attempts; persistent
+conflicts escalate to blocked for manual intervention.</li>
+</ol>
+<blockquote>
+<p><strong>Empty-worktree self-heal (0.31.0)</strong>: a rare race (≈1
+in 8 runs in testing) left a freshly checked-out worktree with zero
+tracked files, forcing the Agent to honestly block on an empty
+directory. Task sandbox setup now verifies a non-empty baseline — if the
+worktree is empty while the base branch has content, it is force-removed
+and rebuilt automatically, transparent to the Agent.</p>
+</blockquote>
+<h3 id="1024-dependency-graph-visualization-dag">10.24 Dependency graph
+visualization (DAG)</h3>
+<p>Expand "Dependency Graph (DAG)" on the project card to see task
+dependency topology:</p>
+<ul>
+<li><strong>Layered layout</strong>: rooted at tasks with no
+dependencies, arranged by longest path;</li>
+<li><strong>Status colors</strong>: open (blue) / in-progress (orange) /
+blocked (red) / done (green);</li>
+<li><strong>Dependency edges</strong>: arrows point to downstream tasks,
+colored by target status;</li>
+<li><strong>Click a node</strong>: opens task details (read-only).</li>
+<li>On mobile, scroll horizontally to see the full graph.</li>
+</ul>
+<h3 id="1025-agent-commit-identity">10.25 Agent commit identity</h3>
+<p>When "Git auto-commit &amp; merge" is enabled, Agent-generated
+commits can have a distinct author identity:</p>
+<ul>
+<li><strong>Global</strong>: Settings → Tools &amp; Network → Agent
+Tools → "Commit author name / email";</li>
+<li><strong>Per-project</strong>: project settings → "Override Git
+commit &amp; merge" → fill in project-specific author name/email (leave
+empty to inherit global).</li>
+</ul>
+<p>Typical use: set <code>Orcsy Agent</code> +
+<code>orcsy@example.com</code> globally so
+<code>git log --author="Orcsy"</code> filters all Agent commits at a
+glance.</p>
+<h3 id="1026-full-process-log-replay">10.26 Full-process log replay</h3>
+<p>Task run details now include a full-process event stream replay:
+beyond existing tool calls and progress events, it records:</p>
+<ul>
+<li><strong>Model message content</strong> (each Agent turn's reply,
+truncated);</li>
+<li><strong>Model reasoning summary</strong> (thinking content,
+truncated);</li>
+<li><strong>Planned tool calls</strong> (tool names + argument
+summaries);</li>
+<li><strong>Tool execution results</strong> (full result text, 4KB
+truncation).</li>
+</ul>
+<p>Open task details → "Run records" → click a run_id to expand the
+event stream. Events are sanitized (API keys and sensitive values never
+leave local).</p>
 <h2 id="11-data-backup-and-migration">11. Data, backup, and
 migration</h2>
 <h3 id="111-where-data-lives">11.1 Where data lives</h3>
@@ -2106,6 +2576,12 @@ migration</h2>
 <td><code>/var/lib/orcsy/state/</code></td>
 </tr>
 <tr>
+<td>Requirement-batch clipboard</td>
+<td><code>%APPDATA%\Orcsy\state\session_bus\</code></td>
+<td><code>./orcsy-data/state/session_bus/</code></td>
+<td><code>/var/lib/orcsy/state/session_bus/</code></td>
+</tr>
+<tr>
 <td>Tasks</td>
 <td>Each project's <code>tasks\</code></td>
 <td><code>./projects/&lt;project&gt;/tasks/</code></td>
@@ -2124,8 +2600,8 @@ migration</h2>
 <ul>
 <li>the data directory (config, skills, logs, usage);</li>
 <li>the run ledger directory (by default <code>runs/</code> inside the
-data directory; if <code>runlog.dir</code> points elsewhere, back up that
-directory);</li>
+data directory; if <code>runlog.dir</code> points elsewhere, back up
+that directory);</li>
 <li>each project's <code>tasks/</code> and <code>AGENT.md</code>;</li>
 <li>the project code itself (use a Git remote).</li>
 </ul>
@@ -2161,14 +2637,16 @@ port and prints it in the console;</li>
 instead of silently changing ports (your explicit choice is
 respected);</li>
 </ul></li>
-<li>If the port is held by another Orcsy instance, this launch is cancelled
-with a "detected an existing Orcsy instance" notice, so two instances never
-scan/execute the same task queue; use <code>--port</code> with a different
-port to start a separate instance deliberately;</li>
-<li>Right-click the tray icon and choose <strong>Exit</strong> to stop both
-the dashboard server and the Orcsy process (running tasks are interrupted and
-reset for a rerun on next start). If the dashboard still responds after that,
-you have another independent instance running — close it too.</li>
+<li>If the port is held by another Orcsy instance, this launch is
+cancelled with a "detected an existing Orcsy instance" notice, so two
+instances never scan/execute the same task queue; use
+<code>--port</code> with a different port to start a separate instance
+deliberately;</li>
+<li>Right-click the tray icon and choose <strong>Exit</strong> to stop
+both the dashboard server and the Orcsy process (running tasks are
+interrupted and reset for a rerun on next start). If the dashboard still
+responds after that, you have another independent instance running —
+close it too.</li>
 </ul>
 <h3 id="122-a-task-stays-blocked">12.2 A task stays "Blocked"</h3>
 <p>Open the task and read <strong>Agent result</strong> plus the run
@@ -2181,8 +2659,8 @@ with backoff; only after that does it mark blocked;</li>
 <li>A test command is missing or the toolchain is not installed;</li>
 <li>A merge conflict;</li>
 <li>The task was edited while it was running (<code>stale_lease</code>):
-the pre-commit check detected a change to the body, dependencies or model
-and skipped the commit; after confirming your change, click
+the pre-commit check detected a change to the body, dependencies or
+model and skipped the commit; after confirming your change, click
 <strong>Requeue</strong>.</li>
 </ul>
 <p>What to do:</p>

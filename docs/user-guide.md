@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.30.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.32.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 
 ---
@@ -155,7 +155,7 @@ When it works, it:
 
 #### Steps
 
-1. Download `orcsy-setup-0.22.0-windows-amd64.exe` from the release page:
+1. Download `orcsy-setup-0.32.0-windows-amd64.exe` from the release page:
    - Gitee: <https://gitee.com/java-and-net/Orcsy/releases>
    - GitHub: <https://github.com/easy-open-meta/Orcsy/releases>
 2. Double-click it. If Windows SmartScreen appears, click **More info** → **Run anyway**.
@@ -875,6 +875,7 @@ Configure it in the dashboard under **Settings → 🛡 Data masking**, or in th
 
 - Auto-check for updates on startup (can be turned off);
 - Top bar **Check for updates** → when a new version exists, click **Update to x.y.z**;
+- The update source repo URL supports **both Gitee and GitHub** (Settings → 🔔 Notifications & App, new in 0.32.0): the default is the official Gitee source; point it to your own GitHub mirror (e.g. `https://github.com/xxx/orcsy`) if you prefer; for private repos fill in an access token next to it (GitHub uses a Personal Access Token);
 - The update installs silently in the background, the app restarts, and the page reloads;
 - If installed under `Program Files` or another system directory, one UAC prompt appears;
 - A failed update rolls back automatically and opens the install log;
