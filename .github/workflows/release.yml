@@ -160,6 +160,15 @@ jobs:
       - name: Remove duplicate sha256 checksums
         run: rm -f dist/*.sha256.sha256
 
+      - name: Generate sha256 for files missing checksums
+        run: |
+          cd dist
+          for f in orcsy-* orcsy_*; do
+            case "$f" in *.sha256) continue ;; esac
+            [ -f "$f.sha256" ] && continue
+            sha256sum "$f" > "$f.sha256"
+          done
+
       - name: Extract release notes from CHANGELOG
         id: notes
         run: |
