@@ -618,8 +618,8 @@ class TaskExecutor:
         # 完成声明校验（P1）：小组模式下 PM 声称 completed 必须有证据——
         # 确实 create_tasks 拆分过，或确有文件变更。实测出现过幻觉拆分
         #（0 个工具事件 + finish(completed)）静默归档 done，比 blocked 更危险。
-        if (resp.action == "completed" and self.team_enabled
-                and self.team_role == "pm" and not resp.files_changed
+        if (resp.action == "completed" and getattr(self, "team_enabled", False)
+                and getattr(self, "team_role", "") == "pm" and not resp.files_changed
                 and "create_tasks" not in getattr(client, "dispatched_tools", [])):
             log.warning("任务 %s 完成声明缺证据（未拆分且无文件变更），降级 blocked", task.id)
             resp.action = "blocked"
