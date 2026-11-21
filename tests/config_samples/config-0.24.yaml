@@ -1,0 +1,79 @@
+# 0.24 世代配置样本（V1 可信流水线 + 移动远程访问已发布，无 extra_body/tool_protocol）
+llm:
+  provider: openai
+  api_key: sk-legacy-sample-0.24
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  temperature: 0.2
+  max_tokens: 8192
+  max_context_tokens: 131072
+  enable_thinking: false
+  timeout_seconds: 300
+scheduler:
+  interval_seconds: 300
+  max_parallel_agents: 1
+logging:
+  level: INFO
+  file: logs/orcsy.log
+  retention_days: 3
+runlog:
+  enabled: true
+  retention_days: 30
+web:
+  host: 127.0.0.1
+  port: 5116
+  auth_password: pbkdf2:sha256:100000$024legacy$deadbeefcafebabedeadbeefcafebabedeadbeefcafebabedeadbeefcafebabe
+  public_url: https://orcsy.example.com
+  trusted_proxies:
+    - 127.0.0.1
+    - "::1"
+budget:
+  enabled: false
+  max_tokens_per_task: 0
+  max_tokens_per_project_per_day: 0
+  max_cost_per_task_cny: 0.0
+  prices: {}
+resilience:
+  enabled: true
+  max_consecutive_failures: 3
+  window_minutes: 120
+  max_failure_rate: 0.6
+  min_samples: 5
+egress:
+  mode: off
+  extra_hosts: []
+  audit: true
+tools: {}
+commands: {}
+env:
+  vars: {}
+  path_autofix: false
+mirrors:
+  custom: {}
+  disabled: []
+permissions:
+  mode: full_access
+update:
+  repo: https://gitee.com/java-and-net/Orcsy
+  token: ""
+  auto_check: true
+notify:
+  sound: true
+  system: true
+masking:
+  enabled: true
+  enhanced_rules: false
+  custom_patterns: []
+subagent:
+  max_parallel: 4
+  adaptive: true
+git:
+  commit_and_merge: false
+projects:
+  - name: sample-app
+    path: /projects/sample-app
+    enabled: true
+    tasks_dir: tasks
+    guide_file: AGENT.md
+    max_tasks_per_cycle: 1
+    review_enabled: false

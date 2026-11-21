@@ -1,0 +1,109 @@
+# 0.26 世代配置样本（0.26.0 已含 V1 全量 + Phase 1 团队记忆 + subagent 并发预算，
+# 尚无 0.27 的 extra_body / tool_protocol / llm.config_version）
+llm:
+  provider: openai
+  api_key: sk-legacy-sample-0.26
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  temperature: 0.2
+  max_tokens: 8192
+  max_context_tokens: 131072
+  enable_thinking: false
+  timeout_seconds: 300
+scheduler:
+  interval_seconds: 300
+  max_parallel_agents: 2
+logging:
+  level: INFO
+  file: logs/orcsy.log
+  retention_days: 7
+  max_total_mb: 200
+runlog:
+  enabled: true
+  retention_days: 30
+  max_total_mb: 500
+budget:
+  enabled: false
+  max_tokens_per_task: 0
+  max_tokens_per_project_per_day: 0
+  max_cost_per_task_cny: 0.0
+  prices: {}
+resilience:
+  enabled: true
+  max_consecutive_failures: 3
+  window_minutes: 120
+  max_failure_rate: 0.6
+  min_samples: 5
+  auto_resume: false
+egress:
+  mode: off
+  extra_hosts: []
+  audit: true
+web:
+  host: 0.0.0.0
+  port: 5116
+  auth_password: pbkdf2:sha256:100000$026legacy$cafebabedeadbeefcafebabedeadbeefcafebabedeadbeefcafebabedeadbeef
+  trusted_proxies:
+    - 127.0.0.1
+    - "::1"
+  public_url: https://orcsy.example.com
+tools: {}
+commands: {}
+env:
+  vars: {}
+  path_autofix: false
+mirrors:
+  custom: {}
+  disabled: []
+permissions:
+  mode: full_access
+  timeout_minutes: 10
+update:
+  repo: https://gitee.com/java-and-net/Orcsy
+  token: ""
+  auto_check: true
+notify:
+  sound: true
+  system: true
+masking:
+  enabled: true
+  enhanced_rules: false
+  custom_patterns: []
+review:
+  enabled: true
+  llm:
+    provider: openai
+    api_key: sk-legacy-review-0.26
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-reasoner
+  max_turns: 10
+  max_review_rounds: 2
+  allow_test_commands: true
+  squash_merge: false
+subagent:
+  max_parallel: 4
+  adaptive: true
+local_debug:
+  browser: edge
+  browser_executable: ""
+  headless: true
+  allowed_hosts: []
+  navigation_timeout_seconds: 30
+  service_ready_timeout_seconds: 60
+  max_services: 3
+  artifacts_retention_days: 7
+git:
+  commit_and_merge: false
+agent_profiles:
+  pm_default:
+    name: 项目经理
+    role: pm
+    llm:
+      model: DeepSeek-R1-Distill-Qwen-14B
+projects:
+  - name: sample-app
+    path: /projects/sample-app
+    enabled: true
+    tasks_dir: tasks
+    guide_file: AGENT.md
+    max_tasks_per_cycle: 1

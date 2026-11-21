@@ -6,7 +6,7 @@ import ipaddress
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import yaml
 
@@ -27,6 +27,41 @@ _LLM_FIELDS = (
     "max_tokens", "max_context_tokens", "enable_thinking", "timeout_seconds",
     "extra_body", "tool_protocol",
 )
+
+
+# ---- 配置 schema 世代（1.0 稳定化 S1）----
+# config_version 是 schema 世代号（非应用版本号）：load_config 按下方注册表把
+# 旧世代配置逐步迁移到当前世代；save_config 恒写当前世代。迁移器只做无损变换
+# （补默认/重命名/搬位/登记），任何破坏性 schema 变更必须在此注册新迁移
+# （1→2、2→3 …）并附带旧样本回归用例，而不是悄悄改默认值。
+CONFIG_VERSION = 1
+
+_CONFIG_MIGRATIONS: dict[int, "Callable[[dict[str, Any]], dict[str, Any]]"] = {
+    # 0 = 无版本号的 0.21~0.27 世代配置：schema 一直增量演进、无破坏性变更，
+    # 0→1 仅登记版本号。首个真正的字段级迁移从 1→2 开始。
+    0: lambda raw: raw,
+}
+
+
+def migrate_config_raw(raw: dict[str, Any], *, context: str = "config") -> dict[str, Any]:
+    """把任意世代的无标签 raw 配置逐步迁移到当前世代（幂等）。
+
+    世代超前（配置来自更新版本的应用）时直接报错——旧应用读新配置宁可
+    拒绝启动也不要静默丢字段。
+    """
+    version = int(raw.get("config_version") or 0)
+    if version > CONFIG_VERSION:
+        raise ValueError(
+            f"{context}.config_version={version} 高于当前应用支持的世代 {CONFIG_VERSION}："
+            "请先升级应用再加载该配置。")
+    while version < CONFIG_VERSION:
+        step = _CONFIG_MIGRATIONS.get(version)
+        if step is None:
+            raise ValueError(f"{context}: config_version={version} 缺少迁移器")
+        raw = step(raw)
+        version += 1
+    raw["config_version"] = CONFIG_VERSION
+    return raw
 
 
 @dataclass
@@ -1194,6 +1229,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
         ) from e
 
     raw: dict[str, Any] = yaml.safe_load(text) or {}
+    # S1 稳定化：旧世代配置先走注册表迁移到当前世代（含 config_version 登记）
+    raw = migrate_config_raw(raw, context=str(path))
 
     llm = _coerce_llm(raw.get("llm") or {}, require_api_key=require_api_key)
 
@@ -1715,6 +1752,7 @@ def save_config(cfg: AppConfig) -> None:
     if src is None:
         raise ValueError("配置文件来源未知，无法保存")
     doc = {
+        "config_version": CONFIG_VERSION,
         "llm": {
             "provider": cfg.llm.provider, "api_key": cfg.llm.api_key,
             "base_url": cfg.llm.base_url, "model": cfg.llm.model,
