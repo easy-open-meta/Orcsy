@@ -126,7 +126,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts
-          path: build/Setup/orcsy-*
+          path: |
+            build/Setup/orcsy-*
+            build/Setup/orcsy_*
           if-no-files-found: error
           retention-days: 5
 
@@ -153,7 +155,7 @@ jobs:
       - name: Generate sha256 checksums
         run: |
           cd dist
-          for f in orcsy-*; do
+          for f in orcsy-* orcsy_*; do
             sha256sum "$f" > "$f.sha256"
           done
           ls -la
@@ -184,7 +186,9 @@ jobs:
           tag_name: V${{ needs.version.outputs.version }}
           name: V${{ needs.version.outputs.version }}：Orcsy
           body_path: release_notes.md
-          files: dist/orcsy-*
+          files: |
+            dist/orcsy-*
+            dist/orcsy_*
           draft: false
           prerelease: ${{ contains(needs.version.outputs.version, 'rc') || contains(needs.version.outputs.version, 'b') }}
           generate_release_notes: false
