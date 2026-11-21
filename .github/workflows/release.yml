@@ -1,0 +1,191 @@
+name: Release
+
+# push 到 main 后自动检查版本号：新版本号 → 构建 + 发布 Release；同版本重推 → 跳过
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  # ---- 版本检测：新版本号才走构建与发布 ----
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      should_release: ${{ steps.v.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 需要全历史才能检查 tag 是否已存在
+      - name: Detect version
+        id: v
+        run: |
+          VERSION=$(grep '__version__' orcsy/__init__.py | sed 's/.*= *"//;s/".*//')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Tag v$VERSION already exists — skipping release"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "New version detected: v$VERSION"
+          fi
+
+  # ---- Windows 构建：PyInstaller + Inno Setup 安装包 + 自更新 zip ----
+  build-windows:
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install uv
+        run: irm https://astral.sh/uv/install.ps1 | iex
+        shell: pwsh
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup -y --no-progress
+        shell: pwsh
+
+      - name: Build frontend
+        run: |
+          cd dashboard
+          npm install --prefer-offline
+          npm run build
+        shell: pwsh
+
+      - name: Generate dashboard_html.py
+        run: uv run python tools/gen_page.py
+        shell: pwsh
+
+      - name: Build Windows artifacts
+        run: uv run python build/build.py --windows-only
+        shell: pwsh
+        env:
+          # Inno Setup ISCC.exe 路径（choco 安装位置）
+          PATH: ${{ env.PATH }};C:\Program Files (x86)\Inno Setup 6
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            build/Setup/orcsy-setup-*.exe
+            build/Setup/orcsy-update-*.zip
+            build/Setup/orcsy-*-windows-arm64.zip
+          if-no-files-found: error
+          retention-days: 5
+
+  # ---- Linux 构建：便携 tar.gz (amd64/arm64) + deb 桌面包 ----
+  build-linux:
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install cross-compile toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+
+      - name: Build frontend
+        run: |
+          cd dashboard
+          npm install --prefer-offline
+          npm run build
+
+      - name: Generate dashboard_html.py
+        run: uv run python tools/gen_page.py
+
+      - name: Build Linux artifacts
+        run: uv run python build/build.py --linux-only
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: build/Setup/orcsy-*
+          if-no-files-found: error
+          retention-days: 5
+
+  # ---- 发布：创建 tag + GitHub Release（CHANGELOG 摘录 + 全部附件 + sha256）----
+  release:
+    needs: [version, build-windows, build-linux]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts
+          path: dist/
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-artifacts
+          path: dist/
+
+      - name: Generate sha256 checksums
+        run: |
+          cd dist
+          for f in orcsy-*; do
+            sha256sum "$f" > "$f.sha256"
+          done
+          ls -la
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          # 提取 CHANGELOG.md 中当前版本的段落
+          NOTES=$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            /^## \[/ && found { exit }
+            found { print }
+          ' CHANGELOG.md)
+          # 写入临时文件（多行安全）
+          echo "$NOTES" > release_notes.md
+          echo "Extracted notes: $(wc -l < release_notes.md) lines"
+
+      - name: Create tag
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: v${{ needs.version.outputs.version }}
+          body_path: release_notes.md
+          files: dist/orcsy-*
+          draft: false
+          prerelease: ${{ contains(needs.version.outputs.version, 'rc') || contains(needs.version.outputs.version, 'b') }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
