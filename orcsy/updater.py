@@ -696,6 +696,37 @@ _WATCHDOG_FLAGS = (
 ) if sys.platform == "win32" else 0
 
 
+
+
+def _auto_backup_config(log: Path) -> None:
+    """升级前自动备份配置（best-effort：备份失败不阻止升级，只记日志）。
+
+    配置定位：Docker/ORCSY_DATA_DIR 环境变量与 Windows 标准位置逐个探测；
+    找不到配置就跳过（桌面 portable 等场景由用户自行 backup-config）。
+    """
+    import os as _os
+    from .backup import create_backup
+
+    candidates = []
+    env_dir = _os.environ.get("ORCSY_DATA_DIR")
+    if env_dir:
+        candidates.append(_os.path.join(env_dir, "config.yaml"))
+    if _os.name == "nt":
+        candidates.append(_os.path.join(_os.environ.get("APPDATA", ""), "Orcsy", "config.yaml"))
+    candidates.append("/data/config.yaml")
+    for cand in candidates:
+        cfg_path = _Path(cand)
+        if not cfg_path.is_file():
+            continue
+        try:
+            dest = cfg_path.parent / "backups"
+            archive = create_backup(cfg_path, dest, keep_last=10)
+            append_install_log(log, f"升级前配置备份: {archive}")
+        except Exception as exc:  # noqa: BLE001 — 备份失败不阻止升级
+            append_install_log(log, f"升级前配置备份失败（不阻止升级）: {exc}")
+        return
+    append_install_log(log, "升级前配置备份跳过：未找到 config.yaml")
+
 def start_watchdog(bat: Path) -> subprocess.Popen | None:
     """分离启动看护脚本（无提权、无窗口）；环境经 _clean_env 剥离脏 bootstrap 变量。"""
     return subprocess.Popen(["cmd", "/c", str(bat)],
@@ -768,6 +799,7 @@ def run_local_install(package: Path | str, app_dir: Path | str,
     package, app_dir, log = Path(package), Path(app_dir), Path(log)
     if not can_apply():
         raise UpdateError(apply_gate_message())
+    _auto_backup_config(log)
     info = validate_package(package)
     if not is_writable(app_dir):
         # Program Files 等系统目录：提权兜底（一次 UAC），不再是死路报错

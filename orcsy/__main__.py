@@ -905,6 +905,54 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backup_config(args: argparse.Namespace) -> int:
+    """创建配置备份归档（config.yaml + sessions.json；chmod 600）。"""
+    from .backup import create_backup, push_backup_webdav
+    from .config import load_config
+
+    try:
+        cfg_path = find_config(args.config)
+    except FileNotFoundError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    dest_dir = Path(args.dir) if args.dir else None
+    try:
+        cfg = load_config(cfg_path, require_api_key=False)
+        bk = cfg.backup
+        if not dest_dir:
+            dest_dir = (cfg_path.parent / bk.dir) if bk.dir else cfg_path.parent / "backups"
+        archive = create_backup(cfg_path, Path(dest_dir), keep_last=bk.keep_last)
+        print(f"备份完成: {archive}")
+        if args.push and bk.enabled and bk.target_type == "webdav" and bk.url:
+            url = push_backup_webdav(archive, bk.url, bk.username, bk.password)
+            print(f"已推送到 WebDAV: {url}")
+        elif args.push:
+            print("未推送：backup 未启用 webdav 目标（config.yaml backup 节）", file=sys.stderr)
+        return 0
+    except Exception as e:  # noqa: BLE001 — CLI 报错给人看
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_restore_config(args: argparse.Namespace) -> int:
+    """从备份归档恢复 config.yaml（+sessions.json）；现配置留 .pre-restore 兜底。"""
+    from .backup import restore_backup
+
+    try:
+        cfg_path = find_config(args.config)
+    except FileNotFoundError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    try:
+        restored = restore_backup(Path(args.archive), cfg_path)
+        print(f"已恢复: {restored}")
+        print("当前配置已留兜底副本 config.yaml.pre-restore；看板/服务需重启生效。")
+        return 0
+    except Exception as e:  # noqa: BLE001
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_reset_password(args: argparse.Namespace) -> int:
     """重置看板访问密码为管理员输入的密码（PBKDF2-SHA256 密文写入 config.yaml）。"""
     import getpass
@@ -1020,6 +1068,18 @@ def main(argv: list[str] | None = None) -> int:
                        help=argparse.SUPPRESS)  # 安装器专用：写自启注册表后退出
     p_web.set_defaults(func=cmd_web)
 
+    p_bk = sub.add_parser("backup-config",
+                          help="创建配置备份归档（config.yaml + sessions.json）")
+    p_bk.add_argument("--config", help="配置文件路径（默认自动发现）")
+    p_bk.add_argument("--dir", help="备份输出目录（默认 config.yaml 同级 backups/）")
+    p_bk.add_argument("--push", action="store_true",
+                      help="创建后推送到已配置的 WebDAV 目标")
+    p_bk.set_defaults(func=cmd_backup_config)
+    p_rs = sub.add_parser("restore-config",
+                          help="从备份归档恢复配置（现配置留 .pre-restore 兜底）")
+    p_rs.add_argument("archive", help="备份归档路径（orcsy-config-backup-*.tar.gz）")
+    p_rs.add_argument("--config", help="配置文件路径（默认自动发现）")
+    p_rs.set_defaults(func=cmd_restore_config)
     p_pwd = sub.add_parser("reset-password", aliases=["passwd"],
                            help="重置看板访问密码为管理员输入的密码（密文存储至 config.yaml）")
     p_pwd.add_argument("password", nargs="?", default=None,

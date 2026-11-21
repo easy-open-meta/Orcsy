@@ -92,6 +92,14 @@ local_debug:
   service_ready_timeout_seconds: 60
   max_services: 3
   artifacts_retention_days: 7
+backup:
+  enabled: false
+  target_type: local
+  dir: backups
+  url: ""
+  username: ""
+  password: ""
+  keep_last: 10
 git:
   commit_and_merge: false
 agent_profiles:

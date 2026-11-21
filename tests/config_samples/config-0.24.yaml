@@ -67,6 +67,14 @@ masking:
 subagent:
   max_parallel: 4
   adaptive: true
+backup:
+  enabled: false
+  target_type: local
+  dir: backups
+  url: ""
+  username: ""
+  password: ""
+  keep_last: 10
 git:
   commit_and_merge: false
 projects:

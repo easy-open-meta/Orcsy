@@ -587,6 +587,19 @@ class GitConfig:
     commit_and_merge: bool = False
 
 
+@dataclass
+class BackupConfig:
+    """配置自动备份（1.0 稳定化 S2）：升级前自动备份 + WebDAV 远端。"""
+
+    enabled: bool = False
+    target_type: str = "local"     # local | webdav
+    dir: str = "backups"           # 本地目标（相对配置目录或绝对路径）
+    url: str = ""                  # webdav 目标：目录 URL
+    username: str = ""
+    password: str = ""
+    keep_last: int = 10
+
+
 def resolve_commit_and_merge(global_git: GitConfig, project: ProjectConfig) -> bool:
     """项目生效的代码提交与合并开关：项目覆盖优先，None = 跟随全局（全局默认 False 关闭）。"""
     if project.commit_and_merge is not None:
@@ -686,6 +699,7 @@ class AppConfig:
     subagent: SubagentConfig = field(default_factory=SubagentConfig)
     local_debug: LocalDebugConfig = field(default_factory=LocalDebugConfig)
     git: GitConfig = field(default_factory=GitConfig)
+    backup: BackupConfig = field(default_factory=BackupConfig)
     agent_profiles: dict[str, AgentProfileConfig] = field(default_factory=dict)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
@@ -1670,6 +1684,18 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
             assert_review_model_distinct(
                 p_task_llm, p_review_llm, context=f"项目 {p_name} 的 review")
 
+    backup_raw = raw.get("backup") or {}
+    if not isinstance(backup_raw, dict):
+        raise ValueError("backup 配置必须是字典（键值对）。")
+    backup_cfg = BackupConfig(
+        enabled=bool(backup_raw.get("enabled", False)),
+        target_type=str(backup_raw.get("target_type") or "local"),
+        dir=str(backup_raw.get("dir") or "backups"),
+        url=str(backup_raw.get("url") or "").strip(),
+        username=str(backup_raw.get("username") or ""),
+        password=str(backup_raw.get("password") or ""),
+        keep_last=max(1, min(int(backup_raw.get("keep_last", 10)), 100)),
+    )
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
                     runlog=runlog, budget=budget, resilience=resilience,
                     egress=egress, web=web,
@@ -1678,7 +1704,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     mirrors=mirrors,
                     review=review_cfg, subagent=subagent_cfg,
                     local_debug=local_debug_cfg,
-                    git=git_cfg, agent_profiles=agent_profiles,
+                    git=git_cfg, backup=backup_cfg, agent_profiles=agent_profiles,
                     projects=projects, source_path=path.resolve())
     # 厂商配额池是进程级单例：加载即生效（看板保存走 web.py 的同一入口）
     configure_limiter(cfg.subagent.max_parallel, cfg.subagent.adaptive)
@@ -1882,6 +1908,15 @@ def save_config(cfg: AppConfig) -> None:
             "commit_and_merge": cfg.git.commit_and_merge,
         },
         # 全局 Agent 角色预设池整体写回（漏写会在看板任意保存时静默丢失）
+        "backup": {
+            "enabled": cfg.backup.enabled,
+            "target_type": cfg.backup.target_type,
+            "dir": cfg.backup.dir,
+            "url": cfg.backup.url,
+            "username": cfg.backup.username,
+            "password": cfg.backup.password,
+            "keep_last": cfg.backup.keep_last,
+        },
         "agent_profiles": {
             pid: profile_to_yaml(prof) for pid, prof in cfg.agent_profiles.items()
         },
