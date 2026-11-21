@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 > Orcsy is an Agent task-orchestration system that plugs into any LLM API. Write tasks as Markdown, and a scheduler scans each managed project's `tasks/` directory, dispatching them by priority (P0 → P4) to that project's dedicated Agent. The Agent reads and writes real code and runs tests inside an isolated git worktree; on completion an **independent review gate** audits the work, changes land incrementally in the main working tree, and the **final commit is confirmed by a human** — a trusted unattended loop with idempotent dispatch, lease-based resume, budget/circuit-breaker guards and per-task run ledgers, all visible on the web dashboard.
 
-![version](https://img.shields.io/badge/version-0.28.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.29.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 
 ```
