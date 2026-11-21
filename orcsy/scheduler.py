@@ -87,7 +87,7 @@ class Scheduler:
                          review_cfg=config.review,
                          local_debug=config.local_debug,
                          commit_and_merge=resolve_commit_and_merge(config.git, p),
-                         git_author=resolve_git_author(cfg.git, p),
+                         git_author=resolve_git_author(config.git, p),
                          agent_profiles=config.agent_profiles,
                          global_tools=config.tools)
             for p in config.projects
