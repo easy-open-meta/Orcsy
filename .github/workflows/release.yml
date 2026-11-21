@@ -183,6 +183,7 @@ jobs:
           files: |
             dist/orcsy-*
             dist/orcsy_*
+            !dist/*.sha256.sha256
           draft: false
           prerelease: ${{ contains(needs.version.outputs.version, 'rc') || contains(needs.version.outputs.version, 'b') }}
           generate_release_notes: false
