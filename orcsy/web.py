@@ -107,6 +107,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -2018,6 +2019,21 @@ class AppState:
             self._cleanup_download_dir(package)  # 失败重试会重新下载，不留残包
             self._set_update_state({
                 "phase": "error", "message": str(e),
+                "install_log_tail": updater.read_install_log(self.install_log)})
+            return
+        except Exception as e:  # noqa: BLE001 — 非预期异常（如 NameError/编程错误）
+            # 安装线程只捕获 UpdateError 时，任何其它异常都会无声杀死线程：
+            # 无结果标记、无错误提示、主进程照常运行，前端挂单版本永不回归 →
+            # 遮罩永久卡死。非预期异常一律如实落日志、写失败标记、翻 error 态。
+            updater.append_install_log(
+                self.install_log,
+                f"静默升级出现非预期异常：{e}\n{traceback.format_exc()}")
+            updater.write_update_result({"ok": False,
+                                         "reason": "install-unexpected-error"})
+            self._cleanup_download_dir(package)
+            self._set_update_state({
+                "phase": "error",
+                "message": f"升级出现非预期异常：{e}（详情见配置目录 logs/install.log）",
                 "install_log_tail": updater.read_install_log(self.install_log)})
             return
         self._set_update_state({"phase": "restarting", "asset_name": package.name})

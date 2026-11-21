@@ -410,6 +410,7 @@ RESULT_REASONS = {
     "old-process-lingering": "旧进程未在预期时间内退出，升级未完成；请关闭程序后重新安装",
     "elevated-copy-timeout": "提权复制未在预期时间内完成，已按旧版重新启动；请重试更新或查看安装日志",
     "elevated-copy-failed": "提权复制文件失败（已回滚为旧版并重新启动）；详见安装日志",
+    "install-unexpected-error": "升级过程中出现非预期异常，安装未完成；请查看安装日志并重试",
 }
 
 

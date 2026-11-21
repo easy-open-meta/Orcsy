@@ -794,6 +794,54 @@ def check_update_apply_keeps_sha_state() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_install_worker_unexpected_error() -> None:
+    """安装线程遇非预期异常（NameError 等）不得静默——必须落日志 + 翻 error 态。
+
+    回归背景（0.31.0 现场故障）：0.30.0 的 updater._auto_backup_config 引用
+    未导入的 _Path，每次手动升级都在安装线程抛 NameError；worker 只捕获
+    UpdateError，异常无声杀死线程——无结果标记、无错误提示、前端挂单版本
+    永不回归，看板遮罩永久卡「应用正常升级中」。修复后统一兜底。
+    """
+    import orcsy.updater as U
+    from orcsy.config import AppConfig, LLMConfig, UpdateConfig, WebConfig
+    from orcsy.scheduler import Scheduler
+    from orcsy.web import AppState
+
+    tmp = Path(tempfile.mkdtemp(prefix="upd-worker-"))
+    try:
+        cfg = AppConfig(
+            llm=LLMConfig(api_key="", base_url="http://localhost:9", model="m"),
+            update=UpdateConfig(auto_check=False),
+            web=WebConfig(host="127.0.0.1", auth_password=""),
+            source_path=tmp / "config.yaml",
+        )
+        state = AppState(cfg, Scheduler(cfg), log_path=str(tmp / "orcsy.log"))
+        pkg = tmp / "orcsy-update-0.99.0.zip"
+        pkg.write_bytes(b"x")  # 内容不校验：run_local_install 被 mock，不读包
+
+        orig = U.run_local_install
+        try:
+            # 复刻现场故障：非 UpdateError 的编程错误（未导入符号等）
+            def _boom(*a, **kw):
+                raise NameError("name '_Path' is not defined")
+            U.run_local_install = _boom
+            state._install_worker(pkg)  # 不应抛出、不应调用 _exit_for_restart
+        finally:
+            U.run_local_install = orig
+
+        st = state.update_state
+        assert st.get("phase") == "error", st
+        assert "非预期异常" in str(st.get("message", "")), st
+        log_tail = U.read_install_log(state.install_log)
+        assert "NameError" in log_tail and "Traceback" in log_tail, log_tail
+        assert U.update_result_path().exists(), "失败面包屑必须落盘供重启后消费"
+        res = U.read_update_result()
+        assert res is not None and res.get("ok") is False, res
+        print("安装线程非预期异常兜底（落日志+error 态+失败标记）✅")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     check_parse_version()
     check_detect_installer()
@@ -817,6 +865,7 @@ def main() -> int:
     check_download_sha256_verify()
     check_update_apply_keeps_sha_state()
     check_prune_stale_dirs()
+    check_install_worker_unexpected_error()
     print("\n全部断言通过 ✅")
     return 0
 
