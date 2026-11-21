@@ -750,7 +750,7 @@ export const api = {
       error?: string
     }>,
   /** 运行台账：某项目/某任务的 run 列表（只读回放） */
-  runs: (p: { project?: string; task_id?: string; limit?: number }) => {
+  runs: (p: { project?: string; task_id?: string; role?: string; limit?: number }) => {
     const qs = new URLSearchParams()
     if (p.project) qs.set('project', p.project)
     if (p.task_id) qs.set('task_id', p.task_id)

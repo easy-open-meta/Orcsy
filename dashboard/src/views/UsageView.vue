@@ -2,7 +2,8 @@
 // 模型用量页：总体 + 各项目 + 近 14 天趋势 + 最近任务记录（任务/审查分类 Tab）。
 // 数据来自 /api/state 的 usage 聚合（台账 logs/usage.jsonl，任务结束即记）。
 import { NCard, NTag } from 'naive-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
+import { api } from '../api'
 import { store } from '../store'
 import { fmtTokens, type TokenUnit } from '../utils'
 import { tNow as t, tFmt } from '../lang'
@@ -68,6 +69,32 @@ const reviewCount = computed(() => recentRows.value.filter(r => isReview(r)).len
 const filteredRecent = computed(() =>
   recTab.value === 'all' ? recentRows.value
     : recentRows.value.filter(r => isReview(r) === (recTab.value === 'review')))
+
+const roleRunsRole = shallowRef('')
+const roleRunsLoading = shallowRef(false)
+const roleRunsError = shallowRef('')
+const roleRuns = shallowRef<{ run_id: string; task_id: string; outcome: string; turns: number; tokens?: Record<string, number> }[]>([])
+
+async function toggleRoleRuns(role: string): Promise<void> {
+  if (roleRunsRole.value === role) {
+    roleRunsRole.value = ''
+    roleRuns.value = []
+    return
+  }
+  roleRunsRole.value = role
+  roleRunsLoading.value = true
+  roleRuns.value = []
+  try {
+    const r = await api.runs({ limit: 200 })
+    roleRuns.value = ((r.runs || []) as { role?: string; run_id: string; task_id: string; outcome: string; turns: number; tokens?: Record<string, number> }[])
+      .filter(x => (x.role || '') === (role === 'solo' ? '' : role))
+      .slice(0, 30)
+  } catch (e: any) {
+    roleRunsError.value = e.message
+  } finally {
+    roleRunsLoading.value = false
+  }
+}
 
 function roleLabel(role: string): string {
   const map: Record<string, string> = {
@@ -175,13 +202,32 @@ const heat = computed(() => {
         </tr></thead>
         <tbody>
           <template v-for="r in usage.roles" :key="r.role">
-            <tr>
-              <td class="pname">{{ roleLabel(r.role) }}</td>
+            <tr class="role-click" :class="{ open: roleRunsRole === r.role }"
+                :title="t('点击展开/收起该角色的最近运行')"
+                @click="toggleRoleRuns(r.role)">
+              <td class="pname">{{ roleLabel(r.role) }} <i class="ms sm">{{ roleRunsRole === r.role ? 'expand_less' : 'expand_more' }}</i></td>
               <td>{{ r.tasks }}</td>
               <td>{{ fmtFull(r.turns) }}</td>
               <td>{{ fmt(r.prompt_tokens) }}</td>
               <td>{{ fmt(r.completion_tokens) }}</td>
               <td class="sum">{{ fmt(r.prompt_tokens + r.completion_tokens) }}</td>
+            </tr>
+            <tr v-if="roleRunsRole === r.role && roleRunsLoading" class="member-row">
+              <td colspan="6" class="hint">{{ t('加载中…') }}</td>
+            </tr>
+            <tr v-if="roleRunsRole === r.role && roleRunsError" class="member-row">
+              <td colspan="6" class="hint">{{ roleRunsError }}</td>
+            </tr>
+            <tr v-for="run in roleRuns" v-show="roleRunsRole === r.role" :key="run.run_id" class="member-row">
+              <td class="mname">⌙ {{ run.task_id.slice(0, 34) }}</td>
+              <td>{{ run.outcome || '-' }}</td>
+              <td>{{ fmtFull(run.turns) }}</td>
+              <td>{{ fmt(run.tokens?.prompt_tokens || 0) }}</td>
+              <td>{{ fmt(run.tokens?.completion_tokens || 0) }}</td>
+              <td class="sum">{{ fmt((run.tokens?.prompt_tokens || 0) + (run.tokens?.completion_tokens || 0)) }}</td>
+            </tr>
+            <tr v-if="roleRunsRole === r.role && !roleRunsLoading && !roleRuns.length" class="member-row">
+              <td colspan="6" class="hint">{{ t('该角色暂无运行记录') }}</td>
             </tr>
             <!-- 小组成员明细子行：执行 + 归属到该成员的审查消耗 -->
             <tr v-for="m in r.members || []" :key="r.role + '|' + m.agent" class="member-row">
