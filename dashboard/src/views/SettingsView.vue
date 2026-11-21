@@ -144,6 +144,7 @@ const draft = reactive({
 const reviewDraft = reactive({
   enabled: true,
   provider: 'openai' as 'openai' | 'anthropic',
+  tool_protocol: '' as '' | 'native' | 'text',
   model: '', base_url: '', api_key: '',
   max_turns: 10, max_review_rounds: 2,
   allow_test_commands: true, squash_merge: true,
@@ -603,6 +604,7 @@ watch(() => store.state, (s) => {
   reviewDraft.provider = (s.review_cfg?.provider as 'openai' | 'anthropic') ?? 'openai'
   reviewDraft.model = s.review_cfg?.model ?? ''
   reviewDraft.base_url = s.review_cfg?.base_url ?? ''
+  reviewDraft.tool_protocol = (s.review_cfg?.tool_protocol as '' | 'native' | 'text') ?? ''
   reviewDraft.api_key = ''
   reviewKeyMasked.value = s.review_cfg?.api_key_masked ?? ''
   reviewKeyConfigured.value = s.review_cfg?.model_configured ?? false
@@ -731,6 +733,7 @@ function syncProfilesDraft(profs: Record<string, any> | undefined): void {
         api_key: '',
         api_key_masked: vLlm.api_key_masked || '',
         api_key_configured: !!vLlm.api_key_configured,
+        tool_protocol: vLlm.tool_protocol || '',
       },
     }
   }
@@ -757,7 +760,7 @@ function addProfile(): void {
     produces_code: true,
     allow_test_scripts: false,
     extra_prompt: getRoleTemplate('custom'),
-    llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false },
+    llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false, tool_protocol: '' },
   }
   editingProfileId.value = id
 }
@@ -840,6 +843,7 @@ async function saveProfiles(): Promise<void> {
         if (p.llm.model.trim()) mObj.model = p.llm.model.trim()
         if (p.llm.base_url.trim()) mObj.base_url = p.llm.base_url.trim()
         if (profilesTouchedKeys[pid]) mObj.api_key = p.llm.api_key || ''
+        if (p.llm.tool_protocol) mObj.tool_protocol = p.llm.tool_protocol
         pData.llm = mObj
       }
       payload[pid] = pData
@@ -925,6 +929,7 @@ async function saveReview(): Promise<void> {
       base_url: reviewDraft.base_url.trim(),
       model: reviewDraft.model.trim(),
       ...(reviewKeyTouched.value ? { api_key: reviewDraft.api_key.trim() } : {}),
+      ...(reviewDraft.tool_protocol ? { tool_protocol: reviewDraft.tool_protocol } : {}),
     } : null
     await api.config({
       review: {
@@ -1970,6 +1975,12 @@ const protocolOptions = computed(() => [
         <div class="frow">
           <div class="f1"><label>{{ it('接口 base_url') }}</label>
             <NInput v-model:value="reviewDraft.base_url" placeholder="https://api.deepseek.com/v1" /></div>
+        <div class="f1"><label>{{ it('工具调用协议（留空继承全局）') }}</label>
+          <NSelect v-model:value="reviewDraft.tool_protocol" :options="[
+            { label: it('跟随全局'), value: '' },
+            { label: 'native — 原生 function calling', value: 'native' },
+            { label: 'text — 文本协议兜底', value: 'text' },
+          ]" /></div>
           <div class="f1"><label>{{ it('密钥 api_key') }}</label>
             <NInput v-model:value="reviewDraft.api_key" type="password" show-password-on="click"
                     :placeholder="reviewKeyConfigured && reviewKeyMasked ? tFmt('已配置（{p0}），留空保持原值', { p0: reviewKeyMasked }) : it('审查模型服务密钥')"

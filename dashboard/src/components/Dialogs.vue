@@ -26,6 +26,7 @@ const pDraft = reactive({
   stack: '', run: '', test: '', err: '',
   // 专属模型绑定：use_llm 关=跟随全局；开=部分覆盖（空字段仍继承全局）
   use_llm: false, ll_provider: '' as '' | 'openai' | 'anthropic',
+  ll_protocol: '' as '' | 'native' | 'text',
   ll_base: '', ll_key: '', ll_model: '',
   // 远程仓库绑定：拉取 open Issues 入任务队列（单向）；token 与账号密码二选一；
   // repo_auto_pull 为自动拉取间隔（分钟，0=仅手动）
@@ -40,6 +41,7 @@ const pDraft = reactive({
   // 审查模型绑定部分覆盖全局 review.llm；rounds null=跟随全局（1~10 自定义）
   use_review: false, review_ll_provider: '' as '' | 'openai' | 'anthropic',
   review_ll_base: '', review_ll_key: '', review_ll_model: '',
+  review_ll_protocol: '' as '' | 'native' | 'text',
   review_rounds: null as number | null,
   debug_hosts_text: '',
   use_cam: false,
@@ -330,6 +332,7 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.use_llm = !!pl
   pDraft.ll_provider = (pl?.provider as '' | 'openai' | 'anthropic') ?? ''
   pDraft.ll_base = pl?.base_url ?? ''
+  pDraft.ll_protocol = (pl?.tool_protocol as '' | 'native' | 'text') ?? ''
   pDraft.ll_key = ''  // 不回填明文：只显示掩码占位，留空即保持原值
   llKeyTouched.value = false
   pDraft.ll_model = pl?.model ?? ''
@@ -363,6 +366,7 @@ watch(() => ui.projectDlg, (dlg) => {
   const prl = p?.review_llm ?? null
   pDraft.review_ll_provider = (prl?.provider as '' | 'openai' | 'anthropic') ?? ''
   pDraft.review_ll_base = prl?.base_url ?? ''
+  pDraft.review_ll_protocol = (prl?.tool_protocol as '' | 'native' | 'text') ?? ''
   pDraft.review_ll_key = ''  // 不回填明文：掩码占位，留空保持原值
   reviewKeyTouched.value = false
   pDraft.review_ll_model = prl?.model ?? ''
@@ -391,6 +395,7 @@ watch(() => ui.projectDlg, (dlg) => {
       role: m.role || '',
       description: m.description || '',
       ll_model: m.llm?.model || '',
+      ll_protocol: m.llm?.tool_protocol || '',
       ll_key: '',
       ll_key_masked: m.llm?.api_key_masked || '',
       allow_test_scripts: m.allow_test_scripts ?? false,
@@ -405,7 +410,7 @@ watch(() => ui.projectDlg, (dlg) => {
     pDraft.team.max_chain_steps_per_cycle = 10
     pDraft.team.fallback_role = 'backend'
     pDraft.team.members = [
-      { id: 'pm', profile: 'pm_default', enabled: true, name: '', role: 'pm', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
+      { id: 'pm', profile: 'pm_default', enabled: true, name: '', role: 'pm', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '' },
       { id: 'backend', profile: 'backend_default', enabled: true, name: '', role: 'backend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
       { id: 'frontend', profile: 'frontend_default', enabled: true, name: '', role: 'frontend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
       { id: 'qa', profile: 'qa_default', enabled: true, name: '', role: 'qa', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
@@ -668,6 +673,7 @@ async function saveProject(): Promise<void> {
       llm: pDraft.use_llm ? {
         ...(pDraft.ll_provider ? { provider: pDraft.ll_provider } : {}),
         ...(pDraft.ll_base.trim() ? { base_url: pDraft.ll_base.trim() } : {}),
+        ...(pDraft.ll_protocol ? { tool_protocol: pDraft.ll_protocol } : {}),
         ...(llKeyTouched.value ? { api_key: pDraft.ll_key.trim() } : {}),
         ...(pDraft.ll_model.trim() ? { model: pDraft.ll_model.trim() } : {}),
       } : null,
@@ -692,6 +698,7 @@ async function saveProject(): Promise<void> {
       review_llm: pDraft.use_review ? {
         ...(pDraft.review_ll_provider ? { provider: pDraft.review_ll_provider } : {}),
         ...(pDraft.review_ll_base.trim() ? { base_url: pDraft.review_ll_base.trim() } : {}),
+        ...(pDraft.review_ll_protocol ? { tool_protocol: pDraft.review_ll_protocol } : {}),
         ...(reviewKeyTouched.value ? { api_key: pDraft.review_ll_key.trim() } : {}),
         ...(pDraft.review_ll_model.trim() ? { model: pDraft.review_ll_model.trim() } : {}),
       } : null,
@@ -721,10 +728,11 @@ async function saveProject(): Promise<void> {
             allow_test_scripts: m.allow_test_scripts,
             extra_prompt: m.extra_prompt.trim() || undefined,
           }
-          if (m.ll_model.trim() || teamMemberKeyTouched[m.id]) {
+          if (m.ll_model.trim() || m.ll_protocol || teamMemberKeyTouched[m.id]) {
             const mLlm: any = {}
             if (m.ll_model.trim()) mLlm.model = m.ll_model.trim()
             if (teamMemberKeyTouched[m.id]) mLlm.api_key = m.ll_key.trim()
+            if (m.ll_protocol) mLlm.tool_protocol = m.ll_protocol
             mObj.llm = mLlm
           }
           return mObj
@@ -1558,6 +1566,14 @@ async function newFolder(): Promise<void> {
                           @update:value="teamMemberKeyTouched[m.id] = true" />
                 </div>
               </div>
+              <div style="margin-top:6px">
+                <label style="font-size:11px">{{ t('工具调用协议（留空 = 跟随全局）') }}</label>
+                <NSelect size="small" v-model:value="m.ll_protocol" :options="[
+                  { label: t('跟随全局'), value: '' },
+                  { label: 'native — 原生 function calling', value: 'native' },
+                  { label: 'text — 文本协议兜底（解析器互斥的中转用）', value: 'text' },
+                ]" />
+              </div>
 
               <div v-if="m.enabled" style="margin-top:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
@@ -1596,7 +1612,14 @@ async function newFolder(): Promise<void> {
       </div>
       <div class="duo">
         <div class="f1"><label>{{ t('接口 base_url') }}</label>
-          <NInput v-model:value="pDraft.ll_base" :placeholder="(pDraft.ll_provider === 'anthropic' ? t('填官方根地址即可（自动补 /v1）；') : '') + t('留空继承全局（当前 ') + (store.state?.llm.base_url || '-') + t('）')" /></div>
+          <NInput v-model:value="pDraft.ll_base" :placeholder="(pDraft.ll_provider === 'anthropic' ? t('填官方根地址即可（自动补 /v1)；') : '') + t('留空继承全局（当前 ') + (store.state?.llm.base_url || '-') + t('）')" /></div>
+                <div class="f1"><label>{{ t('工具调用协议（留空继承全局）') }}</label>
+                  <NSelect v-model:value="pDraft.ll_protocol" :options="[
+                    { label: t('跟随全局'), value: '' },
+                    { label: 'native — 原生 function calling', value: 'native' },
+                    { label: 'text — 文本协议兜底', value: 'text' },
+                  ]" /></div>
+
         <div class="f1"><label>{{ t('密钥 api_key') }}</label>
           <NInput v-model:value="pDraft.ll_key" type="password" show-password-on="click"
                   :placeholder="llKeyPlaceholder" @update:value="llKeyTouched = true" /></div>
@@ -1629,6 +1652,13 @@ async function newFolder(): Promise<void> {
       <div class="duo">
         <div class="f1"><label>{{ t('接口 base_url') }}</label>
           <NInput v-model:value="pDraft.review_ll_base" :placeholder="t('留空继承全局审查模型配置')" /></div>
+                <div class="f1"><label>{{ t('工具调用协议（留空继承全局）') }}</label>
+                  <NSelect v-model:value="pDraft.review_ll_protocol" :options="[
+                    { label: t('跟随全局'), value: '' },
+                    { label: 'native — 原生 function calling', value: 'native' },
+                    { label: 'text — 文本协议兜底', value: 'text' },
+                  ]" /></div>
+
         <div class="f1"><label>{{ t('密钥 api_key') }}</label>
           <NInput v-model:value="pDraft.review_ll_key" type="password" show-password-on="click"
                   :placeholder="reviewKeyPlaceholder" @update:value="reviewKeyTouched = true" /></div>

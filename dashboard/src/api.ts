@@ -336,6 +336,7 @@ export interface AppStateT {
   /** 全局审查（Review Agent）配置：model_configured=false = 审查未启用默认态 */
   review_cfg: {
     enabled: boolean
+    tool_protocol?: 'native' | 'text'
     model_configured: boolean
     provider: 'openai' | 'anthropic'
     model: string

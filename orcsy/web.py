@@ -905,6 +905,7 @@ class AppState:
                 "model": self.config.review.llm.model if self.config.review.llm else "",
                 "base_url": self.config.review.llm.base_url if self.config.review.llm else "",
                 "api_key_masked": mask_secret(self.config.review.llm.api_key) if self.config.review.llm else "",
+                "tool_protocol": self.config.review.llm.tool_protocol if self.config.review.llm else "",
                 "max_turns": self.config.review.max_turns,
                 "max_review_rounds": self.config.review.max_review_rounds,
                 "allow_test_commands": self.config.review.allow_test_commands,
