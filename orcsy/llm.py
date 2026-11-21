@@ -843,6 +843,12 @@ class LLMClient:
             # 思考内容不回传给服务（多数协议禁止），只本地留档
             if reasoning:
                 log.info("💭 模型思考（第 %d 轮）：\n%s", turn, _clip_thinking(reasoning))
+            # 全过程留档（④ 回放增强）：正文/思考/计划调用进运行台账
+            self._emit("chat", turn=turn,
+                       content=_clip_thinking(assistant_msg.get("content") or ""),
+                       reasoning=_clip_thinking(reasoning),
+                       tool_calls=[{"name": n, "args": (a or "")[:300]}
+                                   for _, n, a in tool_calls])
 
             if not tool_calls:
                 # 模型直接输出文字而非调用工具：提醒其走 finish 协议；
@@ -1015,6 +1021,8 @@ class LLMClient:
                         )
                     log.debug("工具结果 [%d] %s：%s", turn, name, result[:200].replace("\n", " "))
                     self.messages.append(self._tool_result(call_id, result))
+                    self._emit("tool_result", name=name, ok=not result.startswith("错误"),
+                               result=_clip_thinking(result))
 
                 # 防死循环 2：代码生产类角色连续只读/扫描未产生文件改动
                 # （含被拦截的重读）累计达上限 → 进入「落盘检查点」，而不是

@@ -859,6 +859,20 @@ function runEventLine(e: { type: string; data: Record<string, any> }): string {
   switch (e.type) {
     case 'progress': return String(d.line || '')
     case 'tool_call': return `${d.name || '?'}${d.ok ? '' : '（失败）'}${d.intercepted ? '（拦截）' : ''} ${d.ms || 0}ms ${d.preview || ''}`
+    case 'tool_result': {
+      const r = String(d.result || '')
+      return `\n${d.name || '?'} ${d.ok ? '✓' : '✗'}\n${r.length > 1200 ? r.slice(0, 1200) + '\n…（已截断，完整内容见运行目录）' : r}`
+    }
+    case 'chat': {
+      const ls: string[] = [`第 ${d.turn || '?'} 轮模型消息`]
+      const c = String(d.content || '')
+      if (c) ls.push(c.length > 1600 ? c.slice(0, 1600) + '\n…（已截断）' : c)
+      const rs = String(d.reasoning || '')
+      if (rs) ls.push('💭 思考：' + (rs.length > 1600 ? rs.slice(0, 1600) + '\n…（已截断）' : rs))
+      const tcs = Array.isArray(d.tool_calls) ? d.tool_calls : []
+      for (const tc of tcs) ls.push(`→ 计划调用 ${tc.name || '?'} ${(tc.args || '').slice(0, 300)}`)
+      return ls.join('\n')
+    }
     case 'model_call': return `${d.model || ''} ${d.prompt_tokens || 0}+${d.completion_tokens || 0} tokens`
     case 'review_verdict': return `${d.verdict || ''} ${d.summary || ''}`
     case 'review_start': return `model=${d.model || ''} round=${d.round || 0}`
@@ -2359,7 +2373,7 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
 .re-seq { color: var(--faint); min-width: 26px; text-align: right; }
 .re-type { color: #6f9dff; min-width: 92px; }
 .re-ts { color: var(--faint); min-width: 58px; }
-.re-data { flex: 1; color: var(--text); word-break: break-all; }
+.re-data { flex: 1; color: var(--text); word-break: break-all; white-space: pre-wrap; }
 </style>
 
 <!-- NModal 瞬移到 body 后 scoped :deep() 够不到 NCard 内部节点：这两条须全局。

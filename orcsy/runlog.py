@@ -45,9 +45,15 @@ log = get_logger("runlog")
 
 # 允许的事件类型：拼写错误在写入前暴露，而不是半年后才发现字段名不一致
 EVENT_TYPES = frozenset({
-    "run_start", "claim", "turn", "model_call", "tool_call", "progress",
-    "review_start", "review_verdict", "commit", "merge", "run_end",
+    "run_start", "claim", "turn", "model_call", "tool_call", "tool_result",
+    "chat", "progress", "review_start", "review_verdict", "commit", "merge",
+    "run_end",
 })
+
+# 全过程日志（S 后续/④ 回放增强）字段上限：保证单事件净负荷 < MAX_EVENT_DATA_BYTES
+CHAT_CONTENT_CAP = 2000
+CHAT_REASONING_CAP = 2000
+TOOL_RESULT_CAP = 4000
 
 # 允许按名字读取的工件（防止路径穿越与随手读任意文件）
 ARTIFACTS = ("meta.json", "events.jsonl", "diff.patch", "test.log",
@@ -249,6 +255,19 @@ class RunRecorder:
                    prompt_tokens=int(prompt_tokens or 0),
                    completion_tokens=int(completion_tokens or 0),
                    turn=int(turn or 0), duration_ms=int(duration_ms or 0))
+
+    def chat_event(self, *, turn: int, content: str = "", reasoning: str = "",
+                   tool_calls: list[dict] | None = None) -> None:
+        """记录一轮模型消息（正文/思考/计划调用，各字段截断+脱敏）。"""
+        self.event("chat", turn=int(turn or 0),
+                   content=redact_text(content or "", CHAT_CONTENT_CAP),
+                   reasoning=redact_text(reasoning or "", CHAT_REASONING_CAP),
+                   tool_calls=tool_calls or [])
+
+    def tool_result_event(self, name: str, *, ok: bool, result: str) -> None:
+        """记录一次工具执行的结果文本（截断+脱敏）。"""
+        self.event("tool_result", name=str(name or ""), ok=bool(ok),
+                   result=redact_text(result or "", TOOL_RESULT_CAP))
 
     def tool_event(self, name: str, *, ok: bool, ms: int = 0,
                    preview: str = "", intercepted: bool = False) -> None:
