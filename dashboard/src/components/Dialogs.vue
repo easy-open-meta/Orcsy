@@ -396,6 +396,7 @@ watch(() => ui.projectDlg, (dlg) => {
       description: m.description || '',
       ll_model: m.llm?.model || '',
       ll_protocol: m.llm?.tool_protocol || '',
+      ll_base: m.llm?.base_url || '',
       ll_key: '',
       ll_key_masked: m.llm?.api_key_masked || '',
       allow_test_scripts: m.allow_test_scripts ?? false,
@@ -410,10 +411,10 @@ watch(() => ui.projectDlg, (dlg) => {
     pDraft.team.max_chain_steps_per_cycle = 10
     pDraft.team.fallback_role = 'backend'
     pDraft.team.members = [
-      { id: 'pm', profile: 'pm_default', enabled: true, name: '', role: 'pm', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '' },
-      { id: 'backend', profile: 'backend_default', enabled: true, name: '', role: 'backend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
-      { id: 'frontend', profile: 'frontend_default', enabled: true, name: '', role: 'frontend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
-      { id: 'qa', profile: 'qa_default', enabled: true, name: '', role: 'qa', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '' },
+      { id: 'pm', profile: 'pm_default', enabled: true, name: '', role: 'pm', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
+      { id: 'backend', profile: 'backend_default', enabled: true, name: '', role: 'backend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
+      { id: 'frontend', profile: 'frontend_default', enabled: true, name: '', role: 'frontend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
+      { id: 'qa', profile: 'qa_default', enabled: true, name: '', role: 'qa', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
     ]
   }
 
@@ -531,7 +532,7 @@ async function fetchMemberModels(m: any): Promise<void> {
   try {
     const prof = m.profile ? store.state?.agent_profiles?.[m.profile] : null
     const provider = prof?.llm?.provider || pDraft.ll_provider || store.state?.llm.provider || 'openai'
-    const baseUrl = (prof?.llm?.base_url || '').trim() || pDraft.ll_base.trim() || store.state?.llm.base_url || ''
+    const baseUrl = (m.ll_base || '').trim() || (prof?.llm?.base_url || '').trim() || pDraft.ll_base.trim() || store.state?.llm.base_url || ''
     const apiKey = (m.ll_key || '').trim() || (prof?.llm?.api_key || '').trim() || pDraft.ll_key.trim()
     const r = await api.models({
       provider,
@@ -728,11 +729,12 @@ async function saveProject(): Promise<void> {
             allow_test_scripts: m.allow_test_scripts,
             extra_prompt: m.extra_prompt.trim() || undefined,
           }
-          if (m.ll_model.trim() || m.ll_protocol || teamMemberKeyTouched[m.id]) {
+          if (m.ll_model.trim() || m.ll_protocol || m.ll_base.trim() || teamMemberKeyTouched[m.id]) {
             const mLlm: any = {}
             if (m.ll_model.trim()) mLlm.model = m.ll_model.trim()
             if (teamMemberKeyTouched[m.id]) mLlm.api_key = m.ll_key.trim()
             if (m.ll_protocol) mLlm.tool_protocol = m.ll_protocol
+            if (m.ll_base.trim()) mLlm.base_url = m.ll_base.trim()
             mObj.llm = mLlm
           }
           return mObj
@@ -1558,6 +1560,10 @@ async function newFolder(): Promise<void> {
                            filterable tag clearable
                            :placeholder="getMemberModelPlaceholder(m)"
                            @update:value="(v: string | null) => { m.ll_model = v || '' }" />
+                </div>
+                <div>
+                  <label style="font-size:11px">{{ t('接口 base_url（留空继承预设/项目/全局）') }}</label>
+                  <NInput size="small" v-model:value="m.ll_base" placeholder="https://..." />
                 </div>
                 <div>
                   <label style="font-size:11px">{{ t('API Key 覆盖') }}</label>
