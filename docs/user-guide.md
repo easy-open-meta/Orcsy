@@ -6,9 +6,6 @@ English | [简体中文](用户指南.md)
 >
 > Version: **0.30.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
-<strong>v0.29.0 highlights</strong>: per-agent commit identity (global + per-project override) for audit trails; team completion-claim verification (hallucinated splits are now intercepted and downgraded to blocked); per-role tool-protocol settings across team presets/members and review config; API contract documented (docs/api.md).config schema versioning (<code>config_version</code> + migrator) with a historical-config regression set — a systematic guard against silent settings resets; config backup/restore (<code>orcsy backup-config</code> / <code>orcsy restore-config</code>, WebDAV push, pre-upgrade auto backup) — stability roadmap S1/S2 delivered.
->
-> ℹ️ The dashboard UI is fully translated (zh / zh-TW / en). Backend-returned dynamic messages (e.g. update progress, pause reasons) remain in the original language for now.
 
 ---
 
