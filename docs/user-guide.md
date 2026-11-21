@@ -4,9 +4,9 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.27.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.28.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
-<strong>v0.27.0 highlights</strong>: new <code>llm.extra_body</code> passthrough and a text tool-protocol fallback (<code>tool_protocol: text</code>) — tasks now complete even on relays whose server-side parser conflicts with reasoning output (inline <code>think</code> triggering parse 400s); text-protocol robustness fixes (double-escape repair, truncated-thinking recovery); pytest baked into the Docker image so Python projects test out of the box; guide section 4.4.1 on custom tool volume mounts / env.vars injection.
+<strong>v0.28.0 highlights</strong>: config schema versioning (<code>config_version</code> + migrator) with a historical-config regression set — a systematic guard against silent settings resets; config backup/restore (<code>orcsy backup-config</code> / <code>orcsy restore-config</code>, WebDAV push, pre-upgrade auto backup) — stability roadmap S1/S2 delivered.
 >
 > ℹ️ The dashboard UI is fully translated (zh / zh-TW / en). Backend-returned dynamic messages (e.g. update progress, pause reasons) remain in the original language for now.
 

@@ -177,9 +177,9 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <blockquote>
 <p>面向第一次接触 Orcsy
 的普通使用者：不需要懂编程，也能完成安装、接入项目、创建任务，并看懂看板上的每一条信息。</p>
-<p>适用版本：<strong>0.27.0</strong>　|　默认看板地址：<strong><a
+<p>适用版本：<strong>0.28.0</strong>　|　默认看板地址：<strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
-<strong>v0.27.0 更新</strong>：新增 <code>llm.extra_body</code> 扩展请求体与文本工具协议兜底（<code>tool_protocol: text</code>）——中转服务解析器与推理输出互斥（think 混入正文触发解析 400）时也能跑通完整任务；文本协议健壮性修复（双重转义还原、思考截断自动恢复）；Docker 镜像内置 pytest，Python 项目测试环境开箱即用；用户指南新增 4.4.1「自定义工具卷挂载 / env.vars 注入」。
+<strong>v0.28.0 更新</strong>：配置格式版本化（<code>config_version</code> + 迁移器）与历史配置回归集——「保存静默重置」类缺陷系统性守卫；配置备份/恢复（<code>orcsy backup-config</code> / <code>orcsy restore-config</code>，WebDAV 推送，升级前自动备份）——1.0 稳定化路线图 S1/S2 落地。
 </blockquote>
 <hr />
 <h2 id="1-先看这里5-分钟跑通第一个任务">1. 先看这里：5
@@ -354,7 +354,7 @@ GLM、Kimi、OpenAI、通义千问等）；</li>
 </ul>
 <h4 id="安装步骤">安装步骤</h4>
 <ol type="1">
-<li>打开项目发布页，下载 <code>orcsy-setup-0.27.0-windows-amd64.exe</code>。
+<li>打开项目发布页，下载 <code>orcsy-setup-0.28.0-windows-amd64.exe</code>。
 <ul>
 <li>Gitee：<a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -708,7 +708,7 @@ Anthropic 兼容服务选 <code>anthropic</code></td>
 </ul>
 <h3 id="55-保存">5.5 保存</h3>
 <p>点「保存模型配置」。顶部标题下方会显示当前模型，例如：</p>
-<pre><code>v0.27.0 · 模型 deepseek-chat（openai） · 配置 C:\Users\你\AppData\Roaming\Orcsy\config.yaml</code></pre>
+<pre><code>v0.28.0 · 模型 deepseek-chat（openai） · 配置 C:\Users\你\AppData\Roaming\Orcsy\config.yaml</code></pre>
 <p>如果显示「未配置 api_key」，说明密钥没保存成功，回到设置页检查。</p>
 <hr />
 <h2 id="6-接入你的第一个项目">6. 接入你的第一个项目</h2>
