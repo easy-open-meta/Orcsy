@@ -38,7 +38,7 @@ ArchitecturesInstallIn64BitMode=x64compatible arm64
 MinVersion=10.0
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
