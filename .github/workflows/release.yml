@@ -22,7 +22,7 @@ jobs:
       - name: Detect version
         id: v
         run: |
-          VERSION=$(grep '__version__' orcsy/__init__.py | sed 's/.*= *"//;s/".*//')
+          VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' orcsy/__init__.py)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
             echo "should_release=false" >> "$GITHUB_OUTPUT"
