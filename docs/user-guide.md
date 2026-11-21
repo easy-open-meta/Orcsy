@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.29.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.30.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 <strong>v0.29.0 highlights</strong>: per-agent commit identity (global + per-project override) for audit trails; team completion-claim verification (hallucinated splits are now intercepted and downgraded to blocked); per-role tool-protocol settings across team presets/members and review config; API contract documented (docs/api.md).config schema versioning (<code>config_version</code> + migrator) with a historical-config regression set — a systematic guard against silent settings resets; config backup/restore (<code>orcsy backup-config</code> / <code>orcsy restore-config</code>, WebDAV push, pre-upgrade auto backup) — stability roadmap S1/S2 delivered.
 >
