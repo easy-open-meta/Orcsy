@@ -576,6 +576,8 @@ def save_settings(state: AppState, data: dict) -> dict:
         git_raw = data.get("git") or {}
         state.config.git = GitConfig(
             commit_and_merge=bool(git_raw.get("commit_and_merge", state.config.git.commit_and_merge)),
+            author_name=str(git_raw.get("author_name") or "").strip(),
+            author_email=str(git_raw.get("author_email") or "").strip(),
         )
 
     # 全局 Agent 角色预设池（分块保存；llm.api_key 三态脱敏保护）
