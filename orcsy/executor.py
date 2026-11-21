@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1112,12 +1113,25 @@ class TaskExecutor:
             attempts = self._merge_heal.get(task.id, 0)
             if attempts < 2:
                 self._merge_heal[task.id] = attempts + 1
+                # 冲突同步进 Agent 的 worktree：主工作区未提交改动以 apply --3way
+                # 打进沙盒（冲突标记落在 Agent 可编辑的文件里），Agent 才有东西可解
+                injected = ""
+                try:
+                    dirty = self.git.run("diff", "--binary")
+                    if dirty.strip():
+                        patch = tempfile.NamedTemporaryFile(delete=False, suffix=".patch")
+                        patch.write(dirty.encode("utf-8", errors="replace"))
+                        patch.close()
+                        Git(wt_path).run("apply", "--3way", str(Path(patch.name)))
+                        Path(patch.name).unlink(missing_ok=True)
+                        injected = "主工作区未提交改动已同步进 worktree（含冲突标记）"
+                except GitError as e:
+                    injected = f"冲突同步失败（{e}）——请在 worktree 中对齐主工作区差异"
                 from .task_model import set_task_file_resume
                 set_task_file_resume(task.path, True)
                 result.notes = (result.notes + "\n" if result.notes else "") + (
-                    f"[冲突自愈] 合入主工作区发生冲突（第 {attempts + 1} 次自愈），"
-                    "已标记续跑：请下轮先检查主工作区现状，解决与主分支工作区的冲突"
-                    "并重跑测试后重新完成。")
+                    f"[冲突自愈] 合入主工作区发生冲突（第 {attempts + 1} 次自愈），已标记续跑。{injected}"
+                    "请在 worktree 中解决 <<<<<<< 冲突标记、重跑测试后重新完成。")
                 self.log.warning("任务 %s 合入冲突，标记续跑自愈（第 %d/2 次）",
                                  task.id, attempts + 1)
                 return "open", review
