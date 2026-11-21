@@ -86,7 +86,7 @@ async function toggleRoleRuns(role: string): Promise<void> {
   roleRuns.value = []
   try {
     const r = await api.runs({ limit: 200 })
-    roleRuns.value = ((r.runs || []) as { role?: string; run_id: string; task_id: string; outcome: string; turns: number; tokens?: Record<string, number> }[])
+    roleRuns.value = (r.runs || [])
       .filter(x => (x.role || '') === (role === 'solo' ? '' : role))
       .slice(0, 30)
   } catch (e: any) {
