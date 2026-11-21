@@ -37,6 +37,8 @@ jobs:
     needs: version
     if: needs.version.outputs.should_release == 'true'
     runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 
