@@ -175,14 +175,14 @@ jobs:
       - name: Create tag
         run: |
           VERSION="${{ needs.version.outputs.version }}"
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
+          git tag "V$VERSION"
+          git push origin "V$VERSION"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.version.outputs.version }}
-          name: v${{ needs.version.outputs.version }}
+          tag_name: V${{ needs.version.outputs.version }}
+          name: V${{ needs.version.outputs.version }}：Orcsy
           body_path: release_notes.md
           files: dist/orcsy-*
           draft: false
