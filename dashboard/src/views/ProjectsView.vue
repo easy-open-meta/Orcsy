@@ -5,6 +5,7 @@
 import { NButton, NCard, NCheckbox, NEmpty, NInput, NPagination, NSelect, NSwitch, NTag } from 'naive-ui'
 import { computed, reactive, ref, shallowRef } from 'vue'
 import { api, type ProjectT, type TaskT } from '../api'
+import DagView from '../components/DagView.vue'
 import { openCommitDlg, openGuide, openProjectEdit, openTaskNew, openTaskView, refresh, store, ui } from '../store'
 import { PRI_COLOR, ST_NAME, ST_TYPE } from '../theme'
 import { tNow as it, tFmt } from '../lang'
@@ -126,6 +127,14 @@ function onTaskPageChange(p: ProjectT, pg: number): void {
 }
 
 // ---- 任务列表展开/收起：默认收起节省卡片高度；空列表同样可展开查看提示 ----
+// ---- 依赖图（DAG）开合状态：与任务列表独立 ----
+const dagOpen = ref<Record<string, boolean>>({})
+function toggleDag(p: { name: string }): void {
+  dagOpen.value = { ...dagOpen.value, [p.name]: !dagOpen.value[p.name] }
+}
+function isDagOpen(p: { name: string }): boolean {
+  return !!dagOpen.value[p.name]
+}
 const taskListOpen = reactive<Record<string, boolean>>({})
 function isTaskListOpen(p: ProjectT): boolean {
   return !!taskListOpen[p.name]
@@ -556,6 +565,18 @@ async function quickAdd(p: ProjectT): Promise<void> {
                        :page="curPage(p)" :page-count="totalPages(p)"
                        @update:page="(pg: number) => onTaskPageChange(p, pg)" />
         </div>
+        </template>
+
+        <button type="button" class="tasklist-toggle" :aria-expanded="isDagOpen(p)"
+                :title="isDagOpen(p) ? it('收起依赖图') : it('展开依赖图')"
+                @click="toggleDag(p)">
+          <i class="ms sm tasklist-chev" :class="{ open: isDagOpen(p) }">{{ isDagOpen(p) ? 'expand_less' : 'expand_more' }}</i>
+          <span class="tasklist-title">{{ it('依赖图 (DAG)') }}</span>
+          <span class="tasklist-count">{{ p.tasks.length }} {{ it('个节点') }}</span>
+          <span class="tasklist-hint">{{ isDagOpen(p) ? it('收起') : it('展开') }}</span>
+        </button>
+        <template v-if="isDagOpen(p)">
+          <DagView :tasks="p.tasks" @open="(id: string) => openTaskView(p.name, id)" />
         </template>
 
         <details v-if="p.archived.length" class="arch">
