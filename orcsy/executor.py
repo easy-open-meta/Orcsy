@@ -111,6 +111,8 @@ class TaskExecutor:
         self.claims = claims
         self.commit_and_merge = bool(commit_and_merge)
         self.git_author = git_author or None
+        # 冲突自愈（§3.3）：合入主工作区冲突时的续跑自愈尝试计数（按任务）
+        self._merge_heal: dict[str, int] = {}
         # worktree_isolation：默认跟随 commit_and_merge（单兵模式保持历史语义）；
         # 项目小组模式下可强制开启 True，在独立 worktree 中开发并仅落地主分支工作区（不默认 commit）
         self.worktree_isolation = (self.commit_and_merge if worktree_isolation is None
@@ -1102,9 +1104,25 @@ class TaskExecutor:
             self._record_merge_event(merged, review)
             if merged:
                 self._mark_merged(task, result)
-            if not merged:
-                return "blocked", review
-            return "done", review
+                self._merge_heal.pop(task.id, None)
+                return "done", review
+            # 冲突自愈（§3.3）：合入主工作区冲突不再直接 blocked——worktree 成果
+            # 保留，标记 resume_run 让同一角色下轮 re-enter 消解冲突后重新合并；
+            # 限次防死循环（2 次后仍冲突才 blocked，交人工）。
+            attempts = self._merge_heal.get(task.id, 0)
+            if attempts < 2:
+                self._merge_heal[task.id] = attempts + 1
+                from .task_model import set_task_file_resume
+                set_task_file_resume(task.path, True)
+                result.notes = (result.notes + "\n" if result.notes else "") + (
+                    f"[冲突自愈] 合入主工作区发生冲突（第 {attempts + 1} 次自愈），"
+                    "已标记续跑：请下轮先检查主工作区现状，解决与主分支工作区的冲突"
+                    "并重跑测试后重新完成。")
+                self.log.warning("任务 %s 合入冲突，标记续跑自愈（第 %d/2 次）",
+                                 task.id, attempts + 1)
+                return "open", review
+            self.log.warning("任务 %s 合入冲突自愈次数耗尽，转 blocked 交人工", task.id)
+            return "blocked", review
 
         # fail / error：不合并且不清 worktree（成果与 WIP 提交保留）
         if review.verdict == "fail":
