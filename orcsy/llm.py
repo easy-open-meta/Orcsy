@@ -778,6 +778,7 @@ class LLMClient:
         self.messages.append(self._user(task_prompt))
         # 工具开关：schema 按启用集过滤下发（dispatch_tool 里还有兜底拦截）
         self._enabled_tools = ctx.enabled_tools
+        self.dispatched_tools = []   # 本任务实际派发过的工具名（完成声明校验取证）
         # 停止信号传到 HTTP 层：请求挂起期间「强制停止」也能生效
         self._stop_event = ctx.stop_event
         use_tools = True
@@ -876,6 +877,7 @@ class LLMClient:
                 if ctx.stop_event is not None and ctx.stop_event.is_set():
                     raise TaskStopped()
                 call_id, name, args_json = call
+                self.dispatched_tools.append(name)
                 log.info("工具调用 [%d] %s %s", turn, name,
                          (args_json or "")[:120].replace("\n", " "))
                 if name == "finish":

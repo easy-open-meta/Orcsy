@@ -611,6 +611,18 @@ class TaskExecutor:
             # 任何结束路径（含 LLM 异常）都回收 token 计量
             if usage_out is not None:
                 usage_out.update(getattr(client, "usage", {}) or {})
+
+        # 完成声明校验（P1）：小组模式下 PM 声称 completed 必须有证据——
+        # 确实 create_tasks 拆分过，或确有文件变更。实测出现过幻觉拆分
+        #（0 个工具事件 + finish(completed)）静默归档 done，比 blocked 更危险。
+        if (resp.action == "completed" and self.team_enabled
+                and self.team_role == "pm" and not resp.files_changed
+                and "create_tasks" not in getattr(client, "dispatched_tools", [])):
+            log.warning("任务 %s 完成声明缺证据（未拆分且无文件变更），降级 blocked", task.id)
+            resp.action = "blocked"
+            resp.notes = (str(resp.notes or "").strip()
+                          + "\n[完成声明校验] 声称完成但未创建子任务且无文件变更，"
+                            "已降级 blocked——请重新入队由 Agent 实际执行。").strip()
         return resp
 
     # ---- worktree 管理 ----
