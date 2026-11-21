@@ -60,6 +60,13 @@ jobs:
           Add-Content $env:GITHUB_PATH "C:\Program Files (x86)\Inno Setup 6"
         shell: pwsh
 
+      - name: Download Chinese language file for Inno Setup
+        run: |
+          $dest = "C:\Program Files (x86)\Inno Setup 6\Languages\ChineseSimplified.isl"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile $dest
+          Write-Host "ChineseSimplified.isl downloaded: $((Get-Item $dest).Length) bytes"
+        shell: pwsh
+
       - name: Build frontend
         run: |
           cd dashboard
