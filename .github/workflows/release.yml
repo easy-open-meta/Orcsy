@@ -157,6 +157,7 @@ jobs:
         run: |
           cd dist
           for f in orcsy-* orcsy_*; do
+            case "$f" in *.sha256) continue ;; esac
             sha256sum "$f" > "$f.sha256"
           done
           ls -la
