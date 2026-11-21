@@ -650,13 +650,17 @@ const roleSelectOptions = [
   { label: it('后端开发工程师'), value: 'backend' },
   { label: it('前端开发工程师'), value: 'frontend' },
   { label: it('测试工程师 (QA)'), value: 'qa' },
+  { label: it('运维/DevOps 工程师'), value: 'devops' },
+  { label: it('UI 视觉审查专家'), value: 'ui_critic' },
+  { label: it('安全合规审计工程师'), value: 'security' },
   { label: it('自定义专职角色'), value: 'custom' },
 ]
 
 function getRoleIcon(role: string): string {
   const map: Record<string, string> = {
     pm: 'manage_accounts', backend: 'terminal', frontend: 'palette',
-    qa: 'science', custom: 'extension',
+    qa: 'science', devops: 'dns', ui_critic: 'visibility',
+    security: 'gpp_maybe', custom: 'extension',
   }
   return map[role] || 'smart_toy'
 }

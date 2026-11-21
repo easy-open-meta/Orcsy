@@ -67,13 +67,17 @@ const roleSelectOptions = [
   { label: t('后端开发工程师'), value: 'backend' },
   { label: t('前端开发工程师'), value: 'frontend' },
   { label: t('测试工程师 (QA)'), value: 'qa' },
+  { label: t('运维/DevOps 工程师'), value: 'devops' },
+  { label: t('UI 视觉审查专家'), value: 'ui_critic' },
+  { label: t('安全合规审计工程师'), value: 'security' },
   { label: t('自定义专职角色'), value: 'custom' },
 ]
 
 function getMemberRoleIcon(role: string): string {
   const map: Record<string, string> = {
     pm: 'manage_accounts', backend: 'terminal', frontend: 'palette',
-    qa: 'science', custom: 'extension',
+    qa: 'science', devops: 'dns', ui_critic: 'visibility',
+    security: 'gpp_maybe', custom: 'extension',
   }
   return map[role] || 'smart_toy'
 }
@@ -923,6 +927,9 @@ const projectAssigneeOptions = computed(() => {
       { label: t('后端开发 (backend)'), value: 'backend' },
       { label: t('前端开发 (frontend)'), value: 'frontend' },
       { label: t('测试工程师 (qa)'), value: 'qa' },
+      { label: t('运维/DevOps (devops)'), value: 'devops' },
+      { label: t('UI 视觉审查 (ui_critic)'), value: 'ui_critic' },
+      { label: t('安全审计 (security)'), value: 'security' },
     )
   }
   return opts

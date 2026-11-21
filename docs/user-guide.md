@@ -985,7 +985,15 @@ Orcsy 0.22.0 introduces **Multi-Model Agent Project Teams**. You can assemble sp
 - **⚡ Quota-aware adaptive concurrency (`subagent.max_parallel` / `adaptive`)**: in-flight requests actually sent to the provider are capped by the sub-agent concurrency budget (default 4 — independent of the 4-sub-agent fan-out fuse). Providers never publish their concurrency ceiling, so adaptation is on by default: an HTTP 429 immediately halves the limit and puts the whole quota pool into a quiet period (honouring `Retry-After` when present), then gradually climbs back after consecutive successes. **On low-tier plans this degrades to "slower", never "some sub-agents failed"**. Pools are shared per `base_url + api_key + model`, so parallel projects don't throttle separately.
 - **📦 Split parent task is archived**: once the PM finishes decomposing a requirement, the parent task is marked **done** and archived into `tasks/done/`, so the active list only shows the hand-off subtasks.
 - **⚡ Intra-Cycle Chaining (`chain_within_cycle`)**: downstream tasks execute immediately within the same cycle once dependencies are resolved, completing multi-phase requirements in minutes.
+- **🛠️ DevOps Engineer (`devops`, 0.31.0)**: owns infrastructure-as-code — Dockerfiles, docker-compose, CI/CD pipeline scripts, Kubernetes manifests and environment configuration. Produces code (infra files), follows the project's existing image/registry/tag conventions, and never embeds plaintext secrets in manifests.
+- **👁️ UI Visual Critic (`ui_critic`, 0.31.0)**: read-only visual reviewer — renders pages in a real browser (dev server + screenshots/snapshots) and judges layout, spacing, and responsive behaviour; files each visual defect via `report_bug` with severity and viewport details for the frontend to fix, never edits business source itself, and waits for regression after reporting.
+- **🔒 Security Auditor (`security`, 0.31.0)**: read-only security reviewer — static-scans the changed scope, traces user-input-to-sink data flows (SQL injection, access control, hardcoded secrets), and looks up dependency CVEs for changed manifests; confirmed risks are filed via `report_bug` with attack scenario and fix suggestion, theoretical issues without evidence are never blockers.
 - **👥 Two-Tier Configuration**: the global **Multi-Model Team** section configures each role's dedicated model once, and project settings reference it with local overrides; every role ships with a built-in responsibility prompt template you can load with one click or customise.
+
+> **Read-only verify-role semantics**: `ui_critic` / `security` share QA's semantics —
+> after filing bugs via `report_bug` the task stays open awaiting regression (never
+> archived as done prematurely), and a clean acceptance with zero file changes completes
+> normally (never misjudged as a stalled round).
 
 ---
 
@@ -1172,6 +1180,12 @@ When multiple team roles work in parallel and their worktree branches touch the 
 2. **Conflict synced to sandbox**: main workspace uncommitted changes are applied `--3way` into the Agent's worktree (conflict markers `<<<<<<<` land in Agent-editable files);
 3. **Agent resolves**: same role re-enters next cycle with conflict context in the prompt, resolves markers, re-runs tests, then re-completes;
 4. **Attempt cap**: up to 2 auto-heal attempts; persistent conflicts escalate to blocked for manual intervention.
+
+> **Empty-worktree self-heal (0.31.0)**: a rare race (≈1 in 8 runs in testing) left a
+> freshly checked-out worktree with zero tracked files, forcing the Agent to honestly
+> block on an empty directory. Task sandbox setup now verifies a non-empty baseline —
+> if the worktree is empty while the base branch has content, it is force-removed and
+> rebuilt automatically, transparent to the Agent.
 
 ### 10.24 Dependency graph visualization (DAG)
 

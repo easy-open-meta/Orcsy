@@ -102,6 +102,9 @@ function roleLabel(role: string): string {
     backend: t('后端开发工程师'),
     frontend: t('前端开发工程师'),
     qa: t('测试工程师 (QA)'),
+    devops: t('运维/DevOps 工程师'),
+    ui_critic: t('UI 视觉审查专家'),
+    security: t('安全合规审计工程师'),
     review: t('任务审查 (Review Agent)'),
     solo: t('全栈单兵 / 传统模式'),
   }
