@@ -426,7 +426,7 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
   </NConfigProvider>
   <!-- 版权栏：桌面/移动端通用，登录层之下（登录页不显示版权避免干扰） -->
   <footer class="app-footer" v-show="!showLogin && !isMobile">
-    <span class="af-copy">© 2024–2026 Orcsy</span>
+    <span class="af-copy">© 2026 Orcsy</span>
     <a class="af-link" href="https://orcsy.oscode.top" target="_blank" rel="noopener">产品主页</a>
     <span class="af-sep">·</span>
     <a class="af-link" href="https://www.oscode.top" target="_blank" rel="noopener">组织主页</a>
