@@ -658,8 +658,7 @@ export interface RunSummaryT {
   event_count: number
   review_verdict: string
   commit: string
-  tokens: { prompt_tokens?: number; completion_tokens?: number   turns: number
-}
+  tokens: { prompt_tokens?: number; completion_tokens?: number }
   turns: number
 }
 
