@@ -2629,7 +2629,7 @@ const protocolOptions = computed(() => [
 .frow label, .checkline { font-size: 12.5px; color: var(--dim); }
 .f1 { flex: 1; } .f14 { flex: 1.4; } .f2 { flex: 2; } .f0 { flex: none; }
 .btnrow { display: flex; gap: 8px; }
-.sfoot { display: flex; justify-content: flex-end; }
+.sfoot { display: flex; justify-content: flex-end; gap: 8px; }
 .pkg-block { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
 .pkg-row { display: flex; gap: 10px; align-items: flex-end; }
 .pkg-row > div { display: flex; flex-direction: column; gap: 4px; }
