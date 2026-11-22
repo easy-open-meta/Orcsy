@@ -12,6 +12,12 @@ export function cmpVersion(a: string, b: string): number {
   return 0
 }
 
+// 展示用版本号归一：剥掉 tag 自带的 V/v 前缀（Gitee 发 V0.32.0、GitHub 发
+// v3.8.1），避免文案里「vV0.32.0」的双前缀；纯版本号原样通过
+export function fmtVer(v: string): string {
+  return (v || '').replace(/^[Vv]/, '')
+}
+
 // 相对时间显示：后端时间格式 "YYYY-MM-DD HH:MM[:SS]"（按当前语言出文案）
 export function relTime(s: string | undefined | null): string {
   if (!s) return '—'

@@ -40271,7 +40271,7 @@
     },
     {
       "id": "K0081",
-      "source": "正在安装 v{target}…（自动重启中）",
+      "source": "正在安装 {target}…（自动重启中）",
       "definitions": {
         "en": {
           "file": "dashboard/src/locales/en.ts",
@@ -40287,14 +40287,14 @@
         "zhCN": {
           "reviewed": true,
           "present": true,
-          "current": "正在安装 v{target}…（自动重启中）",
+          "current": "正在安装 {target}…（自动重启中）",
           "assessment": "reviewed_no_issue_flagged",
           "findingRef": null
         },
         "zhTW": {
           "reviewed": true,
           "present": true,
-          "current": "正在安裝 v{target}…（自動重啟中）",
+          "current": "正在安裝 {target}…（自動重啟中）",
           "assessment": "reviewed_no_issue_flagged",
           "findingRef": null
         },
@@ -55782,7 +55782,7 @@
     },
     {
       "id": "K0395",
-      "source": "正在安装 v{p0}…（自动重启中）",
+      "source": "正在安装 {p0}…（自动重启中）",
       "definitions": {
         "en": {
           "file": "dashboard/src/locales/en.ts",
@@ -55795,19 +55795,19 @@
       },
       "usages": [
         {
-          "key": "正在安装 v{p0}…（自动重启中）",
+          "key": "正在安装 {p0}…（自动重启中）",
           "callee": "tFmt",
           "kind": "script",
           "file": "dashboard/src/App.vue",
           "line": 108,
-          "context": "if (pending.value) return tFmt('正在安装 v{p0}…（自动重启中）', { p0: pending.value.target })"
+          "context": "if (pending.value) return tFmt('正在安装 {p0}…（自动重启中）', { p0: pending.value.target })"
         }
       ],
       "locales": {
         "zhCN": {
           "reviewed": true,
           "present": true,
-          "current": "正在安装 v{p0}…（自动重启中）",
+          "current": "正在安装 {p0}…（自动重启中）",
           "assessment": "reviewed_no_issue_flagged",
           "findingRef": null
         },

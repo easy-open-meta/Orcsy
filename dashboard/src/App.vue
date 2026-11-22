@@ -7,7 +7,7 @@ import Dialogs from './components/Dialogs.vue'
 import Onboard from './components/Onboard.vue'
 import { auth, beginRestartWait, clearPendingUpdate, doLogin, doLogout, getPendingUpdate, initAuth, needLogin, openProjectNew, refresh, store, ui } from './store'
 import { isMobile, onPageVisible, useMobileViewport } from './mobile'
-import { cmpVersion } from './utils'
+import { cmpVersion, fmtVer } from './utils'
 import { naiveTheme, theme, themeIcon, themeLabel, themeOverrides, toggleTheme } from './theme'
 import { tNow as t, tFmt, lang, langLabel, toggleLang } from './lang'
 
@@ -115,7 +115,7 @@ const pending = computed(() => {
 const updWorking = computed(() =>
   ['checking', 'downloading', 'applying'].includes(updPhase.value) || ui.restarting)
 const updLabel = computed(() => {
-  if (pending.value) return tFmt('正在安装 v{p0}…（自动重启中）', { p0: pending.value.target })
+  if (pending.value) return tFmt('正在安装 {p0}…（自动重启中）', { p0: fmtVer(pending.value.target) })
   if (ui.restarting) return t('重启中…')
   switch (updPhase.value) {
     case 'checking': return t('检查中…')
@@ -139,7 +139,7 @@ async function checkUpdate(): Promise<void> {
 
 function askApply(latest: string, notes: string): void {
   window.$dialog?.warning({
-    title: tFmt('发现新版本 v{p0}', { p0: latest }),
+    title: tFmt('发现新版本 v{p0}', { p0: fmtVer(latest) }),
     content: (notes || t('无更新日志')).slice(0, 1500)
       + t('\n\n注意：若正在执行任务会被中断；安装完成后应用会自动重启，本页面也将自动刷新并提示更新结果。'),
     positiveText: t('立即更新'),

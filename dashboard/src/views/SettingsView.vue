@@ -3,7 +3,7 @@ import { NButton, NCard, NDynamicTags, NInput, NInputNumber, NProgress, NSelect,
 import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type AuditEntryT, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
-import { cmpVersion, fmtTokens } from '../utils'
+import { cmpVersion, fmtTokens, fmtVer } from '../utils'
 import { miIcon } from '../mi'
 import { tNow as it, tFmt } from '../lang'
 
@@ -1387,7 +1387,7 @@ async function checkUpdateNow(): Promise<void> {
   updChecking.value = true
   try {
     const r = await api.updateCheck()
-    if (r.phase === 'available') message()?.(tFmt('发现新版本 v{p0}，可点顶部「更新到 {p1}」安装', { p0: r.latest, p1: r.latest }), 'success')
+    if (r.phase === 'available') message()?.(tFmt('发现新版本 v{p0}，可点顶部「更新到 {p1}」安装', { p0: fmtVer(r.latest), p1: fmtVer(r.latest) }), 'success')
     else message()?.(tFmt('已是最新版本（v{p0}）', { p0: r.current }), 'success')
   } catch (e: any) { message()?.(e.message, 'error') }
   finally { updChecking.value = false }
