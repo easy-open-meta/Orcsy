@@ -1,7 +1,7 @@
 # 通用 Harness 编码执行器接入方案（评估稿）
 
-> 状态：设计提案，**尚未实施**｜2026-11-22  
-> 目标：Orcsy 负责任务调度、隔离、验收和落地；外部 Harness 负责探索、编码和测试。  
+> 状态：设计提案，**尚未实施**｜2026-11-22
+> 目标：Orcsy 负责任务调度、隔离、验收和落地；外部 Harness 负责探索、编码和测试。
 > 关联：[`plan-v1-trusted-pipeline.md` §4.10](plan-v1-trusted-pipeline.md)、[`design-project-team.md`](design-project-team.md)、[`design-review-agent.md`](design-review-agent.md)。
 
 ## 1. 结论与范围
@@ -69,7 +69,7 @@ projects:
 
 `HarnessContext`（进程内）：`run_id、task_id、role、project_root、work_root、任务正文/验收标准、上游摘要、AGENT.md 指引、续跑说明、超时、stop_event`。提示词显式说明只改 `work_root` 下代码、不修改任务文件与 Orcsy 元数据、不自行 commit/push；提示词不是权限边界。输入用 stdin 或 Orcsy 管理的临时文件（仅 prompt_file 模式，限制权限、退出时清理、避免文件名和日志泄漏正文）；可选将 `ORCSY_WORK_ROOT` 等非敏感标识作为环境变量。不要将 API Key、任务正文或环境密钥拼进命令行参数、异常字符串、事件日志或仓库内文件。
 
-`HarnessResult`：`status=completed|blocked|error|cancelled`、简短摘要、诊断信息、可选可信用量（无数据记 `unknown`），内部再转换到现有 `AgentResponse`；`files_changed` 由 Orcsy 重算。JSONL 至少识别版本化的 `progress` 和唯一终结 `result` 事件；未知事件只截断留痕，不影响结论；末尾缺失/重复/非法终结事件视为协议错误。单行大小、总输出字节、队列容量和日志保留均应有上限；stdout/stderr 持续消费，不能因管道填满死锁。通用 CLI 无结构化协议时先以人工配置的 adapter 做映射，**不从普通文本中的“成功”推断 completed**；首期可先用假 CLI 与一个真实 CLI 验证 JSONL 契约。
+`HarnessResult`：`status=completed|blocked|error|cancelled`、简短摘要、诊断信息、可选可信用量（无数据记 `unknown`），内部再转换到现有 `AgentResponse`；`files_changed` 由 Orcsy 重算。JSONL 至少识别版本化的 `progress` 和唯一终结 `result` 事件；未知事件只截断留痕，不影响结论；末尾缺失/重复/非法终结事件视为协议错误。单行大小、总输出字节、队列容量和日志保留均应有上限；stdout/stderr 持续消费，不能因管道填满死锁。通用 CLI 无结构化协议时先以人工配置的 adapter 做映射，**不从普通文本中的“成功”推断 completed**；首期用假 CLI 固定 Orcsy 内部契约，再分别把两个真实 CLI 的原生事件映射到该契约，不能假定厂商 JSONL 格式相同。
 
 启动时使用已校验的绝对可执行文件路径、参数数组 `shell=False`、`cwd=work_root`、最小环境变量和显式超时；Web/API 不能直接接受任意可执行命令作为任务参数。若支持不同 CLI 的输入/输出格式，用适配层或预置模板翻译到同一契约，不把某 CLI 私有事件格式写进 `TaskExecutor`。运行启动与关闭同样记录可执行文件版本/配置摘要（不记录密钥）。
 
@@ -92,15 +92,29 @@ projects:
 | M0 契约与安全基线 | 定稿 schema、能力矩阵、JSONL 结果协议、运行前检查；假 CLI fixture | 明确预算/隔离/审查无法保障时拒绝运行；不破坏旧配置 |
 | M1 后端旁路 | `orcsy/harness.py` 负责进程与事件；`executor.py` 只选择编码策略；`agent.py` 传生效 runner；`claims.py` 指纹增量 | 假 CLI 成功、无改动、非零退出、无终结结果、超时/停止、异常输出和重启恢复均可解释；builtin 回归通过 |
 | M2 配置与产品入口 | 配置加载/保存、Web 状态/保存、看板选择与预检、双语使用说明 | YAML/API/Web 往返不丢字段，密钥不出 API，旧配置继续是 builtin；无 Git/嵌套 Git 显示不可用原因 |
-| M3 真实 CLI 验证 | 选择 **一个**有稳定非交互接口的 CLI 做 adapter，版本能力探测；再评估第二种 CLI | Windows/Linux 各跑一次真实工作树任务：编码→系统 diff→审查→落地；停机和凭据/网络提示与真实行为一致 |
+| M3 真实 CLI 验证 | 按 §7 顺序接入 Claude Code、Codex 两个具名 adapter，分别做版本能力探测 | Windows/Linux 各验证真实工作树任务：编码→系统 diff→审查→落地；分别验证停止、异常退出和凭据/网络提示 |
 
 测试建议新增 `tests/test_harness.py`（fixture CLI、进程树、协议、输出上限、预算闸、密钥脱敏）；扩展 `tests/test_team_config.py`、`tests/test_team_web_api.py`、`tests/test_task_dependencies.py`、`tests/test_task_stop.py`、`tests/test_review_config.py`、`tests/test_config_roundtrip.py`。验证 `python tests/run_all.py`、看板构建，并人工走单兵与小组并行 worktree、审查通过/拒绝、手动 requeue、服务重启四条链路。
 
-## 7. 开发前需要明确的产品决策
+## 7. 首期 Harness 选型与接入顺序
+
+推荐 **假 CLI 契约测试 → Claude Code → Codex CLI**。前者是内部测试替身，不是面向用户的 Harness；两个真实 adapter 顺序交付，可先上线第一个、待第二个验收后再宣称多 CLI 接入。不要用 `harnesses` 的通用配置替代厂商事件解析、权限映射和版本探测。
+
+| 顺序 | 候选 | 选型依据与实施要求 |
+| --- | --- | --- |
+| 0 | 假 CLI | 固定 Orcsy 自有的 `progress/result` 契约，回放成功、失败、取消、超时、格式错误、超大输出、假成功/无 diff，避免真实账户与费用依赖。 |
+| 1 | **Claude Code** | 官方[程序化调用文档](https://code.claude.com/docs/en/headless)提供非交互 `claude -p`、`--output-format json/stream-json`、权限与费用参数；优先验证 stdin、事件映射、无人值守权限和结束结果。`--max-budget-usd` 属 CLI 自身能力，仍须验证是否达到 Orcsy 所需的硬预算/实时停止语义。 |
+| 2 | **Codex CLI** | 已安装版本的 `codex exec --help` 提供 stdin 提示词、`--json` JSONL、`-C` 工作目录、`--sandbox` 与最终输出选项；用第二种原生事件格式验证 adapter 抽象。实现时以[官方 CLI 参考](https://developers.openai.com/codex/cli/reference/)与目标版本 `--help` 双重核对，不能照搬 Claude Code 的事件/审批/费用处理。 |
+| 后续 | **Gemini CLI** | 官方[Headless 文档](https://geminicli.com/docs/cli/headless/)描述 JSON 与流式 JSON 输出；列第二批，首期不承诺完成适配。 |
+| 后续 | **OpenCode** | [CLI 文档](https://opencode.ai/docs/cli/)描述非交互 `opencode run`；本次未从该页核实足够稳定的结构化结果协议，也未在当前开发环境安装，先做能力验证，再决定是否接入。 |
+
+以上是**候选优先级，不是兼容性声明**。本次仅检查了当前开发机的 CLI 存在与 `--help`（Claude Code 2.1.314、Codex CLI 0.166.0、Gemini CLI 0.66.0；OpenCode 未安装），没有执行真实编码会话、登录验证或 Windows/Linux 双端验收。文档能力可能随版本变化，实际交付要固定被测版本范围并验证 JSON 事件、退出码、停止、沙箱和费用字段；尤其不得把各 CLI 的自带沙箱或预算选项表述为 Orcsy 的统一安全保证。
+
+## 8. 开发前需要明确的产品决策
 
 1. **“通用”范围**：建议先定义为本机 CLI 的统一输入/输出契约，不承诺任意第三方 CLI 零配置可用；后续再做具名 adapter。
 2. **部署信任等级**：是否只允许用户本机可信 CLI？若要求对第三方/远程不可信 Harness 保证文件与网络隔离，M0 必须先增加 OS/container 沙箱，工期与产品表述均改变。
 3. **预算与审查强制性**：建议硬预算不可计量时 fail closed；审查要求独立模型时，无法确认 Harness 的模型身份也 fail closed。若业务接受“费用未知”和“身份未知”的风险，应以显式关闭相关硬保证的配置表达，不做隐式降级。
-4. **首个验收 CLI**：建议选择已有稳定非交互 + 结构化输出 + 可中断能力的 CLI；以实际版本能力探测结果确定 adapter 细节，不预先把某厂商参数当作通用标准。
+4. **首个验收 CLI**：按 §7 优先验证 Claude Code，再用 Codex CLI 验证通用 adapter；以实际版本能力探测结果确定参数和事件映射，不预先把某厂商参数当作通用标准。
 
-**粗估**：按一名熟悉项目的开发者，M0–M2 约 2–3 周，首个真实 CLI 的跨平台联调及安全测试另需约 1–2 周；若加入强 OS 沙箱、精准外部成本计量或远程 Harness，则需单独估算。此估计属于方案假设，不代表已完成开发或已有供应商兼容性验证。
+**粗估**：按一名熟悉项目的开发者，M0–M2 约 2–3 周，首个真实 CLI 的跨平台联调及安全测试另需约 1–2 周；第二个 CLI 的适配与验收还需额外排期。若加入强 OS 沙箱、精准外部成本计量或远程 Harness，则需单独估算。此估计属于方案假设，不代表已完成开发或已有供应商兼容性验证。
