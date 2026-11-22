@@ -991,6 +991,11 @@ Orcsy 0.22.0 introduces **Multi-Model Agent Project Teams**. You can assemble sp
 - **🔒 Security Auditor (`security`, 0.31.0)**: read-only security reviewer — static-scans the changed scope, traces user-input-to-sink data flows (SQL injection, access control, hardcoded secrets), and looks up dependency CVEs for changed manifests; confirmed risks are filed via `report_bug` with attack scenario and fix suggestion, theoretical issues without evidence are never blockers.
 - **👥 Two-Tier Configuration**: the global **Multi-Model Team** section configures each role's dedicated model once, and project settings reference it with local overrides; every role ships with a built-in responsibility prompt template you can load with one click or customise.
 
+> **Adding the three new roles after upgrading from an older version (0.31.0's `devops` / `ui_critic` / `security`)**:
+> the upgrade only extends the selectable role list — an old config's preset pool still has the original four defaults. Two steps to adopt them:
+> ① **Fill presets (optional)**: Settings → 🤖 Models & Team → Multi-Model Team, click **"Fill in built-in role presets (devops / ui_critic / security)"** — the three built-in presets (with responsibility templates and default turn limits) enter the draft, models inheriting the global LLM by default; review then click "Save role presets" to apply;
+> ② **Join a project**: in a project's Settings → Multi-Model Team, click **"+ Add member"** and pick the role in the role-type dropdown (new projects already include all three as default members). You can also skip presets and add members directly — model and tools then follow the role's built-in defaults, tunable per member afterwards.
+
 > **Read-only verify-role semantics**: `ui_critic` / `security` share QA's semantics —
 > after filing bugs via `report_bug` the task stays open awaiting regression (never
 > archived as done prematurely), and a clean acceptance with zero file changes completes

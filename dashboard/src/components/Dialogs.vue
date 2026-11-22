@@ -106,6 +106,28 @@ function addTeamMember(): void {
   })
 }
 
+// 新建项目默认小组成员：内置角色逐个绑定同名预设（预设不存在则留空自定义配置）。
+// 0.31.0 起角色池扩展了 devops / ui_critic / security——老版本升级后没有这些
+// 预设也照常加成员，模型与工具走角色内置默认（可在成员卡里再改）
+function defaultTeamMembers(): any[] {
+  const roles: Array<{ id: string, profile: string, role: string }> = [
+    { id: 'pm', profile: 'pm_default', role: 'pm' },
+    { id: 'backend', profile: 'backend_default', role: 'backend' },
+    { id: 'frontend', profile: 'frontend_default', role: 'frontend' },
+    { id: 'qa', profile: 'qa_default', role: 'qa' },
+    { id: 'devops', profile: 'devops_default', role: 'devops' },
+    { id: 'ui_critic', profile: 'ui_critic_default', role: 'ui_critic' },
+    { id: 'security', profile: 'security_default', role: 'security' },
+  ]
+  const profs = store.state?.agent_profiles || {}
+  return roles.map(r => ({
+    id: r.id, profile: r.profile in profs ? r.profile : '', enabled: true,
+    name: '', role: r.role, description: '', ll_model: '', ll_key: '',
+    ll_key_masked: '', allow_test_scripts: false, extra_prompt: '',
+    ll_protocol: '', ll_base: '',
+  }))
+}
+
 function removeTeamMember(idx: number): void {
   pDraft.team.members.splice(idx, 1)
 }
@@ -414,12 +436,7 @@ watch(() => ui.projectDlg, (dlg) => {
     pDraft.team.chain_within_cycle = true
     pDraft.team.max_chain_steps_per_cycle = 10
     pDraft.team.fallback_role = 'backend'
-    pDraft.team.members = [
-      { id: 'pm', profile: 'pm_default', enabled: true, name: '', role: 'pm', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
-      { id: 'backend', profile: 'backend_default', enabled: true, name: '', role: 'backend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
-      { id: 'frontend', profile: 'frontend_default', enabled: true, name: '', role: 'frontend', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
-      { id: 'qa', profile: 'qa_default', enabled: true, name: '', role: 'qa', description: '', ll_model: '', ll_key: '', ll_key_masked: '', allow_test_scripts: false, extra_prompt: '', ll_protocol: '', ll_base: '' },
-    ]
+    pDraft.team.members = defaultTeamMembers()
   }
 
   pDraft.stack = ''; pDraft.run = ''; pDraft.test = ''

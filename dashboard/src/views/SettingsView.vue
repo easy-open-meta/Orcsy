@@ -769,6 +769,41 @@ function addProfile(): void {
   editingProfileId.value = id
 }
 
+// 老版本升级补齐：0.31.0 新增的 devops / ui_critic / security 三个内置角色
+// 在老配置的预设池里没有对应预设（默认只建 pm/backend/frontend/qa 四个）。
+// 一键按内置角色元数据生成预设进草稿（带内置职责模板与默认轮数），确认保存生效；
+// 已存在的预设跳过不覆盖。
+function fillBuiltinProfiles(): void {
+  const wanted: Array<{ id: string, role: string, nameKey: string, descKey: string }> = [
+    { id: 'devops_default', role: 'devops', nameKey: '运维/DevOps 工程师', descKey: '负责容器化/CI/CD/K8s 声明与环境配置的编写维护' },
+    { id: 'ui_critic_default', role: 'ui_critic', nameKey: 'UI 视觉审查专家', descKey: '浏览器渲染页面的纯视觉把关，视觉缺陷逐条报 Bug' },
+    { id: 'security_default', role: 'security', nameKey: '安全合规审计工程师', descKey: '变更范围静态扫描 + 依赖 CVE 检索 + 数据流风险识别' },
+  ]
+  const turnsByRole: Record<string, number> = { devops: 40, ui_critic: 25, security: 25 }
+  let added = 0
+  for (const w of wanted) {
+    if (profilesDraft.value[w.id]) continue
+    profilesDraft.value[w.id] = {
+      id: w.id,
+      name: it(w.nameKey),
+      role: w.role,
+      description: it(w.descKey),
+      max_turns: turnsByRole[w.role] ?? 40,
+      produces_code: w.role === 'devops',
+      allow_test_scripts: false,
+      extra_prompt: getRoleTemplate(w.role),
+      llm: { provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', api_key_configured: false, tool_protocol: '' },
+    }
+    added++
+  }
+  if (added) {
+    editingProfileId.value = added < 3 ? Object.keys(profilesDraft.value)[0] : wanted[0].id
+    message()?.(tFmt('已补齐 {p0} 个内置角色预设进草稿（模型默认继承全局，检查后点「保存角色预设池」生效）', { p0: added }), 'success')
+  } else {
+    message()?.(it('三个内置角色预设（devops / ui_critic / security）均已存在，无需补齐'), 'info')
+  }
+}
+
 function removeProfile(id: string): void {
   delete profilesDraft.value[id]
   delete profilesTouchedKeys[id]
@@ -1624,6 +1659,7 @@ const protocolOptions = computed(() => [
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
               <span class="hint">{{ it('配置不同专业职能角色的专属大模型与能力边界，进驻任意项目时可自由选用或局部微调。') }}</span>
+              <NButton size="small" secondary @click="fillBuiltinProfiles">{{ it('补齐内置角色预设（devops / ui_critic / security）') }}</NButton>
               <NButton size="small" type="primary" secondary @click="addProfile">{{ it('+ 新建角色预设') }}</NButton>
             </div>
 

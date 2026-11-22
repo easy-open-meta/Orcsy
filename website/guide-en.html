@@ -2080,6 +2080,24 @@ overrides; every role ships with a built-in responsibility prompt
 template you can load with one click or customise.</li>
 </ul>
 <blockquote>
+<p><strong>Adding the three new roles after upgrading from an older
+version (0.31.0's <code>devops</code> / <code>ui_critic</code> /
+<code>security</code>)</strong>: the upgrade only extends the selectable
+role list — an old config's preset pool still has the original four
+defaults. Two steps to adopt them: ① <strong>Fill presets
+(optional)</strong>: Settings → 🤖 Models &amp; Team → Multi-Model Team,
+click <strong>"Fill in built-in role presets (devops / ui_critic /
+security)"</strong> — the three built-in presets (with responsibility
+templates and default turn limits) enter the draft, models inheriting
+the global LLM by default; review then click "Save role presets" to
+apply; ② <strong>Join a project</strong>: in a project's Settings →
+Multi-Model Team, click <strong>"+ Add member"</strong> and pick the
+role in the role-type dropdown (new projects already include all three
+as default members). You can also skip presets and add members directly
+— model and tools then follow the role's built-in defaults, tunable per
+member afterwards.</p>
+</blockquote>
+<blockquote>
 <p><strong>Read-only verify-role semantics</strong>:
 <code>ui_critic</code> / <code>security</code> share QA's semantics —
 after filing bugs via <code>report_bug</code> the task stays open

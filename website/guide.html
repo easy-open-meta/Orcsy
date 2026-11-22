@@ -1722,6 +1722,17 @@ CVE 检索，追踪「用户输入 → 危险汇点」数据流（SQL
 项目设置弹窗自由引用与局部技术栈微调；每个角色都内置一套职责规范提示词模板（可一键载入或自定义）。</li>
 </ul>
 <blockquote>
+<p><strong>老版本升级后如何加入三个新角色（0.31.0 的 <code>devops</code>
+/ <code>ui_critic</code> / <code>security</code>）</strong>：
+升级只扩充了「可选角色清单」，老配置的预设池仍是原四个默认预设——按需两步接入：
+① <strong>补预设</strong>（可选）：设置页「🤖 模型与团队 →
+多模型项目小组」点 <strong>「补齐内置角色预设（devops / ui_critic /
+security）」</strong>，三个内置预设（带职责模板与默认轮数）进入草稿，模型默认继承全局，检查后点「保存角色预设池」生效；
+② <strong>进驻项目</strong>：项目「设置 → 多模型 Agent 项目小组」里点
+<strong>「+
+添加成员」</strong>，角色类型下拉选对应角色即可（新建项目的默认成员名单已含三者）。不建预设直接加成员也可以——模型与工具走角色内置默认，可再在成员卡里微调。</p>
+</blockquote>
+<blockquote>
 <p><strong>只读验证角色语义</strong>：<code>ui_critic</code> /
 <code>security</code> 与 QA 同属「只读验证型角色」—— 通过
 <code>report_bug</code> 报出缺陷后任务保持打开进入等待回归（不会误归档
