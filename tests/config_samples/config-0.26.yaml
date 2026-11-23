@@ -115,3 +115,9 @@ projects:
     tasks_dir: tasks
     guide_file: AGENT.md
     max_tasks_per_cycle: 1
+archive:
+  enabled: false
+  target: local
+  include_runs: false
+  keep_last: 10
+storage_targets: {}

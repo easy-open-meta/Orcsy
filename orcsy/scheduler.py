@@ -368,6 +368,46 @@ class Scheduler:
                 }
             self._issue_timers[name] = time.monotonic() + interval
 
+    # ---- 定时备份（独立后台线程） ----
+
+    def run_backup_schedule_forever(self) -> threading.Thread:
+        t = threading.Thread(target=self._backup_schedule_loop,
+                             name="backup-schedule-loop", daemon=True)
+        t.start()
+        return t
+
+    def _backup_schedule_loop(self) -> None:
+        log.info("定时备份循环启动")
+        while not self._stop_event.is_set():
+            try:
+                self._run_scheduled_backup_if_due()
+            except Exception:  # noqa: BLE001
+                log.exception("定时备份检查失败")
+            waited = 0.0
+            while waited < 30 and not self._stop_event.is_set():
+                self._stop_event.wait(1.0)
+                waited += 1.0
+        log.info("定时备份循环已退出")
+
+    def _run_scheduled_backup_if_due(self) -> None:
+        cfg = self.config
+        bk = cfg.backup
+        if not bk.schedule_enabled or cfg.source_path is None:
+            return
+        data_dir = cfg.source_path.parent
+        from .backup import (do_backup, load_last_backup, mark_backup_run,
+                             schedule_due)
+        now = time.time()
+        if not schedule_due(load_last_backup(data_dir), now,
+                            bk.schedule_interval, bk.schedule_unit):
+            return
+        try:
+            do_backup(cfg)
+            mark_backup_run(data_dir, now)
+            log.info("定时备份完成")
+        except Exception:  # noqa: BLE001 — 备份失败不中断循环
+            log.exception("定时备份失败")
+
     # ---- 前台阻塞模式（CLI run 命令） ----
 
     def run_forever(self) -> None:
@@ -376,6 +416,7 @@ class Scheduler:
             max(30, self.config.scheduler.interval_seconds), len(self.agents),
         )
         self.run_issues_forever_background()
+        self.run_backup_schedule_forever()
         try:
             self._loop()
         except KeyboardInterrupt:

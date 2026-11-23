@@ -55,6 +55,12 @@ from .config import (
 from .config import (
     _coerce_llm as _coerce_llm_cfg,
 )
+from .config import (
+    ArchiveConfig,
+    BackupConfig,
+    _parse_storage_target,
+    resolve_storage_target,
+)
 from .egress import validate_extra_hosts
 from .logging_setup import get_logger
 
@@ -608,6 +614,55 @@ def save_settings(state: AppState, data: dict) -> dict:
                             f"请先在项目设置中解绑该预设后再删除。"
                         )
         state.config.agent_profiles = new_profs
+
+    # 存储目标注册表（分块保存；敏感字段三态：缺失保持/空清除/非空换新）
+    if "storage_targets" in data:
+        t_in = data.get("storage_targets") or {}
+        if not isinstance(t_in, dict):
+            raise ValueError("storage_targets 必须是字典")
+        old_targets = state.config.storage_targets
+        merged_targets: dict = {}
+        for name, item in t_in.items():
+            if not isinstance(item, dict):
+                raise ValueError(f"storage_targets.{name} 必须是字典")
+            merged = dict(item)
+            old = old_targets.get(str(name))
+            for secret in ("password", "access_key", "secret_key", "session_token"):
+                if old is not None and secret not in merged:
+                    merged[secret] = getattr(old, secret, "")
+            merged_targets[str(name)] = merged
+        state.config.storage_targets = {
+            str(name): _parse_storage_target(str(name), raw)
+            for name, raw in merged_targets.items()
+        }
+
+    # 配置备份目标：整体写回（漏写会被看板任意保存静默重置）
+    if "backup" in data:
+        b_raw = data.get("backup") or {}
+        target = str(b_raw.get("target") or state.config.backup.target or "local")
+        resolve_storage_target(state.config.storage_targets, target)
+        state.config.backup = BackupConfig(
+            enabled=bool(b_raw.get("enabled", state.config.backup.enabled)),
+            target=target,
+            keep_last=max(1, min(int(b_raw.get("keep_last", state.config.backup.keep_last)), 100)),
+            schedule_enabled=bool(b_raw.get("schedule_enabled", state.config.backup.schedule_enabled)),
+            schedule_interval=max(1, min(int(b_raw.get("schedule_interval", state.config.backup.schedule_interval)), 1000)),
+            schedule_unit=str(b_raw.get("schedule_unit") or state.config.backup.schedule_unit or "days").lower(),
+        )
+        if state.config.backup.schedule_unit not in ("hours", "days", "weeks", "months"):
+            raise ValueError("backup.schedule_unit 只能是 hours / days / weeks / months")
+
+    # 项目归档目标：整体写回
+    if "archive" in data:
+        a_raw = data.get("archive") or {}
+        target = str(a_raw.get("target") or state.config.archive.target or "local")
+        resolve_storage_target(state.config.storage_targets, target)
+        state.config.archive = ArchiveConfig(
+            enabled=bool(a_raw.get("enabled", state.config.archive.enabled)),
+            target=target,
+            include_runs=bool(a_raw.get("include_runs", state.config.archive.include_runs)),
+            keep_last=max(1, min(int(a_raw.get("keep_last", state.config.archive.keep_last)), 100)),
+        )
 
     state.scheduler.reload_config(state.config)
     state._apply_config(state.config)

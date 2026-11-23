@@ -105,9 +105,31 @@ def check_all_current_sections_covered() -> None:
     print(f"样本顶层键覆盖 ✅（{len(saved_keys)} 个分区全在样本中）")
 
 
+def check_v1_backup_migration() -> None:
+    """1→2：扁平 backup（target_type=webdav）→ storage_targets + backup.target（幂等）。"""
+    raw = {
+        "config_version": 1,
+        "llm": {"provider": "openai", "api_key": "sk-x",
+                "base_url": "https://a.example/v1", "model": "m"},
+        "backup": {"enabled": True, "target_type": "webdav",
+                   "url": "https://dav.example.com/orcsy/",
+                   "username": "u", "password": "p", "keep_last": 5},
+    }
+    migrated = migrate_config_raw(copy.deepcopy(raw), context="config")
+    assert migrated["config_version"] == CONFIG_VERSION
+    assert migrated["backup"]["target"] == "webdav"
+    assert "target_type" not in migrated["backup"]
+    assert migrated["storage_targets"]["webdav"]["url"] == "https://dav.example.com/orcsy/"
+    assert migrated["storage_targets"]["webdav"]["password"] == "p"
+    again = migrate_config_raw(copy.deepcopy(migrated), context="config")
+    assert again == migrated
+    print("扁平 backup 1→2 迁移 ✅")
+
+
 if __name__ == "__main__":
     check_legacy_samples_migrate_and_roundtrip()
     check_save_always_stamps_current_version()
     check_future_version_rejected()
     check_all_current_sections_covered()
+    check_v1_backup_migration()
     print("test_config_roundtrip: 全部通过")

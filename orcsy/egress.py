@@ -380,6 +380,22 @@ def _collect_urls(config: object) -> list[str]:
     upd_repo = str(getattr(getattr(config, "update", None), "repo", "") or "")
     if "github.com" in upd_repo.lower():
         add("https://api.github.com")
+    # 存储目标（备份/归档）：WebDAV/S3 出网主机提前派生，避免首次备份即被拦
+    for target in (getattr(config, "storage_targets", None) or {}).values():
+        t = str(getattr(target, "type", "") or "").lower()
+        if t == "webdav":
+            add(getattr(target, "url", ""))
+        elif t == "s3":
+            endpoint = str(getattr(target, "endpoint", "") or "").strip()
+            if endpoint:
+                add(endpoint)
+            else:
+                bucket = str(getattr(target, "bucket", "") or "")
+                region = str(getattr(target, "region", "") or "us-east-1")
+                if "." in bucket:
+                    add(f"https://s3.{region}.amazonaws.com")
+                else:
+                    add(f"https://{bucket}.s3.{region}.amazonaws.com")
     try:
         from .mirrors import BUILTIN_MIRRORS
         for mirrors in BUILTIN_MIRRORS.values():

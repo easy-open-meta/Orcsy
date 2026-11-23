@@ -272,6 +272,20 @@ def mask_secret(value: str) -> str:
     return f"{v[:4]}…{v[-4:]}"
 
 
+def _http_status_hint(status: int) -> str:
+    """把 HTTP 状态码翻译成普通用户能看的原因提示（存储目标推送失败用）。"""
+    return {
+        400: "请求无效（HTTP 400）",
+        401: "鉴权失败：用户名/密码不正确",
+        403: "无权限写入（HTTP 403）",
+        404: "路径不存在：WebDAV 地址可能不对",
+        405: "目标不支持 PUT（可能不是 WebDAV 目录）",
+        409: "目录不存在、不可写或被占用（HTTP 409）",
+        423: "资源被锁定（HTTP 423）",
+        507: "存储空间不足（HTTP 507）",
+    }.get(status, f"HTTP {status}")
+
+
 def _is_ip_trusted(ip_str: str, trusted_list: list[str]) -> bool:
     """判断 IP 是否属于受信任代理名单（支持单 IP 与 CIDR 网段；非法值按不信任处理）。"""
     try:
@@ -995,6 +1009,37 @@ class AppState:
                 "audit": self.config.egress.audit,
             },
             "egress_status": egress_snapshot(),
+            # 存储目标 + 备份/归档配置：密钥只出掩码不出明文（H2 同规则）
+            "storage_targets": {
+                name: {
+                    "type": t.type,
+                    "dir": t.dir,
+                    "url": t.url,
+                    "username": t.username,
+                    "password_masked": mask_secret(t.password),
+                    "endpoint": t.endpoint,
+                    "bucket": t.bucket,
+                    "region": t.region,
+                    "access_key_masked": mask_secret(t.access_key),
+                    "secret_key_masked": mask_secret(t.secret_key),
+                    "session_token_masked": mask_secret(t.session_token),
+                }
+                for name, t in self.config.storage_targets.items()
+            },
+            "backup_cfg": {
+                "enabled": self.config.backup.enabled,
+                "target": self.config.backup.target,
+                "keep_last": self.config.backup.keep_last,
+                "schedule_enabled": self.config.backup.schedule_enabled,
+                "schedule_interval": self.config.backup.schedule_interval,
+                "schedule_unit": self.config.backup.schedule_unit,
+            },
+            "archive_cfg": {
+                "enabled": self.config.archive.enabled,
+                "target": self.config.archive.target,
+                "include_runs": self.config.archive.include_runs,
+                "keep_last": self.config.archive.keep_last,
+            },
             # 工具开关：全局生效 map + 工具目录（名称/描述取自 TOOLS 注册表）。
             # finish 也进目录——前端把它渲染成「常开且禁用」的展示行，
             # validate_tools_map 会剥掉任何 finish 条目，配置语义不受影响
@@ -1752,6 +1797,70 @@ class AppState:
                                      agent_profiles=cfg.agent_profiles,
                                      global_tools=cfg.tools)
                 for p in cfg.projects}
+
+    def backup_config_now(self, data: dict) -> dict:
+        """手动触发一次配置备份：创建归档并按 backup.target 推送（本地/远端）。"""
+        import httpx
+        from .backup import do_backup
+        from .egress import EgressDenied
+        from .storage import StorageError
+
+        try:
+            result = do_backup(self.config)
+        except httpx.HTTPStatusError as e:
+            raise ValueError(
+                f"备份推送到目标失败：{_http_status_hint(e.response.status_code)}"
+                f"（{e.response.url}）") from e
+        except (httpx.HTTPError, StorageError, EgressDenied) as e:
+            raise ValueError(f"备份推送到目标失败：{e}") from e
+        return {"ok": True, **result}
+
+    def archive_project_now(self, data: dict) -> dict:
+        """手动触发一次项目归档：打包并推送。body: {project: 项目名}。"""
+        import httpx
+        from .archive import archive_prefix, archive_project, push_archive
+        from .config import resolve_storage_target
+        from .egress import EgressDenied
+        from .storage import StorageError, build_provider
+
+        name = str((data or {}).get("project") or "").strip()
+        if not name:
+            raise ValueError("缺少 project 参数")
+        project = next((p for p in self.config.projects if p.name == name), None)
+        if project is None:
+            raise ValueError(f"项目未找到：{name}")
+        if self.config.source_path is None:
+            raise ValueError("配置来源未知，无法归档")
+        base = self.config.source_path.parent
+        target = resolve_storage_target(self.config.storage_targets, self.config.archive.target)
+        provider = build_provider(target, base_dir=base)
+        archive = archive_project(project, data_dir=base,
+                                  include_runs=self.config.archive.include_runs,
+                                  keep_last=self.config.archive.keep_last)
+        handle = str(archive)
+        if provider.kind != "local":
+            try:
+                handle = push_archive(archive, provider,
+                                      keep_last=self.config.archive.keep_last,
+                                      prefix=archive_prefix(project.name))
+            except httpx.HTTPStatusError as e:
+                raise ValueError(
+                    f"归档推送到 {provider.kind} 目标失败："
+                    f"{_http_status_hint(e.response.status_code)}（{e.response.url}）") from e
+            except (httpx.HTTPError, StorageError, EgressDenied) as e:
+                raise ValueError(f"归档推送到 {provider.kind} 目标失败：{e}") from e
+        return {"ok": True, "path": str(archive), "handle": handle, "kind": provider.kind}
+
+    def storage_probe(self, data: dict) -> dict:
+        """测试一个存储目标（WebDAV 会列子目录）。body 为目标字段（type/url/…）。"""
+        from .config import _parse_storage_target
+        from .storage import build_provider, probe_provider
+
+        raw = (data or {}).get("target") or data or {}
+        target = _parse_storage_target("probe", raw)
+        provider = build_provider(target, base_dir=self.config.source_path.parent
+                                  if self.config.source_path else None)
+        return probe_provider(provider)
 
     def save_project(self, data: dict) -> dict:
         """新建或修改项目并持久化 + 热重载。original_name 用于重命名。"""
@@ -2896,6 +3005,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.update_apply(body))
             elif path == "/api/update/install":
                 self._json(self.state.update_install(body))
+            elif path == "/api/backup":
+                self._json(self.state.backup_config_now(body))
+            elif path == "/api/archive":
+                self._json(self.state.archive_project_now(body))
+            elif path == "/api/storage/probe":
+                self._json(self.state.storage_probe(body))
             elif path == "/api/config":
                 self._json(self.state.save_settings(body))
             elif path == "/api/runlog/migration/retry":

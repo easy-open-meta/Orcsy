@@ -428,6 +428,31 @@ export interface AppStateT {
     audit: boolean
   }
   egress_status?: EgressStatusT
+  /** 存储目标注册表（备份/归档共用）：密钥只出掩码不出明文 */
+  storage_targets?: Record<string, {
+    type: 'local' | 'webdav' | 's3'
+    dir: string
+    url: string
+    username: string
+    password_masked: string
+    endpoint: string
+    bucket: string
+    region: string
+    access_key_masked: string
+    secret_key_masked: string
+    session_token_masked: string
+  }>
+  /** 配置备份（S2）：target = storage_targets 目标名，local 为内置 */
+  backup_cfg?: {
+    enabled: boolean
+    target: string
+    keep_last: number
+    schedule_enabled: boolean
+    schedule_interval: number
+    schedule_unit: string
+  }
+  /** 项目归档（评估⑤） */
+  archive_cfg?: { enabled: boolean; target: string; include_runs: boolean; keep_last: number }
   /** 全局 Agent 工具开关：只含显式设置过的项，未列出的工具默认启用 */
   tools_cfg: Record<string, boolean>
   /** 可开关工具目录（名称+中文描述+所属组；finish 为协议工具不在其中） */
@@ -898,6 +923,19 @@ export const api = {
       error?: string
     }>,
   config: (p: Record<string, unknown>) => post('/api/config', p),
+  /** 手动触发一次配置备份（按 backup.target 落地） */
+  backup: () => post('/api/backup', {}) as Promise<{
+    ok: boolean; path: string; handle: string; kind: string
+  }>,
+  /** 手动触发一次项目归档（按 archive.target 落地） */
+  archive: (project: string) => post('/api/archive', { project }) as Promise<{
+    ok: boolean; path: string; handle: string; kind: string
+  }>,
+  /** 测试一个存储目标（WebDAV 会列子目录供发现挂载路径） */
+  storageProbe: (t: Record<string, unknown>) =>
+    post('/api/storage/probe', { target: t }) as Promise<{
+      ok: boolean; status: number; message: string; children: string[]
+    }>,
   /** 响应一条挂起的审批：approved=批准/拒绝；always=本任务内始终允许该工具（仅批准时有意义） */
   approvalRespond: (id: string, approved: boolean, always = false) =>
     post('/api/approval', { id, approved, always }),

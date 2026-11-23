@@ -210,6 +210,32 @@ masking:
 #                              # 改动直接留在工作区，方便人工检查与自由提交；
 #                              # 开启后在独立 worktree 分支完成开发并自动提交合并）
 
+# 存储目标 + 备份/归档：配置备份（backup）与项目任务归档（archive）共用这些目标。
+#   local 是内置隐含目标（写到配置目录 backups/），无需声明。
+# storage_targets:
+#   my-webdav:
+#     type: webdav
+#     url: https://dav.example.com/orcsy/   # WebDAV 目录 URL
+#     username: ""                          # Basic Auth 用户名；留空 = 匿名
+#     password: ""                    # Basic Auth 密码
+#   my-s3:
+#     type: s3
+#     endpoint: https://s3.example.com      # 空 = AWS；MinIO/兼容空间填 endpoint
+#     bucket: orcsy-backups
+#     region: us-east-1
+#     access_key: ""
+#     secret_key: ""
+#     # session_token: ""                   # 可选会话令牌
+# backup:
+#   enabled: false            # 升级前自动备份是否也推送到远端（本地始终留一份）
+#   target: local             # storage_targets 中的目标名；local = 内置本地
+#   keep_last: 10
+# archive:
+#   enabled: false
+#   target: local             # 项目任务归档目标名；local = 内置本地
+#   include_runs: false       # 是否附带 runs/<项目> 运行台账（审计留痕）
+#   keep_last: 10
+
 # agent_profiles:              # 全局 Agent 角色预设池（多模型项目小组使用，可选）：
 #   pm_default:                #   预设 ID
 #     name: "项目经理 PM"        #   显示名称
@@ -818,6 +844,8 @@ def cmd_web(args: argparse.Namespace) -> int:
         scheduler.run_forever_background()
     # 定时拉取 Issues：独立线程，与调度周期解耦（间隔可短于调度周期）
     scheduler.run_issues_forever_background()
+    # 定时备份：独立线程，30 秒轮询一次到期判断
+    scheduler.run_backup_schedule_forever()
 
     if config.web.open_browser and not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
@@ -906,28 +934,37 @@ def cmd_web(args: argparse.Namespace) -> int:
 
 
 def cmd_backup_config(args: argparse.Namespace) -> int:
-    """创建配置备份归档（config.yaml + sessions.json；chmod 600）。"""
-    from .backup import create_backup, push_backup_webdav
-    from .config import load_config
+    """创建配置备份归档（config.yaml + sessions.json；chmod 600），可推送到目标。"""
+    from .backup import create_backup, push_backup_archive
+    from .config import load_config, resolve_storage_target
+    from .storage import LocalProvider, build_provider
 
     try:
         cfg_path = find_config(args.config)
     except FileNotFoundError as e:
         print(f"错误: {e}", file=sys.stderr)
         return 1
-    dest_dir = Path(args.dir) if args.dir else None
+    base = cfg_path.parent
     try:
         cfg = load_config(cfg_path, require_api_key=False)
-        bk = cfg.backup
-        if not dest_dir:
-            dest_dir = (cfg_path.parent / bk.dir) if bk.dir else cfg_path.parent / "backups"
-        archive = create_backup(cfg_path, Path(dest_dir), keep_last=bk.keep_last)
+        target = resolve_storage_target(
+            cfg.storage_targets, args.target or cfg.backup.target or "local")
+        provider = build_provider(target, base_dir=base)
+        local = isinstance(provider, LocalProvider)
+        if args.dir:
+            dest_dir = Path(args.dir)
+            local = True
+        elif local:
+            dest_dir = provider.root  # type: ignore[attr-defined]
+        else:
+            dest_dir = base / "backups"
+        archive = create_backup(cfg_path, Path(dest_dir), keep_last=cfg.backup.keep_last)
         print(f"备份完成: {archive}")
-        if args.push and bk.enabled and bk.target_type == "webdav" and bk.url:
-            url = push_backup_webdav(archive, bk.url, bk.username, bk.password)
-            print(f"已推送到 WebDAV: {url}")
-        elif args.push:
-            print("未推送：backup 未启用 webdav 目标（config.yaml backup 节）", file=sys.stderr)
+        if local:
+            print(f"本地目标: {args.dir or provider.root}")
+        else:
+            handle = push_backup_archive(archive, provider, keep_last=cfg.backup.keep_last)
+            print(f"已推送到 {provider.kind}: {handle}")
         return 0
     except Exception as e:  # noqa: BLE001 — CLI 报错给人看
         print(f"错误: {e}", file=sys.stderr)
@@ -935,8 +972,13 @@ def cmd_backup_config(args: argparse.Namespace) -> int:
 
 
 def cmd_restore_config(args: argparse.Namespace) -> int:
-    """从备份归档恢复 config.yaml（+sessions.json）；现配置留 .pre-restore 兜底。"""
-    from .backup import restore_backup
+    """从备份归档恢复 config.yaml（+sessions.json）；现配置留 .pre-restore 兜底。
+
+    --target 指定后，archive 是远端对象键（文件名），先下载再恢复。
+    """
+    from .backup import download_backup, restore_backup
+    from .config import load_config, resolve_storage_target
+    from .storage import build_provider
 
     try:
         cfg_path = find_config(args.config)
@@ -944,9 +986,52 @@ def cmd_restore_config(args: argparse.Namespace) -> int:
         print(f"错误: {e}", file=sys.stderr)
         return 1
     try:
-        restored = restore_backup(Path(args.archive), cfg_path)
+        archive_path = Path(args.archive)
+        if args.target:
+            cfg = load_config(cfg_path, require_api_key=False)
+            target = resolve_storage_target(cfg.storage_targets, args.target)
+            provider = build_provider(target, base_dir=cfg_path.parent)
+            tmp = cfg_path.parent / f".restore-{archive_path.name}"
+            download_backup(provider, args.archive, tmp)
+            archive_path = tmp
+        restored = restore_backup(archive_path, cfg_path)
         print(f"已恢复: {restored}")
         print("当前配置已留兜底副本 config.yaml.pre-restore；看板/服务需重启生效。")
+        return 0
+    except Exception as e:  # noqa: BLE001
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_archive_project(args: argparse.Namespace) -> int:
+    """归档一个项目的任务快照（tasks + done + AGENT.md，可选 runs），可推送到目标。"""
+    from .archive import archive_prefix, archive_project, push_archive
+    from .config import load_config, resolve_storage_target
+    from .storage import build_provider
+
+    try:
+        cfg_path = find_config(args.config)
+    except FileNotFoundError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+    try:
+        cfg = load_config(cfg_path, require_api_key=False)
+        project = next((p for p in cfg.projects if p.name == args.project), None)
+        if project is None:
+            print(f"错误: 项目 {args.project!r} 未在 config.yaml projects 中", file=sys.stderr)
+            return 1
+        target = resolve_storage_target(
+            cfg.storage_targets, args.target or cfg.archive.target or "local")
+        provider = build_provider(target, base_dir=cfg_path.parent)
+        archive = archive_project(
+            project, data_dir=cfg_path.parent,
+            include_runs=args.include_runs or cfg.archive.include_runs,
+            keep_last=cfg.archive.keep_last)
+        print(f"归档完成: {archive}")
+        if provider.kind != "local":
+            handle = push_archive(archive, provider, keep_last=cfg.archive.keep_last,
+                                  prefix=archive_prefix(project.name))
+            print(f"已推送到 {provider.kind}: {handle}")
         return 0
     except Exception as e:  # noqa: BLE001
         print(f"错误: {e}", file=sys.stderr)
@@ -1069,17 +1154,25 @@ def main(argv: list[str] | None = None) -> int:
     p_web.set_defaults(func=cmd_web)
 
     p_bk = sub.add_parser("backup-config",
-                          help="创建配置备份归档（config.yaml + sessions.json）")
+                          help="创建配置备份归档并（可选）推送到存储目标")
     p_bk.add_argument("--config", help="配置文件路径（默认自动发现）")
-    p_bk.add_argument("--dir", help="备份输出目录（默认 config.yaml 同级 backups/）")
-    p_bk.add_argument("--push", action="store_true",
-                      help="创建后推送到已配置的 WebDAV 目标")
+    p_bk.add_argument("--dir", help="本地输出目录（强制本地，覆盖 backup.target）")
+    p_bk.add_argument("--target", help="存储目标名（默认 config.yaml backup.target；local 为内置本地）")
     p_bk.set_defaults(func=cmd_backup_config)
     p_rs = sub.add_parser("restore-config",
-                          help="从备份归档恢复配置（现配置留 .pre-restore 兜底）")
-    p_rs.add_argument("archive", help="备份归档路径（orcsy-config-backup-*.tar.gz）")
+                          help="从备份归档恢复配置（--target 时从远端下载，否则为本地路径）")
+    p_rs.add_argument("archive", help="本地归档路径，或 --target 下的远端归档文件名")
     p_rs.add_argument("--config", help="配置文件路径（默认自动发现）")
+    p_rs.add_argument("--target", help="存储目标名（指定后 archive 视为远端对象键）")
     p_rs.set_defaults(func=cmd_restore_config)
+    p_ar = sub.add_parser("archive-project",
+                          help="归档一个项目的任务快照（tasks + done + AGENT.md，可选 runs）")
+    p_ar.add_argument("project", help="项目名（config.yaml projects 中）")
+    p_ar.add_argument("--config", help="配置文件路径（默认自动发现）")
+    p_ar.add_argument("--target", help="存储目标名（默认 config.yaml archive.target）")
+    p_ar.add_argument("--include-runs", action="store_true",
+                      help="附带 runs/<项目> 运行台账")
+    p_ar.set_defaults(func=cmd_archive_project)
     p_pwd = sub.add_parser("reset-password", aliases=["passwd"],
                            help="重置看板访问密码为管理员输入的密码（密文存储至 config.yaml）")
     p_pwd.add_argument("password", nargs="?", default=None,

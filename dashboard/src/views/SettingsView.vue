@@ -48,6 +48,8 @@ const SETTING_GROUPS: SettingGroup[] = [
         desc: '每个任务一轮执行留一份可回放证据（事件 / diff / 测试 / 审查 / 用量）；保存后立即生效。orcsy.log 的保留在「调度与看板」。' },
       { key: 'audit', label: '审计日志', icon: 'history',
         desc: '登录、任务/项目/设置变更、提交确认与 API Key 写调用留痕；只读，不记录密钥与正文。' },
+      { key: 'backup', label: '备份与归档', icon: 'archive',
+        desc: '配置备份与项目任务归档的存储目标（local / WebDAV / S3 兼容）；保存后立即生效。' },
     ],
   },
   {
@@ -165,6 +167,13 @@ const updTokenConfigured = shallowRef(false)
 const updTokenTouched = shallowRef(false)
 // ---- 软件更新配置草稿 ----
 const updDraft = reactive({ repo: '', token: '', auto_check: true })
+// ---- 备份与归档草稿（S2 存储目标 + 配置备份 + 项目归档）----
+const backupDraft = reactive({
+  backup_enabled: false, backup_target: 'local', backup_keep: 10,
+  backup_schedule_enabled: false, backup_schedule_interval: 1, backup_schedule_unit: 'days',
+  archive_enabled: false, archive_target: 'local', archive_include_runs: false, archive_keep: 10,
+})
+const targetsDraft = ref<Array<Record<string, string>>>([])
 // 掩码占位跟随轮询刷新（保存新密钥/令牌后不用刷新页面就能看到新掩码；
 // 只动展示用的掩码，不碰用户正在输入的草稿）
 watch(() => store.state?.llm.api_key_masked, (v) => {
@@ -635,6 +644,25 @@ watch(() => store.state, (s) => {
   draft.egress_mode = (s.egress_cfg?.mode as 'allowlist' | 'off') ?? 'allowlist'
   draft.egress_extra = [...(s.egress_cfg?.extra_hosts ?? [])]
   draft.egress_audit = s.egress_cfg?.audit ?? true
+  // 存储目标 + 备份/归档回填（密钥只回掩码，留空 = 保持不变）
+  backupDraft.backup_enabled = s.backup_cfg?.enabled ?? false
+  backupDraft.backup_target = s.backup_cfg?.target ?? 'local'
+  backupDraft.backup_keep = s.backup_cfg?.keep_last ?? 10
+  backupDraft.backup_schedule_enabled = s.backup_cfg?.schedule_enabled ?? false
+  backupDraft.backup_schedule_interval = s.backup_cfg?.schedule_interval ?? 1
+  backupDraft.backup_schedule_unit = s.backup_cfg?.schedule_unit ?? 'days'
+  backupDraft.archive_enabled = s.archive_cfg?.enabled ?? false
+  backupDraft.archive_target = s.archive_cfg?.target ?? 'local'
+  backupDraft.archive_include_runs = s.archive_cfg?.include_runs ?? false
+  backupDraft.archive_keep = s.archive_cfg?.keep_last ?? 10
+  const _st: Record<string, any> = (s as any).storage_targets || {}
+  targetsDraft.value = Object.entries(_st).map(([name, t]: [string, any]) => ({
+    name, type: t.type || 'local', dir: t.dir || '', url: t.url || '',
+    username: t.username || '', password: t.password_masked || '',
+    endpoint: t.endpoint || '', bucket: t.bucket || '', region: t.region || '',
+    access_key: t.access_key_masked || '', secret_key: t.secret_key_masked || '',
+    session_token: t.session_token_masked || '',
+  }))
   syncProfilesDraft(s.agent_profiles)
 })
 
@@ -1116,6 +1144,112 @@ async function saveEgress(): Promise<void> {
   void import('../store').then(m => m.refresh(true))
 }
 const egressStatus = computed(() => store.state?.egress_status)
+
+// ---- 备份与归档：存储目标 + 配置备份/项目归档 ----
+const backupSaving = shallowRef(false)
+function newTarget(): Record<string, string> {
+  return { name: '', type: 'webdav', dir: '', url: '', username: '', password: '',
+           endpoint: '', bucket: '', region: '', access_key: '', secret_key: '', session_token: '' }
+}
+function addTarget(): void { targetsDraft.value.push(newTarget()) }
+function removeTarget(i: number): void { targetsDraft.value.splice(i, 1) }
+const targetOptions = computed(() => [
+  { label: it('local — 配置目录 backups/'), value: 'local' },
+  ...targetsDraft.value.filter(t => (t.name || '').trim())
+    .map(t => ({ label: (t.name || '').trim(), value: (t.name || '').trim() })),
+])
+async function saveBackup(): Promise<void> {
+  backupSaving.value = true
+  try {
+    const storage_targets: Record<string, any> = {}
+    for (const t of targetsDraft.value) {
+      const name = (t.name || '').trim()
+      if (!name) continue
+      const entry: any = { type: t.type }
+      if (t.type === 'local') {
+        if (t.dir) entry.dir = t.dir
+      } else if (t.type === 'webdav') {
+        entry.url = (t.url || '').trim()
+        entry.username = t.username || ''
+        if (t.password) entry.password = t.password  // 非空才上报（三态）
+      } else {
+        entry.endpoint = (t.endpoint || '').trim()
+        entry.bucket = (t.bucket || '').trim()
+        entry.region = t.region || ''
+        if (t.access_key) entry.access_key = t.access_key
+        if (t.secret_key) entry.secret_key = t.secret_key
+        if (t.session_token) entry.session_token = t.session_token
+      }
+      storage_targets[name] = entry
+    }
+    await api.config({
+      storage_targets,
+      backup: { enabled: backupDraft.backup_enabled, target: backupDraft.backup_target,
+                keep_last: backupDraft.backup_keep,
+                schedule_enabled: backupDraft.backup_schedule_enabled,
+                schedule_interval: backupDraft.backup_schedule_interval,
+                schedule_unit: backupDraft.backup_schedule_unit },
+      archive: { enabled: backupDraft.archive_enabled, target: backupDraft.archive_target,
+                 include_runs: backupDraft.archive_include_runs, keep_last: backupDraft.archive_keep },
+    })
+    message()?.(it('备份与归档设置已保存并立即生效'))
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { backupSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+// ---- 手动触发：立即备份 / 立即归档 ----
+const backupNowSaving = shallowRef(false)
+async function backupNow(): Promise<void> {
+  backupNowSaving.value = true
+  try {
+    const r = await api.backup()
+    if (r.kind === 'local') {
+      message()?.(it('配置备份完成：') + (r.path || ''))
+    } else {
+      message()?.(it('配置备份完成并推送到 ') + r.kind + '：' + (r.handle || ''))
+    }
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { backupNowSaving.value = false }
+}
+const archiveNowSaving = shallowRef(false)
+const archiveProject = ref('')
+const archiveProjectOptions = computed(() =>
+  (store.state?.projects || []).map((p: any) => ({ label: p.name, value: p.name })))
+async function archiveNow(): Promise<void> {
+  const name = archiveProject.value
+  if (!name) { message()?.(it('请先选择要归档的项目'), 'error'); return }
+  archiveNowSaving.value = true
+  try {
+    const r = await api.archive(name)
+    if (r.kind === 'local') {
+      message()?.(it('项目归档完成：') + (r.path || ''))
+    } else {
+      message()?.(it('项目归档完成并推送到 ') + r.kind + '：' + (r.handle || ''))
+    }
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { archiveNowSaving.value = false }
+}
+const probeSaving = shallowRef(false)
+async function testTarget(i: number): Promise<void> {
+  const t = targetsDraft.value[i]
+  if (!t) return
+  probeSaving.value = true
+  try {
+    const r = await api.storageProbe({
+      type: t.type, dir: t.dir, url: t.url, username: t.username,
+      password: t.password, endpoint: t.endpoint, bucket: t.bucket,
+      region: t.region, access_key: t.access_key, secret_key: t.secret_key,
+      session_token: t.session_token,
+    })
+    if (r.ok) {
+      const kids = (r.children || []).join('、')
+      message()?.((kids ? it('目标可访问，子目录/文件：') + kids : it('目标可访问')), 'success')
+    } else {
+      message()?.(r.message || it('测试失败'), 'error')
+    }
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { probeSaving.value = false }
+}
 
 const pausedProjects = computed(() =>
   (store.state?.projects || []).filter(p => p.health?.paused))
@@ -2496,6 +2630,115 @@ const protocolOptions = computed(() => [
       <div class="sfoot">
         <NButton type="primary" :loading="egressSaving" @click="saveEgress">{{ it('保存出网白名单') }}</NButton>
       </div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'backup'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">archive</i> {{ it('存储目标') }}</template>
+            <div class="hint tool-foot">
+              {{ it('配置备份与项目任务归档共用这些目标；local 为内置本地目标（配置目录 backups/），无需声明。') }}
+              {{ it('密钥留空 = 保持不变。') }}
+            </div>
+            <div v-for="(t, i) in targetsDraft" :key="i" class="trow">
+              <div class="frow">
+                <div class="f1"><label>{{ it('目标名') }}</label>
+                  <NInput v-model:value="t.name" :placeholder="it('如 my-s3 / my-webdav / my-local')" /></div>
+                <div class="f1"><label>{{ it('类型') }}</label>
+                  <NSelect v-model:value="t.type" :options="[
+                    { label: it('本地目录 (local)'), value: 'local' },
+                    { label: 'WebDAV', value: 'webdav' },
+                    { label: it('S3 兼容'), value: 's3' },
+                  ]" /></div>
+                <div class="f0" style="display:flex;flex-direction:row;align-items:flex-end;padding-bottom:6px;gap:6px">
+                  <NButton size="small" :loading="probeSaving" @click="testTarget(i)">{{ it('测试') }}</NButton>
+                  <NButton size="small" quaternary type="error" @click="removeTarget(i)">{{ it('删除') }}</NButton></div>
+              </div>
+              <div v-if="t.type === 'local'" class="frow">
+                <div class="f1"><label>{{ it('目录（留空 = backups）') }}</label>
+                  <NInput v-model:value="t.dir" /></div>
+              </div>
+              <div v-else-if="t.type === 'webdav'" class="frow">
+                <div class="f2"><label>{{ it('WebDAV 目录 URL') }}</label>
+                  <NInput v-model:value="t.url" placeholder="https://dav.example.com/orcsy/" /></div>
+                <div class="f1"><label>{{ it('用户名（留空 = 匿名）') }}</label>
+                  <NInput v-model:value="t.username" /></div>
+                <div class="f1"><label>{{ it('密码（留空 = 保持不变）') }}</label>
+                  <NInput v-model:value="t.password" type="password" show-password-on="click" /></div>
+              </div>
+              <template v-else>
+                <div class="frow">
+                  <div class="f2"><label>{{ it('Endpoint（空 = AWS）') }}</label>
+                    <NInput v-model:value="t.endpoint" placeholder="https://s3.example.com" /></div>
+                  <div class="f1"><label>{{ it('Bucket') }}</label>
+                    <NInput v-model:value="t.bucket" /></div>
+                  <div class="f1"><label>{{ it('Region') }}</label>
+                    <NInput v-model:value="t.region" placeholder="us-east-1" /></div>
+                </div>
+                <div class="frow">
+                  <div class="f1"><label>{{ it('Access Key（留空 = 保持不变）') }}</label>
+                    <NInput v-model:value="t.access_key" /></div>
+                  <div class="f1"><label>{{ it('Secret Key（留空 = 保持不变）') }}</label>
+                    <NInput v-model:value="t.secret_key" type="password" show-password-on="click" /></div>
+                  <div class="f1"><label>{{ it('Session Token（可选）') }}</label>
+                    <NInput v-model:value="t.session_token" /></div>
+                </div>
+              </template>
+            </div>
+            <div class="sfoot">
+              <NButton size="small" @click="addTarget">{{ it('添加目标') }}</NButton>
+            </div>
+          </NCard>
+
+          <NCard size="small" class="scard" style="margin-top:12px">
+            <template #header><i class="ms">backup</i> {{ it('配置备份 & 项目归档') }}</template>
+            <div class="frow">
+              <div class="f1">
+                <label class="checkline"><NSwitch v-model:value="backupDraft.backup_enabled" />
+                  {{ it('启用配置备份') }}</label>
+                <label>{{ it('备份目标') }}</label>
+                <NSelect v-model:value="backupDraft.backup_target" :options="targetOptions" />
+                <label style="margin-top:8px">{{ it('保留份数') }}</label>
+                <NInputNumber v-model:value="backupDraft.backup_keep" :min="1" :max="100" />
+                <label class="checkline" style="margin-top:8px">
+                  <NSwitch v-model:value="backupDraft.backup_schedule_enabled" />
+                  {{ it('定时自动备份') }}</label>
+                <template v-if="backupDraft.backup_schedule_enabled">
+                  <div style="display:flex;gap:8px">
+                    <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+                      <label>{{ it('间隔数值') }}</label>
+                      <NInputNumber v-model:value="backupDraft.backup_schedule_interval" :min="1" :max="1000" style="width:100%" />
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+                      <label>{{ it('间隔单位') }}</label>
+                      <NSelect v-model:value="backupDraft.backup_schedule_unit" :options="[
+                        { label: it('小时'), value: 'hours' },
+                        { label: it('天'), value: 'days' },
+                        { label: it('周'), value: 'weeks' },
+                        { label: it('月'), value: 'months' },
+                      ]" style="width:100%" />
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <div class="f1">
+                <label class="checkline"><NSwitch v-model:value="backupDraft.archive_enabled" />
+                  {{ it('启用项目归档') }}</label>
+                <label>{{ it('归档目标') }}</label>
+                <NSelect v-model:value="backupDraft.archive_target" :options="targetOptions" />
+                <label class="checkline" style="margin-top:8px">
+                  <NSwitch v-model:value="backupDraft.archive_include_runs" />
+                  {{ it('附带 runs 运行台账') }}</label>
+                <label>{{ it('保留份数') }}</label>
+                <NInputNumber v-model:value="backupDraft.archive_keep" :min="1" :max="100" />
+              </div>
+            </div>
+            <div class="sfoot">
+              <NButton type="primary" :loading="backupSaving" @click="saveBackup">{{ it('保存备份与归档设置') }}</NButton>
+              <NButton :loading="backupNowSaving" @click="backupNow">{{ it('立即备份') }}</NButton>
+              <NSelect v-model:value="archiveProject" :options="archiveProjectOptions"
+                       style="width:200px" :placeholder="it('选择要归档的项目')" />
+              <NButton :loading="archiveNowSaving" @click="archiveNow">{{ it('立即归档') }}</NButton>
+            </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'app'">

@@ -765,7 +765,9 @@ def _auto_backup_config(log: Path) -> None:
     """
     import os as _os
     from pathlib import Path as _Path
-    from .backup import create_backup
+    from .backup import create_backup, push_backup_archive
+    from .config import load_config, resolve_storage_target
+    from .storage import LocalProvider, build_provider
 
     candidates = []
     env_dir = _os.environ.get("ORCSY_DATA_DIR")
@@ -779,9 +781,18 @@ def _auto_backup_config(log: Path) -> None:
         if not cfg_path.is_file():
             continue
         try:
-            dest = cfg_path.parent / "backups"
-            archive = create_backup(cfg_path, dest, keep_last=10)
+            archive = create_backup(cfg_path, cfg_path.parent / "backups", keep_last=10)
             append_install_log(log, f"升级前配置备份: {archive}")
+            try:
+                cfg = load_config(cfg_path, require_api_key=False)
+                target = resolve_storage_target(cfg.storage_targets, cfg.backup.target)
+                provider = build_provider(target, base_dir=cfg_path.parent)
+                if not isinstance(provider, LocalProvider):
+                    handle = push_backup_archive(archive, provider,
+                                                 keep_last=cfg.backup.keep_last)
+                    append_install_log(log, f"升级前配置备份已推送 {provider.kind}: {handle}")
+            except Exception as push_exc:  # noqa: BLE001 — 推送失败不阻止升级
+                append_install_log(log, f"升级前配置备份推送失败（不阻止升级）: {push_exc}")
         except Exception as exc:  # noqa: BLE001 — 备份失败不阻止升级
             append_install_log(log, f"升级前配置备份失败（不阻止升级）: {exc}")
         return

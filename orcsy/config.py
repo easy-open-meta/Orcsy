@@ -34,12 +34,54 @@ _LLM_FIELDS = (
 # 旧世代配置逐步迁移到当前世代；save_config 恒写当前世代。迁移器只做无损变换
 # （补默认/重命名/搬位/登记），任何破坏性 schema 变更必须在此注册新迁移
 # （1→2、2→3 …）并附带旧样本回归用例，而不是悄悄改默认值。
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
+
+
+def _migrate_v1_backup(raw: dict[str, Any]) -> dict[str, Any]:
+    """1→2 迁移：扁平 backup → storage_targets 注册表 + backup.target（幂等）。
+
+    旧形（0.28 及之前）：backup.{enabled,target_type,dir,url,username,password,keep_last}
+    新形（0.29 起）：storage_targets.<name> + backup.{enabled,target,keep_last}。
+    """
+    old_bk = raw.get("backup")
+    if not isinstance(old_bk, dict):
+        return raw
+    if "target_type" not in old_bk and "target" in old_bk:
+        return raw  # 已是新 schema
+    tt = str(old_bk.get("target_type") or "local").strip().lower()
+    new_bk: dict[str, Any] = {
+        "enabled": bool(old_bk.get("enabled", False)),
+        "target": "local",
+        "keep_last": old_bk.get("keep_last", 10),
+    }
+    synth: dict[str, dict[str, Any]] = {}
+    if tt == "webdav" and str(old_bk.get("url") or "").strip():
+        synth["webdav"] = {
+            "type": "webdav",
+            "url": str(old_bk["url"]).strip(),
+            "username": str(old_bk.get("username") or ""),
+            "password": str(old_bk.get("password") or ""),
+        }
+        new_bk["target"] = "webdav"
+    elif tt == "local":
+        d = str(old_bk.get("dir") or "").strip()
+        if d and d != "backups":
+            synth["local"] = {"type": "local", "dir": d}
+        new_bk["target"] = "local"
+    raw["backup"] = new_bk
+    if synth:
+        targets = raw.setdefault("storage_targets", {})
+        if isinstance(targets, dict):
+            for k, v in synth.items():
+                targets.setdefault(k, v)
+    return raw
+
 
 _CONFIG_MIGRATIONS: dict[int, "Callable[[dict[str, Any]], dict[str, Any]]"] = {
     # 0 = 无版本号的 0.21~0.27 世代配置：schema 一直增量演进、无破坏性变更，
-    # 0→1 仅登记版本号。首个真正的字段级迁移从 1→2 开始。
+    # 0→1 仅登记版本号。1 = 扁平 backup 重塑为 storage_targets（见上）。
     0: lambda raw: raw,
+    1: _migrate_v1_backup,
 }
 
 
@@ -640,16 +682,104 @@ class GitConfig:
 
 
 @dataclass
+class StorageTargetConfig:
+    """一个存储目标（备份/归档共用）：local / webdav / s3 三选一，按 type 取用字段。"""
+
+    type: str = "local"            # local | webdav | s3
+    dir: str = ""                  # local：备份目录（相对配置目录或绝对路径；空 = backups）
+    url: str = ""                  # webdav：目录 URL
+    username: str = ""             # webdav：Basic Auth 用户名
+    password: str = ""      # webdav：Basic Auth 密码
+    endpoint: str = ""             # s3：endpoint（MinIO 等 path-style；空 = AWS）
+    bucket: str = ""               # s3：桶名
+    region: str = ""               # s3：region（空默认 us-east-1）
+    access_key: str = ""           # s3：Access Key
+    secret_key: str = ""           # s3：Secret Key
+    session_token: str = ""        # s3：可选会话令牌
+
+
+@dataclass
 class BackupConfig:
-    """配置自动备份（1.0 稳定化 S2）：升级前自动备份 + WebDAV 远端。"""
+    """配置自动备份（1.0 稳定化 S2）：升级前自动备份 + 推送到指定存储目标。"""
 
     enabled: bool = False
-    target_type: str = "local"     # local | webdav
-    dir: str = "backups"           # 本地目标（相对配置目录或绝对路径）
-    url: str = ""                  # webdav 目标：目录 URL
-    username: str = ""
-    password: str = ""
+    target: str = "local"          # storage_targets 中的目标名；local 为内置默认
     keep_last: int = 10
+    # 定时自动备份
+    schedule_enabled: bool = False
+    schedule_interval: int = 1     # 间隔数值
+    schedule_unit: str = "days"    # hours | days | weeks | months
+
+
+@dataclass
+class ArchiveConfig:
+    """项目任务归档（评估⑤）：点时间快照推送到指定存储目标。"""
+
+    enabled: bool = False
+    target: str = "local"
+    include_runs: bool = False     # 是否附带 runs/<项目> 运行台账（审计留痕）
+    keep_last: int = 10
+
+
+def _parse_storage_target(name: str, raw: object) -> StorageTargetConfig:
+    """解析 storage_targets 单个条目并做基本字段校验。"""
+    if not isinstance(raw, dict):
+        raise ValueError(f"storage_targets.{name} 必须是字典（键值对）。")
+    t = str(raw.get("type") or "local").strip().lower()
+    if t not in ("local", "webdav", "s3"):
+        raise ValueError(f"storage_targets.{name}.type 只能是 local / webdav / s3（当前：{t or '空'}）")
+    cfg = StorageTargetConfig(
+        type=t,
+        dir=str(raw.get("dir") or "").strip(),
+        url=str(raw.get("url") or "").strip(),
+        username=str(raw.get("username") or ""),
+        password=str(raw.get("password") or ""),
+        endpoint=str(raw.get("endpoint") or "").strip(),
+        bucket=str(raw.get("bucket") or "").strip(),
+        region=str(raw.get("region") or "").strip(),
+        access_key=str(raw.get("access_key") or ""),
+        secret_key=str(raw.get("secret_key") or ""),
+        session_token=str(raw.get("session_token") or ""),
+    )
+    if t == "webdav" and not cfg.url.startswith(("http://", "https://")):
+        raise ValueError(f"storage_targets.{name}.url 必须以 http(s):// 开头")
+    if t == "s3" and not cfg.bucket:
+        raise ValueError(f"storage_targets.{name}.bucket 不能为空（s3 目标）")
+    return cfg
+
+
+def resolve_storage_target(targets: dict[str, StorageTargetConfig], name: str) -> StorageTargetConfig:
+    """按名取存储目标；local 为内置隐含目标（未配置也可用）。"""
+    name = (name or "").strip()
+    if name in targets:
+        return targets[name]
+    if name in ("", "local"):
+        return StorageTargetConfig(type="local")
+    raise ValueError(f"存储目标 {name!r} 不在 storage_targets 中")
+
+
+def storage_target_to_yaml(t: StorageTargetConfig) -> dict:
+    """存储目标 → YAML 字典（写盘用，按 type 只落该类型相关字段）。"""
+    d: dict = {"type": t.type}
+    if t.type == "local":
+        if t.dir:
+            d["dir"] = t.dir
+    elif t.type == "webdav":
+        d["url"] = t.url
+        if t.username:
+            d["username"] = t.username
+        if t.password:
+            d["password"] = t.password
+    elif t.type == "s3":
+        d["endpoint"] = t.endpoint
+        d["bucket"] = t.bucket
+        if t.region:
+            d["region"] = t.region
+        d["access_key"] = t.access_key
+        d["secret_key"] = t.secret_key
+        if t.session_token:
+            d["session_token"] = t.session_token
+    return d
 
 
 def resolve_git_author(global_git: GitConfig, project: ProjectConfig) -> tuple[str, str] | None:
@@ -763,6 +893,8 @@ class AppConfig:
     local_debug: LocalDebugConfig = field(default_factory=LocalDebugConfig)
     git: GitConfig = field(default_factory=GitConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
+    archive: ArchiveConfig = field(default_factory=ArchiveConfig)
+    storage_targets: dict[str, StorageTargetConfig] = field(default_factory=dict)
     agent_profiles: dict[str, AgentProfileConfig] = field(default_factory=dict)
     projects: list[ProjectConfig] = field(default_factory=list)
     source_path: Path | None = None   # 配置文件来源（web 界面提示用户编辑位置）
@@ -1748,18 +1880,40 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
             assert_review_model_distinct(
                 p_task_llm, p_review_llm, context=f"项目 {p_name} 的 review")
 
+    storage_raw = raw.get("storage_targets") or {}
+    if not isinstance(storage_raw, dict):
+        raise ValueError("storage_targets 配置必须是字典（键值对）。")
+    storage_targets: dict[str, StorageTargetConfig] = {}
+    for name, t_raw in storage_raw.items():
+        storage_targets[str(name)] = _parse_storage_target(str(name), t_raw)
+
     backup_raw = raw.get("backup") or {}
     if not isinstance(backup_raw, dict):
         raise ValueError("backup 配置必须是字典（键值对）。")
     backup_cfg = BackupConfig(
         enabled=bool(backup_raw.get("enabled", False)),
-        target_type=str(backup_raw.get("target_type") or "local"),
-        dir=str(backup_raw.get("dir") or "backups"),
-        url=str(backup_raw.get("url") or "").strip(),
-        username=str(backup_raw.get("username") or ""),
-        password=str(backup_raw.get("password") or ""),
+        target=str(backup_raw.get("target") or "local"),
         keep_last=max(1, min(int(backup_raw.get("keep_last", 10)), 100)),
+        schedule_enabled=bool(backup_raw.get("schedule_enabled", False)),
+        schedule_interval=max(1, min(int(backup_raw.get("schedule_interval", 1)), 1000)),
+        schedule_unit=str(backup_raw.get("schedule_unit") or "days").lower(),
     )
+    if backup_cfg.schedule_unit not in ("hours", "days", "weeks", "months"):
+        raise ValueError("backup.schedule_unit 只能是 hours / days / weeks / months")
+
+    archive_raw = raw.get("archive") or {}
+    if not isinstance(archive_raw, dict):
+        raise ValueError("archive 配置必须是字典（键值对）。")
+    archive_cfg = ArchiveConfig(
+        enabled=bool(archive_raw.get("enabled", False)),
+        target=str(archive_raw.get("target") or "local"),
+        include_runs=bool(archive_raw.get("include_runs", False)),
+        keep_last=max(1, min(int(archive_raw.get("keep_last", 10)), 100)),
+    )
+    # 目标引用必须可解析（local 为内置隐含目标）
+    resolve_storage_target(storage_targets, backup_cfg.target)
+    resolve_storage_target(storage_targets, archive_cfg.target)
+
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
                     runlog=runlog, budget=budget, resilience=resilience,
                     egress=egress, web=web,
@@ -1768,7 +1922,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     mirrors=mirrors,
                     review=review_cfg, subagent=subagent_cfg,
                     local_debug=local_debug_cfg,
-                    git=git_cfg, backup=backup_cfg, agent_profiles=agent_profiles,
+                    git=git_cfg, backup=backup_cfg, archive=archive_cfg,
+                    storage_targets=storage_targets, agent_profiles=agent_profiles,
                     projects=projects, source_path=path.resolve())
     # 厂商配额池是进程级单例：加载即生效（看板保存走 web.py 的同一入口）
     configure_limiter(cfg.subagent.max_parallel, cfg.subagent.adaptive)
@@ -1973,15 +2128,25 @@ def save_config(cfg: AppConfig) -> None:
             "author_name": cfg.git.author_name,
             "author_email": cfg.git.author_email,
         },
-        # 全局 Agent 角色预设池整体写回（漏写会在看板任意保存时静默丢失）
+        # 存储目标注册表 + 配置备份 + 项目归档：整体写回（漏写会被看板任意
+        # 保存静默重置，同 update/notify 教训）
+        "storage_targets": {
+            name: storage_target_to_yaml(t)
+            for name, t in cfg.storage_targets.items()
+        },
         "backup": {
             "enabled": cfg.backup.enabled,
-            "target_type": cfg.backup.target_type,
-            "dir": cfg.backup.dir,
-            "url": cfg.backup.url,
-            "username": cfg.backup.username,
-            "password": cfg.backup.password,
+            "target": cfg.backup.target,
             "keep_last": cfg.backup.keep_last,
+            "schedule_enabled": cfg.backup.schedule_enabled,
+            "schedule_interval": cfg.backup.schedule_interval,
+            "schedule_unit": cfg.backup.schedule_unit,
+        },
+        "archive": {
+            "enabled": cfg.archive.enabled,
+            "target": cfg.archive.target,
+            "include_runs": cfg.archive.include_runs,
+            "keep_last": cfg.archive.keep_last,
         },
         "agent_profiles": {
             pid: profile_to_yaml(prof) for pid, prof in cfg.agent_profiles.items()
@@ -2042,6 +2207,9 @@ __all__ = [
     "SubagentConfig",
     "LocalDebugConfig",
     "GitConfig",
+    "BackupConfig",
+    "ArchiveConfig",
+    "StorageTargetConfig",
     "AgentProfileConfig",
     "ProjectTeamConfig",
     "TeamMemberConfig",
@@ -2051,5 +2219,6 @@ __all__ = [
     "resolve_llm",
     "resolve_commands",
     "resolve_permission_mode",
+    "resolve_storage_target",
 ]
 

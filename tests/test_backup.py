@@ -1,11 +1,10 @@
-"""S2 配置备份/恢复回归：创建-恢复往返、保留数裁剪、路径穿越拒绝、配置分区读写。
+"""S2 配置备份/恢复回归：创建-恢复往返、保留数裁剪、路径穿越拒绝、存储目标读写。
 
 运行：uv run python tests/test_backup.py
 """
 
 from __future__ import annotations
 
-import io
 import sys
 import tempfile
 from pathlib import Path
@@ -82,6 +81,7 @@ def check_traversal_rejected() -> None:
 def check_webdav_push_monkeypatched() -> None:
     """WebDAV 推送：PUT 目标/认证/内容正确（monkeypatch httpx.put 不发真网）。"""
     import orcsy.backup as B
+    import orcsy.storage as S
 
     captured = {}
 
@@ -94,8 +94,8 @@ def check_webdav_push_monkeypatched() -> None:
 
         return R()
 
-    orig = B.httpx.put
-    B.httpx.put = fake_put
+    orig = S.httpx.put
+    S.httpx.put = fake_put
     try:
         with tempfile.TemporaryDirectory() as td:
             src = Path(td) / "config.yaml"
@@ -106,29 +106,39 @@ def check_webdav_push_monkeypatched() -> None:
             assert captured["auth"] == ("u", "p")
             assert captured["content"] == archive.read_bytes()
     finally:
-        B.httpx.put = orig
+        S.httpx.put = orig
     print("WebDAV 推送 ✅")
 
 
-def check_backup_section_roundtrip() -> None:
-    """backup 分区进配置读写循环：load/save 均保留（S1 往返盲区守卫同款）。"""
+def check_storage_targets_roundtrip() -> None:
+    """storage_targets + backup/archive 分区进配置读写循环（S1 往返盲区守卫同款）。"""
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "c.yaml"
         p.write_text(yaml.safe_dump({
             "llm": {"provider": "openai", "api_key": "sk-x",
                     "base_url": "https://a.example/v1", "model": "m"},
-            "backup": {"enabled": True, "target_type": "webdav",
-                       "url": "https://dav.example.com/orcsy/",
-                       "username": "u", "password": "p", "keep_last": 5},
+            "storage_targets": {
+                "dav": {"type": "webdav", "url": "https://dav.example.com/orcsy/",
+                        "username": "u", "password": "p"},
+                "s3": {"type": "s3", "endpoint": "https://s3.example.com", "bucket": "bk",
+                       "region": "us-east-1", "access_key": "ak", "secret_key": "sk"},
+            },
+            "backup": {"enabled": True, "target": "dav", "keep_last": 5},
+            "archive": {"enabled": True, "target": "s3", "include_runs": True,
+                        "keep_last": 3},
         }), encoding="utf-8")
         cfg = load_config(p, require_api_key=False)
-        assert cfg.backup.enabled is True and cfg.backup.target_type == "webdav"
-        assert cfg.backup.url == "https://dav.example.com/orcsy/" and cfg.backup.keep_last == 5
+        assert cfg.backup.target == "dav" and cfg.backup.keep_last == 5
+        assert cfg.storage_targets["dav"].url == "https://dav.example.com/orcsy/"
+        assert cfg.storage_targets["dav"].password == "p"
+        assert cfg.storage_targets["s3"].bucket == "bk"
+        assert cfg.archive.target == "s3" and cfg.archive.include_runs is True
         save_config(cfg)
-        again = yaml.safe_load(p.read_text(encoding="utf-8")).get("backup") or {}
-        assert again.get("enabled") is True and again.get("target_type") == "webdav", again
-        assert again.get("password") == "p", "备份分区写回应保留全部字段"
-    print("backup 分区读写往返 ✅")
+        again = yaml.safe_load(p.read_text(encoding="utf-8"))
+        assert again["backup"]["target"] == "dav"
+        assert again["storage_targets"]["dav"]["password"] == "p"
+        assert again["archive"]["target"] == "s3"
+    print("storage_targets/backup/archive 分区读写往返 ✅")
 
 
 if __name__ == "__main__":
@@ -136,5 +146,5 @@ if __name__ == "__main__":
     check_prune()
     check_traversal_rejected()
     check_webdav_push_monkeypatched()
-    check_backup_section_roundtrip()
+    check_storage_targets_roundtrip()
     print("test_backup: 全部通过")
