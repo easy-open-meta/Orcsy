@@ -2784,7 +2784,7 @@ const protocolOptions = computed(() => [
         </div>
       </div>
           </NCard>
-          <NCard size="small" class="scard">
+          <NCard size="small" class="scard" style="margin-top:14px">
             <template #header><i class="ms">lock</i> {{ it('看板访问密码') }}</template>
       <div class="frow">
         <div class="f1"><label>{{ it('看板登录密码（非空时访问页面/API 均需先登录，保存后立即生效）') }}</label>
