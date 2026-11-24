@@ -32,6 +32,10 @@ class TaskControls:
         with self._lock:
             self._events.pop((project, task_id), None)
 
+    def event(self, project: str, task_id: str) -> threading.Event | None:
+        with self._lock:
+            return self._events.get((project, task_id))
+
     def stop(self, project: str, task_id: str) -> bool:
         """置位停止信号；任务不在执行中返回 False（看板据此报 400）。"""
         with self._lock:

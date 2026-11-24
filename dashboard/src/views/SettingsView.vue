@@ -221,7 +221,8 @@ const toolsTab = shallowRef<'tools' | 'commands' | 'debug' | 'perms'>('tools')
 const cmdSearch = shallowRef('')
 const toolSearch = shallowRef('')
 
-const defaultToolCategories = [
+// 选项标签随语言切换更新（it=tNow 一次性取值，须包 computed）
+const defaultToolCategories = computed(() => [
   {
     key: 'file_ops',
     label: it('文件操作与编辑'),
@@ -278,9 +279,10 @@ const defaultToolCategories = [
     description: it('查阅专业技能库文档、抓取公网页面正文与镜像源延迟测速'),
     tools: ['read_skill', 'web_fetch', 'speedtest_mirrors'],
   },
-]
+])
 
-const defaultCommandCategories = [
+// 选项标签随语言切换更新（it=tNow 一次性取值，须包 computed）
+const defaultCommandCategories = computed(() => [
   {
     key: 'python',
     label: it('Python 生态'),
@@ -344,14 +346,14 @@ const defaultCommandCategories = [
     description: it('跨平台/Unix 常用只读与文本统计命令（只读无害）'),
     commands: ['ls', 'cat', 'wc', 'head', 'tail', 'grep', 'sort', 'uniq', 'cut', 'tr', 'diff', 'stat', 'du', 'df', 'pwd', 'printf', 'date', 'sleep', 'uname', 'which', 'id', 'basename', 'dirname', 'touch', 'md5sum', 'sha256sum', 'printenv'],
   },
-]
+])
 
 const toolCategories = computed(() => {
-  return store.state?.tool_categories?.filter(c => c.key !== 'local_debug' && c.key !== 'browser_auto') ?? defaultToolCategories
+  return store.state?.tool_categories?.filter(c => c.key !== 'local_debug' && c.key !== 'browser_auto') ?? defaultToolCategories.value
 })
 
 const commandCategories = computed(() => {
-  return store.state?.command_categories ?? defaultCommandCategories
+  return store.state?.command_categories ?? defaultCommandCategories.value
 })
 
 const mutatingToolsSet = new Set([
@@ -511,11 +513,12 @@ async function onTestBrowser(): Promise<void> {
   }
 }
 // ---- 访问权限草稿（全局默认；项目可在对话框里逐个覆盖） ----
-const permOptions = [
+// 选项标签随语言切换更新（it=tNow 一次性取值，须包 computed）
+const permOptions = computed(() => [
   { label: it('变更前询问（发生变更时询问：写/改/删/移文件、执行命令都挂起等批准）'), value: 'ask_on_change' },
   { label: it('自主模式（有风险时询问：仅 delete_file / move_file / run_command）'), value: 'autonomous' },
   { label: it('完全访问（减少确认次数：一律不询问，与历史行为一致）'), value: 'full_access' },
-]
+])
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
 // ---- Git 提交与合并开关（默认关闭：改动直接保留在工作区） ----
 const gitCommitAndMergeDraft = shallowRef(false)
@@ -673,7 +676,8 @@ const profilesSaving = shallowRef(false)
 const editingProfileId = shallowRef<string | null>(null)
 const profileTestingId = shallowRef<string | null>(null)
 
-const roleSelectOptions = [
+// 选项标签随语言切换更新（it=tNow 一次性取值，须包 computed）
+const roleSelectOptions = computed(() => [
   { label: it('项目经理 (PM)'), value: 'pm' },
   { label: it('后端开发工程师'), value: 'backend' },
   { label: it('前端开发工程师'), value: 'frontend' },
@@ -682,7 +686,7 @@ const roleSelectOptions = [
   { label: it('UI 视觉审查专家'), value: 'ui_critic' },
   { label: it('安全合规审计工程师'), value: 'security' },
   { label: it('自定义专职角色'), value: 'custom' },
-]
+])
 
 function getRoleIcon(role: string): string {
   const map: Record<string, string> = {

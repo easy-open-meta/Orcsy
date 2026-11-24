@@ -1089,6 +1089,12 @@ export default {
   '限制真正打给厂商的在途请求数（与「单次最多派 4 个子代理」的熔断值无关）；撞 429 自动对半降并发，成功后逐步爬回。': "Caps in-flight requests to the model provider, separately from the limit of 4 sub-agents per call. An HTTP 429 response halves the concurrency limit, which then rises gradually as requests succeed.",
   '按 429 / Retry-After 自适应降速（厂商不返回限流头时也有效）': 'Adapts to 429 / Retry-After (works even when providers omit rate-limit headers)',
 
+  '合并前复测命令必须是非空字符串组成的 JSON argv 数组，例如 ["npm", "test"]': 'The premerge command must be a JSON argv array of non-empty strings, such as ["npm", "test"].',
+  '已启用合并前复测，请填写有效的 JSON argv 数组，例如 ["npm", "test"]': 'Premerge retesting is enabled. Enter a valid JSON argv array, such as ["npm", "test"].',
+  '启用合并前复测（项目级 opt-in）': 'Retest before merge (project opt-in)',
+  '启用后，在隔离候选工作区合入最新已验收基线后重测；主工作区须干净，或仅包含与 stage 一致的已落地增量。测试失败将保留任务分支，等待人工检查与重新入队。': 'Retest an isolated candidate against the latest accepted baseline. The main workspace must be clean or contain only the accepted stage delta. Failed tests preserve the task branch for inspection and requeue.',
+  '复测命令 argv（JSON 字符串数组，不使用 shell 解析）': 'Retest argv (JSON string array; no shell parsing)',
+
   // ---- 镜像源 ----
   '镜像源管理与测速选源': 'Mirror management & speed test',
   'Agent 装环境/拉依赖前测速，哪个快用哪个。': 'Speed-tests mirrors before installs/dependency pulls and picks the fastest.',
@@ -1265,4 +1271,7 @@ export default {
   "（{p0}）。\n\n选择「保留我的修改」将覆盖最新内容；「采用最新状态」会放弃本页未保存的输入。": "({p0}).\n\nChoose \"Keep my changes\" to overwrite the latest version. Choose \"Use latest\" to discard the unsaved changes on this page.",
   "如 feat: 完成用户登录与前后端联调测试（首行标题，AI 生成的要点正文会附在下方）": "e.g., feat: complete user sign-in and frontend–backend integration tests (first line is the commit subject; AI-generated bullet points are appended below)",
   "看板将监听所有网络接口（web.host: 0.0.0.0），并沿用现有登录密码。": "The dashboard will listen on all network interfaces (web.host: 0.0.0.0) and keep the current sign-in password.",
+  '检测到未完成的任务草稿': 'Unsaved task draft found',
+  "项目「{p0}」有一份未保存的任务草稿（{p1}），是否继续编辑？": "Project \"{p0}\" has an unsaved task draft ({p1}). Continue editing?",
+  '继续编辑': 'Continue editing',
 } as Record<string, string>

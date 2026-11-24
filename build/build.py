@@ -765,7 +765,11 @@ def main() -> int:
                         break
             if iscc:
                 run([iscc, "installer.iss"], cwd=BUILD)
-                artifacts_done.append(f"Windows 首次安装包 build/Setup/orcsy-setup-{v_str}-windows-amd64.exe")
+                setup = BUILD / "Setup" / f"orcsy-setup-{v_str}-windows-amd64.exe"
+                digest = hashlib.sha256(setup.read_bytes()).hexdigest()
+                setup.with_name(setup.name + ".sha256").write_text(
+                    f"{digest}  {setup.name}\n", encoding="ascii")
+                artifacts_done.append(f"Windows 首次安装包 build/Setup/{setup.name}")
             else:
                 print("警告：未找到 ISCC.exe（Inno Setup 6），已跳过 Windows exe 安装包制作")
             build_update_zip(ver)

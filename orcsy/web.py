@@ -851,6 +851,8 @@ class AppState:
                 "max_agent_turns": p.max_agent_turns,
                 "allowed_branch": p.allowed_branch,
                 "allowed_commands": p.allowed_commands,
+                "premerge_test_enabled": p.premerge_test_enabled,
+                "premerge_test_command": p.premerge_test_command,
                 # 项目级密钥同样只出掩码（H2 同规则）：项目专属模型 api_key 与
                 # 仓库 token/密码都随 /api/state 外发，不能给明文
                 "llm": self._project_llm_public(p.llm),
@@ -1612,6 +1614,18 @@ class AppState:
         # 编辑现有项目时取原配置：密钥类字段的「三态」合并需要它（H2 脱敏配套）
         existing = (next((p for p in self.config.projects if p.name == original_name), None)
                     if original_name else None)
+        premerge_enabled = data.get("premerge_test_enabled", existing.premerge_test_enabled if existing else False)
+        if not isinstance(premerge_enabled, bool):
+            raise ValueError("premerge_test_enabled 必须是布尔值")
+        premerge_command = data.get("premerge_test_command", existing.premerge_test_command if existing else None)
+        if premerge_command is not None and (
+            not isinstance(premerge_command, list) or not premerge_command
+            or any(not isinstance(arg, str) or not arg.strip() or "\x00" in arg
+                   for arg in premerge_command)
+        ):
+            raise ValueError("premerge_test_command 必须是非空字符串 argv 列表")
+        if premerge_enabled and not premerge_command:
+            raise ValueError("启用合入前重测必须填写测试命令")
         # 项目专属模型绑定：字典则清洗+校验（值非法立刻报错），显式 null 或全空=清除绑定。
         # api_key 三态：键缺失=保持原值（看板只拿到掩码，未输入就不带键）；带键
         # （含空串）=按新值处理，空串即清除绑定回「继承全局」
@@ -1732,6 +1746,8 @@ class AppState:
             tasks_dir=tasks_dir, guide_file=guide_file,
             max_tasks_per_cycle=max_tasks, max_agent_turns=max_turns,
             allowed_commands=allowed, allowed_branch=branch, llm=llm, repo=repo,
+            premerge_test_enabled=premerge_enabled,
+            premerge_test_command=list(premerge_command) if premerge_command else None,
             tools=tools, permission_mode=perm,
             review_enabled=review_enabled_raw,
             review_llm=review_llm,
@@ -1742,6 +1758,12 @@ class AppState:
             git_author_email=git_author_email or None,
             team=team,
         )
+        if draft.premerge_test_enabled:
+            from .tools_cmd import check_command_allowed
+            allowed_cmd, reason = check_command_allowed(
+                draft.premerge_test_command or [], resolve_commands(self.config.commands, draft))
+            if not allowed_cmd:
+                raise ValueError(f"合入前重测命令不允许：{reason}")
         # 审查模型互斥校验（R4）：配置了审查模型且开关生效时，与该项目生效
         # 任务模型同名即拒绝保存（400，前端红字提示同一文案）
         eff_review_llm = resolve_review_llm(self.config.review, review_llm,

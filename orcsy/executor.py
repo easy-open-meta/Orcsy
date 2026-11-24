@@ -1012,6 +1012,67 @@ class TaskExecutor:
         except Exception:  # noqa: BLE001 — 台账旁路
             self.log.warning("工作区 diff 记录失败（可忽略）", exc_info=True)
 
+    def _merge_with_premerge(self, task: Task, result: TaskResult, branch: str,
+                             wt_path: Path) -> bool | None:
+        """None 表示重测门禁受阻；False 才表示需要冲突自愈的合并失败。"""
+        lock = self.merge_lock or contextlib.nullcontext()
+        with lock:
+            if self.project.premerge_test_enabled:
+                from .premerge import PremergeConflict, PremergeError, verify_candidate
+                try:
+                    if not self.worktree_isolation:
+                        raise PremergeError("合入前重测要求独立任务 worktree")
+                    main_branch = self.project.allowed_branch or self.git.current_branch()
+                    if self.git.current_branch() != main_branch:
+                        raise PremergeError("主工作区不在项目允许的主分支")
+                    stage_mode = not self.commit_and_merge
+                    base_branch = self._stage_branch() if stage_mode else main_branch
+                    approval = self._make_approval_gate(task)
+                    if approval is not None:
+                        denied = approval("run_command", {
+                            "command": self.project.premerge_test_command or [],
+                            "timeout_seconds": 600,
+                        })
+                        if denied:
+                            raise PremergeError(denied)
+                    main_sha, output = verify_candidate(
+                        self.git, base_branch, result.wip_commit or branch,
+                        self.project.premerge_test_command or [], self.allowed_commands,
+                        stop_event=get_task_controls().event(self.project.name, task.id),
+                        extra_env=self.extra_env, allow_stage_workspace=stage_mode,
+                    )
+                    from .runlog import redact_text
+                    self._rec_event("premerge_test", verdict="pass", base=main_sha,
+                                    command=redact_text(" ".join(self.project.premerge_test_command or []), 300),
+                                    output=redact_text(output, 4000))
+                    if self.git.rev_parse(base_branch) != main_sha:
+                        raise PremergeError("合并前候选基线变化，拒绝使用过期测试结果")
+                    if stage_mode:
+                        from .premerge import stage_matches_main_workspace
+                        if not stage_matches_main_workspace(self.git, main_branch, base_branch):
+                            raise PremergeError("合并前主工作区与 stage 不再一致，拒绝落地")
+                    elif self.git.is_dirty() or self.git.current_branch() != main_branch:
+                        raise PremergeError("合并前主工作区发生变化，拒绝使用过期测试结果")
+                    ok, reason = self._verify_claim(task)
+                    if not ok:
+                        raise PremergeError(f"重测后任务租约失效，拒绝合入：{reason}")
+                except PremergeConflict as exc:
+                    from .runlog import redact_text
+                    result.notes = (result.notes + "\n" if result.notes else "") + redact_text(str(exc), 2000)
+                    self._rec_event("premerge_test", verdict="conflict", summary=redact_text(str(exc), 2000))
+                    return False
+                except (PremergeError, GitError) as exc:
+                    from .runlog import redact_text
+                    result.block_reason = "premerge_test_failed"
+                    result.notes = (result.notes + "\n" if result.notes else "") + redact_text(str(exc), 2000)
+                    self._rec_event("premerge_test", verdict="fail", summary=redact_text(str(exc), 2000))
+                    return None
+            if result.block_reason == "premerge_test_failed":
+                result.block_reason = ""
+            if self.commit_and_merge:
+                return self._merge_and_push(task, result, branch, wt_path=wt_path)
+            return self._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
+
     def _complete_with_review(self, task: Task, response: AgentResponse,
                               result: TaskResult) -> tuple[str, object]:
         """git 项目 action=completed 的完整路径：WIP 提交 → 审查门 → 安全合入/落地。
@@ -1029,12 +1090,8 @@ class TaskExecutor:
         base_branch = self._base_branch()
         message = response.commit_message or f"fix: {task.title}"
 
-        def _finish_merge() -> bool:
-            lock = self.merge_lock or contextlib.nullcontext()
-            with lock:
-                if self.commit_and_merge:
-                    return self._merge_and_push(task, result, branch, wt_path=wt_path)
-                return self._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
+        def _finish_merge() -> bool | None:
+            return self._merge_with_premerge(task, result, branch, wt_path)
 
         # 提交前二次校验（V1-R2）：任务内容被改 / 租约易主 / TTL 过期 → 不提交
         ok, reason = self._verify_claim(task)
@@ -1089,6 +1146,8 @@ class TaskExecutor:
             self.log.info("审查门跳过（%s），安全合入", skip_reason)
             merged = _finish_merge()
             self._rec_event("review_verdict", verdict="skipped", summary=skip_reason)
+            if merged is None:
+                return "blocked", self._skipped_review(skip_reason)
             self._record_merge_event(merged)
             if merged:
                 self._mark_merged(task, result)
@@ -1109,6 +1168,8 @@ class TaskExecutor:
 
         if review.verdict == "pass":
             merged = _finish_merge()
+            if merged is None:
+                return "blocked", review
             self._record_merge_event(merged, review)
             if merged:
                 self._mark_merged(task, result)
@@ -1286,6 +1347,9 @@ class TaskExecutor:
                     self.git.run("merge", "--no-ff", "-m",
                                  f"Merge arranger work for {task.id}", result.wip_commit or branch)
         except GitError:
+            self.git.run("merge", "--abort", check=False)
+            # squash 冲突没有 MERGE_HEAD；保留索引与工作树供人工裁决，
+            # 不能 reset --hard：用户可能在合并期间修改了其他文件。
             self.log.exception("合并任务 %s 的提交失败，保留分支 %s 供人工处理",
                                task.id, branch)
             result.notes = (result.notes + "\n" if result.notes else "") + \

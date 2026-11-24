@@ -34,21 +34,22 @@ function fmtFull(v: number | undefined): string {
   return (v ?? 0).toLocaleString('zh-CN')
 }
 
-const OUT_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }> = {
+// 标签随语言切换更新（t=tNow 一次性取值，须包 computed）
+const OUT_TAG = computed<Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }>>(() => ({
   done: { type: 'success', name: t('完成') },
   open: { type: 'info', name: t('待续') },
   blocked: { type: 'warning', name: t('受阻') },
   cancelled: { type: 'default', name: t('取消') },
-}
+}))
 
 // 审查记录（kind=review）的结果列用另一套词汇：badge 颜色区分 + 🔍 前缀，
 // 与任务结果（完成/受阻）同框但一眼可辨，不再混用同一列语义
-const REVIEW_TAG: Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }> = {
+const REVIEW_TAG = computed<Record<string, { type: 'success' | 'warning' | 'default' | 'error' | 'info'; name: string }>>(() => ({
   pass: { type: 'success', name: t('审查通过') },
   fail: { type: 'error', name: t('审查不通过') },
   error: { type: 'warning', name: t('审查失败') },
   skipped: { type: 'default', name: t('免审查') },
-}
+}))
 
 // 台账旧记录缺 kind 字段视为任务记录
 function isReview(r: { kind?: string }): boolean {
@@ -56,8 +57,8 @@ function isReview(r: { kind?: string }): boolean {
 }
 type TagType = 'success' | 'warning' | 'default' | 'error' | 'info'
 function tagOf(r: { kind?: string; outcome: string }): { type: TagType; name: string } {
-  if (isReview(r)) return REVIEW_TAG[r.outcome] || { type: 'default', name: r.outcome }
-  return OUT_TAG[r.outcome] || { type: 'default', name: r.outcome }
+  if (isReview(r)) return REVIEW_TAG.value[r.outcome] || { type: 'default', name: r.outcome }
+  return OUT_TAG.value[r.outcome] || { type: 'default', name: r.outcome }
 }
 
 // ---- 最近记录分类 Tab：全部 / 任务 / 审查 ----

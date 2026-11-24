@@ -10,6 +10,7 @@ import importlib.util
 import re
 import shutil
 import socketserver
+import hashlib
 import sys
 import tempfile
 import threading
@@ -116,17 +117,25 @@ def _server() -> tuple[_Srv, str]:
     return srv, f"http://127.0.0.1:{srv.server_address[1]}"
 
 
+def _write_checksum(path: Path) -> None:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    path.with_name(path.name + ".sha256").write_text(
+        f"{digest}  {path.name}\n", encoding="ascii")
+
+
 def _fake_pkg_dir() -> Path:
     d = Path(tempfile.mkdtemp(prefix="orcsy-rel-pkg-"))
-    (d / "orcsy-setup-0.15.0.exe").write_bytes(b"MZ" + b"x" * 2048)
-    (d / "orcsy-update-0.15.0.zip").write_bytes(b"PK" + b"y" * 1024)
-    (d / "orcsy-update-0.15.0.zip.sha256").write_text(
-        "0" * 64 + "  orcsy-update-0.15.0.zip\n", encoding="ascii")
+    setup = d / "orcsy-setup-0.15.0.exe"
+    update = d / "orcsy-update-0.15.0.zip"
+    setup.write_bytes(b"MZ" + b"x" * 2048)
+    update.write_bytes(b"PK" + b"y" * 1024)
+    _write_checksum(setup)
+    _write_checksum(update)
     return d
 
 
-EXPECTED_NAMES = ["orcsy-setup-0.15.0.exe", "orcsy-update-0.15.0.zip",
-                  "orcsy-update-0.15.0.zip.sha256"]
+EXPECTED_NAMES = ["orcsy-setup-0.15.0.exe", "orcsy-setup-0.15.0.exe.sha256",
+                  "orcsy-update-0.15.0.zip", "orcsy-update-0.15.0.zip.sha256"]
 
 
 def check_artifacts() -> None:
@@ -136,14 +145,21 @@ def check_artifacts() -> None:
         assert [f.name for f in files] == EXPECTED_NAMES, files
         # 测试新架构后缀 windows-amd64 匹配
         (d / "orcsy-setup-0.15.0.exe").unlink()
-        (d / "orcsy-setup-0.15.0-windows-amd64.exe").write_bytes(b"MZ" + b"x" * 2048)
+        (d / "orcsy-setup-0.15.0.exe.sha256").unlink()
+        setup_arch = d / "orcsy-setup-0.15.0-windows-amd64.exe"
+        setup_arch.write_bytes(b"MZ" + b"x" * 2048)
+        _write_checksum(setup_arch)
         files_arch = release.check_artifacts((0, 15, 0), setup_dir=d)
         assert files_arch[0].name == "orcsy-setup-0.15.0-windows-amd64.exe"
         (d / "orcsy-setup-0.15.0-windows-amd64.exe").unlink()
-        (d / "orcsy-setup-0.15.0.exe").write_bytes(b"MZ" + b"x" * 2048)
+        (d / "orcsy-setup-0.15.0-windows-amd64.exe.sha256").unlink()
+        setup = d / "orcsy-setup-0.15.0.exe"
+        setup.write_bytes(b"MZ" + b"x" * 2048)
+        _write_checksum(setup)
         # 测试 windows-arm64 产物自动识别与追加
-        (d / "orcsy-0.15.0-windows-arm64.zip").write_bytes(b"PK" + b"z" * 1024)
-        (d / "orcsy-0.15.0-windows-arm64.zip.sha256").write_text("0" * 64 + "  orcsy-0.15.0-windows-arm64.zip\n")
+        arm = d / "orcsy-0.15.0-windows-arm64.zip"
+        arm.write_bytes(b"PK" + b"z" * 1024)
+        _write_checksum(arm)
         files_arm = release.check_artifacts((0, 15, 0), setup_dir=d)
         names_arm = [f.name for f in files_arm]
         assert "orcsy-0.15.0-windows-arm64.zip" in names_arm
@@ -166,6 +182,35 @@ def check_artifacts() -> None:
         except release.ReleaseError as e:
             assert ".sha256" in str(e) and "build" in str(e)
         print("check_artifacts（三附件齐全/缺 zip/缺 sha256 拦下）✅")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def check_checksum_rejected() -> None:
+    d = _fake_pkg_dir()
+    try:
+        update = d / "orcsy-update-0.15.0.zip"
+        update.write_bytes(update.read_bytes() + b"tampered")
+        try:
+            release.check_artifacts((0, 15, 0), setup_dir=d)
+            raise AssertionError("篡改附件应拒绝发布")
+        except release.ReleaseError as exc:
+            assert "SHA256 不匹配" in str(exc)
+        _write_checksum(update)
+        sidecar = d / "orcsy-update-0.15.0.zip.sha256"
+        sidecar.write_text("0" * 64 + "  wrong.zip\n", encoding="ascii")
+        try:
+            release.check_artifacts((0, 15, 0), setup_dir=d)
+            raise AssertionError("错误文件名应拒绝发布")
+        except release.ReleaseError as exc:
+            assert "文件名错误" in str(exc)
+        _write_checksum(update)
+        (d / "orcsy-update-0.15.0.zip.sha256.sha256").write_text("garbage")
+        try:
+            release.check_artifacts((0, 15, 0), setup_dir=d)
+            raise AssertionError("重复校验文件应拒绝发布")
+        except release.ReleaseError as exc:
+            assert "未纳入清单" in str(exc)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -241,10 +286,10 @@ def check_dry_run() -> None:
         shutil.copy(Path(__file__).resolve().parents[1] / "build" / "build.py",
                     fake / "build" / "build.py")
         for name, data in (("orcsy-setup-0.15.0.exe", b"MZ" + b"x" * 100),
-                           ("orcsy-update-0.15.0.zip", b"PK" + b"y" * 100),
-                           ("orcsy-update-0.15.0.zip.sha256",
-                            ("0" * 64 + "  orcsy-update-0.15.0.zip\n").encode())):
-            (fake / "build" / "Setup" / name).write_bytes(data)
+                           ("orcsy-update-0.15.0.zip", b"PK" + b"y" * 100)):
+            artifact = fake / "build" / "Setup" / name
+            artifact.write_bytes(data)
+            _write_checksum(artifact)
         old_root = release.ROOT
         release.ROOT = fake
         try:
@@ -262,6 +307,7 @@ def check_dry_run() -> None:
 
 def main() -> int:
     check_artifacts()
+    check_checksum_rejected()
     check_upload_flow()
     check_idempotent_replace()
     check_dry_run()

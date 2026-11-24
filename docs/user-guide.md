@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.32.3**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.33.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 
 ---
@@ -155,7 +155,7 @@ When it works, it:
 
 #### Steps
 
-1. Download `orcsy-setup-0.32.3-windows-amd64.exe` from the release page:
+1. Download `orcsy-setup-0.33.0-windows-amd64.exe` from the release page:
    - Gitee: <https://gitee.com/java-and-net/Orcsy/releases>
    - GitHub: <https://github.com/easy-open-meta/Orcsy/releases>
 2. Double-click it. If Windows SmartScreen appears, click **More info** → **Run anyway**.
@@ -1193,6 +1193,12 @@ When multiple team roles work in parallel and their worktree branches touch the 
 > if the worktree is empty while the base branch has content, it is force-removed and
 > rebuilt automatically, transparent to the Agent.
 
+### 10.23.1 Premerge retest (project opt-in)
+
+Enable "Retest against latest main before merge" in project settings and enter a JSON argument array such as `["npm", "test"]`. This deterministic gate applies to Git worktree coding tasks; optional tests selected by the review Agent are separate. Orcsy builds a disposable merged candidate from the current accepted baseline and the task commit, runs the configured command there, and only then lands the change. A failed/missing command, timeout or unrelated workspace changes blocks landing and preserves the task branch for inspection and manual requeue. The executable must be in the effective command allowlist; the timeout is 600 seconds.
+
+In team stage mode, the main worktree may contain precisely the accepted stage delta. Any other uncommitted or untracked changes make the gate refuse to run until checked manually. Choose an offline-capable test command that needs no production secrets. This feature defaults off; existing projects retain their previous merge behavior.
+
 ### 10.24 Dependency graph visualization (DAG)
 
 Expand "Dependency Graph (DAG)" on the project card to see task dependency topology:
@@ -1238,7 +1244,7 @@ Open task details → "Run records" → click a run_id to expand the event strea
 | Tasks | Each project's `tasks\` | `./projects/<project>/tasks/` | `/srv/orcsy-projects/<project>/tasks/` |
 | Project guide | Each project's `AGENT.md` | `./projects/<project>/AGENT.md` | `/srv/orcsy-projects/<project>/AGENT.md` |
 
-### 11.2 Backup
+### 11.2 Config backup
 
 Back up:
 
@@ -1249,7 +1255,89 @@ Back up:
 
 `config.yaml` contains your API key. **Never upload it to a public repository or share it.**
 
-### 11.3 Move to another computer
+Built-in config backup (1.0 stabilization S2). Backs up `config.yaml` + `sessions.json` (login sessions); archives are `chmod 600`.
+
+```bash
+# Back up to the built-in local target (backups/ next to config.yaml)
+orcsy backup-config
+
+# Back up to a named storage target (see storage_targets below)
+orcsy backup-config --target my-s3
+
+# Roll back after a failed upgrade: restore from a local archive
+# (the current config is automatically kept as config.yaml.pre-restore)
+orcsy restore-config backups/orcsy-config-backup-<timestamp>.tar.gz
+
+# Download an archive from a storage target, then restore
+# (the second argument is the remote archive filename)
+orcsy restore-config --target my-s3 orcsy-config-backup-<timestamp>.tar.gz
+```
+
+- Auto-backup: **before installing/upgrading a version, a local config backup is created automatically**, then pushed to `backup.target` (a push failure does not block the upgrade);
+- A backup archive contains the API key and login sessions, so treat it with the same confidentiality as `config.yaml`.
+
+Storage targets are declared in the `storage_targets` registry; `backup.target` references one by name (`local` is the built-in local target and needs no declaration):
+
+```yaml
+storage_targets:
+  my-webdav:
+    type: webdav
+    url: https://dav.example.com/orcsy/   # WebDAV directory URL
+    username: ""                          # optional; empty = anonymous
+    password: ""                    # Basic Auth password
+  my-s3:
+    type: s3
+    endpoint: https://s3.example.com      # empty = AWS; set for MinIO etc.
+    bucket: orcsy-backups
+    region: us-east-1
+    access_key: ""
+    secret_key: ""
+backup:
+  enabled: false          # also push the pre-upgrade backup to the remote
+  target: my-s3           # storage_targets name; local = built-in
+  keep_last: 10           # number of local archives to retain
+```
+
+Three target types are supported: `local` (a directory), `webdav` (WebDAV PUT + Basic Auth, covering most NAS/cloud-drive products), and `s3` (S3-compatible protocol, e.g. MinIO or the S3-compatible endpoints offered by Tencent COS / Alibaba OSS; signed with AWS Signature V4, no extra dependency). Remote target hosts are added to the egress allowlist automatically. You can also configure storage targets and the backup target visually under **Settings → Data & compliance → Backup & archive**.
+
+### 11.3 Project archive
+
+Pack one project's task snapshot and push it to a storage target (intended as snapshot distribution / compliance audit, not a replacement for a Git remote):
+
+```bash
+# Archive to the built-in local target (archive/ under the data directory)
+orcsy archive-project demo
+
+# Archive to a named target and include the runs/<project> ledger
+orcsy archive-project demo --target my-s3 --include-runs
+```
+
+Contents: `tasks/*.md` (including the `done/` archive) + `AGENT.md`; `--include-runs` also includes the run ledger. The archive target and retention count are configured in the `archive` section of `config.yaml` (`enabled` / `target` / `include_runs` / `keep_last`), or under **Settings → Data & compliance → Backup & archive**. Archiving is one-way; to restore, download and copy the files back into `tasks/` (automatic re-import to be designed later).
+
+### 11.4 Manual rollback after a failed upgrade
+
+Windows release packages are currently **unsigned**. SHA256 checks download integrity, not publisher identity; a personal self-signed certificate does not remove public SmartScreen warnings. Download only from a release source you trust.
+
+1. Stop Orcsy. Copy the **entire data directory and every project directory** to another safe location before changing the installation. `backup-config` contains only `config.yaml` and `sessions.json`, not tasks, skills, run logs or project repositories; automatic pre-upgrade backup is best-effort, so confirm the archive exists.
+2. Obtain the previous application package from the trusted release source and verify its checksum. Keep the newer installation and data snapshot separately; do not launch the old version against the only copy of newer data—an old version may reject the new `config_version`.
+3. Restore the matching pre-upgrade data/project snapshots, or use `orcsy restore-config <archive>` for configuration and sessions only after saving a full snapshot. Install the previous package, run `orcsy validate`, and confirm projects and tasks in the dashboard. If validation fails, stop and restore the saved snapshot rather than editing the only copy.
+
+### 11.5 Release verification and support policy
+
+The release workflow prepares artifacts and runs a prepublish smoke check. It validates every artifact's SHA256 sidecar, checks the CHANGELOG entry, extracts the Linux amd64 tarball, runs `python3 -m compileall`, and runs the packaged CLI with `--version`. It also checks the required files inside the Windows update and ARM64 archives.
+
+Before installing a package:
+
+1. Download the package and its matching `.sha256` file from a release source you trust.
+2. Verify the SHA256 digest with the platform tool (`sha256sum` on Linux, `certutil -hashfile <file> SHA256` on Windows).
+3. Keep the package and digest together while testing installation and rollback.
+4. Record the Orcsy version, platform, package name, digest result, install result, and rollback result in the release checklist.
+
+Support follows the policy in `CHANGELOG.md`: only the newest 1.x minor release receives support, including its patch fixes. Older 1.x minors do not receive backports after a newer minor is released. 0.x releases have no backport commitment; upgrade to the current release line for fixes.
+
+The S4 production observation is a separate 4–8 week evidence period. A release checklist or smoke result is not evidence that S4 is complete.
+
+### 11.6 Move to another computer
 
 1. Install Orcsy on the new computer;
 2. Close the program;

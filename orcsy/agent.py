@@ -685,9 +685,18 @@ class ProjectAgent:
                 self.log.warning("补审指纹校验失败（忽略）", exc_info=True)
 
         if ex.review_llm is None:
-            # 审查已停用（如配置热重载清掉了模型）：放行归档，兜底清队
-            self.log.info("审查未启用，任务 %s 放行归档（兜底清 pending）", task.id)
+            self.log.info("审查未启用，任务 %s 进入补审合入门禁", task.id)
             set_task_file_review_pending(task.path, False)
+            if ex.project.premerge_test_enabled:
+                wt_path = ex._task_worktree(task)
+                branch = ex._task_branch(task)
+                result = TaskResult(task_id=task.id, outcome="blocked",
+                                    role=ex.team_role, agent_name=ex.agent_name)
+                merged = ex._merge_with_premerge(task, result, branch, wt_path)
+                if merged is True:
+                    result.outcome = "done"
+                    ex.remove_worktree(wt_path=wt_path, branch=branch if ex.per_task_worktree else None)
+                return result
             self._archive_task(task, review_note="审查未执行（审查已停用，兜底放行）")
             return None
 
@@ -704,15 +713,11 @@ class ProjectAgent:
                                   role=ex.team_role, agent_name=ex.agent_name)
         if review.verdict == "pass":
             result.outcome = "done"
-            lock = ex.merge_lock or threading.Lock()
-            with lock:
-                if ex.commit_and_merge:
-                    merged = ex._merge_and_push(task, result, branch, wt_path=wt_path)
-                else:
-                    merged = ex._merge_to_stage_and_land_main(task, result, branch, wt_path=wt_path)
-            if not merged:
+            merged = ex._merge_with_premerge(task, result, branch, wt_path)
+            if merged is not True:
                 result.outcome = "blocked"
-                result.notes = (result.notes or "") + "审查通过但合并失败，需人工介入"
+                if merged is False:
+                    result.notes = (result.notes or "") + "审查通过但合并失败，需人工介入"
             else:
                 ex.remove_worktree(wt_path=wt_path, branch=branch if ex.per_task_worktree else None)
         # fail/error：outcome=blocked，交 _write_back_result 按 verdict 分派

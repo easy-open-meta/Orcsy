@@ -299,7 +299,11 @@ projects: []
 #    #   http_request: true            # 开启本地 API 请求调试工具（默认关闭）
 #    # permission_mode: autonomous     # 项目级访问权限覆盖（ask_on_change / autonomous /
 #    #                                 # full_access）；缺省 = 跟随全局 permissions.mode
-#    # commit_and_merge: true          # 项目级覆盖：任务完成后自动提交并合并代码（缺省 = 跟随全局 git.commit_and_merge 关闭）
+#    # commit_and_merge: true          # 项目级覆盖：任务完成后自动提交并合并代码（默认 false）
+#    # premerge_test_enabled: false    # 合入前重测（显式启用）；主工作区须仅含 stage 已验收增量
+#    # premerge_test_command:          # argv 字符串数组，不经过 shell
+#    #   - npm
+#    #   - test
 #    # team:                           # 多模型 Agent 项目小组编排（自由组合角色）：
 #    #   enabled: true                 #   开启小组模式（强制开启按任务 Worktree 沙盒隔离）
 #    #   execution_mode: parallel_worktree # 并发策略：parallel_worktree（安全并发）/ sequential（串行）

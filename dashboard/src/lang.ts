@@ -72,9 +72,14 @@ function apply(): void {
 }
 
 export function setLang(l: Lang): void {
+  const changed = lang.value !== l
   lang.value = l
   apply()
   try { localStorage.setItem(KEY, l) } catch { /* 隐私模式忽略 */ }
+  // 兜底：语言切换后整页重载一次，确保任何未走响应式的数据源
+  // （如历史遗留的一次性取值选项列表、已打开弹窗内冻结的下拉数据）
+  // 也按新语言重新初始化；路由（含 hash）与 localStorage 均保留
+  if (changed && typeof window !== 'undefined') window.location.reload()
 }
 
 const CYCLE: Lang[] = ['zh', 'zhTW', 'en']

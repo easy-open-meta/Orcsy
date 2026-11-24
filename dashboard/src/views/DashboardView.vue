@@ -657,8 +657,13 @@ async function quickAdd(p: ProjectT): Promise<void> {
   margin-bottom: 16px;
 }
 .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 14px; }
+/* align-items: start——卡片保持自身内容高度：同行某卡展开任务列表变高时，
+   其余卡片不跟随拉伸（默认 stretch 会把矮卡拉到与高卡等高，底部空出大段空白） */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 14px; align-items: start; }
 .phead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+/* 卡片较窄时徽章行（.phead）会把标题区压成 0 宽（标题竖排一字一行）：
+   Naive 的 __main 是 flex: 1 1 0%，只吃剩余空间，这里给标题区保底宽度 */
+.proj :deep(.n-card-header__main) { min-width: 90px; }
 .git-refresh { padding: 0 6px; font-size: 13px; }
 /* 路径与任务统计同行两端对齐：路径过长自行折行，统计钉在右上角不随路径折行漂移 */
 .pathline { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }

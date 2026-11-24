@@ -119,6 +119,8 @@ class ProjectConfig:
     allowed_branch: str | None = None # 仅在该分支上工作；None 表示当前分支
     max_agent_turns: int = 40         # 单个任务的工具循环轮数上限
     allowed_commands: list[str] | None = None  # Agent 可执行的命令白名单；None 用内置默认
+    premerge_test_enabled: bool = False  # 合入前在最新主分支候选工作区重测（显式启用）
+    premerge_test_command: list[str] | None = None  # argv，不经过 shell
     # 项目专属模型绑定：部分覆盖全局 llm 配置（只写需要换的字段，其余继承全局）。
     # 存原始字典而非 LLMConfig——全局配置改动后，未覆盖字段始终继承最新全局值。
     llm: dict[str, Any] | None = None
@@ -1829,6 +1831,26 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
             if not (p_review_rounds == -1 or 1 <= p_review_rounds <= 10):
                 raise ValueError(
                     f"项目 {p_name} 的 review_max_rounds 应为 -1（不设上限）或 1~10（当前：{p_review_rounds}）")
+        premerge_enabled = item.get("premerge_test_enabled", False)
+        if not isinstance(premerge_enabled, bool):
+            raise ValueError(f"项目 {p_name} 的 premerge_test_enabled 必须是布尔值")
+        premerge_command = item.get("premerge_test_command")
+        if premerge_command is not None:
+            if (not isinstance(premerge_command, list) or not premerge_command
+                    or any(not isinstance(arg, str) or not arg.strip() or "\x00" in arg
+                           for arg in premerge_command)):
+                raise ValueError(f"项目 {p_name} 的 premerge_test_command 必须是非空字符串 argv 列表")
+        if premerge_enabled and not premerge_command:
+            raise ValueError(f"项目 {p_name} 启用合入前重测时必须配置 premerge_test_command")
+        if premerge_enabled:
+            from .tools_cmd import check_command_allowed
+            project_allowed = (item.get("allowed_commands")
+                               if isinstance(item.get("allowed_commands"), list) else None)
+            allowed, reason = check_command_allowed(
+                premerge_command, project_allowed if project_allowed is not None
+                else resolve_commands(commands, ProjectConfig(name=p_name, path=p_path)))
+            if not allowed:
+                raise ValueError(f"项目 {p_name} 的合入前重测命令不允许：{reason}")
         projects.append(
             ProjectConfig(
                 name=p_name,
@@ -1843,6 +1865,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     [str(c) for c in item["allowed_commands"]]
                     if isinstance(item.get("allowed_commands"), list) else None
                 ),
+                premerge_test_enabled=premerge_enabled,
+                premerge_test_command=list(premerge_command) if premerge_command else None,
                 llm=p_llm or None,
                 repo=p_repo or None,
                 tools=p_tools,
@@ -2159,6 +2183,9 @@ def save_config(cfg: AppConfig) -> None:
                 "max_agent_turns": p.max_agent_turns,
                 **({"allowed_branch": p.allowed_branch} if p.allowed_branch else {}),
                 **({"allowed_commands": p.allowed_commands} if p.allowed_commands else {}),
+                **({"premerge_test_enabled": True} if p.premerge_test_enabled else {}),
+                **({"premerge_test_command": p.premerge_test_command}
+                   if p.premerge_test_command else {}),
                 **({"llm": p.llm} if p.llm else {}),
                 **({"review_enabled": p.review_enabled}
                    if p.review_enabled is not None else {}),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, NSpin, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
-import { computed, nextTick, reactive, ref, shallowRef, watch } from 'vue'
-import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode, type RunDetailT, type RunSummaryT, type TaskDepT } from '../api'
+import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import { api, ConflictError, type DirListing, type ModelInfo, type PermissionMode, type RunDetailT, type RunSummaryT, type TaskDepT, type TeamMemberT } from '../api'
 import { isMobile, viewportHeight } from '../mobile'
 import { miIcon } from '../mi'
 import { beginRestartWait, navigateTo, openTaskView, refresh, ui, store } from '../store'
@@ -20,6 +20,22 @@ Object.assign(message, messageApi)
 ;(window as any).$dialog = useDialog() as any
 
 // ---------- 项目对话框 ----------
+interface TeamMemberDraft {
+  id: string
+  profile: string
+  enabled: boolean
+  name: string
+  role: string
+  description: string
+  ll_model: string
+  ll_protocol: string
+  ll_base: string
+  ll_key: string
+  ll_key_masked: string
+  allow_test_scripts: boolean
+  extra_prompt: string
+}
+
 const pDraft = reactive({
   name: '', path: '', tasks_dir: 'tasks', guide_file: 'AGENT.md',
   max_tasks: 1, max_turns: 40, branch: '', cmds: '', enabled: true,
@@ -46,6 +62,8 @@ const pDraft = reactive({
   debug_hosts_text: '',
   use_cam: false,
   cam_enabled: false,
+  premerge_test_enabled: false,
+  premerge_test_command: '',
   git_author_name: '', git_author_email: '',
   team: {
     enabled: false,
@@ -55,14 +73,15 @@ const pDraft = reactive({
     chain_within_cycle: true,
     max_chain_steps_per_cycle: 10,
     fallback_role: 'backend',
-    members: [] as any[],
+    members: [] as TeamMemberDraft[],
   },
 })
 
 const teamMemberKeyTouched = reactive<Record<string, boolean>>({})
 const gitIniting = shallowRef(false)
 
-const roleSelectOptions = [
+// 选项标签随语言切换更新：tNow 为一次性取值，须包 computed 才响应 lang 变化
+const roleSelectOptions = computed(() => [
   { label: t('项目经理 (PM)'), value: 'pm' },
   { label: t('后端开发工程师'), value: 'backend' },
   { label: t('前端开发工程师'), value: 'frontend' },
@@ -71,7 +90,7 @@ const roleSelectOptions = [
   { label: t('UI 视觉审查专家'), value: 'ui_critic' },
   { label: t('安全合规审计工程师'), value: 'security' },
   { label: t('自定义专职角色'), value: 'custom' },
-]
+])
 
 function getMemberRoleIcon(role: string): string {
   const map: Record<string, string> = {
@@ -94,14 +113,14 @@ function addTeamMember(): void {
   const base = 'custom'
   let id = base
   let n = 2
-  const existing = new Set(pDraft.team.members.map((m: any) => m.id))
+  const existing = new Set(pDraft.team.members.map(m => m.id))
   while (existing.has(id)) {
     id = `${base}_${n}`
     n++
   }
   pDraft.team.members.push({
     id, profile: '', enabled: true, name: '', role: 'custom',
-    description: '', ll_model: '', ll_key: '', ll_key_masked: '',
+    description: '', ll_model: '', ll_protocol: '', ll_base: '', ll_key: '', ll_key_masked: '',
     allow_test_scripts: false, extra_prompt: '',
   })
 }
@@ -109,7 +128,7 @@ function addTeamMember(): void {
 // 新建项目默认小组成员：内置角色逐个绑定同名预设（预设不存在则留空自定义配置）。
 // 0.31.0 起角色池扩展了 devops / ui_critic / security——老版本升级后没有这些
 // 预设也照常加成员，模型与工具走角色内置默认（可在成员卡里再改）
-function defaultTeamMembers(): any[] {
+function defaultTeamMembers(): TeamMemberDraft[] {
   const roles: Array<{ id: string, profile: string, role: string }> = [
     { id: 'pm', profile: 'pm_default', role: 'pm' },
     { id: 'backend', profile: 'backend_default', role: 'backend' },
@@ -171,7 +190,8 @@ const pDevServerGroupEnabled = computed({
   },
 })
 
-const defaultProjectToolCategories = [
+// 选项标签随语言切换更新（tNow 一次性取值，须包 computed）
+const defaultProjectToolCategories = computed(() => [
   {
     key: 'file_ops',
     label: t('文件操作与编辑'),
@@ -231,10 +251,10 @@ const defaultProjectToolCategories = [
       'browser_close',
     ],
   },
-]
+])
 
 const projectToolCategories = computed(() => {
-  return store.state?.tool_categories ?? defaultProjectToolCategories
+  return store.state?.tool_categories ?? defaultProjectToolCategories.value
 })
 
 function pToggleToolsGroup(tools: string[], enable: boolean): void {
@@ -298,13 +318,14 @@ const repoPassPlaceholder = computed(() => {
 })
 
 // ---------- 访问权限（人工审批）公共文案 ----------
-const PERM_LABEL: Record<string, string> = {
+// 选项标签随语言切换更新（tNow 一次性取值，须包 computed）
+const PERM_LABEL = computed<Record<string, string>>(() => ({
   ask_on_change: t('变更前询问'),
   autonomous: t('自主模式'),
   full_access: t('完全访问'),
-}
+}))
 const permOptions = computed(() => [
-  { label: tFmt('跟随全局（当前：{p0}）', { p0: PERM_LABEL[store.state?.permissions_cfg?.mode || 'full_access'] }), value: '' },
+  { label: tFmt('跟随全局（当前：{p0}）', { p0: PERM_LABEL.value[store.state?.permissions_cfg?.mode || 'full_access'] }), value: '' },
   { label: t('变更前询问（文件/命令变更都询问）'), value: 'ask_on_change' },
   { label: t('自主模式（仅高风险询问：删除/移动/执行命令）'), value: 'autonomous' },
   { label: t('完全访问（不询问，减少确认次数）'), value: 'full_access' },
@@ -402,6 +423,10 @@ watch(() => ui.projectDlg, (dlg) => {
   pDraft.git_author_name = p?.git_author_name ?? ''
   pDraft.git_author_email = p?.git_author_email ?? ''
   pDraft.cam_enabled = p?.commit_and_merge ?? false
+  pDraft.premerge_test_enabled = p?.premerge_test_enabled ?? false
+  pDraft.premerge_test_command = p?.premerge_test_command
+    ? JSON.stringify(p.premerge_test_command)
+    : ''
 
   for (const k of Object.keys(teamMemberKeyTouched)) delete teamMemberKeyTouched[k]
   const ptTeam = p?.team ?? null
@@ -413,7 +438,7 @@ watch(() => ui.projectDlg, (dlg) => {
     pDraft.team.chain_within_cycle = ptTeam.chain_within_cycle ?? true
     pDraft.team.max_chain_steps_per_cycle = ptTeam.max_chain_steps_per_cycle ?? 10
     pDraft.team.fallback_role = ptTeam.fallback_role || 'backend'
-    pDraft.team.members = (ptTeam.members || []).map((m: any) => ({
+    pDraft.team.members = (ptTeam.members || []).map((m: TeamMemberT) => ({
       id: m.id,
       profile: m.profile || '',
       enabled: m.enabled !== false,
@@ -447,11 +472,12 @@ const pModels = ref<ModelInfo[]>([])
 const pFetching = shallowRef(false)
 const pTesting = shallowRef(false)
 const pModelOptions = computed(() => pModels.value.map(m => ({ label: m.id, value: m.id })))
-const llProviderOptions = [
+// 选项标签随语言切换更新（tNow 一次性取值，须包 computed）
+const llProviderOptions = computed(() => [
   { label: t('继承全局'), value: '' },
   { label: t('openai（兼容协议）'), value: 'openai' },
   { label: 'anthropic', value: 'anthropic' },
-]
+])
 const effLlm = () => ({
   provider: pDraft.ll_provider || store.state?.llm.provider || 'openai',
   base_url: pDraft.ll_base.trim() || store.state?.llm.base_url || '',
@@ -479,13 +505,14 @@ const repoPlatform = computed(() => {
   const hit = ['github', 'gitee', 'gitlab'].find(k => host.includes(k))
   return hit ? hit.toUpperCase() : ''
 })
-const repoProviderOptions = [
+// 选项标签随语言切换更新（tNow 一次性取值，须包 computed）
+const repoProviderOptions = computed(() => [
   { label: t('自动识别（按 URL）'), value: '' },
   { label: 'GitHub', value: 'github' },
   { label: 'Gitee', value: 'gitee' },
   { label: t('GitLab（含自托管）'), value: 'gitlab' },
   { label: t('Gitea（含自托管）'), value: 'gitea' },
-]
+])
 // 编辑对话框里回显上次自动拉取结果（状态来自 /api/state 的 issue_auto_pull）
 const repoAutoPullHint = computed(() => {
   const p = ui.projectDlg?.original
@@ -533,7 +560,7 @@ const availableTeamModelOptions = computed(() => {
   return Array.from(set).map(id => ({ label: id, value: id }))
 })
 
-function getMemberModelPlaceholder(m: any): string {
+function getMemberModelPlaceholder(m: TeamMemberDraft): string {
   if (m.profile && store.state?.agent_profiles?.[m.profile]?.llm?.model) {
     return `继承预设（${store.state?.agent_profiles?.[m.profile]?.llm?.model}）`
   }
@@ -548,7 +575,7 @@ function getMemberModelPlaceholder(m: any): string {
 
 const memberFetchingId = shallowRef<string | null>(null)
 
-async function fetchMemberModels(m: any): Promise<void> {
+async function fetchMemberModels(m: TeamMemberDraft): Promise<void> {
   memberFetchingId.value = m.id
   try {
     const prof = m.profile ? store.state?.agent_profiles?.[m.profile] : null
@@ -585,7 +612,7 @@ function getMemberRoleTemplate(role: string): string {
   return ''
 }
 
-function loadMemberTemplate(m: any): void {
+function loadMemberTemplate(m: TeamMemberDraft): void {
   const tpl = getMemberRoleTemplate(m.role || m.id)
   if (!tpl) {
     message.warning(t('未找到该角色的内置模版'))
@@ -669,6 +696,21 @@ function browsePath(): void {
   ui.browserDlg = true
 }
 
+function parsePremergeTestCommand(): string[] | null {
+  const raw = pDraft.premerge_test_command.trim()
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0
+        || parsed.some(part => typeof part !== 'string' || !part.trim() || part.includes('\0'))) {
+      return null
+    }
+    return parsed as string[]
+  } catch {
+    return null
+  }
+}
+
 async function saveProject(): Promise<void> {
   if (!ui.projectDlg) return
   if (pDraft.use_repo && !pDraft.repo_url.trim()) {
@@ -678,6 +720,14 @@ async function saveProject(): Promise<void> {
   // 审查模型互斥（前端第一道，后端仍强制校验）：同名直接拦截
   if (reviewModelConflict.value) {
     pDraft.err = reviewModelConflict.value
+    return
+  }
+  if (pDraft.premerge_test_command.trim() && !parsePremergeTestCommand()) {
+    pDraft.err = t('合并前复测命令必须是非空字符串组成的 JSON argv 数组，例如 ["npm", "test"]')
+    return
+  }
+  if (pDraft.premerge_test_enabled && !parsePremergeTestCommand()) {
+    pDraft.err = t('已启用合并前复测，请填写有效的 JSON argv 数组，例如 ["npm", "test"]')
     return
   }
   try {
@@ -729,6 +779,8 @@ async function saveProject(): Promise<void> {
         ? pDraft.debug_hosts_text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)
         : null,
       commit_and_merge: pDraft.use_cam ? pDraft.cam_enabled : null,
+      premerge_test_enabled: pDraft.premerge_test_enabled,
+      premerge_test_command: parsePremergeTestCommand(),
       git_author_name: pDraft.git_author_name?.trim() || null,
       git_author_email: pDraft.git_author_email?.trim() || null,
       team: pDraft.team.enabled ? {
@@ -739,7 +791,7 @@ async function saveProject(): Promise<void> {
         chain_within_cycle: pDraft.team.chain_within_cycle,
         max_chain_steps_per_cycle: pDraft.team.max_chain_steps_per_cycle,
         fallback_role: pDraft.team.fallback_role.trim() || undefined,
-        members: pDraft.team.members.map((m: any) => {
+        members: pDraft.team.members.map(m => {
           const mObj: any = {
             id: m.id.trim(),
             profile: m.profile.trim() || undefined,
@@ -963,8 +1015,10 @@ const draftAvailable = shallowRef(false)
 let draftTimer = 0
 
 function saveDraft(): void {
-  if (!draftKey.value) return
+  if (!draftKey.value || !ui.taskDlg) return
+  // project/id 供整页重载（如切语言）后启动扫描定位重开；id 统一用 'new' 表示新建
   localStorage.setItem(draftKey.value, JSON.stringify({
+    project: ui.taskDlg.project, id: ui.taskDlg.id || 'new',
     title: tDraft.title, priority: tDraft.priority, labels: tDraft.labels,
     assignee: tDraft.assignee, description: tDraft.description,
     depends_on: tDraft.depends_on, at: Date.now(),
@@ -999,6 +1053,49 @@ watch(tDraft, () => {
   if (draftPaused || !draftKey.value) return
   window.clearTimeout(draftTimer)
   draftTimer = window.setTimeout(saveDraft, 300)
+})
+
+// ---- 切语言整页重载 / 异常中断后的草稿找回 ----
+// ① beforeunload 同步落盘：防抖窗口（300ms）内的最后输入在页面卸载瞬间不丢；
+// ② 启动时扫描未恢复草稿（带重开上下文的最新一条），提示「继续编辑」——
+//    点击后打开对应任务弹窗，弹窗内自动出现既有「恢复」条（打开时检查草稿）
+onMounted(() => {
+  window.addEventListener('beforeunload', () => {
+    if (ui.taskDlg && !tReadonly.value && !draftPaused && draftKey.value) {
+      window.clearTimeout(draftTimer)
+      saveDraft()
+    }
+  })
+  // 延后一拍再扫：避开首屏渲染与初始加载提示
+  window.setTimeout(() => {
+    try {
+      let found: { project: string; id: string; at: number } | null = null
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (!k || !k.startsWith(DRAFT_PREFIX)) continue
+        let d: Record<string, any>
+        try { d = JSON.parse(localStorage.getItem(k) || '{}') } catch { continue }
+        // 只提示带重开上下文的草稿（project/id 字段本次新增；旧草稿仍走弹窗内手动恢复）
+        if (typeof d.project !== 'string' || !d.project) continue
+        const at = typeof d.at === 'number' ? d.at : 0
+        if (!found || at > found.at) found = { project: d.project, id: String(d.id ?? 'new'), at }
+      }
+      if (!found) return
+      const target = found
+      window.$dialog?.warning({
+        title: t('检测到未完成的任务草稿'),
+        content: tFmt('项目「{p0}」有一份未保存的任务草稿（{p1}），是否继续编辑？',
+          { p0: target.project, p1: target.id === 'new' ? t('新建任务') : target.id }),
+        positiveText: t('继续编辑'),
+        negativeText: t('稍后再说'),
+        onPositiveClick() {
+          ui.taskDlg = target.id === 'new'
+            ? { project: target.project, id: null }
+            : { project: target.project, id: target.id }
+        },
+      })
+    } catch { /* 扫描失败按无草稿处理 */ }
+  }, 800)
 })
 
 // ---- 移动端 Markdown 快捷工具条：一键插入常用标记，光标定位插入点 ----
@@ -1497,6 +1594,20 @@ async function newFolder(): Promise<void> {
         <div class="f1"><label>{{ t('测试 Test') }}</label><NInput v-model:value="pDraft.test" placeholder="npm test" /></div>
       </div>
     </template>
+    <div class="premerge-test" style="margin-top:12px; padding:10px; border:1px solid var(--line); border-radius:6px">
+      <label class="checkline">
+        <NCheckbox v-model:checked="pDraft.premerge_test_enabled" />
+        {{ t('启用合并前复测（项目级 opt-in）') }}
+      </label>
+      <div class="hint" style="margin-top:6px">
+        {{ t('启用后，在隔离候选工作区合入最新已验收基线后重测；主工作区须干净，或仅包含与 stage 一致的已落地增量。测试失败将保留任务分支，等待人工检查与重新入队。') }}
+      </div>
+      <div v-if="pDraft.premerge_test_enabled || pDraft.premerge_test_command.trim()" style="margin-top:8px">
+        <label>{{ t('复测命令 argv（JSON 字符串数组，不使用 shell 解析）') }}</label>
+        <NInput v-model:value="pDraft.premerge_test_command" type="textarea" :rows="2"
+                placeholder="[&quot;npm&quot;, &quot;test&quot;]" />
+      </div>
+    </div>
     <label class="checkline" style="margin-top:12px">
       <NSwitch v-model:value="pDraft.use_cam" />
       {{ t('覆盖 Git 代码提交与合并策略') }}（{{ t('关闭 = 跟随全局设置') }}{{ store.state?.git_cfg?.commit_and_merge ? t('开启') : t('关闭') }}）

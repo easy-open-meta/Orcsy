@@ -41,6 +41,54 @@ def check_create_restore_roundtrip() -> None:
     print("备份-恢复往返 ✅")
 
 
+def check_upgrade_failure_recovery() -> None:
+    """隔离数据目录演练：旧配置迁移、升级故障、配置/会话恢复与数据快照。"""
+    import shutil
+    from orcsy.config import CONFIG_VERSION
+
+    sample = Path(__file__).parent / "config_samples" / "config-0.26.yaml"
+    with tempfile.TemporaryDirectory() as td:
+        data = Path(td) / "data"
+        data.mkdir()
+        config = data / "config.yaml"
+        shutil.copy2(sample, config)
+        sessions = data / "sessions.json"
+        sessions.write_text('{"session": "fixture"}', encoding="utf-8")
+        tasks = data / "tasks" / "open.md"
+        tasks.parent.mkdir()
+        tasks.write_text("old task", encoding="utf-8")
+        runlog = data / "state" / "runs.json"
+        runlog.parent.mkdir()
+        runlog.write_text('{"completed": ["before-upgrade"]}', encoding="utf-8")
+        snapshot = Path(td) / "snapshot"
+        shutil.copytree(data, snapshot)
+        expected = {p.relative_to(snapshot): p.read_bytes()
+                    for p in snapshot.rglob("*") if p.is_file()}
+        archive = create_backup(config, Path(td) / "backups")
+
+        migrated = load_config(config, require_api_key=False)
+        save_config(migrated)
+        assert yaml.safe_load(config.read_text(encoding="utf-8"))["config_version"] == CONFIG_VERSION
+        config.write_text("config_version: 999\n", encoding="utf-8")
+        sessions.unlink()
+        tasks.write_text("damaged task", encoding="utf-8")
+        runlog.unlink()
+        (data / "state" / "new-after-upgrade.json").write_text("stale", encoding="utf-8")
+
+        # 配置归档恢复配置与会话；部署快照恢复整个数据目录。
+        restore_backup(archive, config)
+        assert config.read_bytes() == expected[Path("config.yaml")]
+        assert sessions.read_bytes() == expected[Path("sessions.json")]
+        assert tasks.read_text(encoding="utf-8") == "damaged task"
+        shutil.rmtree(data)
+        shutil.copytree(snapshot, data)
+        recovered = {p.relative_to(data): p.read_bytes()
+                     for p in data.rglob("*") if p.is_file()}
+        assert recovered == expected, "完整快照恢复后文件列表和每个文件的内容应一致"
+        assert load_config(config, require_api_key=False).projects == migrated.projects
+    print("隔离数据目录升级故障/手动恢复演练 ✅")
+
+
 def check_prune() -> None:
     """保留最近 keep_last 份，更旧删除。"""
     with tempfile.TemporaryDirectory() as td:
@@ -143,6 +191,7 @@ def check_storage_targets_roundtrip() -> None:
 
 if __name__ == "__main__":
     check_create_restore_roundtrip()
+    check_upgrade_failure_recovery()
     check_prune()
     check_traversal_rejected()
     check_webdav_push_monkeypatched()

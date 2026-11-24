@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from orcsy import USER_AGENT  # noqa: E402
 from orcsy.issues import IssueError, detect_repo  # noqa: E402
+from build.verify_release import ArtifactError, verify_checksums  # noqa: E402
 
 
 class ReleaseError(Exception):
@@ -68,7 +69,7 @@ def expected_artifacts(ver: tuple[int, int, int],
         d / f"orcsy-setup-{v}.exe",
     ]
     setup_file = next((f for f in setup_candidates if f.is_file()), setup_candidates[0])
-    base = [setup_file,
+    base = [setup_file, setup_file.with_name(setup_file.name + ".sha256"),
             d / f"orcsy-update-{v}.zip",
             d / f"orcsy-update-{v}.zip.sha256"]
     extra = [
@@ -90,11 +91,22 @@ def expected_artifacts(ver: tuple[int, int, int],
 def check_artifacts(ver: tuple[int, int, int],
                     setup_dir: Path | str | None = None) -> list[Path]:
     files = expected_artifacts(ver, setup_dir)
+    d = Path(setup_dir) if setup_dir else ROOT / "build" / "Setup"
+    v = ".".join(map(str, ver))
     missing = [f.name for f in files if not f.is_file() or f.stat().st_size == 0]
     if missing:
         raise ReleaseError(
             f"缺少发布附件：{', '.join(missing)}。请先运行 build.bat（或 "
             f"uv run python build/build.py）产出安装包与 .sha256 校验文件后再发布。")
+    selected = {f.name for f in files}
+    for artifact in d.glob(f"orcsy*{v}*"):
+        if artifact.is_file() and artifact.name not in selected:
+            if artifact.name.endswith(".sha256") or artifact.suffix in (".exe", ".zip", ".gz", ".deb"):
+                raise ReleaseError(f"发布目录有未纳入清单的版本附件：{artifact.name}")
+    try:
+        verify_checksums(files)
+    except ArtifactError as exc:
+        raise ReleaseError(str(exc)) from exc
     return files
 
 
@@ -291,8 +303,9 @@ def main(argv: list[str] | None = None) -> int:
         if not body.strip():
             body = (f"Orcsy {tag}\n\n"
                     f"- `{files[0].name}`：首次安装包（exe 安装向导）\n"
-                    f"- `{files[1].name}`：自更新包（zip，看板「手动导入安装包」或在线更新使用）\n"
-                    f"- `{files[2].name}`：自更新包 sha256 校验文件（在线更新完整性校验用）")
+                    f"- `{files[2].name}`：自更新包（zip，看板「手动导入安装包」或在线更新使用）\n"
+                    f"- `{files[3].name}`：自更新包 sha256 校验文件（在线更新完整性校验用）")
+        body += "\n\nWindows 安装包未签名；SHA256 仅校验完整性，不认证发布者身份。"
 
         rel = create_or_get_release(repo, tag, f"Orcsy {tag}", body, token,
                                     api_base=args.api_base)

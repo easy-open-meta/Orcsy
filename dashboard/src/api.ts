@@ -199,6 +199,10 @@ export interface ProjectT {
   /** 代码提交与合并开关：任务完成后是否自动 commit 并 merge 到主分支；null = 跟随全局（全局默认 false 关闭） */
   commit_and_merge?: boolean | null
   commit_and_merge_effective?: boolean
+  /** 项目级 opt-in：合并前在目标 worktree 执行一次复测；默认关闭 */
+  premerge_test_enabled?: boolean
+  /** 合并前复测命令的 argv；null = 未配置 */
+  premerge_test_command?: string[] | null
   /** 项目级提交身份覆盖（null = 继承全局） */
   git_author_name?: string | null
   git_author_email?: string | null

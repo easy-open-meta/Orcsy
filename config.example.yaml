@@ -194,6 +194,32 @@ masking:
 #                              # 改动直接留在工作区，方便人工检查与自由提交；
 #                              # 开启后在独立 worktree 分支完成开发并自动提交合并）
 
+# 存储目标 + 备份/归档：配置备份（backup）与项目任务归档（archive）共用这些目标。
+#   local 是内置隐含目标（写到配置目录 backups/），无需声明。
+# storage_targets:
+#   my-webdav:
+#     type: webdav
+#     url: https://dav.example.com/orcsy/   # WebDAV 目录 URL
+#     username: ""                          # Basic Auth 用户名；留空 = 匿名
+#     password: ""                    # Basic Auth 密码
+#   my-s3:
+#     type: s3
+#     endpoint: https://s3.example.com      # 空 = AWS；MinIO/兼容空间填 endpoint
+#     bucket: orcsy-backups
+#     region: us-east-1
+#     access_key: ""
+#     secret_key: ""
+#     # session_token: ""                   # 可选会话令牌
+# backup:
+#   enabled: false            # 升级前自动备份是否也推送到远端（本地始终留一份）
+#   target: local             # storage_targets 中的目标名；local = 内置本地
+#   keep_last: 10
+# archive:
+#   enabled: false
+#   target: local             # 项目任务归档目标名；local = 内置本地
+#   include_runs: false       # 是否附带 runs/<项目> 运行台账（审计留痕）
+#   keep_last: 10
+
 # agent_profiles:              # 全局 Agent 角色预设池（多模型项目小组使用，可选）：
 #   pm_default:                #   预设 ID
 #     name: "项目经理 PM"        #   显示名称
@@ -257,7 +283,11 @@ projects: []
 #    #   http_request: true            # 开启本地 API 请求调试工具（默认关闭）
 #    # permission_mode: autonomous     # 项目级访问权限覆盖（ask_on_change / autonomous /
 #    #                                 # full_access）；缺省 = 跟随全局 permissions.mode
-#    # commit_and_merge: true          # 项目级覆盖：任务完成后自动提交并合并代码（缺省 = 跟随全局 git.commit_and_merge 关闭）
+#    # commit_and_merge: true          # 项目级覆盖：任务完成后自动提交并合并代码（默认 false）
+#    # premerge_test_enabled: false    # 合入前重测（显式启用）；主工作区须仅含 stage 已验收增量
+#    # premerge_test_command:          # argv 字符串数组，不经过 shell
+#    #   - npm
+#    #   - test
 #    # team:                           # 多模型 Agent 项目小组编排（自由组合角色）：
 #    #   enabled: true                 #   开启小组模式（强制开启按任务 Worktree 沙盒隔离）
 #    #   execution_mode: parallel_worktree # 并发策略：parallel_worktree（安全并发）/ sequential（串行）

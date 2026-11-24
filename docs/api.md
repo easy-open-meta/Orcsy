@@ -13,7 +13,8 @@
   2. HttpOnly Cookie（登录时由服务端 Set-Cookie，浏览器自动携带）。
   未认证访问受保护端点返回 `401`，响应体 `{"ok": false, ...}`。
 - **限流**：登录失败按真实客户端 IP 熔断（X-Forwarded-For 链以受信代理解析，
-  见 `web.trusted_proxies`）；触发后返回 `429`。
+  见 `web.trusted_proxies`）；锁定期间 `POST /api/login` 返回 `401`，响应
+  `{"ok": false, "message": "尝试次数过多，账号已临时锁定，请 15 分钟后再试"}`。
 - **请求体**：均为 `application/json`；错误返回 `{"ok": false, "message": "<原因>"}`，
   校验类错误为 `400`，冲突（任务乐观锁）为 `409`。
 - **免登录端点**：`/`、`/index.html`、`/api/auth`、`/api/system/endpoints`、
@@ -26,7 +27,7 @@
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
 | `/api/auth` | GET | 认证状态：`{"ok", "app", "enabled", "authed"}`；看板启动首查 |
-| `/api/login` | POST | `{password, remember?}` → `{ok, token, expires_in}`；失败按 IP 熔断 |
+| `/api/login` | POST | `{password, remember_me?}` → `{ok, token, expires_in}`；失败按 IP 熔断 |
 | `/api/logout` | POST | 注销当前会话 |
 | `/api/state` | GET | 全量看板状态（项目/任务/用量/配置回显）；`?summary=true` 移动端轻量摘要 |
 | `/api/config` | POST | 分块保存设置（`{llm?, scheduler?, web?, ...}`；键缺失=保持现值） |
@@ -57,12 +58,15 @@
 - `POST /api/config` 的**键缺失 = 保持现值**（全部分区一致）——看板分块保存
   与第三方脚本的局部更新都依赖此语义，变更需走 deprecation 流程。
 - 任务状态域固定为 `open / in_progress / done / blocked / cancelled`。
-- `/api/task` 的乐观锁：编辑必须携带最近一次 `GET /api/state` 返回的
-  `version_token`；冲突返回 `409` 与最新任务内容。
+- `/api/task` 的乐观锁：编辑已有任务时可携带最近一次 `GET /api/task`
+  返回的 `version_token` 作为 `base_version`；提供基准且版本不符时返回
+  `409` 与最新任务内容（`latest_task`）。未提供基准时直接保存；
+  `force_overwrite: true` 可跳过版本比对。
 
 ## 已知非契约端点（会变，勿依赖）
 
 `/api/llm/*`、`/api/mirror/*`、`/api/skill/*`、`/api/update/*`、`/api/browse`、
 `/api/mkdir`、`/api/artifact`、`/api/audit`、`/api/egress`、`/api/guide`、
-`/api/approval`、`/api/runlog/*`、`/api/dashboard/*` 等仍按 0.x 节奏演进，
+`/api/approval`、`/api/runlog/*`、`/api/dashboard/*`、`/api/backup`、
+`/api/archive` 等仍按 0.x 节奏演进，
 1.0 后逐一评估是否纳入冻结面。

@@ -334,6 +334,15 @@ class Git:
         if not patch_bytes.strip():
             return True, ""
 
+        # 先做三方合并预检；预检失败不让 git apply 留下冲突索引或半套文件。
+        check_proc = subprocess.run(
+            ["git", "-C", str(self.repo), "apply", "--3way", "--check"],
+            input=patch_bytes, capture_output=True,
+            startupinfo=_windows_startupinfo(), creationflags=_SUBPROCESS_FLAGS,
+        )
+        if check_proc.returncode != 0:
+            err = check_proc.stderr.decode("utf-8", errors="replace").strip()
+            return False, f"增量合入主工作区冲突（预检失败，未写入）：{err}"
         apply_proc = subprocess.run(
             ["git", "-C", str(self.repo), "apply", "--3way"],
             input=patch_bytes,
