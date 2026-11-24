@@ -115,7 +115,10 @@ class Git:
         return self._run("rev-parse", "--abbrev-ref", "HEAD")
 
     def status_porcelain(self) -> list[str]:
-        out = self._run("status", "--porcelain")
+        # core.quotepath=false：含中文等非 ASCII 的文件名原样输出，
+        # 否则 porcelain 会给出八进制转义串（"P2-\345..."），下游 git add 的
+        # pathspec 匹配不到真实文件（Windows 中文任务文件提交失败即此因）
+        out = self._run("-c", "core.quotepath=false", "status", "--porcelain")
         return [line for line in out.splitlines() if line.strip()]
 
     def _status_raw_lines(self) -> list[str]:
@@ -126,7 +129,7 @@ class Git:
         需要精确解析 XY 前缀时用本方法。
         """
         proc = subprocess.run(
-            ["git", "-C", str(self.repo), "status", "--porcelain"],
+            ["git", "-C", str(self.repo), "-c", "core.quotepath=false", "status", "--porcelain"],
             stdin=subprocess.DEVNULL, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             startupinfo=_windows_startupinfo(), creationflags=_SUBPROCESS_FLAGS,
