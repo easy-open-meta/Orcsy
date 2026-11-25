@@ -178,7 +178,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <blockquote>
 <p>面向第一次接触 Orcsy
 的普通使用者：不需要懂编程，也能完成安装、接入项目、创建任务，并看懂看板上的每一条信息。</p>
-<p>适用版本：<strong>0.34.0</strong>　|　默认看板地址：<strong><a
+<p>适用版本：<strong>0.35.0</strong>　|　默认看板地址：<strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
 </blockquote>
 <hr />
@@ -391,7 +391,7 @@ GLM、Kimi、OpenAI、通义千问等）；</li>
 <h4 id="安装步骤">安装步骤</h4>
 <ol type="1">
 <li>打开项目发布页，下载
-<code>orcsy-setup-0.34.0-windows-amd64.exe</code>。
+<code>orcsy-setup-0.35.0-windows-amd64.exe</code>（ARM64 机器可优先用原生 <code>orcsy-setup-0.35.0-windows-arm64.exe</code>；amd64 包也能在 ARM64 Win11 上通过仿真运行）。
 <ul>
 <li>Gitee：<a
 href="https://gitee.com/java-and-net/Orcsy/releases">https://gitee.com/java-and-net/Orcsy/releases</a></li>
@@ -1528,7 +1528,10 @@ CI 脚本」「改 .env
 授权；</li>
 <li>更新失败会自动回滚，并打开安装日志；</li>
 <li>也可以「手动导入本地安装包」：选择
-<code>orcsy-update-*.zip</code>，支持同版本覆盖、升级、降级。</li>
+<code>orcsy-update-*.zip</code>，支持同版本覆盖、升级、降级；</li>
+<li>更新包按<strong>当前程序架构</strong>选择：ARM64 原生版只领
+<code>orcsy-update-*-windows-arm64.zip</code>；某版本未提供 ARM64
+包时会明确提示，不会把原生程序悄悄替换成 x64 仿真版。</li>
 </ul>
 <blockquote>
 <p>⚠️ <strong>降级注意（运行台账）</strong>：运行台账是 0.25

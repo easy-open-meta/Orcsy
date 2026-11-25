@@ -1,5 +1,5 @@
 ﻿; orcsy Windows 安装包脚本（Inno Setup 6）
-; 产物： build/Setup/orcsy-setup-<版本>-windows-amd64.exe
+; 产物： build/Setup/orcsy-setup-<版本>-windows-{amd64|arm64}.exe（arm64 构建传 /DArm64）
 
 #define MyAppName "Orcsy"
 #define MyAppNameEn "Orcsy"
@@ -8,6 +8,12 @@
 ; 版本号单源化：以 orcsy/__init__.py 的 __version__ 为唯一来源，
 ; build/build.py 生成 build/version.ini，此处只读不再手改
 #define MyAppVersion ReadIni(SourcePath + "\version.ini", "Version", "AppVersion", "0.0.0")
+; 目标架构：build.py 在 arm64 构建时传 /DArm64；缺省 amd64（保持既有安装包行为）
+#ifdef Arm64
+  #define MyArchTag "arm64"
+#else
+  #define MyArchTag "amd64"
+#endif
 
 [Setup]
 AppId={{8E4A2C6F-1B7D-4E3A-9C5F-TASKARRANGER}}
@@ -28,13 +34,19 @@ DefaultGroupName={#MyAppName}
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 OutputDir=Setup
-OutputBaseFilename=orcsy-setup-{#MyAppVersion}-windows-amd64
+OutputBaseFilename=orcsy-setup-{#MyAppVersion}-windows-{#MyArchTag}
 SetupIconFile=icon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+#ifdef Arm64
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
+; amd64 包允许在 ARM64 Win11 上安装，靠 Prism 仿真运行
 ArchitecturesInstallIn64BitMode=x64compatible arm64
+#endif
 MinVersion=10.0
 
 [Languages]

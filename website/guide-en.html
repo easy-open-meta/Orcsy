@@ -179,7 +179,7 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <p>For first-time, non-technical users: install Orcsy, connect a
 project, create tasks, and understand every part of the dashboard —
 without needing to write code.</p>
-<p>Version: <strong>0.34.0</strong>　|　Default dashboard: <strong><a
+<p>Version: <strong>0.35.0</strong>　|　Default dashboard: <strong><a
 href="http://127.0.0.1:5116">http://127.0.0.1:5116</a></strong></p>
 </blockquote>
 <hr />
@@ -437,7 +437,7 @@ required, but then you lose automatic commit/merge).</li>
 </ul>
 <h4 id="steps">Steps</h4>
 <ol type="1">
-<li>Download <code>orcsy-setup-0.34.0-windows-amd64.exe</code> from the
+<li>Download the installer for your architecture: <code>orcsy-setup-0.35.0-windows-amd64.exe</code>, or the native <code>orcsy-setup-0.35.0-windows-arm64.exe</code> on ARM64 machines (the amd64 build also runs via emulation). From the
 release page:
 <ul>
 <li>Gitee: <a
@@ -1826,7 +1826,12 @@ directory, one UAC prompt appears;</li>
 log;</li>
 <li>You can also <strong>import a local package</strong>: choose
 <code>orcsy-update-*.zip</code>; same-version reinstall, upgrade, and
-downgrade are supported.</li>
+downgrade are supported;</li>
+<li>Update packages are selected by the <strong>running program's
+architecture</strong>: a native ARM64 build only accepts
+<code>orcsy-update-*-windows-arm64.zip</code>. If a release has no ARM64
+package, the app says so instead of silently replacing native binaries
+with the x64 emulated build.</li>
 </ul>
 <blockquote>
 <p>⚠️ <strong>Downgrade note (run ledger)</strong>: the run ledger is

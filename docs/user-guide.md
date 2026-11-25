@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.34.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.35.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 
 ---
@@ -155,7 +155,7 @@ When it works, it:
 
 #### Steps
 
-1. Download `orcsy-setup-0.34.0-windows-amd64.exe` from the release page:
+1. Download the installer for your architecture: `orcsy-setup-0.35.0-windows-amd64.exe`, or the native `orcsy-setup-0.35.0-windows-arm64.exe` on ARM64 machines (the amd64 build also installs and runs on ARM64 Windows 11 via emulation).
    - Gitee: <https://gitee.com/java-and-net/Orcsy/releases>
    - GitHub: <https://github.com/easy-open-meta/Orcsy/releases>
 2. Double-click it. If Windows SmartScreen appears, click **More info** → **Run anyway**.
@@ -880,6 +880,7 @@ Configure it in the dashboard under **Settings → 🛡 Data masking**, or in th
 - If installed under `Program Files` or another system directory, one UAC prompt appears;
 - A failed update rolls back automatically and opens the install log;
 - You can also **import a local package**: choose `orcsy-update-*.zip`; same-version reinstall, upgrade, and downgrade are supported.
+- Update packages are selected by the **running program's architecture**: a native ARM64 build only accepts `orcsy-update-*-windows-arm64.zip`. If a release has no ARM64 package, the app says so instead of silently replacing native binaries with the x64 emulated build.
 
 > ⚠️ **Downgrade note (run ledger)**: the run ledger is new in 0.25 and uses the `runlog` config section plus the `runs/` directory. Older versions do not know that section: after downgrading, do **not** change ledger-related settings in the older build — saving any settings may drop the `runlog` section together with a custom directory. Ledger data files are never deleted. Back up `config.yaml` and the ledger directory before downgrading; after upgrading again, the app reconnects the history automatically from the config and the last used directory.
 

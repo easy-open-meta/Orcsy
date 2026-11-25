@@ -8,6 +8,12 @@
 
 （下一版本的内容在此累积）
 
+## [0.35.0] — 2026-11-26
+
+### 新增
+- **Windows ARM64 原生安装包与自更新**：CI 在 `windows-11-arm` 上产出 `orcsy-setup-{ver}-windows-arm64.exe` 与 `orcsy-update-{ver}-windows-arm64.zip`（PyInstaller 不支持交叉编译）；更新器按运行进程架构选包，ARM64 版本缺少更新包时明确报错，不会回退安装 x64 仿真版。
+- **构建脚本架构参数**：`build.py` 新增 `--arch` 与 `--skip-frontend`，跨架构构建直接拒绝；`installer.iss` 通过 `/DArm64` 参数化输出名与 `ArchitecturesAllowed`；发布清单与预发布 smoke 覆盖 arm64 产物。
+
 ## [0.34.0] — 2026-11-25
 
 ### 新增

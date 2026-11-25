@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -64,6 +65,49 @@ def version_newer(candidate: str, current: str) -> bool:
     c += (0,) * (width - len(c))
     cur += (0,) * (width - len(cur))
     return c > cur
+
+
+def _host_update_arch() -> str:
+    """当前运行进程的架构（不是宿主 OS 架构）：arm64 / amd64。
+
+    取 platform.machine() 而非 Windows 系统架构：x64 构建跑在 ARM64 Win11
+    的 Prism 仿真下时仍是 AMD64 进程，继续领 amd64 更新包才是正确的原地升级。
+    """
+    machine = (platform.machine() or "").lower()
+    return "arm64" if machine in ("arm64", "aarch64") else "amd64"
+
+
+def _pick_update_asset(assets: list[dict], latest: str,
+                       arch: str | None = None) -> dict:
+    """从 Release 附件里挑匹配当前架构的更新包（arch 仅测试注入）。
+
+    arm64 必须命中 *-windows-arm64.zip；缺失时报错而不是回退 amd64——
+    否则会把原生 exe 静默替换成 x64 仿真版。amd64 排除 arm64 包，未标注
+    架构的历史更新包视为 amd64（向后兼容旧 Release）。
+    """
+    zips = [a for a in assets if str(a.get("name", "")).lower().endswith(".zip")]
+    update_zips = [a for a in zips
+                   if str(a.get("name", "")).lower().startswith("orcsy-update")]
+    pool = update_zips or zips
+    arch = arch or _host_update_arch()
+    want_arm64 = arch == "arm64"
+
+    def _is_arm64(a: dict) -> bool:
+        return "arm64" in str(a.get("name", "")).lower()
+
+    for a in pool:
+        if _is_arm64(a) == want_arm64:
+            return a
+    if want_arm64:
+        raise UpdateError(
+            f"Release {latest} 没有 ARM64 更新包（orcsy-update-*-windows-arm64.zip）。"
+            "为避免把原生程序替换成 x64 仿真版，在线更新已停止；"
+            "请等待提供 ARM64 更新的版本，或改用 ARM64 安装包。")
+    if not pool:
+        raise UpdateError(f"Release {latest} 里没有找到 orcsy-update-*.zip 更新包附件"
+                          "（在线更新用 zip 更新包，请随 Release 一并上传；"
+                          "exe 安装包只用于首次安装）。")
+    raise UpdateError(f"Release {latest} 里没有找到 x64 更新包（orcsy-update-*.zip）。")
 
 
 def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, Any]:
@@ -152,14 +196,7 @@ def check_update(update_cfg: dict[str, Any], current_version: str) -> dict[str, 
     if not latest:
         raise UpdateError("检查更新失败：Release 缺少 tag_name。")
     assets = [a for a in (data.get("assets") or []) if isinstance(a, dict)]
-    zips = [a for a in assets if str(a.get("name", "")).lower().endswith(".zip")]
-    update_zips = [a for a in zips
-                   if str(a.get("name", "")).lower().startswith("orcsy-update")]
-    asset = (update_zips or zips or [None])[0]
-    if asset is None:
-        raise UpdateError(f"Release {latest} 里没有找到 orcsy-update-*.zip 更新包附件"
-                          "（在线更新用 zip 更新包，请随 Release 一并上传；"
-                          "exe 安装包只用于首次安装）。")
+    asset = _pick_update_asset(assets, latest)
     download_url = str(asset.get("browser_download_url") or "")
     if not download_url:
         raise UpdateError(f"Release {latest} 的附件缺少下载地址。")

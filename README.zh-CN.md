@@ -6,7 +6,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：把任务写成 Markdown，定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后经**独立审查门**把关、增量落地主分支工作区，**最终提交由人工确认**——幂等派发、租约续跑、预算/熔断与任务级运行台账全程留痕，Web 看板可视化掌控的可信无人值守闭环。
 
-![version](https://img.shields.io/badge/version-0.34.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.35.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 
 ```
@@ -46,7 +46,7 @@
 
 ### 方式一：Windows 安装包（推荐）
 
-1. 运行 `build/Setup/orcsy-setup-<版本>-windows-amd64.exe`，按向导安装；
+1. 运行 `orcsy-setup-<版本>-windows-amd64.exe`（ARM64 机器可用原生 `-windows-arm64.exe`），按向导安装；
 2. 可勾选「初始化示例任务」在数据目录放置示例模板；**config.yaml 无需手动初始化**——首次启动时自动生成在数据目录 `%APPDATA%\Orcsy`（Roaming，本地实体，不受 OneDrive 干扰）；
 3. 打开看板，在「项目与设置」页填写 `llm.api_key`、`base_url`、`model` 并新建项目（也可直接编辑 `%APPDATA%\Orcsy\config.yaml`，`projects[].path` 用**绝对路径**）；
 4. 从开始菜单/桌面打开「任务编排系统」→ 浏览器自动打开看板；

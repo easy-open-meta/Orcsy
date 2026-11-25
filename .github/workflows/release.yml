@@ -72,6 +72,13 @@ jobs:
         run: uv run python tools/gen_page.py
         shell: pwsh
 
+      - name: Upload dashboard_html.py for the ARM64 job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-html
+          path: orcsy/dashboard_html.py
+          retention-days: 5
+
       - name: Build Windows artifacts
         run: |
           uv run python build/build.py --windows-only
@@ -97,6 +104,75 @@ jobs:
             build/Setup/orcsy-update-*.zip.sha256
             build/Setup/orcsy-*-windows-arm64.zip
             build/Setup/orcsy-*-windows-arm64.zip.sha256
+          if-no-files-found: error
+          retention-days: 5
+
+  # ---- Windows ARM64 构建：PyInstaller 不支持交叉编译，必须在 ARM64 宿主执行 ----
+  build-windows-arm64:
+    needs: [version, build-windows]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: windows-11-arm
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: irm https://astral.sh/uv/install.ps1 | iex
+        shell: pwsh
+
+      - name: Install ARM64 Python and dependencies
+        run: |
+          uv python install 3.12
+          uv sync --dev --python 3.12 --managed-python
+        shell: pwsh
+
+      - name: Verify the interpreter is ARM64
+        run: |
+          uv run python -c "import platform, sys; arch = platform.machine().lower(); print(sys.version); print('arch:', arch); assert arch in ('arm64', 'aarch64'), 'Python is not ARM64'"
+        shell: pwsh
+
+      - name: Reuse dashboard_html.py from the x64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-html
+          path: orcsy
+
+      - name: Install Inno Setup 6
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco install innosetup -y --no-progress
+          } else {
+            $exe = Join-Path $env:TEMP "innosetup.exe"
+            Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile $exe
+            # 默认安装路径即 C:\Program Files (x86)\Inno Setup 6，避免带空格参数的引用问题
+            Start-Process -Wait $exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART"
+          }
+          Add-Content $env:GITHUB_PATH "C:\Program Files (x86)\Inno Setup 6"
+        shell: pwsh
+
+      - name: Build Windows ARM64 artifacts
+        run: uv run python build/build.py --windows-only --arch arm64 --skip-frontend
+        shell: pwsh
+
+      - name: Validate ARM64 release assets
+        run: |
+          $version = '${{ needs.version.outputs.version }}'
+          $setup = "build/Setup/orcsy-setup-$version-windows-arm64.exe"
+          $update = "build/Setup/orcsy-update-$version-windows-arm64.zip"
+          uv run python build/verify_release.py $setup "$setup.sha256" $update "$update.sha256"
+        shell: pwsh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-artifacts
+          path: |
+            build/Setup/orcsy-setup-*-windows-arm64.exe
+            build/Setup/orcsy-setup-*-windows-arm64.exe.sha256
+            build/Setup/orcsy-update-*-windows-arm64.zip
+            build/Setup/orcsy-update-*-windows-arm64.zip.sha256
           if-no-files-found: error
           retention-days: 5
 
@@ -157,7 +233,7 @@ jobs:
 
   # ---- 预发布门禁：下载、校验并做 smoke；通过后自动发布 ----
   prepublish-smoke:
-    needs: [version, build-windows, build-linux]
+    needs: [version, build-windows, build-windows-arm64, build-linux]
     if: needs.version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -178,11 +254,19 @@ jobs:
           name: linux-artifacts
           path: dist/
 
+      - name: Download Windows ARM64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-arm64-artifacts
+          path: dist/
+
       - name: Verify release artifacts before publishing
         run: |
           version='${{ needs.version.outputs.version }}'
           files=(dist/orcsy-setup-"$version"-windows-amd64.exe
+                 dist/orcsy-setup-"$version"-windows-arm64.exe
                  dist/orcsy-update-"$version".zip
+                 dist/orcsy-update-"$version"-windows-arm64.zip
                  dist/orcsy-"$version"-windows-arm64.zip
                  dist/orcsy-"$version"-linux-{amd64,arm64}.tar.gz
                  dist/orcsy_"$version"_{amd64,arm64}.deb)
@@ -216,6 +300,8 @@ jobs:
           version='${{ needs.version.outputs.version }}'
           unzip -Z1 "dist/orcsy-update-$version.zip" | grep -Fx 'orcsy-web.exe'
           unzip -Z1 "dist/orcsy-update-$version.zip" | grep -Fx 'orcsy-tray.exe'
+          unzip -Z1 "dist/orcsy-update-$version-windows-arm64.zip" | grep -Fx 'orcsy-web.exe'
+          unzip -Z1 "dist/orcsy-update-$version-windows-arm64.zip" | grep -Fx 'orcsy-tray.exe'
           unzip -Z1 "dist/orcsy-$version-windows-arm64.zip" | grep -Fx "orcsy-$version-windows-arm64/orcsy.bat"
           unzip -Z1 "dist/orcsy-$version-windows-arm64.zip" | grep -Fx "orcsy-$version-windows-arm64/pyproject.toml"
 

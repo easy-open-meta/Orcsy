@@ -29,6 +29,28 @@ assert _spec and _spec.loader
 release = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(release)
 
+# build/build.py 同法加载：arm64 产物命名与「禁止跨架构」守卫自检
+_build_spec = importlib.util.spec_from_file_location(
+    "orcsy_build", Path(__file__).resolve().parents[1] / "build" / "build.py")
+assert _build_spec and _build_spec.loader
+buildpy = importlib.util.module_from_spec(_build_spec)
+_build_spec.loader.exec_module(buildpy)
+
+
+def check_build_arch() -> None:
+    """更新包命名与跨架构守卫：arm64 带后缀，非宿主架构直接拒绝。"""
+    assert buildpy.update_zip_name((0, 15, 0), "amd64") == "orcsy-update-0.15.0.zip"
+    assert buildpy.update_zip_name((0, 15, 0), "arm64")         == "orcsy-update-0.15.0-windows-arm64.zip"
+    assert buildpy.resolve_windows_arch("auto") == buildpy.host_arch()
+    other = "arm64" if buildpy.host_arch() == "amd64" else "amd64"
+    try:
+        buildpy.resolve_windows_arch(other)
+        raise AssertionError("跨架构构建应拒绝")
+    except SystemExit as e:
+        assert "交叉编译" in str(e) and other in str(e)
+    print("build 架构守卫（更新包命名 / 拒绝跨架构）✅")
+
+
 STATE: dict = {"releases": {}, "next_id": 1, "uploads": []}
 
 
@@ -164,6 +186,24 @@ def check_artifacts() -> None:
         names_arm = [f.name for f in files_arm]
         assert "orcsy-0.15.0-windows-arm64.zip" in names_arm
         assert "orcsy-0.15.0-windows-arm64.zip.sha256" in names_arm
+
+        # 原生 arm64 安装包/更新包：存在即纳入发布清单
+        arm_setup = d / "orcsy-setup-0.15.0-windows-arm64.exe"
+        arm_update = d / "orcsy-update-0.15.0-windows-arm64.zip"
+        arm_setup.write_bytes(b"MZ" + b"a" * 2048)
+        arm_update.write_bytes(b"PK" + b"aw" * 512)
+        _write_checksum(arm_setup)
+        _write_checksum(arm_update)
+        names_native = [f.name for f in release.check_artifacts((0, 15, 0), setup_dir=d)]
+        for name in ("orcsy-setup-0.15.0-windows-arm64.exe",
+                     "orcsy-setup-0.15.0-windows-arm64.exe.sha256",
+                     "orcsy-update-0.15.0-windows-arm64.zip",
+                     "orcsy-update-0.15.0-windows-arm64.zip.sha256"):
+            assert name in names_native, names_native
+        (d / "orcsy-setup-0.15.0-windows-arm64.exe").unlink()
+        (d / "orcsy-setup-0.15.0-windows-arm64.exe.sha256").unlink()
+        (d / "orcsy-update-0.15.0-windows-arm64.zip").unlink()
+        (d / "orcsy-update-0.15.0-windows-arm64.zip.sha256").unlink()
         (d / "orcsy-0.15.0-windows-arm64.zip").unlink()
         (d / "orcsy-0.15.0-windows-arm64.zip.sha256").unlink()
         # 缺 zip（只发了 exe）→ 明确报错，不许「顺手」漏发
@@ -306,6 +346,7 @@ def check_dry_run() -> None:
 
 
 def main() -> int:
+    check_build_arch()
     check_artifacts()
     check_checksum_rejected()
     check_upload_flow()

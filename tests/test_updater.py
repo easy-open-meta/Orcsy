@@ -20,8 +20,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
 
 from orcsy.config import load_config
-from orcsy.updater import (UpdateError, _clean_env, _copier_bat, _watchdog_bat,
-                           _watchdog_bat_elevated, _WATCHDOG_FLAGS,
+from orcsy.updater import (UpdateError, _clean_env, _copier_bat, _pick_update_asset,
+                           _watchdog_bat, _watchdog_bat_elevated, _WATCHDOG_FLAGS,
                            append_install_log, check_update, clear_update_result,
                            detect_installer_version, download_installer,
                            fetch_expected_sha256, install_log_path, is_writable,
@@ -44,6 +44,32 @@ def check_parse_version() -> None:
     assert not version_newer("0.12.9", "0.13.0")
     assert not version_newer("unknown", "0.13.0")  # 解析失败宁可不更
     print("版本解析与比较 ✅")
+
+
+def check_pick_update_asset() -> None:
+    """更新包按运行架构选择：arm64 不回退 x64，历史无后缀包视为 amd64。"""
+    def a(name):
+        return {"name": name, "browser_download_url": f"https://x/{name}"}
+
+    both = [a("orcsy-update-0.15.0-windows-arm64.zip"),
+            a("orcsy-update-0.15.0.zip")]
+    assert _pick_update_asset(both, "V0.15.0", arch="arm64")["name"]         == "orcsy-update-0.15.0-windows-arm64.zip"
+    assert _pick_update_asset(both, "V0.15.0", arch="amd64")["name"]         == "orcsy-update-0.15.0.zip"
+    # 旧 Release 只有无后缀包：amd64 兼容，arm64 明确拒绝而不是装成仿真版
+    legacy = [a("orcsy-update-0.15.0.zip")]
+    assert _pick_update_asset(legacy, "V0.15.0", arch="amd64")["name"]         == "orcsy-update-0.15.0.zip"
+    try:
+        _pick_update_asset(legacy, "V0.15.0", arch="arm64")
+        raise AssertionError("arm64 缺包应报错")
+    except UpdateError as e:
+        assert "ARM64" in str(e) and "windows-arm64" in str(e)
+    # 完全没有任何 zip 附件
+    try:
+        _pick_update_asset([a("orcsy-setup-0.15.0.exe")], "V0.15.0", arch="amd64")
+        raise AssertionError("缺 zip 应报错")
+    except UpdateError as e:
+        assert "zip" in str(e).lower()
+    print("更新包架构选择（arm64/amd64/旧包兼容）✅")
 
 
 def check_detect_installer() -> None:
@@ -913,6 +939,7 @@ def check_install_worker_unexpected_error() -> None:
 
 def main() -> int:
     check_parse_version()
+    check_pick_update_asset()
     check_detect_installer()
     check_validate_package()
     check_stage_package()

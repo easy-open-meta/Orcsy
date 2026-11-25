@@ -56,7 +56,7 @@ def read_version() -> tuple[int, int, int]:
 
 def expected_artifacts(ver: tuple[int, int, int],
                       setup_dir: Path | str | None = None) -> list[Path]:
-    """本次发布应上传的附件：Windows 安装包/更新包 + Linux amd64/arm64 发布包与校验文件。
+    """本次发布应上传的附件：Windows amd64/arm64 安装包与更新包 + Linux 发布包与校验文件。
 
     .sha256 是在线更新与发布的完整性依据；存在即一并发布上传。
     """
@@ -73,6 +73,10 @@ def expected_artifacts(ver: tuple[int, int, int],
             d / f"orcsy-update-{v}.zip",
             d / f"orcsy-update-{v}.zip.sha256"]
     extra = [
+        d / f"orcsy-setup-{v}-windows-arm64.exe",
+        d / f"orcsy-setup-{v}-windows-arm64.exe.sha256",
+        d / f"orcsy-update-{v}-windows-arm64.zip",
+        d / f"orcsy-update-{v}-windows-arm64.zip.sha256",
         d / f"orcsy-{v}-windows-arm64.zip",
         d / f"orcsy-{v}-windows-arm64.zip.sha256",
         d / f"orcsy-{v}-linux-amd64.tar.gz",

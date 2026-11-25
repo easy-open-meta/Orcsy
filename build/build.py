@@ -9,8 +9,10 @@
 之后依次执行 PyInstaller、ISCC 与 zip 打包，保证 exe 自报版本 = 安装包版本。
 
 产物：
-  - build/Setup/orcsy-setup-{ver}-windows-amd64.exe 首次安装用 Windows Inno 安装包（允许 UAC，兼容 arm64 仿真）
-  - build/Setup/orcsy-update-{ver}.zip       Windows 自更新用 zip 更新包（零 UAC 换名更新）
+  - build/Setup/orcsy-setup-{ver}-windows-{amd64|arm64}.exe 首次安装用 Inno 安装包
+    （amd64 允许 ARM64 Win11 仿真安装；arm64 为原生包，须在 ARM64 宿主构建）
+  - build/Setup/orcsy-update-{ver}.zip       Windows amd64 自更新包（零 UAC 换名更新）
+  - build/Setup/orcsy-update-{ver}-windows-arm64.zip Windows arm64 自更新包
   - build/Setup/orcsy-{ver}-windows-arm64.zip Windows arm64 便携发布包（纯原生指令，含快捷方式安装器）
   - build/Setup/orcsy-{ver}-linux-amd64.tar.gz Linux amd64 便携发布包（含一键安装器）
   - build/Setup/orcsy-{ver}-linux-arm64.tar.gz Linux arm64 便携发布包（含一键安装器）
@@ -26,6 +28,7 @@ import argparse
 import hashlib
 import io
 import json
+import platform
 import re
 import shutil
 import subprocess
@@ -107,16 +110,39 @@ def build_frontend() -> None:
     run([sys.executable, "tools/gen_page.py"], cwd=ROOT)
 
 
-def build_update_zip(ver: tuple[int, int, int]) -> Path:
+def host_arch() -> str:
+    """PyInstaller 产物架构 = 宿主进程架构：Windows arm64 / amd64。"""
+    machine = (platform.machine() or "").lower()
+    return "arm64" if machine in ("arm64", "aarch64") else "amd64"
+
+
+def resolve_windows_arch(requested: str) -> str:
+    """校验并返回 Windows 目标架构；跨架构直接退出（PyInstaller 不能交叉编译）。"""
+    arch = host_arch() if requested == "auto" else requested
+    if arch != host_arch():
+        sys.exit(
+            f"PyInstaller 不支持交叉编译：当前宿主 {host_arch()}，"
+            f"无法构建 {arch} 产物。请在 ARM64 Windows（或 CI windows-11-arm）"
+            "上运行本脚本。")
+    return arch
+
+
+def update_zip_name(ver: tuple[int, int, int], arch: str) -> str:
+    """更新包命名：amd64 保持历史名（向后兼容），arm64 带架构后缀。"""
+    v = f"{ver[0]}.{ver[1]}.{ver[2]}"
+    return f"orcsy-update-{v}-windows-arm64.zip" if arch == "arm64"         else f"orcsy-update-{v}.zip"
+
+
+def build_update_zip(ver: tuple[int, int, int], arch: str = "amd64") -> Path:
     """打包 zip 更新包（自更新载体）：两个 exe + README，扁平结构。
 
-    成员名与 orcsy/updater.py 的白名单一致：orcsy-web.exe / orcsy-tray.exe /
-    README*；文件名 orcsy-update-{ver}.zip 供版本识别（同/异版本均允许安装）。
+    成员名与 orcsy/updater.py 的白名单一致；amd64 沿用 orcsy-update-{ver}.zip，
+    arm64 为 orcsy-update-{ver}-windows-arm64.zip。
     """
     dist = ROOT / "dist"
     out_dir = BUILD / "Setup"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"orcsy-update-{ver[0]}.{ver[1]}.{ver[2]}.zip"
+    out = out_dir / update_zip_name(ver, arch)
     members = [dist / "orcsy-web.exe", dist / "orcsy-tray.exe",
                ROOT / "README.md", ROOT / "README.zh-CN.md"]
     missing = [m.name for m in members if not m.is_file()]
@@ -736,6 +762,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Orcsy 多平台一键构建与打包")
     parser.add_argument("--windows-only", action="store_true", help="仅构建 Windows 安装包与更新包")
     parser.add_argument("--linux-only", action="store_true", help="仅构建 Linux 发布包 (amd64 / arm64)")
+    parser.add_argument("--arch", choices=("auto", "amd64", "arm64"), default="auto",
+                        help="Windows 目标架构（默认 auto=宿主架构；PyInstaller 不支持交叉编译）")
+    parser.add_argument("--skip-frontend", action="store_true",
+                        help="跳过前端构建（CI arm64 job 复用 x64 产出的 dashboard_html.py）")
     args = parser.parse_args()
 
     ver = read_version()
@@ -744,13 +774,16 @@ def main() -> int:
     BUILD.mkdir(exist_ok=True)
     write_exe_version_file(ver)
     write_version_ini(ver)
-    build_frontend()
+    if not args.skip_frontend:
+        build_frontend()
 
     artifacts_done: list[str] = []
 
     # Windows 产物构建
     if not args.linux_only:
         if sys.platform == "win32":
+            arch = resolve_windows_arch(args.arch)
+            setup_name = f"orcsy-setup-{v_str}-windows-{arch}.exe"
             run([sys.executable, "-m", "PyInstaller", "orcsy.spec", "--noconfirm"], cwd=ROOT)
             iscc = shutil.which("ISCC.exe")
             if not iscc:
@@ -764,16 +797,21 @@ def main() -> int:
                         iscc = str(cand)
                         break
             if iscc:
-                run([iscc, "installer.iss"], cwd=BUILD)
-                setup = BUILD / "Setup" / f"orcsy-setup-{v_str}-windows-amd64.exe"
+                iscc_args = [iscc]
+                if arch == "arm64":
+                    iscc_args.append("/DArm64")
+                iscc_args.append("installer.iss")
+                run(iscc_args, cwd=BUILD)
+                setup = BUILD / "Setup" / setup_name
                 digest = hashlib.sha256(setup.read_bytes()).hexdigest()
                 setup.with_name(setup.name + ".sha256").write_text(
                     f"{digest}  {setup.name}\n", encoding="ascii")
                 artifacts_done.append(f"Windows 首次安装包 build/Setup/{setup.name}")
             else:
                 print("警告：未找到 ISCC.exe（Inno Setup 6），已跳过 Windows exe 安装包制作")
-            build_update_zip(ver)
-            artifacts_done.append(f"Windows 自更新包   build/Setup/orcsy-update-{v_str}.zip")
+            build_update_zip(ver, arch)
+            artifacts_done.append(
+                f"Windows ({arch}) 自更新包 build/Setup/{update_zip_name(ver, arch)}")
         build_windows_arm64_zip(ver)
         artifacts_done.append(f"Windows (arm64) 便携包 build/Setup/orcsy-{v_str}-windows-arm64.zip")
 

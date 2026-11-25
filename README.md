@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 > Orcsy is an Agent task-orchestration system that plugs into any LLM API. Write tasks as Markdown, and a scheduler scans each managed project's `tasks/` directory, dispatching them by priority (P0 → P4) to that project's dedicated Agent. The Agent reads and writes real code and runs tests inside an isolated git worktree; on completion an **independent review gate** audits the work, changes land incrementally in the main working tree, and the **final commit is confirmed by a human** — a trusted unattended loop with idempotent dispatch, lease-based resume, budget/circuit-breaker guards and per-task run ledgers, all visible on the web dashboard.
 
-![version](https://img.shields.io/badge/version-0.34.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.35.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 
 ```
@@ -46,7 +46,7 @@ English | [简体中文](README.zh-CN.md)
 
 ### Option 1: Windows installer (recommended)
 
-1. Run `build/Setup/orcsy-setup-<version>-windows-amd64.exe` and follow the wizard;
+1. Run `orcsy-setup-<version>-windows-amd64.exe` (or the native `-windows-arm64.exe` on ARM64) and follow the wizard;
 2. Optionally check "Initialize sample tasks" to place sample templates in the data directory; **no manual config.yaml setup needed** — it is auto-generated on first launch at `%APPDATA%\Orcsy` (Roaming; local files, unaffected by OneDrive);
 3. Open the dashboard, fill in `llm.api_key`, `base_url` and `model` on the "Projects & Settings" page and create a project (or edit `%APPDATA%\Orcsy\config.yaml` directly; `projects[].path` must be **absolute**);
 4. Launch "Task Orchestration System" from the Start menu / desktop → the dashboard opens in your browser;
