@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import http.server
 import importlib.util
+import io
 import re
 import shutil
 import socketserver
 import hashlib
 import sys
+import tarfile
 import tempfile
 import threading
 from pathlib import Path
@@ -345,8 +347,49 @@ def check_dry_run() -> None:
         shutil.rmtree(fake, ignore_errors=True)
 
 
+def check_linux_archives() -> None:
+    """Linux tar/deb：启动器不能与包目录 orcsy/ 同名（否则解包 Not a directory）。"""
+    tmp = Path(tempfile.mkdtemp(prefix="orcsy-linux-pkg-"))
+    old_build = buildpy.BUILD
+    try:
+        buildpy.BUILD = tmp
+        tar_path = buildpy.build_linux_tarball((0, 15, 0), "amd64")
+        with tarfile.open(tar_path, "r:gz") as tf:
+            names = tf.getnames()
+        prefix = "orcsy-0.15.0-linux-amd64"
+        assert f"{prefix}/orcsy.sh" in names, names[:5]
+        assert f"{prefix}/orcsy/tools.py" in names
+        assert f"{prefix}/orcsy" not in names, "启动器与包目录同名会导致解包失败"
+
+        deb_path = buildpy.build_linux_deb((0, 15, 0), "amd64")
+        blob = deb_path.read_bytes()
+        assert blob.startswith(b"!<arch>\n")
+        entries: dict[str, bytes] = {}
+        off = 8
+        while off + 60 <= len(blob):
+            header = blob[off:off + 60]
+            name = header[:16].decode("ascii").strip()
+            size = int(header[48:58].decode("ascii").strip() or 0)
+            entries[name] = blob[off + 60:off + 60 + size]
+            off += 60 + size + (size % 2)
+        with tarfile.open(fileobj=io.BytesIO(entries["data.tar.gz"]), mode="r:gz") as tf:
+            data_names = tf.getnames()
+        assert "./opt/orcsy/orcsy" in data_names, data_names[:5]
+        assert "./opt/orcsy/tools.py" in data_names
+        with tarfile.open(fileobj=io.BytesIO(entries["control.tar.gz"]), mode="r:gz") as tf:
+            member = next((n for n in tf.getnames() if n.endswith("postinst")), None)
+            assert member is not None
+            postinst = tf.extractfile(member)
+            assert postinst is not None and "/opt/orcsy/orcsy" in postinst.read().decode("utf-8")
+        print("Linux tar/deb 启动器命名（与 orcsy/ 目录不冲突）✅")
+    finally:
+        buildpy.BUILD = old_build
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     check_build_arch()
+    check_linux_archives()
     check_artifacts()
     check_checksum_rejected()
     check_upload_flow()

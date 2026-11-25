@@ -345,7 +345,7 @@ def build_linux_tarball(ver: tuple[int, int, int], arch: str) -> Path:
     """构建独立 Linux 绿色发布包（linux-amd64 / linux-arm64）。
 
     包含：
-    - orcsy: 可执行 CLI 启动器（0o755）
+    - orcsy.sh: 可执行 CLI 启动器（0o755；包目录也叫 orcsy/，不能同名）
     - install.sh: 一键安装服务（systemd）或当前用户级工具（0o755）
     - uninstall.sh: 一键卸载器（0o755）
     - orcsy.service: systemd 服务单元
@@ -401,7 +401,7 @@ if [ "$IS_USER" -eq 1 ]; then
     cp -r "$DIR/orcsy" "$TARGET_DIR/"
     cp "$DIR/pyproject.toml" "$TARGET_DIR/"
     [ -f "$DIR/config.example.yaml" ] && cp "$DIR/config.example.yaml" "$TARGET_DIR/"
-    cp "$DIR/orcsy" "$BIN_DIR/orcsy"
+    cp "$DIR/orcsy.sh" "$BIN_DIR/orcsy"
     chmod +x "$BIN_DIR/orcsy"
     echo "==> 已安装到用户目录: $BIN_DIR/orcsy"
     echo "    请确保 $BIN_DIR 已在您的 PATH 中。"
@@ -424,7 +424,7 @@ echo "==> 正在安装 Orcsy 到 $APP_DIR..."
 mkdir -p "$APP_DIR" "$DATA_DIR" "$PROJECTS_DIR"
 cp -r "$DIR/orcsy" "$APP_DIR/"
 cp "$DIR/pyproject.toml" "$APP_DIR/"
-cp "$DIR/orcsy" "$APP_DIR/orcsy-bin"
+cp "$DIR/orcsy.sh" "$APP_DIR/orcsy-bin"
 chmod +x "$APP_DIR/orcsy-bin"
 ln -sf "$APP_DIR/orcsy-bin" /usr/local/bin/orcsy
 
@@ -502,7 +502,7 @@ echo "==> Orcsy 程序文件与服务已移除（数据目录 /var/lib/orcsy 已
             tar.addfile(ti, io.BytesIO(data))
 
         # 脚本类成员赋 0o755 可执行权限
-        _add_virtual("orcsy", launcher_sh, mode=0o755)
+        _add_virtual("orcsy.sh", launcher_sh, mode=0o755)
         _add_virtual("install.sh", install_sh, mode=0o755)
         _add_virtual("uninstall.sh", uninstall_sh, mode=0o755)
         if service_content:

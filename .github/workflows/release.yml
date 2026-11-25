@@ -291,6 +291,9 @@ jobs:
           tar -xzf "dist/orcsy-$version-linux-amd64.tar.gz" -C "$workdir"
           root=$(find "$workdir" -mindepth 1 -maxdepth 1 -type d -print -quit)
           test -n "$root"
+          # 启动器文件与包目录同名会让 tar 解包失败（orcsy 文件 vs orcsy/ 目录）
+          test -x "$root/orcsy.sh"
+          test -f "$root/orcsy/tools.py"
           python3 -m compileall -q "$root"
           python3 -m pip install --quiet --target "$workdir/deps" "$root"
           PYTHONPATH="$workdir/deps" python3 -m orcsy --version
@@ -304,6 +307,10 @@ jobs:
           unzip -Z1 "dist/orcsy-update-$version-windows-arm64.zip" | grep -Fx 'orcsy-tray.exe'
           unzip -Z1 "dist/orcsy-$version-windows-arm64.zip" | grep -Fx "orcsy-$version-windows-arm64/orcsy.bat"
           unzip -Z1 "dist/orcsy-$version-windows-arm64.zip" | grep -Fx "orcsy-$version-windows-arm64/pyproject.toml"
+          tar -tzf "dist/orcsy-$version-linux-arm64.tar.gz" | grep -Fx "orcsy-$version-linux-arm64/orcsy.sh"
+          tar -tzf "dist/orcsy-$version-linux-arm64.tar.gz" | grep -Fx "orcsy-$version-linux-arm64/orcsy/tools.py"
+          dpkg-deb -c "dist/orcsy_$version_amd64.deb" | grep -E "opt/orcsy/orcsy$"
+          dpkg-deb -c "dist/orcsy_$version_amd64.deb" | grep -E "opt/orcsy/tools.py$"
 
       - name: Upload checked artifacts for release
         uses: actions/upload-artifact@v4
