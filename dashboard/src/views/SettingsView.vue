@@ -262,8 +262,8 @@ const defaultToolCategories = computed(() => [
     key: 'project_memory',
     label: it('项目架构记忆'),
     icon: 'account_tree',
-    description: it('维护 ARCHITECTURE.md 全局架构黑板报：PM 首次梳理、开发重大接口变更后追加'),
-    tools: ['update_architecture'],
+    description: it('维护 ARCHITECTURE.md 架构黑板报与 PROJECT_NOTES.md 项目经验记忆：PM 首次梳理、开发重大接口变更后追加、收尾前沉淀长期经验'),
+    tools: ['update_architecture', 'update_project_notes'],
   },
   {
     key: 'subagent',

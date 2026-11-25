@@ -13,7 +13,7 @@
 
 - **配置备份**：`config.yaml + sessions.json` → tar.gz（chmod 600），推送/下载经
   provider；升级前自动备份本地 + 推送 `backup.target`（失败不阻止升级）。
-- **项目归档**：单项目 `tasks/*.md`（含 `done/`）+ `AGENT.md`（可选 `runs/<项目>`）
+- **项目归档**：单项目 `tasks/*.md`（含 `done/`）+ `AGENT.md` + 项目记忆文档（`ARCHITECTURE.md` / `PROJECT_NOTES.md` / `LONG_TERM_MEMORY.md`）（可选 `runs/<项目>`）
   → tar.gz，推送到 `archive.target`。定位「快照分发 / 合规审计」，**单向**
   （回灌恢复后续再设计），避免与 Git 远端双轨。
 

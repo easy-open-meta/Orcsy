@@ -238,13 +238,13 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
 <!-- ===== Hero ===== -->
 <div class="hero" id="top">
   <div class="wrap">
-    <span class="hero-badge">开源免费 · <b id="ver">v0.33.0</b> · Windows / Docker / Linux</span>
+    <span class="hero-badge">开源免费 · <b id="ver">v0.34.0</b> · Windows / Docker / Linux</span>
     <h1>让 AI Agent<br><span class="grad">按任务清单自动干活</span></h1>
     <p class="sub" style="margin-top:10px;font-size:15px">全程<b>可信留痕</b>：独立审查门 · 预算/熔断 · 运行台账 · 人工把关提交</p>
     <p class="sub">Orcsy 是一个 <b>AI Agent 任务编排系统</b>：把需求与 Bug 写成 Markdown 任务清单，
       支持单兵或<b>多模型 Agent 项目小组（PM、后端、前端、测试）</b>进驻协作；Agent 在独立 Git Worktree 沙盒中真实改代码、跑联调测试，改动经独立审查门后安全落地主工作区，最终代码提交完全由人工把关——
       任务级运行台账全程留痕，由 <b>Web 看板</b>可视化掌控。</p>
-    <p class="hero-note"><b>v0.33.0</b>：多目标存储与备份/归档 —— `local` / WebDAV / S3 兼容（AWS Signature V4、零依赖）；项目任务归档命令与看板设置；配置备份 S3 目标。</p>
+    <p class="hero-note"><b>v0.34.0</b>：上下文记忆升级 —— 旧工具结果裁剪前先生成摘要（失败自动降级）；新增 <code>PROJECT_NOTES.md</code> 项目经验记忆，满 8000 字符自动归档到 <code>LONG_TERM_MEMORY.md</code> 并继续追加。</p>
     <p class="hero-note">Windows 一键安装包 <code>orcsy-setup-*.exe</code> · 在线更新包 <code>orcsy-update-*.zip</code> · 也支持 <code>docker compose up</code> 与 systemd / 源码运行 · <a href="#download">⬇ 前往下载</a></p>
   </div>
 </div>
@@ -284,8 +284,8 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--faint);f
         <p>登录、任务/项目/设置变更、提交确认、审批与 API Key 写调用写入 <code>logs/audit.jsonl</code>；看板可筛选查看，参数只记摘要，密码、密钥与任务正文不落盘；日志 5MB 轮转保留 5 份。</p></div>
       <div class="fcard"><div class="ico">🚦</div><h3>统一出口白名单</h3>
         <p>模型调用、Issue 拉取、镜像测速、网页抓取、更新检查全部经 <code>egress</code> 判定：模型/Issue/镜像/更新源主机自动放行，额外主机在设置页追加；白名单外拒绝并写审计。回环调试不受影响；子进程出网不承诺拦截。</p></div>
-      <div class="fcard"><div class="ico">🧠</div><h3>团队记忆（Phase 1）</h3>
-        <p><code>ARCHITECTURE.md</code> 架构黑板报（正文英文书写省 token）开工自动注入，PM 首次梳理、开发重大接口变更后追加；同需求批次用 <code>session_share</code> / <code>session_read</code> 传递临时端口与测试凭证，验收后自动清除；任务详情可一键查看前置成果并跳转。</p></div>
+      <div class="fcard"><div class="ico">🧠</div><h3>项目记忆与长上下文（Phase 1/2）</h3>
+        <p><code>ARCHITECTURE.md</code> 架构黑板报 + <code>PROJECT_NOTES.md</code> 经验记忆（测试/构建坑、环境怪癖）开工自动注入，满额归档到 <code>LONG_TERM_MEMORY.md</code> 后继续追加；同需求批次用 <code>session_share</code> 传递临时凭证；长上下文裁剪前先生成摘要，早期事实不丢。</p></div>
       <div class="fcard"><div class="ico">🔒</div><h3>真实执行，安全禁锢</h3>
         <p>文件工具锁死在项目根内（路径穿越直接拒绝）、命令白名单、工具轮数上限、上下文成本自动裁剪——放开手让它跑，也出不了圈。</p></div>
       <div class="fcard"><div class="ico">🛡️</div><h3>三档访问权限 + 人工审批</h3>

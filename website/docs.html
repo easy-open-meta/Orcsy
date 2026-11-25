@@ -290,6 +290,7 @@ depends_on: [P1-api]    <span class="c"># 前置依赖任务 ID 列表（全部�
         <tr><td>create_tasks</td><td>任务过大或项目经理（PM）拆分需求为子任务（支持 depends_on_refs 依赖编排与角色指派）</td><td><span class="pill pill-acc">变更</span></td></tr>
         <tr><td>reassign_task</td><td>项目经理（PM）将单一小需求直接指派给目标开发/测试角色（免拆分直派）</td><td><span class="pill pill-acc">变更</span></td></tr>
         <tr><td>report_bug</td><td>测试工程师（QA）联调发现缺陷时新建 Bug 任务并派发修复，原测试任务自动挂靠依赖并进入等待回归</td><td><span class="pill pill-acc">变更</span></td></tr>
+        <tr><td>update_architecture / update_project_notes</td><td>维护项目架构黑板报 <code>ARCHITECTURE.md</code> 与项目经验记忆 <code>PROJECT_NOTES.md</code>（满额可归档到 <code>LONG_TERM_MEMORY.md</code> 后继续追加）</td><td><span class="pill pill-acc">变更</span></td></tr>
         <tr><td>write_file / edit_file / multi_edit</td><td>创建或编辑代码文件（精确唯一匹配替换，多处原子替换）</td><td><span class="pill pill-acc">变更</span></td></tr>
         <tr><td>delete_file / move_file</td><td>删除或重命名文件目录</td><td><span class="pill pill-warn">高风险</span></td></tr>
         <tr><td>run_command</td><td>在受管项目内执行白名单命令（测试/构建/检查等），新装工具立即可用</td><td><span class="pill pill-warn">高风险</span></td></tr>

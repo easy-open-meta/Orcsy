@@ -868,6 +868,7 @@ export default {
   '同一需求批次内跨角色传递临时端口、测试账号、动态凭证等运行态信息': 'Pass temporary ports, test accounts and dynamic credentials across roles within a requirement batch',
   '项目架构记忆': 'Project architecture memory',
   '维护 ARCHITECTURE.md 全局架构黑板报：PM 首次梳理、开发重大接口变更后追加': 'Maintain the ARCHITECTURE.md blackboard: PM drafts first, developers append after major API changes',
+  '维护 ARCHITECTURE.md 架构黑板报与 PROJECT_NOTES.md 项目经验记忆：PM 首次梳理、开发重大接口变更后追加、收尾前沉淀长期经验': 'Maintain the ARCHITECTURE.md blackboard and PROJECT_NOTES.md experience notes: PM drafts first, developers append after major API changes, and lasting lessons are recorded before finishing',
   '子代理并发协同': 'Concurrent sub-agents',
   '派生只读子代理并行探索多个模块/目录，单轮拿到汇总结论': "Use one tool call to launch read-only subagents that explore multiple modules or folders in parallel and return a consolidated report.",
   '本地开发服务与浏览器自动化扩展': 'Local dev services and browser automation extensions',

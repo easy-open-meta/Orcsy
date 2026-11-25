@@ -226,7 +226,7 @@ const defaultProjectToolCategories = computed(() => [
     key: 'project_memory',
     label: t('项目架构记忆'),
     icon: 'account_tree',
-    tools: ['update_architecture'],
+    tools: ['update_architecture', 'update_project_notes'],
   },
   {
     key: 'external_net',

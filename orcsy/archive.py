@@ -2,8 +2,9 @@
 
 对齐路线图评估⑤「快照分发（合规/审计），避免与 git 双轨」：归档是单向快照，
 恢复 = 手动下载后回灌（后续再设计）。内容：tasks/*.md + tasks/done/*.md
-+ AGENT.md（可选 runs/<项目> 运行台账）。归档先落本地 archive/ 并 prune，
-远端推送走 `orcsy.storage` 统一 provider。
++ AGENT.md + 项目记忆文档（ARCHITECTURE.md / PROJECT_NOTES.md /
+LONG_TERM_MEMORY.md），可选 runs/<项目> 运行台账。归档先落本地 archive/
+并 prune，远端推送走 `orcsy.storage` 统一 provider。
 """
 
 from __future__ import annotations
@@ -12,7 +13,11 @@ import pathlib
 import tarfile
 import time
 
+from .tools_memory import ARCHITECTURE_FILE, LONG_TERM_FILE, NOTES_FILE
+
 ARCHIVE_GLOB = "orcsy-project-*.tar.gz"
+# 项目长期记忆：随任务快照一起打包，换机/回灌时不丢项目经验
+MEMORY_FILES = (ARCHITECTURE_FILE, NOTES_FILE, LONG_TERM_FILE)
 
 
 def _safe_project_name(name: str) -> str:
@@ -47,6 +52,10 @@ def archive_project(project, *, data_dir: pathlib.Path,
         guide = proj_root / guide_file
         if guide.is_file():
             tf.add(guide, arcname=guide.name)
+        for memory_name in MEMORY_FILES:
+            memory = proj_root / memory_name
+            if memory.is_file():
+                tf.add(memory, arcname=memory.name)
         if include_runs:
             runs_root = pathlib.Path(data_dir) / "runs" / project_name
             if runs_root.is_dir():

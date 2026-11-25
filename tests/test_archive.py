@@ -32,6 +32,9 @@ def check_archive_content() -> None:
         (tasks / "open.md").write_text("open\n", encoding="utf-8")
         (tasks / "done" / "done.md").write_text("done\n", encoding="utf-8")
         (proj_root / "AGENT.md").write_text("guide\n", encoding="utf-8")
+        (proj_root / "ARCHITECTURE.md").write_text("arch\n", encoding="utf-8")
+        (proj_root / "PROJECT_NOTES.md").write_text("notes\n", encoding="utf-8")
+        (proj_root / "LONG_TERM_MEMORY.md").write_text("ltm\n", encoding="utf-8")
         (proj_root / ".worktree-arranger").mkdir()
         (proj_root / ".worktree-arranger" / "x.txt").write_text("x", encoding="utf-8")
 
@@ -46,6 +49,8 @@ def check_archive_content() -> None:
         assert "tasks/open.md" in names, names
         assert "tasks/done/done.md" in names, names
         assert "AGENT.md" in names, names
+        # 项目长期记忆随快照一起打包
+        assert {"ARCHITECTURE.md", "PROJECT_NOTES.md", "LONG_TERM_MEMORY.md"} <= names, names
         assert ".worktree-arranger/x.txt" not in names  # worktree 不进归档
     print("归档内容 ✅")
 

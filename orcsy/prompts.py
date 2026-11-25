@@ -15,6 +15,7 @@ from .logging_setup import get_logger
 from .skills import Skill
 from .task_model import Task
 from .tools import _path_key
+from .tools_memory import LONG_TERM_FILE
 
 log = get_logger("prompts")
 
@@ -22,6 +23,9 @@ log = get_logger("prompts")
 # 所有角色任务启动时只读注入前 N 字符；PM 首次梳理、开发在重大接口变更后追加。
 ARCHITECTURE_FILE = "ARCHITECTURE.md"
 ARCHITECTURE_MAX_CHARS = 3000
+# 项目经验记忆（Phase 2）：测试/构建命令、环境坑、依赖约束等长期经验
+NOTES_FILE = "PROJECT_NOTES.md"
+NOTES_MAX_CHARS = 1500
 
 OUTPUT_CONTRACT_HEADER = """\
 ## 工作方式与结束协议（必须严格遵守）
@@ -78,6 +82,8 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
         clauses.append("session_share / session_read 在同一需求批次内传递临时端口与测试凭证")
     if on("update_architecture"):
         clauses.append("update_architecture 维护项目架构黑板报")
+    if on("update_project_notes"):
+        clauses.append("update_project_notes 沉淀项目经验记忆")
     if on("dev_server_start"):
         clauses.append("dev_server_* 管理后台开发服务")
     if on("http_request"):
@@ -116,6 +122,14 @@ def _output_contract(enabled: frozenset[str] | None = None) -> str:
             "- 跨角色传递**临时运行态**（本地服务端口、测试账号、动态 JWT、临时 DSN）"
             "用 session_share 写入本需求批次剪贴板，下游用 session_read 读取；"
             "不要写进任务文件/代码/提交，也不要放长期密钥。需求验收或终止后自动清除。")
+    if on("update_project_notes"):
+        bullets.append(
+            "- **收尾前必做**：检查本次是否踩到会长期影响后续任务的坑（测试/构建命令与坑、"
+            "环境怪癖、依赖约束、易误伤的操作），有则用 update_project_notes 追加 "
+            "1~3 行（每条 ≤120 字符，英文优先）；这些内容会注入后续任务，省去重复踩坑。"
+            "没有则不必调用。若 append 因超过 8000 字符被拒：先 read_file 读全文归纳成 "
+            "≤1500 字摘要，用 mode=archive 归档到 " + LONG_TERM_FILE + "，再 append。"
+            "不要写任务日志、临时状态或架构事实（后者用 update_architecture）。")
     if on("dev_server_start") or on("browser_navigate") or on("http_request"):
         bullets.append(
             "- 本地调试流程：先用 dev_server_start 启动被测服务（命令中使用 {PORT} 自动分配端口并等待就绪），"
@@ -156,6 +170,49 @@ def _architecture_section(content: str) -> str:
         f"- 开发角色完成重大接口、数据表或模块边界变更后，追加一条简短增量"
         f"（关键路由、数据模型、文件导引，≤200 字符）；普通小改动不要改黑板报；\n"
         f"- 只写长期有效的架构事实，不写本次任务的执行日志、临时端口或调试过程。\n\n"
+    )
+
+
+def _notes_section(content: str, long_term_exists: bool = False) -> str:
+    """项目经验记忆：首尾共取 1500 字符（前 600 稳定约定 + 末 900 最新经验）。
+
+    不能只取前 N：新条目 append 在末尾，只取头部会让最新经验注入不进来。
+    """
+    text = (content or "").strip()
+    if not text and not long_term_exists:
+        return ""
+    if len(text) > NOTES_MAX_CHARS:
+        head = NOTES_MAX_CHARS * 2 // 5
+        tail = NOTES_MAX_CHARS - head
+        omitted = len(text) - head - tail
+        text = (text[:head].rstrip()
+                + f"\n…（已截断：中间省略 {omitted} 字符；"
+                  f"完整内容见项目根 {NOTES_FILE}）…\n"
+                + text[-tail:].lstrip())
+    body = f"<project_notes>\n{text}\n</project_notes>\n\n" if text else ""
+    long_term = ""
+    if long_term_exists:
+        long_term = (
+            f"项目根还存在 `{LONG_TERM_FILE}`（历史经验归档摘要，超出 20000 字符时"
+            f"自动裁剪最旧段落）：需要更早的经验（工具链变迁、已废弃方案等）"
+            f"时用 read_file 读取。\n\n"
+        )
+    return (
+        f"# 项目经验记忆（{NOTES_FILE}）\n\n"
+        f"以下是历史上完成本项目的任务时沉淀的经验（命令、坑、约束），优先采信：\n\n"
+        f"{body}"
+        f"{long_term}"
+        f"维护约定（只在确有长期价值时更新，避免流水账）：\n"
+        f"- 任务收尾前若发现会长期影响后续任务的经验（测试/构建命令与坑、环境怪癖、"
+        f"依赖约束、易误伤的操作），用 `update_project_notes(mode=\"append\", content=...)` "
+        f"追加 1~3 行，每条 ≤120 字符；新条目追加在文件末尾，会自动注入并优先展示；\n"
+        f"- append 因超过 8000 字符被拒时：先 read_file 读全文，归纳成 ≤1500 字摘要"
+        f"（仍有效的命令/约定保留，重复合并），用 `update_project_notes(mode=\"archive\", "
+        f"content=摘要)` 归档——摘要追加到 `{LONG_TERM_FILE}`，本文件随之精简为该摘要，"
+        f"之后再 append 新经验；\n"
+        f"- 正文优先英文（命令、路径、标识符保留原文），在信息不丢失的前提下压缩 token；\n"
+        f"- 不写任务日志、临时端口/凭证、当次调试过程；架构事实写 `{ARCHITECTURE_FILE}`；\n"
+        f"- 同类条目重复时用 `mode=\"replace\"` 合并重写全文。\n\n"
     )
 
 
@@ -231,6 +288,8 @@ def build_system_prompt(
     tool_map: dict | None = None,
     in_worktree: bool | None = None,
     architecture: str = "",
+    notes: str = "",
+    long_term: bool = False,
     nested_repos: list[str] | None = None,
 ) -> str:
     """组装系统提示词：角色 → 项目指引 → 技能索引 → 工作环境 → 输出协议。
@@ -241,6 +300,8 @@ def build_system_prompt(
     「本机工具」节——模型无需浪费轮数自己探测命令在哪。
     in_worktree：是否运行在隔离 worktree 内（默认跟随 is_git_repo；只读 PM/QA 为 False）。
     architecture：项目根 ARCHITECTURE.md 的内容（Phase 1 架构黑板报，空 = 未建立）。
+    notes：项目根 PROJECT_NOTES.md 的内容（Phase 2 项目经验记忆，空 = 未建立）。
+    long_term：项目根存在 LONG_TERM_MEMORY.md 时置 True，注入「按需读取」提示。
     nested_repos：项目中的 gitlink/嵌套仓库路径；非空时说明已回退主工作区模式。
     """
     guide = guide_content.strip()
@@ -282,6 +343,7 @@ def build_system_prompt(
         f"以下是该项目的开发指引，是你在本项目工作的最高行为准则，必须遵守：\n\n"
         f"<agent_guide>\n{guide}\n</agent_guide>\n\n"
         f"{_architecture_section(architecture)}"
+        f"{_notes_section(notes, long_term)}"
         f"{_skills_section(skills, tools)}"
         f"{workspace}\n"
         f"{nested_note}"

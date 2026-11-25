@@ -13,6 +13,7 @@ ZCode/
 *.deb
 build/task-arranger
 promo/
+*.mp4
 
 # 前端工程（Vue3 + Vite）
 dashboard/node_modules/

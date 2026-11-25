@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.33.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.34.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 
 ---
@@ -155,7 +155,7 @@ When it works, it:
 
 #### Steps
 
-1. Download `orcsy-setup-0.33.0-windows-amd64.exe` from the release page:
+1. Download `orcsy-setup-0.34.0-windows-amd64.exe` from the release page:
    - Gitee: <https://gitee.com/java-and-net/Orcsy/releases>
    - GitHub: <https://github.com/easy-open-meta/Orcsy/releases>
 2. Double-click it. If Windows SmartScreen appears, click **More info** → **Run anyway**.
@@ -1144,13 +1144,27 @@ egress:
 - **Subprocesses are not intercepted**: `npm` / `pip` / `git` started via `run_command` can reach the network outside the application layer; mirrors/proxy environment variables and the run ledger provide the constraints. The docs make no "zero outbound requests" claim;
 - **Troubleshooting**: temporarily set `mode: off` (allow all, no deny audit), then switch back to `allowlist`. The settings page shows the derived host count, process-wide allow/deny counters and recent denials.
 
-### 10.21 Team memory (Phase 1)
+### 10.21 Team memory and long-context handling (Phase 1/2)
 
 **Architecture blackboard `ARCHITECTURE.md`**
 - Lives in the project root: core layers, module boundaries, technology choices, shared data models and key routes; **write the body in English** (keep API paths/identifiers as-is) to save tokens;
 - Injected read-only into every task prompt (first 3000 chars) so all roles share the same project picture; omitted when the file does not exist;
 - The PM creates/updates it with `update_architecture(mode="replace")` on first decomposition; developers append a short English note (≤200 chars) after major API/schema changes with `mode="append"`; small changes need no update;
 - The tool can only write `ARCHITECTURE.md` — it does not give PM/QA arbitrary file-write access.
+
+**Project experience notes `PROJECT_NOTES.md`** (Phase 2)
+- A second, lighter memory file next to the blackboard: test/build commands and gotchas, environment quirks, dependency constraints, operations that easily break things, verification tricks — anything that will keep affecting future tasks;
+- Injected read-only into every task prompt as 1500 chars total (first 600 for stable conventions + last 900 for the newest lessons, since appends go to the end); omitted when the file does not exist;
+- Before finishing, the agent appends 1–3 lines (≤120 chars each, English preferred) with `update_project_notes(mode="append")`; duplicate entries are merged with `mode="replace"`;
+- Same write boundary as the blackboard: only that one file, total ≤8000 chars. Task logs, temporary ports/credentials, one-off debugging steps and architecture facts do not belong here (use the blackboard for the latter).
+- When the file hits its 8000-char cap, `append` is rejected with a fix hint: read the file, condense it to a ≤1500-char summary, and call `update_project_notes(mode="archive", content=summary)`. The summary is appended to `LONG_TERM_MEMORY.md` (dated section) and `PROJECT_NOTES.md` is condensed to that summary, so appending can continue;
+- `LONG_TERM_MEMORY.md` keeps the archive (≤20000 chars, oldest sections pruned automatically). It is not injected in full — the prompt only points to it, and the agent reads it on demand with `read_file` when older lessons matter.
+
+**Long-context handling (Phase 2)**
+- Conversation history is still trimmed when it grows past the soft budget (64K estimated tokens, or 90% of the model window in an emergency);
+- Before old tool results are replaced with placeholders, Orcsy asks the task model for a ≤400-char digest of the batch and appends it as a `【上下文压缩摘要】` message, so confirmed facts (paths, APIs, config values, test results, applied changes) survive the trim;
+- If that summary request fails, a deterministic digest (tool name + leading snippet per result) is used instead; the worst case is the old placeholder-only behavior, never worse;
+- Token estimation now counts non-ASCII text at ~0.7 tokens/char (previously half of that, which underestimated Chinese about 2x).
 
 **Requirement-batch shared clipboard**
 - PM subtasks, developers, QA and bug-fix tasks under the same `parent_id` tree share one batch;
@@ -1312,7 +1326,7 @@ orcsy archive-project demo
 orcsy archive-project demo --target my-s3 --include-runs
 ```
 
-Contents: `tasks/*.md` (including the `done/` archive) + `AGENT.md`; `--include-runs` also includes the run ledger. The archive target and retention count are configured in the `archive` section of `config.yaml` (`enabled` / `target` / `include_runs` / `keep_last`), or under **Settings → Data & compliance → Backup & archive**. Archiving is one-way; to restore, download and copy the files back into `tasks/` (automatic re-import to be designed later).
+Contents: `tasks/*.md` (including the `done/` archive) + `AGENT.md` + project memory documents (`ARCHITECTURE.md` / `PROJECT_NOTES.md` / `LONG_TERM_MEMORY.md`); `--include-runs` also includes the run ledger. The archive target and retention count are configured in the `archive` section of `config.yaml` (`enabled` / `target` / `include_runs` / `keep_last`), or under **Settings → Data & compliance → Backup & archive**. Archiving is one-way; to restore, download and copy the files back into `tasks/` and the project root memory documents (automatic re-import to be designed later).
 
 ### 11.4 Manual rollback after a failed upgrade
 

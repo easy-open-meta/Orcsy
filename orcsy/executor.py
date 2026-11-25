@@ -35,7 +35,8 @@ from .git_ops import Git, GitError
 from .llm import AgentResponse, LLMClient, LLMError, finish_response
 from .logging_setup import get_logger
 from .mirrors import decorate_skill_body
-from .prompts import ARCHITECTURE_FILE, build_system_prompt
+from .prompts import ARCHITECTURE_FILE, NOTES_FILE, build_system_prompt
+from .tools_memory import LONG_TERM_FILE
 from .skills import Skill, skill_bodies
 from .task_control import get_task_controls
 from .task_model import Task, append_progress
@@ -587,12 +588,24 @@ class TaskExecutor:
                 architecture = arch_path.read_text(encoding="utf-8")[:20000]
         except OSError as e:
             self.log.debug("读取架构黑板报失败（忽略）：%s", e)
+        # 项目经验记忆（Phase 2）：PROJECT_NOTES.md 同款只读注入，文件不存在即省略。
+        notes = ""
+        long_term = False
+        try:
+            notes_path = Path(work_root) / NOTES_FILE
+            if notes_path.is_file():
+                notes = notes_path.read_text(encoding="utf-8")[:8000]
+            long_term = (Path(work_root) / LONG_TERM_FILE).is_file()
+        except OSError as e:
+            self.log.debug("读取项目经验记忆失败（忽略）：%s", e)
         sys_prompt = build_system_prompt(self.project, guide_content, self.is_git_repo,
                                          skills=skills, tools=enabled,
                                          permission_mode=self.permission_mode,
                                          tool_map=tool_map,
                                          in_worktree=use_worktree,
                                          architecture=architecture,
+                                         notes=notes,
+                                         long_term=long_term,
                                          nested_repos=self.gitlinks)
         if self.extra_system_prompt:
             sys_prompt = sys_prompt.rstrip() + "\n\n" + self.extra_system_prompt

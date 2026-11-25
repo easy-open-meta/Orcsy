@@ -6,7 +6,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：把任务写成 Markdown，定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后经**独立审查门**把关、增量落地主分支工作区，**最终提交由人工确认**——幂等派发、租约续跑、预算/熔断与任务级运行台账全程留痕，Web 看板可视化掌控的可信无人值守闭环。
 
-![version](https://img.shields.io/badge/version-0.30.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.34.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 
 ```
@@ -30,26 +30,16 @@
 
 ## ✨ 特性
 
-- **多模型 Agent 项目小组（Project Team）** —— 自由编排 **👑 项目经理 / ⚙️ 后端 / 🎨 前端 / 🧪 测试 QA** 进驻项目：PM 只读摸底、拆解 DAG 子任务（`depends_on_refs`）或直接转派；前后端在任务隔离的 Worktree 沙盒中专端开发，Prompt 自动透传上游接口契约；QA 拉起本地服务与浏览器做端到端联调，缺陷经 `report_bug` 派发修复任务并自动回归；依赖解锁后同周期链式接棒（`chain_within_cycle`），单个需求一个周期完整闭环。
-- **🧠 团队记忆（Phase 1）** —— `ARCHITECTURE.md` 架构黑板报（正文英文书写以节省 token）在任务启动时自动注入前 3000 字，PM 首次梳理、开发重大接口变更后追加（`update_architecture`，只写该文件）；同一需求批次的角色可用 `session_share` / `session_read` 直接传递临时端口、测试账号与动态凭证，需求验收后自动清除；任务详情可一键查看前置任务成果并跳转其详情。
-- **🧩 特殊仓库兼容** —— 自动识别父仓库中的 gitlink/嵌套 Git 仓库（如 caresy-api、caresy-web）：这类结构无法用 worktree 隔离，系统自动回退主工作区串行模式，任务直接修改真实子仓库文件，不会出现 worktree 空目录或合并丢失改动；运行台账/审查会合并展示子仓库 diff，「待人工提交」页按仓库分组，提交时自动先提交子仓库、再提交父仓库 gitlink 指针。
-- **🔍 独立审查 Agent（合并前把关）** —— 任务完成先落 WIP 提交，由**另一个不同模型**只读审查（对照验收标准抽查、可实际跑测试），通过才合并归档；不通过带结构化问题清单自动返工（次数可调），杜绝「自己审自己」。
-- **🔒 幂等派发与断点续跑** —— 任务指纹 + 带 TTL/心跳的租约，同一任务不会被重复认领；提交前二次校验，运行中任务正文/依赖/模型被改会阻断提交并标 `stale_lease`；WIP 提交或合并阶段崩溃后自动续跑，不重复提交。
-- **💰 预算硬闸** —— 任务级 token/成本上限 + 项目当日上限；超限立即停止并保留 worktree 成果，项目预算用尽后自动暂停领取新任务；看板「预算与成本」可调，单价表按模型配置。
-- **🛑 熔断停机** —— 连续失败或窗口失败率超阈值时项目自动暂停领取新任务，看板显示可解释原因并支持一键恢复；默认人工恢复，避免自动重启掩盖系统性故障。
-- **🧾 写操作审计** —— 登录、任务/项目/设置变更、提交确认、审批与 API Key 写调用写入 `logs/audit.jsonl`；看板可筛选查看，参数只记摘要，密码、密钥与任务正文不落盘。
-- **🚦 统一出口白名单** —— 应用自身发起的 HTTP（模型调用、Issue 拉取、镜像测速、网页抓取、更新检查/下载）全部经 `egress` 判定：模型/Issue/镜像/更新源主机按配置自动放行，额外主机在看板「出网白名单」追加；非白名单拒绝并写审计。回环调试不受影响；Agent 子进程（npm/pip/git）出网不在应用层拦截范围，文档不承诺「零外网请求」。
-- **🛡️ 数据脱敏（密钥不出本地）** —— Agent 读到的 API 密钥、数据库密码**发送模型厂商前在本地掩除**：处理只在内存进行（不写磁盘、不进日志、任务结束即清除）；高置信规则开箱即用（sk- 全系（含 sk-ant-/sk-or-/sk-tp-/sk-sp-/sk-kimi-/sk-cp-/sk-api- 等厂商变体）/tp-/xai-/gsk_/hf_/co_/ark-/AKID/bce-v3/JWT/PEM 私钥块/Bearer/URL token/连接串密码段），模型只见 `[REDACTED:api_key:…]` 占位符，写回文件自动还原原文；键值对增强规则与自定义正则按需开启。
-- **🌐 本地调试与浏览器自动化** —— 纯 Python CDP 直连本地 Chrome / Edge（零 driver 依赖）：页面结构化快照、按 ref 点击输入、截图与 Console/Network 监听；配合 `dev_server_*` 后台服务起停与 `http_request` 本地接口调试（主机白名单约束），构成 Web/API 联调闭环。
-- **任意大模型** —— OpenAI 兼容协议（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）与 Anthropic 协议均原生 function calling，改 `base_url` + `model` 即可切换。
-- **Markdown 即任务** —— 每个任务一个 `.md` 文件：frontmatter 写元信息、正文写需求与验收标准，纯文本可版本化、可人工编辑。
-- **每项目一个专属 Agent / 小组** —— 独立的 `AGENT.md` 行为准则、任务清单、worktree 与对话历史；多 Agent 并行；支持项目级专属模型绑定。
-- **🛠️ 工具能力与三级审批** —— 文件工具禁锢在项目 worktree 内、90+ 默认命令白名单（9 大生态分组，看板可视化开关）、三档访问权限（变更前询问 / 自主模式 / 完全访问，敏感操作挂起等看板审批）；缺工具链时按内置 `env-setup` 技能静默安装（国内无代理网络自动切镜像直下）。
-- **并发子代理探索** —— PM 与开发角色可一次派生 2~4 个**只读子代理**并行摸底不同模块，单轮拿汇总报告，串行探索耗时成倍压缩。
-- **技能库（Skill）** —— 导入本地目录 / 看板新建 / 一键扫描 ZCode / Claude Code / Codex 等工具的用户级技能批量导入；提示词只注入「名称+描述」索引，全文按需 `read_skill`，不撑爆上下文。
-- **仓库 Issues 集成** —— 绑定 GitHub / Gitee / GitLab / Gitea 仓库（含自托管），open Issue 一键转任务（标签映射优先级、归档去重、单向导入）。
-- **📱 移动端远程访问** —— 手机远程查看/编辑/新建任务：扫码直达、30 天 Cookie + Bearer 双轨免登录、专属移动布局（吸顶顶栏/底部导航/全屏任务抽屉）、触屏排序、乐观锁冲突保存、草稿暂存、PWA 添加到主屏幕；受信任代理限速，防反代误锁 127.0.0.1。
-- **Web 可视化看板** —— 状态总览、任务增删改与拖拽排序、**人工把关提交页**（按仓库分组的文件清单 + diff 对比，嵌套 gitlink 一并提交，一键确认 commit/push）、模型连通测试、运行日志与模型思考查看；托盘常驻、开机自启、自更新（零 UAC / 系统目录一次提权）、任务结束提醒、按角色用量台账与 12 周热力图。
+- **多模型 Agent 项目小组** —— PM / 后端 / 前端 / QA 自由编排：PM 只读摸底并拆解 DAG 子任务或直接转派；开发在任务隔离 worktree 中编码，上游接口契约自动注入；QA 拉起本地服务与浏览器端到端联调、提 Bug 并自动回归——单个需求一个周期闭环。
+- **可信无人值守流水线** —— 独立审查模型做合并前把关（不通过自动返工）、幂等派发 + TTL 租约与 stale-lease 校验、崩溃后续跑不重复提交、人工把关提交页、token/成本硬闸、熔断停机与写操作审计。
+- **🧠 项目记忆与上下文** —— `ARCHITECTURE.md` 架构黑板报 + `PROJECT_NOTES.md` 经验记忆（每任务注入，满额归档到 `LONG_TERM_MEMORY.md`）、批次共享剪贴板传递临时端口/凭证、摘要式上下文裁剪让早期事实不丢、只读 `delegate_explore` 并发子代理。
+- **任意大模型，Markdown 即任务** —— OpenAI 兼容与 Anthropic 协议均原生 function calling（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）；每任务一个 `.md`、每项目一份 `AGENT.md`，支持项目级专属模型。
+- **🛠️ 工具沙箱与三级审批** —— 文件工具禁锢在项目内、90+ 命令白名单（9 大生态）、三档权限 + 看板审批队列，缺工具链时按内置技能静默安装（国内自动切镜像直下）。
+- **🌐 本地调试与浏览器自动化** —— 纯 Python CDP 直连 Chrome / Edge（结构化快照、按 ref 点击输入、截图、Console/Network），配合 `dev_server_*` 与 `http_request`，默认关闭、按需开启。
+- **🛡️ 默认安全** —— 密钥发送模型前本地掩除、写回文件自动还原；应用自身 HTTP 统一出网白名单；非回环监听强制登录（PBKDF2 密文存储）。
+- **📱 看板与移动端** —— 状态总览、任务增删改与拖拽排序、人工把关提交页（diff 对比）、运行日志与模型思考、用量热力图、托盘/自启/自更新/提醒；扫码连接的移动布局与 PWA 安装。
+- **🧩 特殊仓库兼容** —— gitlink / 嵌套仓库自动回退主工作区串行模式；提交页按仓库分组，先提交子仓库再提交父仓库指针。
+- **技能库与 Issues** —— 一键导入 ZCode / Claude Code / Codex 等用户级技能（只注入索引，按需读全文）；绑定 GitHub / Gitee / GitLab / Gitea，open Issue 单向导入任务。
 - **开箱即用的项目接入** —— 新建/导入项目只新增 `tasks/` 与 `AGENT.md`；自动探测技术栈预填运行与测试命令。
 
 ## 🚀 快速开始
