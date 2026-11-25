@@ -13,7 +13,7 @@
     （amd64 允许 ARM64 Win11 仿真安装；arm64 为原生包，须在 ARM64 宿主构建）
   - build/Setup/orcsy-update-{ver}.zip       Windows amd64 自更新包（零 UAC 换名更新）
   - build/Setup/orcsy-update-{ver}-windows-arm64.zip Windows arm64 自更新包
-  - build/Setup/orcsy-{ver}-windows-arm64.zip Windows arm64 便携发布包（纯原生指令，含快捷方式安装器）
+  - build/Setup/orcsy-{ver}-windows-arm64.zip Windows arm64 源码便携包（非 exe；原生 exe 需 ARM64 宿主构建）
   - build/Setup/orcsy-{ver}-linux-amd64.tar.gz Linux amd64 便携发布包（含一键安装器）
   - build/Setup/orcsy-{ver}-linux-arm64.tar.gz Linux arm64 便携发布包（含一键安装器）
   - build/Setup/orcsy_{ver}_amd64.deb        Linux amd64 桌面安装包（Ubuntu/Debian/UOS/Deepin 双击安装）
@@ -806,14 +806,26 @@ def main() -> int:
                 digest = hashlib.sha256(setup.read_bytes()).hexdigest()
                 setup.with_name(setup.name + ".sha256").write_text(
                     f"{digest}  {setup.name}\n", encoding="ascii")
-                artifacts_done.append(f"Windows 首次安装包 build/Setup/{setup.name}")
+                artifacts_done.append(f"Windows ({arch}) 首次安装包 build/Setup/{setup.name}")
             else:
                 print("警告：未找到 ISCC.exe（Inno Setup 6），已跳过 Windows exe 安装包制作")
             build_update_zip(ver, arch)
             artifacts_done.append(
                 f"Windows ({arch}) 自更新包 build/Setup/{update_zip_name(ver, arch)}")
         build_windows_arm64_zip(ver)
-        artifacts_done.append(f"Windows (arm64) 便携包 build/Setup/orcsy-{v_str}-windows-arm64.zip")
+        artifacts_done.append(
+            f"Windows (arm64) 源码便携包（非 exe） build/Setup/orcsy-{v_str}-windows-arm64.zip")
+        if host_arch() == "arm64":
+            print()
+            print("提示：Windows ARM64 原生安装包/更新包已构建；"
+                  "amd64 安装包需在 x64 宿主构建（CI 负责）。")
+        else:
+            print()
+            print("提示：Windows ARM64 原生安装包/更新包需在 ARM64 Windows 宿主构建"
+                  "（PyInstaller 不能交叉编译），本机为 amd64，已跳过。")
+            print("      CI 的 windows-11-arm job 会自动产出：")
+            print(f"      build/Setup/orcsy-setup-{v_str}-windows-arm64.exe")
+            print(f"      build/Setup/orcsy-update-{v_str}-windows-arm64.zip")
 
     # Linux 产物构建 (linux-amd64 与 linux-arm64 便携包 + 原生桌面 .deb 包)
     if not args.windows_only:
