@@ -40,16 +40,40 @@
   实例，`_raw_body_bytes` 缓存未按请求重置，第二个 POST 读到上一个请求的 body，
   剩余字节被当成下一请求行（`501 Unsupported method`）。已修复为每个 POST
   开始重置缓存，并新增 `tests/test_web_keepalive_post.py` 回归。
+- **回环 Provider 误走系统代理**：本机常驻代理（`127.0.0.1:7897`）会拦截发往
+  `127.0.0.1` 的 Provider 请求，模拟厂商测试中表现为 502 / 连接重置 / 超时。
+  `approval_providers._http_json` 现对回环地址（localhost / 127.0.0.0/8 / ::1）
+  强制 `trust_env=False`，公网 Provider 仍遵循系统代理；`test_approval_adapters.py`
+  新增回环判定与 `trust_env` 断言。
+
+## 3.1 未能实测项的模拟方案（已落地）
+
+新增本地模拟厂商服务 `tests/mock_vendor_server.py` 与
+`tests/test_approval_adapters_http.py`，用真实 HTTP 请求覆盖适配器契约：
+
+| 供应商 | 模拟端点 | 验证内容 |
+| --- | --- | --- |
+| GitLab | 建 issue、拉 notes、关闭 issue | `PRIVATE-TOKEN`、项目路径编码、`/approve` `/reject` 解析、Webhook `X-Gitlab-Token` 验签 |
+| GitHub | 建 issue、拉 comments、关闭 issue | `Bearer` 与版本头、`/approve` `/reject` 解析 |
+| 飞书 | tenant_access_token、创建/查询审批实例 | 应用凭据、`task_list` 的 `APPROVED/REJECTED` 计数 |
+| 钉钉 | gettoken、创建/查询审批实例 | 应用凭据、`operation_records` 的 `AGREE/REFUSE` 计数 |
+
+会签引擎还跑了三条端到端用例：真实 GitLab 适配器轮询 + email 白名单去重
+计数至 approved、GitHub 一票否决、GitLab Webhook 回调验签推进并验证重复回调
+幂等；随后用新 manager 实例读回持久化终态。以上均通过。
+
+仍无法用本地模拟替代的部分：真实厂商的权限模型/版本差异、真实租户身份与
+审批模板字段、公网 HTTPS 与反向代理、真实 LLM 的工具调用行为。
 
 ## 4. 未能实测的项目（及原因）
 
 | 项 | 原因 | 现状/建议 |
 | --- | --- | --- |
-| 真实 GitLab/GitHub 审批工单 | 无真实仓库 token / 测试 issue 环境 | 适配器仅有 mock HTTP 单测；需在测试仓库用 `/approve`、`/reject` 验证 |
-| 真实飞书/钉钉审批实例 | 无企业应用凭据、审批模板 | 适配器仅有 mock HTTP 单测；需确认 `approval_code`/`process_code`、表单字段、`originator_user_id` |
+| 真实 GitLab/GitHub 审批工单 | 无真实仓库 token / 测试 issue 环境 | **已用模拟厂商做 HTTP 契约实测**；仍需在真实测试仓库确认版本差异与 token 权限 |
+| 真实飞书/钉钉审批实例 | 无企业应用凭据、审批模板 | **已用模拟厂商验证端点与字段解析**；仍需确认 `approval_code`/`process_code`、表单字段、`originator_user_id` |
 | 真实 LLM 任务 | 无可用模型密钥 | 使用脚本化 `LLMClient`；真实模型的工具调用/轮次未覆盖 |
 | 公网 HTTPS 回调 + 反代 | 本机 localhost 测试 | 仅验证 localhost HTTP + 签名回调；TLS、反代、raw body 转发需部署后验证 |
-| 真实 email 白名单身份 | 使用 fake 身份映射 | 未验证 GitLab username / GitHub login / 飞书 open_id / 钉钉 userid 的真实映射 |
+| 真实 email 白名单身份 | 使用 fake/模拟身份映射 | **已模拟 GitLab username / GitHub login / 飞书 user_id / 钉钉 userid 映射**；真实租户身份仍需冒烟 |
 | 飞书/钉钉 Webhook | 当前适配器仅轮询，回调明确 fail closed | 需后续事件订阅实现与验签 |
 | 2D 内置账号/RBAC | 尚未实现（1.x） | 不属本次测试范围 |
 | 多进程/重启后的 UI 复用 | 本次为单进程 UI 测试 | 持久化/重启复用已有单元测试覆盖，未做 UI 级重启演练 |
@@ -61,13 +85,16 @@
 - Phase 1/2 种子请求通过真实 manager 创建；Phase 2 回调使用
   `sign_callback(secret, raw_body)` 生成 `X-Orcsy-Signature`/`X-Orcsy-Timestamp`；
 - 完整任务链路使用脚本化 `LLMClient`，真实执行 `TaskExecutor.run_task`。
-- 测试脚本位于临时目录，不随仓库提交；本报告只记录结果与边界。
+- 模拟厂商契约测试随仓库提交：`tests/mock_vendor_server.py` 与
+  `tests/test_approval_adapters_http.py`，直接 `uv run python` 运行；
+  UI 测试脚本位于临时目录，不随仓库提交。
 
 ## 6. 结论
 
 Phase 1 与 Phase 2A/2B/2C 的**核心 UI、配置、审批状态机与 executor 接线**已在
-真实看板 + 真实 HTTP 回调 + 脚本化 Agent 下跑通；测试还发现并修复了一个
-keep-alive POST 的真实缺陷。
+真实看板 + 真实 HTTP 回调 + 脚本化 Agent 下跑通；四个真实 Provider 适配器与
+会签引擎也已通过本地模拟厂商的真实 HTTP 契约测试。测试还发现并修复了
+keep-alive POST body 错位与回环 Provider 误走系统代理两个缺陷。
 
-上线前仍需按 §4 用真实 GitLab/GitHub/飞书/钉钉凭据与真实模型做一轮供应商
-侧冒烟，并验证公网反代下的回调可达性与验签。
+上线前仍需用真实 GitLab/GitHub/飞书/钉钉凭据与真实模型做一轮供应商侧冒烟，
+并验证公网反代下的回调可达性与验签；这部分无法用本地模拟替代。
