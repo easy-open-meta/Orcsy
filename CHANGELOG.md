@@ -15,7 +15,7 @@
 - **构建脚本架构参数**：`build.py` 新增 `--arch` 与 `--skip-frontend`，跨架构构建直接拒绝；`installer.iss` 通过 `/DArm64` 参数化输出名与 `ArchitecturesAllowed`；发布清单与预发布 smoke 覆盖 arm64 产物。
 
 ### 修复
-- **Linux 便携包解包失败**：tar 顶层启动器 `orcsy` 与包目录 `orcsy/` 同名，`tar -xzf` 报 `Not a directory`；启动器改名为 `orcsy.sh`（`install.sh` 同步调整），预发布 smoke 增加启动器/包目录解包校验与 arm64 tar、deb 结构检查。
+- **Linux 便携包解包失败**：tar 顶层启动器 `orcsy` 与包目录 `orcsy/` 同名，`tar -xzf` 报 `Not a directory`；启动器改名为 `orcsy.sh`（`install.sh` 同步调整），预发布 smoke 改为纯 Python 校验（`build/verify_packages.py`）：覆盖 zip/tar/deb 结构并直接列出缺失成员，不再依赖 `unzip`/`dpkg-deb` 的输出格式。
 
 ## [0.34.0] — 2026-11-25
 

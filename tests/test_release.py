@@ -16,6 +16,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "."))
@@ -37,6 +38,14 @@ _build_spec = importlib.util.spec_from_file_location(
 assert _build_spec and _build_spec.loader
 buildpy = importlib.util.module_from_spec(_build_spec)
 _build_spec.loader.exec_module(buildpy)
+
+# 预发布 smoke 的纯 Python 包内容校验器
+_pkg_spec = importlib.util.spec_from_file_location(
+    "orcsy_verify_packages",
+    Path(__file__).resolve().parents[1] / "build" / "verify_packages.py")
+assert _pkg_spec and _pkg_spec.loader
+verify_packages = importlib.util.module_from_spec(_pkg_spec)
+_pkg_spec.loader.exec_module(verify_packages)
 
 
 def check_build_arch() -> None:
@@ -387,9 +396,48 @@ def check_linux_archives() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_package_contents() -> None:
+    """预发布 smoke 校验器：zip/tar/deb 结构齐全，缺件能明确报错。"""
+    tmp = Path(tempfile.mkdtemp(prefix="orcsy-pkg-check-"))
+    old_build = buildpy.BUILD
+    try:
+        buildpy.BUILD = tmp
+        for arch in ("amd64", "arm64"):
+            buildpy.build_linux_tarball((0, 15, 0), arch)
+            buildpy.build_linux_deb((0, 15, 0), arch)
+        setup = tmp / "Setup"
+        fake = {
+            "orcsy-update-0.15.0.zip": ["orcsy-web.exe", "orcsy-tray.exe"],
+            "orcsy-update-0.15.0-windows-arm64.zip": ["orcsy-web.exe", "orcsy-tray.exe"],
+            "orcsy-0.15.0-windows-arm64.zip": [
+                "orcsy-0.15.0-windows-arm64/orcsy.bat",
+                "orcsy-0.15.0-windows-arm64/pyproject.toml",
+            ],
+        }
+        for name, members in fake.items():
+            with zipfile.ZipFile(setup / name, "w") as zf:
+                for member in members:
+                    zf.writestr(member, b"x")
+        report = verify_packages.verify(setup, "0.15.0")
+        assert len(report) == 7, report
+
+        with zipfile.ZipFile(setup / "orcsy-update-0.15.0-windows-arm64.zip", "w") as zf:
+            zf.writestr("orcsy-web.exe", b"x")
+        try:
+            verify_packages.verify(setup, "0.15.0")
+            raise AssertionError("缺少 orcsy-tray.exe 应报错")
+        except verify_packages.PackageError as e:
+            assert "orcsy-tray.exe" in str(e)
+        print("发布包内容校验（zip/tar/deb 结构 + 缺件报错）✅")
+    finally:
+        buildpy.BUILD = old_build
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     check_build_arch()
     check_linux_archives()
+    check_package_contents()
     check_artifacts()
     check_checksum_rejected()
     check_upload_flow()

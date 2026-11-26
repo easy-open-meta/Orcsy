@@ -300,17 +300,7 @@ jobs:
 
       - name: Smoke package contents without network or publishing
         run: |
-          version='${{ needs.version.outputs.version }}'
-          unzip -Z1 "dist/orcsy-update-$version.zip" | grep -Fx 'orcsy-web.exe'
-          unzip -Z1 "dist/orcsy-update-$version.zip" | grep -Fx 'orcsy-tray.exe'
-          unzip -Z1 "dist/orcsy-update-$version-windows-arm64.zip" | grep -Fx 'orcsy-web.exe'
-          unzip -Z1 "dist/orcsy-update-$version-windows-arm64.zip" | grep -Fx 'orcsy-tray.exe'
-          unzip -Z1 "dist/orcsy-$version-windows-arm64.zip" | grep -Fx "orcsy-$version-windows-arm64/orcsy.bat"
-          unzip -Z1 "dist/orcsy-$version-windows-arm64.zip" | grep -Fx "orcsy-$version-windows-arm64/pyproject.toml"
-          tar -tzf "dist/orcsy-$version-linux-arm64.tar.gz" | grep -Fx "orcsy-$version-linux-arm64/orcsy.sh"
-          tar -tzf "dist/orcsy-$version-linux-arm64.tar.gz" | grep -Fx "orcsy-$version-linux-arm64/orcsy/tools.py"
-          dpkg-deb -c "dist/orcsy_$version_amd64.deb" | grep -E "opt/orcsy/orcsy$"
-          dpkg-deb -c "dist/orcsy_$version_amd64.deb" | grep -E "opt/orcsy/tools.py$"
+          python3 build/verify_packages.py dist "${{ needs.version.outputs.version }}"
 
       - name: Upload checked artifacts for release
         uses: actions/upload-artifact@v4
