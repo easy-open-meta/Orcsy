@@ -270,13 +270,19 @@ class QuorumApprovalManager:
         with self._lock:
             existing: QuorumApprovalRequest | None = None
             for req in self._requests.values():
+                same_policy = (
+                    req.provider_name == provider_name
+                    and req.required == max(2, int(required))
+                    and set(req.allowed_approvers) == set(allowed))
                 if (req.project == project and req.task_id == task_id
-                        and req.digest == digest and req.status == "pending"
+                        and req.digest == digest and same_policy
+                        and req.status == "pending"
                         and (req.expires_at == 0 or req.expires_at > now)):
                     existing = req
                     break
                 if (req.project == project and req.task_id == task_id
-                        and req.digest == digest and req.status == "approved"
+                        and req.digest == digest and same_policy
+                        and req.status == "approved"
                         and (req.expires_at == 0 or req.expires_at > now)):
                     return QuorumApprovalOutcome(
                         approved=True, timed_out=False, cancelled=False,
