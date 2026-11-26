@@ -19,6 +19,9 @@
 - **风险审批 Phase 2C（飞书/钉钉审批实例）**：飞书用 tenant_access_token 创建审批实例并轮询 task_list；钉钉用 gettoken 创建 processinstance 并轮询 operation_records；按 Provider 账号映射 email 计数。两者当前仅轮询，Webhook 暂未启用。
 - 说明：Provider 凭据仍在 config.yaml 的 `approval_providers` 配置，设置页选择名称并配置 quorum/白名单/回调。
 
+### 修复
+- 看板 keep-alive 连接上连续 POST 时，raw body 缓存未按请求重置，第二个请求会复用上一个 body，剩余字节被当成下一请求行（501 Unsupported method）。现于每个 POST 开始时重置，并新增 `test_web_keepalive_post.py` 回归。
+
 ## [0.35.0] — 2026-11-26
 
 ### 新增

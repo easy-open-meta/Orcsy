@@ -3029,6 +3029,10 @@ class WebHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         body: dict = {}
         self._last_json_status = 200
+        # BaseHTTPRequestHandler 会在同一 keep-alive 连接上复用实例；raw body
+        # 缓存必须按请求重置，否则第二个 POST 会读到上一个请求的 body，
+        # 剩余字节被当成下一请求行（501 Unsupported method）。
+        self._raw_body_bytes = None
         try:
             # 先读净请求体再鉴权：401 拒掉时若留下未读的 body，keep-alive
             # 连接上的下一个请求会把残留字节当请求行解析（协议失步 → 连接重置）
