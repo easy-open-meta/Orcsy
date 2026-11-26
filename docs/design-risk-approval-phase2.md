@@ -404,6 +404,8 @@ risk_approval:
 
 ## 13. 测试与验收
 
+- 真实飞书/钉钉租户的免费测试企业搭建与会签冒烟，见
+  [`feishu-dingtalk-test-setup.md`](feishu-dingtalk-test-setup.md)；
 - 假 Provider HTTP 服务：create/poll/callback、HMAC、timestamp、重放、重复回调；
 - quorum：2 个白名单 email 达标、1 个不足、同一 email 多账号只计一次、任一
   白名单内拒绝一票否决；
