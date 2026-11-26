@@ -1,6 +1,6 @@
 # 风险审批 Phase 1/2 实际测试报告（2026-11-27）
 
-> 测试分支：`test/risk-approval-full`（`a296354` + 修复 `b5358d0`）
+> 测试分支：`test/risk-approval-full`（含 keep-alive、回环代理与模拟厂商补测提交）
 > 环境：Windows 10.0.26300 x64、Chrome DevTools MCP、`uv run`、本机回环
 > 范围：风险审批 Phase 0+1（单人）与 Phase 2A/2B/2C（会签骨架、工单/审批实例适配器、设置页）
 > 结论：**核心链路通过**；真实外部 Provider、真实 LLM、公网回调未实测（见 §4）。
@@ -98,3 +98,7 @@ keep-alive POST body 错位与回环 Provider 误走系统代理两个缺陷。
 
 上线前仍需用真实 GitLab/GitHub/飞书/钉钉凭据与真实模型做一轮供应商侧冒烟，
 并验证公网反代下的回调可达性与验签；这部分无法用本地模拟替代。
+
+自动回归：`uv run python tests/run_all.py --unit-only` 共 85 个文件，83 通过；
+`test_mobile_remote_access` 与 `test_release` 在整套运行中超时（单独运行通过，
+前者为已知回环抖动，后者受前端构建耗时影响），与本功能改动无关。
