@@ -2311,6 +2311,9 @@ async function newFolder(): Promise<void> {
           </NTag>
           <NTag size="small" :bordered="false" type="info">{{ r.project }}</NTag>
           <NTag size="small" :bordered="false">{{ r.task_id }}</NTag>
+          <NTag v-if="r.mode === 'quorum'" size="small" :bordered="false" type="warning">
+            {{ r.provider || t('会签') }} · {{ r.approved_count || 0 }}/{{ r.required || 0 }}
+          </NTag>
           <span class="hint appr-wait">{{ t('已等待') }} {{ fmtWaited(r.waited_seconds) }}</span>
         </div>
         <div class="appr-title">{{ r.title }}</div>
@@ -2322,14 +2325,28 @@ async function newFolder(): Promise<void> {
           <span class="risk-add">+{{ r.additions }}</span>/<span class="risk-del">-{{ r.deletions }}</span>
           · {{ r.branch }}@{{ r.commit }}
         </div>
-        <NInput v-model:value="riskComments[r.id]" type="textarea" :rows="2"
-                :placeholder="t('审批意见（可选）')" />
-        <div class="btnrow" style="justify-content:flex-end; margin-top:8px">
-          <NButton size="small" :disabled="riskResponding === r.id"
-                   @click="respondRiskApproval(r.id, false)">{{ t('拒绝合入') }}</NButton>
-          <NButton size="small" type="primary" :loading="riskResponding === r.id"
-                   @click="respondRiskApproval(r.id, true)">{{ t('批准合入') }}</NButton>
-        </div>
+        <template v-if="r.mode === 'quorum'">
+          <div v-if="r.approvers?.length" class="risk-reasons">
+            <div v-for="a in r.approvers" :key="a.email">• {{ a.email }} · {{ a.name || a.id }}</div>
+          </div>
+          <div class="hint">{{ t('会签由外部 Provider 完成；这里只查看进度，不在本页批准。') }}</div>
+          <div class="btnrow" style="justify-content:flex-end; margin-top:8px">
+            <a v-if="r.external_url" :href="r.external_url" target="_blank" rel="noopener">
+              <NButton size="small">{{ t('打开审批') }}</NButton>
+            </a>
+            <NButton size="small" @click="refresh(true)">{{ t('刷新状态') }}</NButton>
+          </div>
+        </template>
+        <template v-else>
+          <NInput v-model:value="riskComments[r.id]" type="textarea" :rows="2"
+                  :placeholder="t('审批意见（可选）')" />
+          <div class="btnrow" style="justify-content:flex-end; margin-top:8px">
+            <NButton size="small" :disabled="riskResponding === r.id"
+                     @click="respondRiskApproval(r.id, false)">{{ t('拒绝合入') }}</NButton>
+            <NButton size="small" type="primary" :loading="riskResponding === r.id"
+                     @click="respondRiskApproval(r.id, true)">{{ t('批准合入') }}</NButton>
+          </div>
+        </template>
       </div>
     </div>
   </NModal>

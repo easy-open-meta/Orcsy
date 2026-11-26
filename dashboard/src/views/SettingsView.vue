@@ -500,12 +500,38 @@ async function saveRiskApproval(): Promise<void> {
   try {
     const extra = riskDraft.extra_text
       .split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    const allowed = riskDraft.allowed_text
+      .split(/[\r\n,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean)
+    const approvers: Record<string, Record<string, string>> = {}
+    for (const row of riskApprovers) {
+      const email = row.email.trim().toLowerCase()
+      if (!email) {
+        message()?.(it('审批人 email 不能为空'), 'error')
+        return
+      }
+      const ids: Record<string, string> = {}
+      for (const provider of ['gitlab', 'github', 'feishu', 'dingtalk'] as const) {
+        const value = row[provider].trim()
+        if (value) ids[provider] = value
+      }
+      if (!Object.keys(ids).length) {
+        message()?.(tFmt('审批人 {p0} 至少填写一个 Provider 身份', { p0: email }), 'error')
+        return
+      }
+      approvers[email] = ids
+    }
     await api.config({
+      approvers,
       risk_approval: {
         enabled: riskDraft.enabled,
         policy: { low: riskDraft.low, medium: riskDraft.medium, high: riskDraft.high },
         timeout_minutes: riskDraft.timeout_minutes,
         extra_high_risk_paths: extra,
+        provider: riskDraft.provider,
+        quorum: { high: riskDraft.quorum_high },
+        allowed_approvers: { high: allowed },
+        callback_url: riskDraft.callback_url.trim(),
+        poll_interval_seconds: riskDraft.poll_interval,
       },
     })
     message()?.(it('已保存并生效'), 'success')
@@ -542,7 +568,14 @@ const permOptions = computed(() => [
 ])
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
 // ---- 合入前风险审批（Phase 1 单机单审批人） ----
-type RiskPolicy = 'off' | 'single'
+type RiskPolicy = 'off' | 'single' | 'quorum'
+interface RiskApproverDraft {
+  email: string
+  gitlab: string
+  github: string
+  feishu: string
+  dingtalk: string
+}
 const riskDraft = reactive({
   enabled: false,
   low: 'off' as RiskPolicy,
@@ -550,12 +583,38 @@ const riskDraft = reactive({
   high: 'single' as RiskPolicy,
   timeout_minutes: 60,
   extra_text: '',
+  provider: '',
+  quorum_high: 2,
+  allowed_text: '',
+  callback_url: '',
+  poll_interval: 20,
 })
+const riskApprovers = reactive<RiskApproverDraft[]>([])
 const riskSaving = shallowRef(false)
 const riskPolicyOptions = computed(() => [
   { label: it('关闭（不加门）'), value: 'off' },
   { label: it('单人审批（看板批准后合入）'), value: 'single' },
 ])
+const riskPolicyOptionsFull = computed(() => [
+  ...riskPolicyOptions.value,
+  { label: it('多人会签（外部 Provider）'), value: 'quorum' },
+])
+const riskProviderOptions = computed(() =>
+  Object.keys(store.state?.approval_providers || {}).map(k => ({ label: k, value: k })))
+
+function useCurrentDomain(): void {
+  const path = window.location.pathname.replace(/\/+$/, '')
+  riskDraft.callback_url =
+    `${window.location.origin}${path}/api/risk-approval/callback/{provider}`
+}
+
+function addRiskApprover(): void {
+  riskApprovers.push({ email: '', gitlab: '', github: '', feishu: '', dingtalk: '' })
+}
+
+function removeRiskApprover(idx: number): void {
+  riskApprovers.splice(idx, 1)
+}
 // ---- Git 提交与合并开关（默认关闭：改动直接保留在工作区） ----
 const gitCommitAndMergeDraft = shallowRef(false)
 const gitAuthorName = shallowRef('')
@@ -614,6 +673,19 @@ watch(() => store.state, (s) => {
   riskDraft.high = (ra?.policy?.high ?? 'single') as RiskPolicy
   riskDraft.timeout_minutes = ra?.timeout_minutes ?? 60
   riskDraft.extra_text = (ra?.extra_high_risk_paths ?? []).join('\n')
+  riskDraft.provider = ra?.provider ?? ''
+  riskDraft.quorum_high = ra?.quorum?.high ?? 2
+  riskDraft.allowed_text = (ra?.allowed_approvers?.high ?? []).join('\n')
+  riskDraft.callback_url = ra?.callback_url ?? ''
+  riskDraft.poll_interval = ra?.poll_interval_seconds ?? 20
+  riskApprovers.splice(0, riskApprovers.length,
+    ...Object.entries(s.approvers || {}).map(([email, ids]) => ({
+      email,
+      gitlab: String((ids as Record<string, string>).gitlab || ''),
+      github: String((ids as Record<string, string>).github || ''),
+      feishu: String((ids as Record<string, string>).feishu || ''),
+      dingtalk: String((ids as Record<string, string>).dingtalk || ''),
+    })))
   const dbg = s.local_debug_cfg
   if (dbg) {
     localDebugDraft.browser = dbg.browser ?? 'auto'
@@ -2162,7 +2234,7 @@ const protocolOptions = computed(() => [
             <label class="checkline">
               <NSwitch v-model:value="riskDraft.enabled" />
               {{ it('启用合入前风险审批') }}
-              <span class="hint">{{ it('Phase 1 为单机单审批人：只有看板登录会话可批准，API Key 不可代批；多人会签需外部身份源，尚未提供。') }}</span>
+              <span class="hint">{{ it('Phase 1 为单机单审批人；Phase 2 的 quorum 会签需配置外部 Provider（首批 GitLab/GitHub/飞书/钉钉适配器接入中）。') }}</span>
             </label>
             <div class="hint">
               {{ it('建议同时设置看板登录密码；无密码看板只能防误操作，不能防本机恶意程序冒充审批。') }}
@@ -2173,7 +2245,50 @@ const protocolOptions = computed(() => [
               <div class="f1"><label>{{ it('中风险策略') }}</label>
                 <NSelect v-model:value="riskDraft.medium" :options="riskPolicyOptions" /></div>
               <div class="f1"><label>{{ it('高风险策略') }}</label>
-                <NSelect v-model:value="riskDraft.high" :options="riskPolicyOptions" /></div>
+                <NSelect v-model:value="riskDraft.high" :options="riskPolicyOptionsFull" /></div>
+            </div>
+            <div class="frow">
+              <div class="f1"><label>{{ it('外部审批 Provider（quorum 用）') }}</label>
+                <NSelect :value="riskDraft.provider || null"
+                         :options="riskProviderOptions" clearable
+                         :placeholder="it('未配置（先在 config.yaml 添加 approval_providers）')"
+                         @update:value="(v: string | null) => { riskDraft.provider = v || '' }" />
+                <div class="hint">{{ it('Provider 凭据在 config.yaml 的 approval_providers 配置；这里选择名称。') }}</div>
+              </div>
+              <div class="f1"><label>{{ it('高风险会签人数（quorum）') }}</label>
+                <NInputNumber v-model:value="riskDraft.quorum_high" :min="2" :max="20" /></div>
+            </div>
+            <div class="frow">
+              <div class="f1"><label>{{ it('允许审批的 email（每行一个）') }}</label>
+                <NInput v-model:value="riskDraft.allowed_text" type="textarea"
+                        :autosize="{ minRows: 2, maxRows: 5 }"
+                        :placeholder="it('alice@example.com')" /></div>
+              <div class="f1"><label>{{ it('轮询间隔（秒，5~300）') }}</label>
+                <NInputNumber v-model:value="riskDraft.poll_interval" :min="5" :max="300" /></div>
+            </div>
+            <label>{{ it('回调地址 callback_url（空 = 仅轮询）') }}</label>
+            <div class="frow">
+              <div class="f2"><NInput v-model:value="riskDraft.callback_url"
+                                      placeholder="https://<domain>/api/risk-approval/callback/{provider}" /></div>
+              <div class="f0"><NButton @click="useCurrentDomain">{{ it('使用当前访问域名') }}</NButton></div>
+            </div>
+            <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
+              <label style="margin:0">{{ it('审批人 email ↔ Provider 身份') }}</label>
+              <NButton size="tiny" quaternary type="primary" @click="addRiskApprover">
+                {{ it('+ 添加审批人') }}
+              </NButton>
+            </div>
+            <div v-for="(a, ai) in riskApprovers" :key="ai"
+                 style="display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap;">
+              <NInput v-model:value="a.email" size="small" :placeholder="it('email')" style="width:200px" />
+              <NInput v-model:value="a.gitlab" size="small" placeholder="GitLab username" style="width:140px" />
+              <NInput v-model:value="a.github" size="small" placeholder="GitHub login" style="width:140px" />
+              <NInput v-model:value="a.feishu" size="small" placeholder="Feishu open_id" style="width:140px" />
+              <NInput v-model:value="a.dingtalk" size="small" placeholder="DingTalk user_id" style="width:140px" />
+              <NButton size="tiny" quaternary type="error" @click="removeRiskApprover(ai)">{{ it('删除') }}</NButton>
+            </div>
+            <div class="hint">
+              {{ it('email 是 quorum 计数唯一口径；未登记用户的批准/拒绝不会计入。') }}
             </div>
             <div class="frow">
               <div class="f1"><label>{{ it('审批等待上限（分钟，超时阻断）') }}</label>

@@ -304,6 +304,42 @@ export interface RiskApprovalT {
   timeout_seconds: number
   waited_seconds: number
   status: string
+  /** single = Phase 1 看板会话；quorum = 外部 Provider 会签 */
+  mode?: 'single' | 'quorum'
+  provider?: string
+  provider_type?: string
+  required?: number
+  approved_count?: number
+  approvers?: {
+    email: string
+    provider?: string
+    id?: string
+    name?: string
+    decision?: string
+    at?: string
+  }[]
+  expires_at?: number
+  external_url?: string
+}
+
+/** 一个外部审批 Provider（/api/state.approval_providers；secret 只回掩码） */
+export interface ApprovalProviderT {
+  type: 'gitlab' | 'github' | 'feishu' | 'dingtalk' | 'fake'
+  base_url?: string
+  project_id?: string
+  repo?: string
+  app_id?: string
+  approval_code?: string
+  app_key?: string
+  process_code?: string
+  verify_tls?: boolean
+  timeout_seconds?: number
+  token_masked?: string
+  token_configured?: boolean
+  callback_secret_masked?: string
+  callback_secret_configured?: boolean
+  app_secret_masked?: string
+  app_secret_configured?: boolean
 }
 
 /** 一条模型用量记录（任务级台账，logs/usage.jsonl；kind=task/review） */
@@ -524,12 +560,21 @@ export interface AppStateT {
   permissions_cfg: { mode: PermissionMode; timeout_minutes: number }
   /** 当前挂起的人工审批请求（5s 轮询刷新；处理后条目消失） */
   approvals: ApprovalT[]
+  /** 外部审批 Provider 注册表（secret 只回掩码） */
+  approval_providers: Record<string, ApprovalProviderT>
+  /** email ↔ Provider 身份映射（quorum 计数唯一口径） */
+  approvers: Record<string, Record<string, string>>
   /** 合入前风险审批配置（全局） */
   risk_approval_cfg: {
     enabled: boolean
-    policy: Record<'low' | 'medium' | 'high', 'off' | 'single'>
+    policy: Record<'low' | 'medium' | 'high', 'off' | 'single' | 'quorum'>
     timeout_minutes: number
     extra_high_risk_paths: string[]
+    provider: string
+    quorum: Record<string, number>
+    allowed_approvers: Record<string, string[]>
+    callback_url: string
+    poll_interval_seconds: number
   }
   /** 当前挂起的合入前风险审批请求 */
   risk_approvals: RiskApprovalT[]
