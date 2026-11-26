@@ -120,6 +120,9 @@ Phase 1 不伪造身份。需要 N 人会签时，二选一：
 无论哪条路，都必须保留 Phase 1 的三条红线：**审批绑定 digest、作者不能自批、
 不可用/超时 fail closed**。
 
+详细协议、Provider 适配器、持久化与重启恢复、配置与排期见
+[`design-risk-approval-phase2.md`](design-risk-approval-phase2.md)。
+
 ## 8. 验收
 
 - `tests/test_risk.py`：分类、内容信号、自定义 glob、digest 稳定性、fail closed；
