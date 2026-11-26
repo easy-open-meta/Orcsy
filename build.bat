@@ -39,7 +39,7 @@ echo.
 if "%RC%"=="0" (
     rem NOTE: never put parens inside echo text here - cmd treats ) as end of block
     echo [OK] Artifacts written to build\Setup\ - Windows amd64 + arm64 source zip + Linux packages
-    echo      Native arm64 setup/update come from CI windows-11-arm (or an ARM64 Windows host)
+    echo      Native arm64 setup/update come from CI windows-11-arm or an ARM64 Windows host
 ) else (
     echo [FAIL] Build aborted, exit code %RC%. Check the error above.
 )
