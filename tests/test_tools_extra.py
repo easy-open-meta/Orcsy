@@ -199,6 +199,9 @@ def check_web_fetch() -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    # 本机回环服务不能被系统代理接管（否则 502）；生产 web_fetch 本身拒绝回环
+    old_no_proxy = os.environ.get("NO_PROXY")
+    os.environ["NO_PROXY"] = "127.0.0.1,localhost"
     # 集成测试放行回环（守卫逻辑已在 check_ssrf_guard 单独直测）
     original = T._assert_public_url
     T._assert_public_url = lambda url: None
@@ -231,6 +234,10 @@ def check_web_fetch() -> None:
         print("ok: web_fetch（HTML 剥标签/文本原样/二进制拒绝/404/空 url）")
     finally:
         T._assert_public_url = original
+        if old_no_proxy is None:
+            os.environ.pop("NO_PROXY", None)
+        else:
+            os.environ["NO_PROXY"] = old_no_proxy
         server.shutdown()
         shutil.rmtree(root, ignore_errors=True)
 
