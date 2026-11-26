@@ -379,6 +379,11 @@ class QuorumApprovalManager:
             try:
                 decision = provider.poll(handle) if provider and handle else None
                 if decision is not None:
+                    # 轮询结果天然属于当前 handle；补上 digest/request_id 供校验
+                    if not decision.digest:
+                        decision.digest = req.digest
+                    if not decision.request_id:
+                        decision.request_id = req.id
                     self.apply_decision(req.id, decision)
                     errors = 0
             except Exception as exc:  # noqa: BLE001 — Provider 故障 fail closed
@@ -423,6 +428,14 @@ class QuorumApprovalManager:
                         break
         if not target:
             raise ProviderError("回调缺少 request_id/external_id")
+        with self._lock:
+            req = self._requests.get(target)
+        if req is not None:
+            # 平台 Webhook 天然关联该 issue/MR；digest 以 Orcsy 存档为准
+            if not decision.digest:
+                decision.digest = req.digest
+            if not decision.request_id:
+                decision.request_id = req.id
         return self.apply_decision(target, decision)
 
     def apply_decision(self, request_id: str,

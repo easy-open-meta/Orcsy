@@ -17,6 +17,9 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import quote
+
+import httpx
 
 from .config import ApprovalProviderConfig
 
@@ -63,6 +66,288 @@ class ApprovalProvider(Protocol):
     def verify_callback(self, headers: dict[str, str],
                         raw_body: bytes) -> ProviderDecision: ...
     def cancel(self, handle: ProviderHandle) -> None: ...
+
+
+def _http_json(method: str, url: str, *, headers: dict[str, str],
+               body: dict | None = None, verify: bool = True,
+               timeout: int = 10) -> Any:
+    """Provider 出站请求统一过 egress；任何网络/HTTP 错误转 ProviderError。"""
+    from . import egress
+    try:
+        egress.check(url, purpose="approval_provider")
+    except Exception as exc:  # noqa: BLE001 — EgressDenied 等
+        raise ProviderError(f"出网白名单拒绝：{exc}") from exc
+    try:
+        with httpx.Client(verify=verify, timeout=timeout,
+                          follow_redirects=True) as client:
+            resp = client.request(method, url, headers=headers, json=body)
+    except httpx.HTTPError as exc:
+        raise ProviderError(f"Provider 请求失败：{exc}") from exc
+    if resp.status_code >= 400:
+        text = resp.text[:300].replace("\n", " ")
+        raise ProviderError(f"Provider HTTP {resp.status_code}：{text}")
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise ProviderError("Provider 返回不是有效 JSON") from exc
+
+
+def _parse_approval_command(body: str) -> tuple[str, str]:
+    """解析评论首行的 /approve 或 /reject；返回 (decision, comment)。"""
+    text = str(body or "").strip()
+    if not text:
+        return "", ""
+    first, _, rest = text.partition("\n")
+    parts = first.strip().split(maxsplit=1)
+    command = parts[0].lower() if parts else ""
+    comment = parts[1].strip() if len(parts) > 1 else ""
+    if command in ("/approve", "/lgtm"):
+        return "approved", comment
+    if command in ("/reject", "/deny"):
+        return "rejected", comment
+    return "", ""
+
+
+def _issue_title(manifest: dict) -> str:
+    return (f"[Orcsy 审批] {manifest.get('project', '')}/"
+            f"{manifest.get('task_id', '')} · "
+            f"{manifest.get('risk', {}).get('level', '')}")
+
+
+def _issue_body(manifest: dict) -> str:
+    risk = manifest.get("risk") or {}
+    emails = ", ".join(manifest.get("allowed_approvers") or [])
+    payload = json.dumps(manifest, ensure_ascii=False, indent=2)
+    return "\n".join([
+        "## Orcsy 合入前风险审批",
+        "",
+        f"- 请求：`{manifest.get('request_id', '')}`",
+        f"- 项目 / 任务：{manifest.get('project', '')} / "
+        f"{manifest.get('task_id', '')}",
+        f"- 标题：{manifest.get('title', '')}",
+        f"- 风险等级：**{risk.get('level', '')}**",
+        f"- Commit：`{manifest.get('commit', '')}`",
+        f"- Digest：`{manifest.get('digest', '')}`",
+        f"- 需要会签：{manifest.get('required_approvals', 0)} 人",
+        f"- 允许审批 email：{emails or '（未配置）'}",
+        "",
+        "审批方式：在本 issue 评论 `/approve` 或 `/reject 原因`。",
+        "只有 Orcsy 配置中登记的 email 对应账号会计入 quorum；"
+        "未登记账号的评论会被忽略。",
+        "",
+        "```json",
+        payload,
+        "```",
+    ])
+
+
+class GitLabProvider:
+    """GitLab 审批工单（issue + 评论），不推送代码分支。"""
+
+    type = "gitlab"
+
+    def __init__(self, name: str, config: ApprovalProviderConfig):
+        self.name = name
+        self.config = config
+        self.base = (config.base_url or "https://gitlab.com").rstrip("/")
+        if not config.project_id:
+            raise ProviderError(f"GitLab Provider {name} 缺少 project_id")
+        self.project = quote(str(config.project_id), safe="")
+
+    def _headers(self) -> dict[str, str]:
+        return {"PRIVATE-TOKEN": self.config.token,
+                "Content-Type": "application/json"}
+
+    def create(self, manifest: dict) -> ProviderHandle:
+        url = f"{self.base}/api/v4/projects/{self.project}/issues"
+        data = _http_json(
+            "POST", url, headers=self._headers(), body={
+                "title": _issue_title(manifest),
+                "description": _issue_body(manifest),
+                "labels": "orcsy-approval",
+            }, verify=self.config.verify_tls,
+            timeout=self.config.timeout_seconds)
+        iid = data.get("iid")
+        if not iid:
+            raise ProviderError("GitLab 创建 issue 未返回 iid")
+        return ProviderHandle(
+            external_id=str(iid), url=str(data.get("web_url") or ""),
+            state={"digest": manifest.get("digest", ""),
+                   "request_id": manifest.get("request_id", "")})
+
+    def poll(self, handle: ProviderHandle) -> ProviderDecision | None:
+        url = (f"{self.base}/api/v4/projects/{self.project}/issues/"
+               f"{handle.external_id}/notes?per_page=100&sort=asc&order_by=created_at")
+        notes = _http_json("GET", url, headers=self._headers(),
+                           verify=self.config.verify_tls,
+                           timeout=self.config.timeout_seconds)
+        if not isinstance(notes, list):
+            raise ProviderError("GitLab notes 返回格式异常")
+        approvers: list[ApproverDecision] = []
+        for note in notes:
+            if note.get("system"):
+                continue
+            decision, _ = _parse_approval_command(note.get("body") or "")
+            if not decision:
+                continue
+            author = note.get("author") or {}
+            username = str(author.get("username") or "")
+            if not username:
+                continue
+            approvers.append(ApproverDecision(
+                provider="gitlab", id=username,
+                name=str(author.get("name") or username),
+                decision=decision, at=str(note.get("created_at") or "")))
+        return ProviderDecision(
+            status="pending", approvers=approvers,
+            digest=str(handle.state.get("digest") or ""),
+            external_id=handle.external_id)
+
+    def verify_callback(self, headers: dict[str, str],
+                        raw_body: bytes) -> ProviderDecision:
+        h = _headers_lower(headers)
+        token = h.get("x-gitlab-token", "")
+        if not self.config.callback_secret or not hmac.compare_digest(
+                token, self.config.callback_secret):
+            raise ProviderError("GitLab Webhook token 不匹配")
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ProviderError("GitLab Webhook 不是有效 JSON") from exc
+        if payload.get("object_kind") != "note":
+            raise ProviderError("仅支持 GitLab note Webhook")
+        attrs = payload.get("object_attributes") or {}
+        issue = payload.get("issue") or {}
+        decision, _ = _parse_approval_command(attrs.get("note") or "")
+        user = payload.get("user") or {}
+        approvers = []
+        if decision and user.get("username"):
+            approvers.append(ApproverDecision(
+                provider="gitlab", id=str(user.get("username")),
+                name=str(user.get("name") or user.get("username")),
+                decision=decision, at=str(attrs.get("created_at") or "")))
+        return ProviderDecision(
+            status="pending", approvers=approvers,
+            external_id=str(issue.get("iid") or ""))
+
+    def cancel(self, handle: ProviderHandle) -> None:
+        try:
+            _http_json(
+                "PUT",
+                f"{self.base}/api/v4/projects/{self.project}/issues/"
+                f"{handle.external_id}",
+                headers=self._headers(), body={"state_event": "close"},
+                verify=self.config.verify_tls,
+                timeout=self.config.timeout_seconds)
+        except ProviderError:
+            return
+
+
+class GitHubProvider:
+    """GitHub 审批工单（issue + 评论），不推送代码分支。"""
+
+    type = "github"
+
+    def __init__(self, name: str, config: ApprovalProviderConfig):
+        self.name = name
+        self.config = config
+        self.base = (config.base_url or "https://api.github.com").rstrip("/")
+        if not config.repo or "/" not in config.repo:
+            raise ProviderError(f"GitHub Provider {name} 的 repo 必须是 owner/name")
+        self.repo = config.repo
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.config.token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        }
+
+    def create(self, manifest: dict) -> ProviderHandle:
+        url = f"{self.base}/repos/{self.repo}/issues"
+        data = _http_json(
+            "POST", url, headers=self._headers(), body={
+                "title": _issue_title(manifest),
+                "body": _issue_body(manifest),
+                "labels": ["orcsy-approval"],
+            }, verify=self.config.verify_tls,
+            timeout=self.config.timeout_seconds)
+        number = data.get("number")
+        if not number:
+            raise ProviderError("GitHub 创建 issue 未返回 number")
+        return ProviderHandle(
+            external_id=str(number), url=str(data.get("html_url") or ""),
+            state={"digest": manifest.get("digest", ""),
+                   "request_id": manifest.get("request_id", "")})
+
+    def poll(self, handle: ProviderHandle) -> ProviderDecision | None:
+        url = (f"{self.base}/repos/{self.repo}/issues/"
+               f"{handle.external_id}/comments?per_page=100")
+        notes = _http_json("GET", url, headers=self._headers(),
+                           verify=self.config.verify_tls,
+                           timeout=self.config.timeout_seconds)
+        if not isinstance(notes, list):
+            raise ProviderError("GitHub comments 返回格式异常")
+        approvers: list[ApproverDecision] = []
+        for note in notes:
+            decision, _ = _parse_approval_command(note.get("body") or "")
+            if not decision:
+                continue
+            user = note.get("user") or {}
+            login = str(user.get("login") or "")
+            if not login:
+                continue
+            approvers.append(ApproverDecision(
+                provider="github", id=login,
+                name=str(user.get("name") or login),
+                decision=decision, at=str(note.get("created_at") or "")))
+        return ProviderDecision(
+            status="pending", approvers=approvers,
+            digest=str(handle.state.get("digest") or ""),
+            external_id=handle.external_id)
+
+    def verify_callback(self, headers: dict[str, str],
+                        raw_body: bytes) -> ProviderDecision:
+        h = _headers_lower(headers)
+        sig = h.get("x-hub-signature-256", "")
+        if not self.config.callback_secret or not sig.startswith("sha256="):
+            raise ProviderError("GitHub Webhook 缺少签名")
+        expected = hmac.new(
+            self.config.callback_secret.encode("utf-8"), raw_body,
+            hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig[7:].lower(), expected):
+            raise ProviderError("GitHub Webhook 签名不匹配")
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ProviderError("GitHub Webhook 不是有效 JSON") from exc
+        if payload.get("action") != "created":
+            raise ProviderError("仅支持 GitHub issue_comment created")
+        comment = payload.get("comment") or {}
+        issue = payload.get("issue") or {}
+        decision, _ = _parse_approval_command(comment.get("body") or "")
+        user = comment.get("user") or {}
+        approvers = []
+        if decision and user.get("login"):
+            approvers.append(ApproverDecision(
+                provider="github", id=str(user.get("login")),
+                name=str(user.get("login")), decision=decision,
+                at=str(comment.get("created_at") or "")))
+        return ProviderDecision(
+            status="pending", approvers=approvers,
+            external_id=str(issue.get("number") or ""))
+
+    def cancel(self, handle: ProviderHandle) -> None:
+        try:
+            _http_json(
+                "PATCH",
+                f"{self.base}/repos/{self.repo}/issues/{handle.external_id}",
+                headers=self._headers(), body={"state": "closed"},
+                verify=self.config.verify_tls,
+                timeout=self.config.timeout_seconds)
+        except ProviderError:
+            return
 
 
 def _headers_lower(headers: dict[str, str]) -> dict[str, str]:
@@ -199,6 +484,10 @@ def decision_from_payload(payload: dict) -> ProviderDecision:
 def build_provider(name: str, config: ApprovalProviderConfig):
     if config.type == "fake":
         return FakeProvider(name, config)
+    if config.type == "gitlab":
+        return GitLabProvider(name, config)
+    if config.type == "github":
+        return GitHubProvider(name, config)
     return UnimplementedProvider(name, config, config.type)
 
 

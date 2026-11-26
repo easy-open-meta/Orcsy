@@ -380,8 +380,8 @@ risk_approval:
 
 | Provider | 身份 | Quorum | 接入方式 | 备注 |
 | --- | --- | --- | --- | --- |
-| GitLab MR approvals | GitLab 账号 | 原生 required approvals | 回调 + API 轮询兜底 | **首批**；username 映射 email |
-| GitHub PR reviews | GitHub 账号 | 原生 required reviews | 回调 + API 轮询兜底 | **首批**；login 映射 email |
+| GitLab 审批工单 | GitLab 账号 | issue 评论 `/approve` 计数 | 回调 + API 轮询兜底 | **已实现**；username 映射 email，不推分支 |
+| GitHub 审批工单 | GitHub 账号 | issue 评论 `/approve` 计数 | 回调 + API 轮询兜底 | **已实现**；login 映射 email，不推分支 |
 | 飞书审批 | 飞书账号 | 原生会签 | 事件回调 + 审批实例轮询 | **首批**；open_id 映射 email |
 | 钉钉审批 | 钉钉账号 | 原生会签 | 事件回调 + 审批实例轮询 | **首批**；user_id 映射 email |
 | Gitea protected branch reviews | Gitea 账号 | 取决于版本/保护规则 | API 轮询 | 后续按需，需核验实例能力 |
@@ -460,5 +460,9 @@ Phase 1 的 `single` 仍是默认安全落点；Phase 2A/2B 完成前不把 quor
   轮询间隔、email↔身份映射；待审批弹窗显示会签进度与外部链接；
 - 测试：配置 v3、持久化、HMAC 回调、quorum/白名单/重启、executor 接线。
 
-未落地：GitLab/GitHub/飞书/钉钉真实适配器。2A 的 quorum 只能用 `fake`
-Provider 跑通契约；生产启用真实 Provider 前会 fail closed（明确报适配器未实现）。
+2B 已落地：**GitLab/GitHub 审批工单适配器**——创建 issue、轮询评论
+`/approve` / `/reject`，支持 GitLab `X-Gitlab-Token` 与 GitHub
+`X-Hub-Signature-256` Webhook 验签；不推送代码分支。
+
+未落地：飞书/钉钉审批实例适配器（2C）。在接入前选择这些类型会 fail closed
+（`UnimplementedProvider` 明确报适配器未实现）。
