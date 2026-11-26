@@ -110,12 +110,12 @@ WIP commit → CI 门禁（可选）→ 独立审查 → 风险评估 → 人工
 Phase 1 不伪造身份。需要 N 人会签时，二选一：
 
 1. **外部审批/身份系统（推荐）**：Orcsy 生成签名清单（project/task/risk/digest/
-   diff stat/required approvals），POST 到 GitLab/Gitea/飞书/钉钉等审批，
-   外部系统完成 N 个真实账号的会签，回调带 `approvers[]`；Orcsy 校验 HMAC、
-   身份唯一性、人数与 digest，不可达/超时 fail closed；
+   diff stat/required approvals），交给 GitLab/GitHub/飞书/钉钉审批；外部系统
+   完成 N 个真实账号的会签，回调带 `approvers[]`；Orcsy 按 email 白名单计数，
+   校验 HMAC、人数与 digest，不可达/超时 fail closed；
 2. **内置账号 + RBAC**：本地用户表、角色、每用户 token/会话、quorum 计数、
-   审计与恢复；工期最长，且与 1.0「不做 SSO/RBAC」的边界冲突，建议作为独立
-   团队版能力。
+   审计与恢复；已排进 1.x（Phase 2D），作为完全离线时的兜底，不替代共享密码
+   兼容模式。
 
 无论哪条路，都必须保留 Phase 1 的三条红线：**审批绑定 digest、作者不能自批、
 不可用/超时 fail closed**。
