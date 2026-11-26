@@ -268,6 +268,7 @@ risk_approval:
   poll_interval_seconds: 20
   # 生产：Orcsy 自己的公网域名；{provider} 由适配器替换
   # 开发/无公网：留空 = 仅轮询（localhost 不能被 GitHub/飞书/钉钉 SaaS 回调）
+  # 该字段可在看板「设置 → 风险审批」可视化编辑；空值 = 仅轮询
   callback_url: https://<orcsy-domain>/api/risk-approval/callback/{provider}
 ```
 
@@ -328,7 +329,13 @@ risk_approval:
 - `POST /api/approval-provider/test`（看板会话）：测试 Provider 连通性；
   `POST /api/risk-approval/refresh`（可选）：手动触发一次轮询。
 - 设置页：Provider 增删改（secret 三态）、选择 Provider、quorum/白名单/
-  timeout、回调地址展示与复制、测试按钮；回调不可达时提示轮询兜底。
+  timeout、**callback_url 可视化编辑**（空 = 仅轮询；「使用当前访问域名」一键
+  填充；按 Provider 生成完整回调 URL 并提供复制/测试按钮）；回调不可达时提示
+  轮询兜底。服务端保存时校验：空值或 https（本地开发允许 `http://127.0.0.1`），
+  非空值必须包含 `{provider}` 占位符。
+- 设置页「测试」分两种：Provider 出站连通性；本地回环自测（生成一条签名回调
+  打到本机 callback 路由，验证验签/幂等）。公网反代是否可达，最终用 Provider
+  的测试事件验证。
 
 ### 9.1 反代与可达性
 
@@ -338,6 +345,8 @@ risk_approval:
 - Orcsy 的鉴权中间件对该路径放行，但 handler 必须验签——同域不等于信任；
 - 若 Orcsy 挂在路径前缀下（如 `https://domain/orcsy/`），`callback_url` 必须
   显式包含该前缀，不能从 `Host` 头推导（可伪造）；
+- 设置页的「使用当前访问域名」只是把 `window.location.origin` 填进输入框供
+  人工确认；服务端保存与回调校验始终以配置值为准，不信任请求 `Host`；
 - 自建 GitLab 只需内网可达；GitHub/飞书/钉钉 SaaS 需要公网可达；不可达时用
   Provider API 轮询兜底，绝不降级为单人审批；
 - 回调失败/超时/验签失败一律 fail closed，并写审计。
