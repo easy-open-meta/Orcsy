@@ -1,6 +1,6 @@
 # 风险审批 Phase 2：真多人会签设计（定稿）
 
-> 状态：**Phase 2 设计定稿（决策已确认，尚未实施）**｜2026-11-26
+> 状态：**Phase 2A 已实现（Provider 接口/持久化 quorum/HMAC 回调/设置面板 + fake Provider）；2B/2C 真实适配器待实施**｜2026-11-26
 > 关联：[`design-risk-approval.md`](design-risk-approval.md)（Phase 0+1）、
 > [`roadmap.md`](roadmap.md) §8、[`design-release-quality-gaps.md`](design-release-quality-gaps.md) 阶段②
 > 目标：在**不伪造身份**的前提下支持高风险合入的 N 人会签（quorum），并保持
@@ -436,10 +436,29 @@ risk_approval:
 
 **仍需确认**：
 
-1. 高风险默认 quorum 人数（建议 2；中/低默认 off/single）；
+1. 高风险默认 quorum 人数（当前 UI/示例默认 2；中/低默认 off/single）；
 2. GitLab 与 GitHub 的先后（建议 GitLab 先，GitHub 紧随）；
 3. 回调域名、TLS 与反代由谁提供；是否允许本机 `127.0.0.1` 调试；
-4. `CONFIG_VERSION=3` 是否随 2A 一起发；
-5. 内置账号迁移：共享密码保留为兼容模式，还是强制首个 admin 账号。
+4. 内置账号迁移：共享密码保留为兼容模式，还是强制首个 admin 账号。
 
 Phase 1 的 `single` 仍是默认安全落点；Phase 2A/2B 完成前不把 quorum 写成已交付。
+
+## 15. 2A 实现状态（2026-11-26）
+
+已落地：
+
+- `CONFIG_VERSION=3`（2→3 恒等迁移）：`approval_providers`、`approvers`
+  （email↔Provider 身份）、`risk_approval.{provider,quorum,allowed_approvers,
+  callback_url,poll_interval_seconds}`；
+- `orcsy/approval_providers.py`：统一 Provider 协议、HMAC 回调校验、`fake`
+  Provider（测试/本地自测），真实类型暂为 `UnimplementedProvider`（fail closed）；
+- `orcsy/quorum_approval.py`：持久化请求、轮询/回调、email 白名单去重、
+  一票否决、超时/取消/Provider 故障 fail closed、重启复用；
+- executor quorum 分支与 `block_reason`；Web `POST /api/risk-approval/callback/{provider}`
+  （免登录但强制验签）、`full_state` 暴露 Provider/approvers/会签进度；
+- 看板：Provider 选择、quorum/白名单、callback_url（含「使用当前访问域名」）、
+  轮询间隔、email↔身份映射；待审批弹窗显示会签进度与外部链接；
+- 测试：配置 v3、持久化、HMAC 回调、quorum/白名单/重启、executor 接线。
+
+未落地：GitLab/GitHub/飞书/钉钉真实适配器。2A 的 quorum 只能用 `fake`
+Provider 跑通契约；生产启用真实 Provider 前会 fail closed（明确报适配器未实现）。

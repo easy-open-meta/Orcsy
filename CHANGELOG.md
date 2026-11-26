@@ -12,6 +12,10 @@
 - 只有看板登录会话可批准，API Key 不能代批；默认只拦高风险，超时默认 60 分钟（可配 1~1440），多人会签明确留待 Phase 2。
 - 审计写 `risk_approval.request|approve|reject|timeout|cancel|stale`；运行台账新增 `risk_assess` / `risk_approval_request` / `risk_approval_decision` 事件与 `risk.json`；任务正文增加「## 风险审批」。
 - 看板：待审批弹窗增加风险合入审批段（等级/原因/文件数/增删行/意见），顶栏徽标合并计数；设置页新增「风险审批」分区。
+- **风险审批 Phase 2A（外部会签骨架）**：配置升到 `CONFIG_VERSION=3`，新增 `approval_providers`（GitLab/GitHub/飞书/钉钉/fake 类型）、`approvers`（email↔Provider 身份）与 `risk_approval.{provider,quorum,allowed_approvers,callback_url,poll_interval_seconds}`。
+- 新增持久化 quorum 引擎：按 email 白名单去重计数、一票否决、超时/取消/Provider 故障 fail closed、重启复用已批准请求；`POST /api/risk-approval/callback/{provider}` 免登录但强制 HMAC 验签。
+- 看板支持 Provider 选择、高风险会签人数、email 白名单、callback_url（含「使用当前访问域名」）、轮询间隔与审批人映射；待审批弹窗显示会签进度/审批人/外部链接。
+- 说明：2A 仅内置 `fake` Provider 跑通契约，GitLab/GitHub/飞书/钉钉真实适配器待 2B/2C；启用未实现类型会明确 fail closed。
 
 ## [0.35.0] — 2026-11-26
 
