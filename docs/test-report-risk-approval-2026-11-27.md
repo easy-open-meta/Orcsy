@@ -57,6 +57,7 @@
 | GitHub | 建 issue、拉 comments、关闭 issue | `Bearer` 与版本头、`/approve` `/reject` 解析 |
 | 飞书 | tenant_access_token、创建/查询审批实例 | 应用凭据、`task_list` 的 `APPROVED/REJECTED` 计数 |
 | 钉钉 | gettoken、创建/查询审批实例 | 应用凭据、`operation_records` 的 `AGREE/REFUSE` 计数 |
+| OpenAI 兼容模型 | `/v1/chat/completions` 两轮脚本响应 | 真实 `LLMClient` 的请求构造、`tool_calls` 解析、`edit_file` 执行、`finish` 收尾与工具结果回传 |
 
 会签引擎还跑了三条端到端用例：真实 GitLab 适配器轮询 + email 白名单去重
 计数至 approved、GitHub 一票否决、GitLab Webhook 回调验签推进并验证重复回调
@@ -71,7 +72,7 @@
 | --- | --- | --- |
 | 真实 GitLab/GitHub 审批工单 | 无真实仓库 token / 测试 issue 环境 | **已用模拟厂商做 HTTP 契约实测**；仍需在真实测试仓库确认版本差异与 token 权限 |
 | 真实飞书/钉钉审批实例 | 无企业应用凭据、审批模板 | **已用模拟厂商验证端点与字段解析**；仍需确认 `approval_code`/`process_code`、表单字段、`originator_user_id` |
-| 真实 LLM 任务 | 无可用模型密钥 | 使用脚本化 `LLMClient`；真实模型的工具调用/轮次未覆盖 |
+| 真实 LLM 任务 | 无可用模型密钥 | **已用本地 OpenAI 兼容服务跑通真实 `LLMClient` 工具循环**；真实模型的工具选择、轮次与稳定性仍需供应商侧冒烟 |
 | 公网 HTTPS 回调 + 反代 | 本机 localhost 测试 | 仅验证 localhost HTTP + 签名回调；TLS、反代、raw body 转发需部署后验证 |
 | 真实 email 白名单身份 | 使用 fake/模拟身份映射 | **已模拟 GitLab username / GitHub login / 飞书 user_id / 钉钉 userid 映射**；真实租户身份仍需冒烟 |
 | 飞书/钉钉 Webhook | 当前适配器仅轮询，回调明确 fail closed | 需后续事件订阅实现与验签 |
@@ -86,8 +87,9 @@
   `sign_callback(secret, raw_body)` 生成 `X-Orcsy-Signature`/`X-Orcsy-Timestamp`；
 - 完整任务链路使用脚本化 `LLMClient`，真实执行 `TaskExecutor.run_task`。
 - 模拟厂商契约测试随仓库提交：`tests/mock_vendor_server.py` 与
-  `tests/test_approval_adapters_http.py`，直接 `uv run python` 运行；
-  UI 测试脚本位于临时目录，不随仓库提交。
+  `tests/test_approval_adapters_http.py`；模型协议测试为
+  `tests/mock_llm_server.py` 与 `tests/test_llm_mock_http.py`，均可直接
+  `uv run python` 运行；UI 测试脚本位于临时目录，不随仓库提交。
 
 ## 6. 结论
 
