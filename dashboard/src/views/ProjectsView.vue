@@ -59,6 +59,8 @@ function stats(p: ProjectT): string {
 function waitingApproval(project: string, taskId: string): boolean {
   return (store.state?.approvals ?? []).some(
     a => a.project === project && a.task_id === taskId)
+    || (store.state?.risk_approvals ?? []).some(
+      a => a.project === project && a.task_id === taskId)
 }
 
 // ---- 拖拽排序：行内 HTML5 DnD，与看板页同语义（同状态+优先级分组内生效） ----

@@ -47,7 +47,7 @@ log = get_logger("runlog")
 EVENT_TYPES = frozenset({
     "run_start", "claim", "turn", "model_call", "tool_call", "tool_result",
     "chat", "progress", "review_start", "review_verdict", "commit", "merge",
-    "run_end",
+    "risk_assess", "risk_approval_request", "risk_approval_decision", "run_end",
 })
 
 # 全过程日志（S 后续/④ 回放增强）字段上限：保证单事件净负荷 < MAX_EVENT_DATA_BYTES
@@ -57,7 +57,7 @@ TOOL_RESULT_CAP = 4000
 
 # 允许按名字读取的工件（防止路径穿越与随手读任意文件）
 ARTIFACTS = ("meta.json", "events.jsonl", "diff.patch", "test.log",
-             "review.json", "usage.json")
+             "review.json", "usage.json", "risk.json")
 
 MAX_ARTIFACT_BYTES = 2 * 1024 * 1024   # 单工件上限 2MB（超出截断并标注）
 MAX_PREVIEW_CHARS = 300                # 事件里的自由文本预览上限

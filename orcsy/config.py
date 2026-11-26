@@ -723,6 +723,79 @@ class ArchiveConfig:
     keep_last: int = 10
 
 
+@dataclass
+class RiskApprovalConfig:
+    """合入前风险审批（Phase 1）：高风险单人审批，其余等级可配置。"""
+
+    enabled: bool = False
+    # low / medium / high → off | single。Phase 1 不支持多人会签（quorum）。
+    policy: dict[str, str] = field(default_factory=lambda: {
+        "low": "off", "medium": "off", "high": "single"})
+    timeout_minutes: int = 60
+    extra_high_risk_paths: list[str] = field(default_factory=list)
+
+
+_RISK_LEVELS = ("low", "medium", "high")
+_RISK_POLICIES = ("off", "single")
+
+
+def parse_risk_approval_config(raw: Any) -> RiskApprovalConfig:
+    """解析/校验全局 risk_approval 配置（load_config 与看板保存共用）。"""
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("risk_approval 配置必须是字典（键值对）。")
+    enabled = raw.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("risk_approval.enabled 必须是布尔值")
+    policy_raw = raw.get("policy") or {}
+    if not isinstance(policy_raw, dict):
+        raise ValueError("risk_approval.policy 必须是字典（low/medium/high）。")
+    unknown = sorted(set(policy_raw) - set(_RISK_LEVELS))
+    if unknown:
+        raise ValueError(
+            f"risk_approval.policy 存在未知等级：{', '.join(unknown)}")
+    policy = {"low": "off", "medium": "off", "high": "single"}
+    for level in _RISK_LEVELS:
+        raw_value = policy_raw.get(level, policy[level])
+        # YAML 1.1 会把未加引号的 off/on 解析为 bool；兼容为 off/single
+        if isinstance(raw_value, bool):
+            value = "single" if raw_value else "off"
+        else:
+            value = str(raw_value or "").strip().lower()
+        if value in _RISK_POLICIES:
+            policy[level] = value
+        elif value in ("quorum", "two", "2"):
+            raise ValueError(
+                "risk_approval.policy 暂不支持多人会签（quorum）；"
+                "多人审批需要外部身份源，见 roadmap Phase 2")
+        else:
+            raise ValueError(
+                f"risk_approval.policy.{level} 只能是 off / single")
+    timeout_raw = raw.get("timeout_minutes", 60)
+    if isinstance(timeout_raw, bool) or not isinstance(timeout_raw, int):
+        raise ValueError("risk_approval.timeout_minutes 必须是整数")
+    if not 1 <= timeout_raw <= 1440:
+        raise ValueError("risk_approval.timeout_minutes 必须在 1~1440 分钟之间")
+    extra_raw = raw.get("extra_high_risk_paths") or []
+    if not isinstance(extra_raw, list):
+        raise ValueError("risk_approval.extra_high_risk_paths 必须是字符串列表")
+    if len(extra_raw) > 50:
+        raise ValueError("risk_approval.extra_high_risk_paths 最多 50 条")
+    extra: list[str] = []
+    for idx, item in enumerate(extra_raw):
+        pattern = str(item or "").strip()
+        if not pattern or len(pattern) > 200 or "\x00" in pattern:
+            raise ValueError(
+                f"risk_approval.extra_high_risk_paths 第 {idx + 1} 条必须是 "
+                "1~200 字符的非空路径 glob")
+        if pattern not in extra:
+            extra.append(pattern)
+    return RiskApprovalConfig(
+        enabled=enabled, policy=policy,
+        timeout_minutes=int(timeout_raw), extra_high_risk_paths=extra)
+
+
 def _parse_storage_target(name: str, raw: object) -> StorageTargetConfig:
     """解析 storage_targets 单个条目并做基本字段校验。"""
     if not isinstance(raw, dict):
@@ -896,6 +969,7 @@ class AppConfig:
     git: GitConfig = field(default_factory=GitConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
     archive: ArchiveConfig = field(default_factory=ArchiveConfig)
+    risk_approval: RiskApprovalConfig = field(default_factory=RiskApprovalConfig)
     storage_targets: dict[str, StorageTargetConfig] = field(default_factory=dict)
     agent_profiles: dict[str, AgentProfileConfig] = field(default_factory=dict)
     projects: list[ProjectConfig] = field(default_factory=list)
@@ -1938,6 +2012,8 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     resolve_storage_target(storage_targets, backup_cfg.target)
     resolve_storage_target(storage_targets, archive_cfg.target)
 
+    risk_approval_cfg = parse_risk_approval_config(raw.get("risk_approval"))
+
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
                     runlog=runlog, budget=budget, resilience=resilience,
                     egress=egress, web=web,
@@ -1947,6 +2023,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     review=review_cfg, subagent=subagent_cfg,
                     local_debug=local_debug_cfg,
                     git=git_cfg, backup=backup_cfg, archive=archive_cfg,
+                    risk_approval=risk_approval_cfg,
                     storage_targets=storage_targets, agent_profiles=agent_profiles,
                     projects=projects, source_path=path.resolve())
     # 厂商配额池是进程级单例：加载即生效（看板保存走 web.py 的同一入口）
@@ -2172,6 +2249,13 @@ def save_config(cfg: AppConfig) -> None:
             "include_runs": cfg.archive.include_runs,
             "keep_last": cfg.archive.keep_last,
         },
+        # 风险审批：整体写回（漏写会在看板任意保存时静默重置为默认关闭）
+        "risk_approval": {
+            "enabled": cfg.risk_approval.enabled,
+            "policy": dict(cfg.risk_approval.policy),
+            "timeout_minutes": cfg.risk_approval.timeout_minutes,
+            "extra_high_risk_paths": list(cfg.risk_approval.extra_high_risk_paths),
+        },
         "agent_profiles": {
             pid: profile_to_yaml(prof) for pid, prof in cfg.agent_profiles.items()
         },
@@ -2236,6 +2320,7 @@ __all__ = [
     "GitConfig",
     "BackupConfig",
     "ArchiveConfig",
+    "RiskApprovalConfig",
     "StorageTargetConfig",
     "AgentProfileConfig",
     "ProjectTeamConfig",

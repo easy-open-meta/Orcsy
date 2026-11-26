@@ -21,6 +21,7 @@ from .config import (
     LocalDebugConfig,
     ProjectConfig,
     ReviewConfig,
+    RiskApprovalConfig,
     ToolsConfig,
     resolve_project_team_members,
     resolve_review_llm,
@@ -56,6 +57,9 @@ _RESULT_HEADING = "## Agent 处理结果"
 
 # 审查结论节（通过/不通过共用；问题清单逐条列在其下）
 _REVIEW_HEADING = "## 审查结果"
+
+# 合入前风险审批节（仅实际触发审批的任务写，避免日常噪音）
+_RISK_HEADING = "## 风险审批"
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 
@@ -152,6 +156,7 @@ class ProjectAgent:
                  local_debug: LocalDebugConfig | None = None,
                  commit_and_merge: bool = False,
                  git_author: tuple[str, str] | None = None,
+                 risk_approval_cfg: RiskApprovalConfig | None = None,
                  *,
                  agent_profiles: dict[str, AgentProfileConfig] | None = None,
                  global_tools: ToolsConfig | None = None) -> None:
@@ -179,6 +184,7 @@ class ProjectAgent:
         self.local_debug = local_debug or LocalDebugConfig()
         self.commit_and_merge = bool(commit_and_merge)
         self.git_author = git_author or None
+        self.risk_approval_cfg = risk_approval_cfg
         self.review_llm = resolve_review_llm(self.review_cfg, project.review_llm,
                                              context=f"项目 {project.name} 的 review_llm")
         if self.review_llm is not None:
@@ -204,6 +210,7 @@ class ProjectAgent:
                                      local_debug=self.local_debug,
                                      commit_and_merge=commit_and_merge,
                                      git_author=git_author,
+                                     risk_approval_cfg=self.risk_approval_cfg,
                                      skills_base=skills_base,
                                      claims=self.claims)
         self.log = get_logger(f"agent.{project.name}")
@@ -269,6 +276,7 @@ class ProjectAgent:
                     local_debug=self.local_debug,
                     commit_and_merge=commit_and_merge,
                     git_author=git_author,
+                    risk_approval_cfg=self.risk_approval_cfg,
                     worktree_isolation=True,
                     per_task_worktree=True,
                     produces_code=m["produces_code"],
@@ -933,7 +941,15 @@ class ProjectAgent:
         if result.llm_error:
             lines.append(f"- 异常：{result.llm_error}")
 
-        self._set_status(task.path, result.outcome, result_section="\n".join(lines))
+        risk = getattr(result, "risk", None)
+        risk_extra = None
+        if risk is not None and (getattr(result, "merge_approval", None)
+                                 or str(getattr(result, "block_reason", "")).startswith(
+                                     "risk_approval_")):
+            risk_extra = (_RISK_HEADING, self._risk_section(result, risk))
+        self._set_status(task.path, result.outcome,
+                         result_section=chr(10).join(lines),
+                         extra_section=risk_extra)
 
         # 审查门结论节（pass/skipped 随归档落档；fail/error 已在各自分支处理）
         if verdict in ("pass", "skipped"):
@@ -942,6 +958,37 @@ class ProjectAgent:
         # done 任务归档到 tasks/done/，保持清单整洁
         if result.outcome == "done":
             self._archive_task(task)
+
+    def _risk_section(self, result: TaskResult, risk) -> str:
+        """任务正文「## 风险审批」：等级、原因、范围与人工决定。"""
+        from .runlog import redact_text
+        approval = getattr(result, "merge_approval", None) or {}
+        reasons = getattr(risk, "reasons", []) or []
+        lines = [
+            f"- 等级：{getattr(risk, 'level', '')}",
+            f"- 原因：{'；'.join(str(r) for r in reasons[:8]) or '-'}",
+            f"- 范围：{len(getattr(risk, 'files', []) or [])} 个文件，"
+            f"+{getattr(risk, 'additions', 0)}/-{getattr(risk, 'deletions', 0)}",
+        ]
+        digest = str(approval.get("digest") or getattr(risk, "digest", "") or "")
+        commit = str(approval.get("commit") or "")
+        if digest or commit:
+            lines.append(f"- 内容摘要：{digest[:16]}"
+                         + (f"（commit {commit}）" if commit else ""))
+        decision = str(approval.get("decision") or "")
+        if decision:
+            label = {"approved": "已批准", "rejected": "已拒绝",
+                     "timeout": "超时未响应", "stale": "内容变化作废"}.get(
+                         decision, decision)
+            lines.append(f"- 决定：{label}")
+        if approval.get("by"):
+            lines.append(f"- 审批人：{approval['by']}")
+        if approval.get("at"):
+            lines.append(f"- 时间：{approval['at']}")
+        comment = redact_text(str(approval.get("comment") or ""), 500)
+        if comment:
+            lines.append(f"- 意见：{comment}")
+        return chr(10).join(lines)
 
     def _handle_review_fail(self, task: Task, result: TaskResult, review) -> None:
         """审查不通过：问题清单落档 → 返工（未达上限）或受阻（达上限）。

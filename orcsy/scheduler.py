@@ -88,6 +88,7 @@ class Scheduler:
                          local_debug=config.local_debug,
                          commit_and_merge=resolve_commit_and_merge(config.git, p),
                          git_author=resolve_git_author(config.git, p),
+                         risk_approval_cfg=config.risk_approval,
                          agent_profiles=config.agent_profiles,
                          global_tools=config.tools)
             for p in config.projects
@@ -200,6 +201,7 @@ class Scheduler:
                          local_debug=cfg.local_debug,
                          commit_and_merge=resolve_commit_and_merge(cfg.git, p),
                          git_author=resolve_git_author(cfg.git, p),
+                         risk_approval_cfg=cfg.risk_approval,
                          agent_profiles=cfg.agent_profiles,
                          global_tools=cfg.tools)
             for p in cfg.projects

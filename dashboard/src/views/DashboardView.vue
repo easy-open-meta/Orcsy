@@ -36,6 +36,8 @@ const logEntries = computed(() => parseLogEntries(store.state?.log_tail || ''))
 function waitingApproval(project: string, taskId: string): boolean {
   return (store.state?.approvals ?? []).some(
     a => a.project === project && a.task_id === taskId)
+    || (store.state?.risk_approvals ?? []).some(
+      a => a.project === project && a.task_id === taskId)
 }
 
 function stats(p: ProjectT): string {

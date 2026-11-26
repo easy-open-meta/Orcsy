@@ -67,6 +67,6 @@
 
 `/api/llm/*`、`/api/mirror/*`、`/api/skill/*`、`/api/update/*`、`/api/browse`、
 `/api/mkdir`、`/api/artifact`、`/api/audit`、`/api/egress`、`/api/guide`、
-`/api/approval`、`/api/runlog/*`、`/api/dashboard/*`、`/api/backup`、
+`/api/approval`、`/api/risk-approval`、`/api/runlog/*`、`/api/dashboard/*`、`/api/backup`、
 `/api/archive` 等仍按 0.x 节奏演进，
 1.0 后逐一评估是否纳入冻结面。

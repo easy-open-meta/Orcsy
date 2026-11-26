@@ -37,6 +37,8 @@ const SETTING_GROUPS: SettingGroup[] = [
         desc: '限制真正打给厂商的在途请求数；撞 429 自动对半降并发，成功后逐步爬回。保存后立即生效。' },
       { key: 'resilience', label: '熔断与恢复', icon: 'health_and_safety',
         desc: '连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。' },
+      { key: 'risk', label: '风险审批', icon: 'verified_user',
+        desc: '高风险合入前需看板人工批准；Phase 1 为单机单审批人，API Key 不可代批。' },
     ],
   },
   {
@@ -493,6 +495,25 @@ async function saveConc(): Promise<void> {
   } catch (e: any) { message()?.(e.message, 'error') }
   void import('../store').then(m => m.refresh(true))
 }
+async function saveRiskApproval(): Promise<void> {
+  riskSaving.value = true
+  try {
+    const extra = riskDraft.extra_text
+      .split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    await api.config({
+      risk_approval: {
+        enabled: riskDraft.enabled,
+        policy: { low: riskDraft.low, medium: riskDraft.medium, high: riskDraft.high },
+        timeout_minutes: riskDraft.timeout_minutes,
+        extra_high_risk_paths: extra,
+      },
+    })
+    message()?.(it('已保存并生效'), 'success')
+  } catch (e: any) { message()?.(e.message, 'error') }
+  finally { riskSaving.value = false }
+  void import('../store').then(m => m.refresh(true))
+}
+
 const testingBrowser = shallowRef(false)
 async function onTestBrowser(): Promise<void> {
   testingBrowser.value = true
@@ -520,6 +541,21 @@ const permOptions = computed(() => [
   { label: it('完全访问（减少确认次数：一律不询问，与历史行为一致）'), value: 'full_access' },
 ])
 const permDraft = reactive({ mode: 'full_access' as string, timeout_minutes: 30 })
+// ---- 合入前风险审批（Phase 1 单机单审批人） ----
+type RiskPolicy = 'off' | 'single'
+const riskDraft = reactive({
+  enabled: false,
+  low: 'off' as RiskPolicy,
+  medium: 'off' as RiskPolicy,
+  high: 'single' as RiskPolicy,
+  timeout_minutes: 60,
+  extra_text: '',
+})
+const riskSaving = shallowRef(false)
+const riskPolicyOptions = computed(() => [
+  { label: it('关闭（不加门）'), value: 'off' },
+  { label: it('单人审批（看板批准后合入）'), value: 'single' },
+])
 // ---- Git 提交与合并开关（默认关闭：改动直接保留在工作区） ----
 const gitCommitAndMergeDraft = shallowRef(false)
 const gitAuthorName = shallowRef('')
@@ -571,6 +607,13 @@ watch(() => store.state, (s) => {
   pathAutofix.value = s.env_path_autofix ?? false
   permDraft.mode = s.permissions_cfg?.mode ?? 'full_access'
   permDraft.timeout_minutes = s.permissions_cfg?.timeout_minutes ?? 30
+  const ra = s.risk_approval_cfg
+  riskDraft.enabled = ra?.enabled ?? false
+  riskDraft.low = (ra?.policy?.low ?? 'off') as RiskPolicy
+  riskDraft.medium = (ra?.policy?.medium ?? 'off') as RiskPolicy
+  riskDraft.high = (ra?.policy?.high ?? 'single') as RiskPolicy
+  riskDraft.timeout_minutes = ra?.timeout_minutes ?? 60
+  riskDraft.extra_text = (ra?.extra_high_risk_paths ?? []).join('\n')
   const dbg = s.local_debug_cfg
   if (dbg) {
     localDebugDraft.browser = dbg.browser ?? 'auto'
@@ -2111,6 +2154,43 @@ const protocolOptions = computed(() => [
               <div v-if="!pausedProjects.length" class="hint">{{ it('当前没有暂停的项目') }}</div>
             </div>
             <div class="sfoot"><NButton type="primary" :loading="resilienceSaving" @click="saveResilience">{{ it('保存熔断设置') }}</NButton></div>
+          </NCard>
+        </div>
+        <div v-if="settingsSection === 'risk'">
+          <NCard size="small" class="scard">
+            <template #header><i class="ms">verified_user</i> {{ it('风险审批（合入前）') }}</template>
+            <label class="checkline">
+              <NSwitch v-model:value="riskDraft.enabled" />
+              {{ it('启用合入前风险审批') }}
+              <span class="hint">{{ it('Phase 1 为单机单审批人：只有看板登录会话可批准，API Key 不可代批；多人会签需外部身份源，尚未提供。') }}</span>
+            </label>
+            <div class="hint">
+              {{ it('建议同时设置看板登录密码；无密码看板只能防误操作，不能防本机恶意程序冒充审批。') }}
+            </div>
+            <div class="frow">
+              <div class="f1"><label>{{ it('低风险策略') }}</label>
+                <NSelect v-model:value="riskDraft.low" :options="riskPolicyOptions" /></div>
+              <div class="f1"><label>{{ it('中风险策略') }}</label>
+                <NSelect v-model:value="riskDraft.medium" :options="riskPolicyOptions" /></div>
+              <div class="f1"><label>{{ it('高风险策略') }}</label>
+                <NSelect v-model:value="riskDraft.high" :options="riskPolicyOptions" /></div>
+            </div>
+            <div class="frow">
+              <div class="f1"><label>{{ it('审批等待上限（分钟，超时阻断）') }}</label>
+                <NInputNumber v-model:value="riskDraft.timeout_minutes" :min="1" :max="1440" /></div>
+            </div>
+            <label>{{ it('追加高风险路径 glob（每行一个，如 src/billing/**）') }}</label>
+            <NInput v-model:value="riskDraft.extra_text" type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 6 }"
+                    :placeholder="it('src/billing/**')" />
+            <div class="hint">
+              {{ it('内置高风险路径已覆盖自更新、认证、脱敏、出网、预算、存储凭据、配置迁移、依赖锁文件、构建与部署；这里只追加项目自定义路径。') }}
+            </div>
+            <div class="sfoot">
+              <NButton type="primary" :loading="riskSaving" @click="saveRiskApproval">
+                {{ it('保存风险审批设置') }}
+              </NButton>
+            </div>
           </NCard>
         </div>
         <div v-if="settingsSection === 'audit'">

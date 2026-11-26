@@ -69,6 +69,8 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/config.py` | 领域模型 | 数据类（AppConfig 等 21 个 dataclass）、YAML 加载反序列化与配置解析 |
 | `orcsy/task_model.py` | 领域模型 | 任务 Markdown 文件解析、frontmatter 状态机与任务依赖 DAG 环检测 |
 | `orcsy/review.py` | 编排层 | 独立模型合并前只读审查 Agent |
+| `orcsy/risk.py` | 编排层 | 合入前风险分级：路径/内容规则、原因与 digest |
+| `orcsy/risk_approval.py` | 编排层 | 高风险合入前的看板人工审批（单机单审批人）与审计 |
 | `orcsy/runlog.py` | 可信层 | 运行台账：run 事件流、diff/测试/审查/用量工件、保留期清理与目录迁移 |
 | `orcsy/claims.py` | 可信层 | 任务指纹、TTL 租约（心跳/文件锁）、断点续跑标记与提交前二次校验 |
 | `orcsy/budget.py` | 可信层 | token/成本预算硬闸、项目当日累计与预算软停判断 |

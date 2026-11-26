@@ -27,6 +27,7 @@ from .config import (
     LocalDebugConfig,
     ProjectConfig,
     ReviewConfig,
+    RiskApprovalConfig,
     TaskStatus,
     assert_review_model_distinct,
     review_enabled_for,
@@ -74,6 +75,9 @@ class TaskResult:
     completion_tokens: int = 0     # 输出 token 累计
     # 审查门结论（合并前审查开启时非 None）；skipped = 未启用审查
     review: object | None = None
+    # 合入前风险评估（risk_approval 开启时非 None）与人工审批决定
+    risk: object | None = None
+    merge_approval: dict | None = None
     # 审查阶段落下的 WIP 提交短哈希（审计可溯；未审查/无提交时为空）
     wip_commit: str = ""
     # 项目小组扩展结果字段
@@ -98,6 +102,7 @@ class TaskExecutor:
                  local_debug: LocalDebugConfig | None = None,
                  commit_and_merge: bool = False,
                  git_author: tuple[str, str] | None = None,
+                 risk_approval_cfg: RiskApprovalConfig | None = None,
                  *,
                  worktree_isolation: bool | None = None,
                  per_task_worktree: bool = False,
@@ -117,6 +122,7 @@ class TaskExecutor:
         self.claims = claims
         self.commit_and_merge = bool(commit_and_merge)
         self.git_author = git_author or None
+        self.risk_approval_cfg = risk_approval_cfg
         # 冲突自愈（§3.3）：合入主工作区冲突时的续跑自愈尝试计数（按任务）
         self._merge_heal: dict[str, int] = {}
         # worktree_isolation：默认跟随 commit_and_merge（单兵模式保持历史语义）；
@@ -483,7 +489,9 @@ class TaskExecutor:
                     tokens={"prompt_tokens": result.prompt_tokens,
                             "completion_tokens": result.completion_tokens},
                     commit=str(getattr(result, "commit", "") or result.wip_commit or ""),
-                    review_verdict=str(getattr(result.review, "verdict", "") or ""))
+                    review_verdict=str(getattr(result.review, "verdict", "") or ""),
+                    risk_level=str(getattr(getattr(result, "risk", None), "level", "") or ""),
+                    risk_approval=str((result.merge_approval or {}).get("decision", "") or ""))
             except Exception:  # noqa: BLE001 — 台账旁路
                 self.log.warning("运行台账收尾失败（可忽略）", exc_info=True)
             finally:
@@ -1025,9 +1033,170 @@ class TaskExecutor:
         except Exception:  # noqa: BLE001 — 台账旁路
             self.log.warning("工作区 diff 记录失败（可忽略）", exc_info=True)
 
+    def _assess_merge_risk(self, result: TaskResult, branch: str, wt_path: Path):
+        """计算任务分支相对基准的 diff、文件与增删行数，返回风险评估。"""
+        from .risk import assess_risk
+        base = self._base_branch()
+        diff = self._review_diff(task=None, wt_path=wt_path,
+                                 base_branch=base, work_branch=branch)
+        files_raw = self.git.run("diff", "--name-only", f"{base}...{branch}")
+        files = [line.strip() for line in files_raw.splitlines() if line.strip()]
+        numstat = self.git.run("diff", "--numstat", f"{base}...{branch}")
+        additions = deletions = 0
+        for line in numstat.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            try:
+                additions += int(parts[0])
+                deletions += int(parts[1])
+            except ValueError:
+                continue  # 二进制文件用 "-"，不计行数
+        branch_sha = self.git.rev_parse(result.wip_commit or branch)
+        return assess_risk(
+            files=files, diff=diff, branch_sha=branch_sha,
+            additions=additions, deletions=deletions,
+            extra_high_risk_paths=(
+                self.risk_approval_cfg.extra_high_risk_paths
+                if self.risk_approval_cfg else None))
+
+    def _record_risk_artifact(self, assessment, approval: dict | None = None) -> None:
+        rec = self._rec()
+        if rec is None:
+            return
+        try:
+            from .runlog import redact_text
+            payload = assessment.as_dict()
+            if approval is not None:
+                payload["approval"] = approval
+            rec.artifact("risk.json", redact_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), 1_500_000))
+            rec.update_meta(risk_level=assessment.level)
+        except Exception:  # noqa: BLE001 — 台账旁路
+            self.log.warning("风险审批工件记录失败（可忽略）", exc_info=True)
+
+    def _approve_risk_merge(self, task: Task, result: TaskResult,
+                            branch: str, wt_path: Path) -> bool:
+        """合入前风险审批：高风险（或配置为 single 的等级）等待看板人工决定。"""
+        cfg = self.risk_approval_cfg
+        if cfg is None or not cfg.enabled:
+            return True
+        from .risk import failed_assessment
+        from .risk_approval import get_manager
+
+        try:
+            assessment = self._assess_merge_risk(result, branch, wt_path)
+        except (GitError, OSError) as exc:
+            assessment = failed_assessment(str(exc))
+        result.risk = assessment
+        policy = (cfg.policy or {}).get(assessment.level, "off")
+        self._rec_event("risk_assess", level=assessment.level, policy=policy,
+                        files=len(assessment.files),
+                        additions=assessment.additions,
+                        deletions=assessment.deletions,
+                        digest=assessment.digest[:16],
+                        reasons=assessment.reasons[:8])
+        if policy != "single":
+            self._record_risk_artifact(assessment)
+            return True
+
+        append_progress(
+            task.path,
+            f"⏸ 风险审批：{assessment.level}（{len(assessment.files)} 个文件，"
+            f"+{assessment.additions}/-{assessment.deletions}）；等待看板批准")
+        self._record_risk_artifact(assessment)
+        self._rec_event("risk_approval_request", level=assessment.level,
+                        digest=assessment.digest[:16],
+                        files=len(assessment.files),
+                        timeout_minutes=int(cfg.timeout_minutes))
+        outcome = get_manager().request(
+            project=self.project.name, task_id=task.id, title=task.title,
+            risk_level=assessment.level, reasons=assessment.reasons,
+            files=assessment.files, additions=assessment.additions,
+            deletions=assessment.deletions, branch=branch,
+            commit=result.wip_commit or branch, digest=assessment.digest,
+            timeout_seconds=max(60, int(cfg.timeout_minutes) * 60),
+            requested_by=f"agent:{self.team_role or self.agent_name or 'agent'}",
+            stop_event=get_task_controls().event(self.project.name, task.id))
+        if outcome.cancelled:
+            raise TaskStopped("任务已停止，风险审批取消")
+        req = outcome.request
+        decided_at = (time.strftime("%Y-%m-%d %H:%M:%S",
+                                    time.localtime(req.decided_at))
+                      if req.decided_at else "")
+        result.merge_approval = {
+            "request_id": req.id,
+            "decision": req.status,
+            "level": assessment.level,
+            "commit": result.wip_commit or branch,
+            "digest": req.digest,
+            "by": req.decided_by,
+            "comment": req.comment,
+            "at": decided_at,
+        }
+        from .runlog import redact_text
+        reasons_text = "；".join(assessment.reasons[:5])
+        if outcome.timed_out:
+            result.block_reason = "risk_approval_timeout"
+            result.notes = (result.notes + chr(10) if result.notes else "") + (
+                f"风险审批超时（{cfg.timeout_minutes} 分钟未响应）："
+                f"{assessment.level}；原因：{reasons_text}")
+            self._rec_event("risk_approval_decision", verdict="timeout",
+                            level=assessment.level, digest=req.digest[:16])
+            append_progress(task.path, "⛔ 风险审批超时，合入已阻断")
+            self._record_risk_artifact(assessment, result.merge_approval)
+            return False
+        if not outcome.approved:
+            result.block_reason = "risk_approval_rejected"
+            comment = redact_text(req.comment, 500)
+            extra = f"；审批意见：{comment}" if comment else ""
+            result.notes = (result.notes + chr(10) if result.notes else "") + (
+                f"风险审批被拒绝：{assessment.level}；原因：{reasons_text}{extra}")
+            self._rec_event("risk_approval_decision", verdict="rejected",
+                            level=assessment.level, digest=req.digest[:16],
+                            by=req.decided_by)
+            append_progress(task.path, f"⛔ 风险审批被拒绝（{req.decided_by or '看板'}）")
+            self._record_risk_artifact(assessment, result.merge_approval)
+            return False
+
+        # 批准后再次核对内容：审批期间 worktree/branch 被改动则作废，需重新审批
+        try:
+            current = self._assess_merge_risk(result, branch, wt_path)
+        except (GitError, OSError) as exc:
+            current = failed_assessment(str(exc))
+        if current.digest != assessment.digest:
+            result.merge_approval["decision"] = "stale"
+            result.block_reason = "risk_approval_stale"
+            result.notes = (result.notes + chr(10) if result.notes else "") + (
+                "审批后任务内容发生变化（digest 不一致），本次批准已作废，需重新审批")
+            self._rec_event("risk_approval_decision", verdict="stale",
+                            level=assessment.level, digest=req.digest[:16])
+            try:
+                from .audit import record as audit_record
+                audit_record(
+                    "risk_approval.stale", actor=req.decided_by or "system",
+                    target=f"{self.project.name}/{task.id}", result="stale",
+                    detail={"risk_level": assessment.level,
+                            "approved_digest": assessment.digest,
+                            "current_digest": current.digest})
+            except Exception:  # noqa: BLE001 — 审计旁路
+                pass
+            append_progress(task.path, "⛔ 审批后内容变化，批准作废并阻断合入")
+            self._record_risk_artifact(current, result.merge_approval)
+            return False
+        self._rec_event("risk_approval_decision", verdict="approved",
+                        level=assessment.level, digest=req.digest[:16],
+                        by=req.decided_by)
+        append_progress(task.path,
+                        f"✅ 风险审批通过（{req.decided_by or '看板'}），开始合入")
+        self._record_risk_artifact(assessment, result.merge_approval)
+        return True
+
     def _merge_with_premerge(self, task: Task, result: TaskResult, branch: str,
                              wt_path: Path) -> bool | None:
-        """None 表示重测门禁受阻；False 才表示需要冲突自愈的合并失败。"""
+        """None 表示重测/风险审批门禁受阻；False 才表示需要冲突自愈的合并失败。"""
+        if not self._approve_risk_merge(task, result, branch, wt_path):
+            return None
         lock = self.merge_lock or contextlib.nullcontext()
         with lock:
             if self.project.premerge_test_enabled:

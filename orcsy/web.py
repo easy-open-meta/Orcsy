@@ -55,6 +55,12 @@ API（均为 GET/POST JSON）：
                          挂起列表经 GET /api/state 的 approvals 字段曝光；
                          超时 permissions.timeout_minutes 自动拒绝）
 
+合入前风险审批（risk_approval.enabled 时，高风险合入挂起等待）：
+  POST /api/risk-approval 响应一条挂起请求 {id, approved, comment?}
+                          （仅看板登录会话可批，API Key 返回 400；
+                          列表经 GET /api/state 的 risk_approvals 字段曝光；
+                          超时 risk_approval.timeout_minutes 阻断合入）
+
 镜像源管理（内置+用户添加源，HTTP 测速选最快；详见 orcsy/mirrors.py）：
   POST /api/mirror/test   测速 {category?}（缺省测全部类别），结果存边车并返回
   POST /api/mirror/apply  把代理类最快源写进 env.vars（GOPROXY/PIP_INDEX_URL/
@@ -117,6 +123,7 @@ from . import __version__, git_service, masking, notify, settings_service, updat
 from . import skills as skills_lib
 from .agent import ProjectAgent
 from .approvals import MUTATING_TOOLS, RISKY_TOOLS, get_manager
+from .risk_approval import get_manager as get_risk_approval_manager
 from .auth import verify_password
 from .concurrency import snapshot_pools
 from .config import (
@@ -739,6 +746,25 @@ class AppState:
             raise ValueError("审批请求不存在或已处理（可能已被响应或超时自动拒绝）")
         return {"ok": True}
 
+    def risk_approval_respond(self, data: dict, *, actor: str = "",
+                              ip: str = "") -> dict:
+        """看板响应一条合入前风险审批；API Key 不允许代批。"""
+        rid = str(data.get("id") or "").strip()
+        if not rid:
+            raise ValueError("缺少风险审批请求 id")
+        if str(actor or "").startswith("api_key:"):
+            raise ValueError("风险审批仅允许看板登录会话，API Key 不可代批")
+        approved = data.get("approved")
+        if not isinstance(approved, bool):
+            raise ValueError("approved 必须是布尔值")
+        comment = str(data.get("comment") or "")[:500]
+        ok = get_risk_approval_manager().respond(
+            rid, approved, comment=comment, actor=actor, ip=ip)
+        if not ok:
+            raise ValueError(
+                "风险审批请求不存在或已处理（可能已被响应、超时或任务已停止）")
+        return {"ok": True}
+
     # ---- 强制停止 ----
 
     def stop_task(self, data: dict) -> dict:
@@ -1085,6 +1111,15 @@ class AppState:
                 "timeout_minutes": self.config.permissions.timeout_minutes,
             },
             "approvals": get_manager().pending(),
+            # 合入前风险审批：配置 + 当前挂起请求（看板 5s 轮询刷新）
+            "risk_approval_cfg": {
+                "enabled": self.config.risk_approval.enabled,
+                "policy": dict(self.config.risk_approval.policy),
+                "timeout_minutes": self.config.risk_approval.timeout_minutes,
+                "extra_high_risk_paths": list(
+                    self.config.risk_approval.extra_high_risk_paths),
+            },
+            "risk_approvals": get_risk_approval_manager().pending(),
             # 命令白名单开关：全局生效 map + 默认白名单目录（逐命令 NSwitch 用）
             "commands_cfg": dict(self.config.commands.enabled),
             "commands_catalog": list(DEFAULT_ALLOWED_COMMANDS),
@@ -1816,6 +1851,7 @@ class AppState:
                                      local_debug=cfg.local_debug,
                                      commit_and_merge=resolve_commit_and_merge(cfg.git, p),
                                      git_author=resolve_git_author(cfg.git, p),
+                                     risk_approval_cfg=cfg.risk_approval,
                                      agent_profiles=cfg.agent_profiles,
                                      global_tools=cfg.tools)
                 for p in cfg.projects}
@@ -3017,6 +3053,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._json(self.state.restart_app())
             elif path == "/api/approval":
                 self._json(self.state.approval_respond(body))
+            elif path == "/api/risk-approval":
+                self._json(self.state.risk_approval_respond(
+                    body, actor=getattr(self, "_audit_actor", ""),
+                    ip=self._client_ip()))
             elif path == "/api/mirror/test":
                 self._json(self.state.mirror_test(body))
             elif path == "/api/mirror/apply":

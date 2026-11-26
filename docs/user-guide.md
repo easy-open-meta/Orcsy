@@ -1214,6 +1214,10 @@ Enable "Retest against latest main before merge" in project settings and enter a
 
 In team stage mode, the main worktree may contain precisely the accepted stage delta. Any other uncommitted or untracked changes make the gate refuse to run until checked manually. Choose an offline-capable test command that needs no production secrets. This feature defaults off; existing projects retain their previous merge behavior.
 
+### 10.23.2 Risk approval (global, before merge)
+
+Enable it in Settings, Runtime & Cost, Risk approval. Phase 1 is single-operator: only a dashboard login session can approve; API keys cannot approve, and multi-person quorum is not available yet. By default only high-risk merges are gated. A request shows the risk level, reasons, changed file count and diff stats, and is bound to the task commit plus a SHA-256 digest of the diff. Approve to continue; reject, timeout, or any content change blocks the merge and keeps the task branch. Requests and decisions go to logs/audit.jsonl, the run's risk.json, and a Risk approval section in the task body. High-risk rules cover self-update, authentication, masking, egress, billing, storage credentials, config migrations, dependency lockfiles, build and deploy; project-specific path globs can be added in settings. This gate does not replace the human commit gate or the CI gate. Do not enable it for headless runs with no reachable dashboard; a high-risk task will wait until the timeout and then block.
+
 ### 10.24 Dependency graph visualization (DAG)
 
 Expand "Dependency Graph (DAG)" on the project card to see task dependency topology:

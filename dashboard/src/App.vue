@@ -107,7 +107,8 @@ async function doScan(): Promise<void> {
 const updPhase = computed(() => store.state?.update?.phase || 'idle')
 const updLatest = computed(() => store.state?.update?.latest || '')
 // 挂起的人工审批数（>0 时顶栏显示「🔔 待审批」入口；面板在 Dialogs.vue）
-const pendingApprovals = computed(() => store.state?.approvals?.length || 0)
+const pendingApprovals = computed(() =>
+  (store.state?.approvals?.length || 0) + (store.state?.risk_approvals?.length || 0))
 const pending = computed(() => {
   void store.state // 建立响应式依赖：轮询更新 store 后重新求值（localStorage 本身非响应式）
   return getPendingUpdate()

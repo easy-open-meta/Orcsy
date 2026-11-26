@@ -6,7 +6,12 @@
 
 ## [Unreleased]
 
-（下一版本的内容在此累积）
+### 新增
+- **风险分级审批 Phase 0+1（合入前，单机单审批人）**：新增全局 `risk_approval` 配置与本地风险评估（路径 + 内容规则）。
+- 高风险合入前在合并锁外等待看板人工批准，绑定任务 commit 与 diff digest；批准后继续 premerge/合入，拒绝/超时/内容变化阻断并保留任务分支。
+- 只有看板登录会话可批准，API Key 不能代批；默认只拦高风险，超时默认 60 分钟（可配 1~1440），多人会签明确留待 Phase 2。
+- 审计写 `risk_approval.request|approve|reject|timeout|cancel|stale`；运行台账新增 `risk_assess` / `risk_approval_request` / `risk_approval_decision` 事件与 `risk.json`；任务正文增加「## 风险审批」。
+- 看板：待审批弹窗增加风险合入审批段（等级/原因/文件数/增删行/意见），顶栏徽标合并计数；设置页新增「风险审批」分区。
 
 ## [0.35.0] — 2026-11-26
 

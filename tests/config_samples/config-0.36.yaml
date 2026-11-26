@@ -1,0 +1,16 @@
+config_version: 2
+llm:
+  provider: openai
+  api_key: sk-test
+  base_url: https://api.example.com/v1
+  model: test-model
+risk_approval:
+  enabled: true
+  policy:
+    low: off
+    medium: single
+    high: single
+  timeout_minutes: 45
+  extra_high_risk_paths:
+    - src/billing/**
+projects: []

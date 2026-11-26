@@ -285,6 +285,27 @@ export interface ApprovalT {
   waited_seconds: number
 }
 
+/** 一条挂起的合入前风险审批（GET /api/state 的 risk_approvals 字段） */
+export interface RiskApprovalT {
+  id: string
+  project: string
+  task_id: string
+  title: string
+  risk_level: 'low' | 'medium' | 'high'
+  reasons: string[]
+  files: string[]
+  additions: number
+  deletions: number
+  branch: string
+  commit: string
+  digest: string
+  requested_by: string
+  created_at: number
+  timeout_seconds: number
+  waited_seconds: number
+  status: string
+}
+
 /** 一条模型用量记录（任务级台账，logs/usage.jsonl；kind=task/review） */
 export interface UsageEntryT {
   at: string
@@ -503,6 +524,15 @@ export interface AppStateT {
   permissions_cfg: { mode: PermissionMode; timeout_minutes: number }
   /** 当前挂起的人工审批请求（5s 轮询刷新；处理后条目消失） */
   approvals: ApprovalT[]
+  /** 合入前风险审批配置（全局） */
+  risk_approval_cfg: {
+    enabled: boolean
+    policy: Record<'low' | 'medium' | 'high', 'off' | 'single'>
+    timeout_minutes: number
+    extra_high_risk_paths: string[]
+  }
+  /** 当前挂起的合入前风险审批请求 */
+  risk_approvals: RiskApprovalT[]
   /** 全局命令白名单开关：只含显式设置过的项，未列出的命令默认放行 */
   commands_cfg: Record<string, boolean>
   /** 默认命令白名单目录（逐命令开关用，含通配符模式如 gradle*） */
@@ -943,6 +973,9 @@ export const api = {
   /** 响应一条挂起的审批：approved=批准/拒绝；always=本任务内始终允许该工具（仅批准时有意义） */
   approvalRespond: (id: string, approved: boolean, always = false) =>
     post('/api/approval', { id, approved, always }),
+  /** 响应一条合入前风险审批（仅看板登录会话可批，API Key 会被后端拒绝） */
+  riskApprovalRespond: (id: string, approved: boolean, comment = '') =>
+    post('/api/risk-approval', { id, approved, comment }),
   /** 镜像源测速（category 缺省测全部）：HTTP 直连探测（绕过系统代理），结果存服务端边车 */
   mirrorTest: (category?: string) => post('/api/mirror/test', { category: category ?? '' }) as Promise<{
     ok: boolean; message: string

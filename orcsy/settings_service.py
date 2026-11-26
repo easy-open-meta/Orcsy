@@ -59,6 +59,7 @@ from .config import (
     ArchiveConfig,
     BackupConfig,
     _parse_storage_target,
+    parse_risk_approval_config,
     resolve_storage_target,
 )
 from .egress import validate_extra_hosts
@@ -663,6 +664,25 @@ def save_settings(state: AppState, data: dict) -> dict:
             include_runs=bool(a_raw.get("include_runs", state.config.archive.include_runs)),
             keep_last=max(1, min(int(a_raw.get("keep_last", state.config.archive.keep_last)), 100)),
         )
+
+    # 风险审批：分块更新，缺省字段保持现值（策略按等级合并）
+    if "risk_approval" in data:
+        r_raw = data.get("risk_approval") or {}
+        if not isinstance(r_raw, dict):
+            raise ValueError("risk_approval 配置必须是字典（键值对）。")
+        current = state.config.risk_approval
+        policy = dict(current.policy)
+        if "policy" in r_raw:
+            if not isinstance(r_raw["policy"], dict):
+                raise ValueError("risk_approval.policy 必须是字典（low/medium/high）。")
+            policy.update(r_raw["policy"])
+        state.config.risk_approval = parse_risk_approval_config({
+            "enabled": r_raw.get("enabled", current.enabled),
+            "policy": policy,
+            "timeout_minutes": r_raw.get("timeout_minutes", current.timeout_minutes),
+            "extra_high_risk_paths": r_raw.get(
+                "extra_high_risk_paths", current.extra_high_risk_paths),
+        })
 
     state.scheduler.reload_config(state.config)
     state._apply_config(state.config)

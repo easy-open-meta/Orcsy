@@ -358,6 +358,29 @@ async function respondApproval(id: string, approved: boolean): Promise<void> {
   finally { responding.value = '' }
   void refresh(true)
 }
+
+// 合入前风险审批：与工具审批共用弹窗，但决定的是「是否合入」，不能勾「始终允许」
+const riskApprovals = computed(() => store.state?.risk_approvals ?? [])
+const riskComments = reactive<Record<string, string>>({})
+const riskResponding = shallowRef('')
+function riskLevelLabel(level: string): string {
+  return level === 'high' ? t('高风险')
+    : level === 'medium' ? t('中风险') : t('低风险')
+}
+function riskLevelType(level: string): 'error' | 'warning' | 'info' {
+  return level === 'high' ? 'error' : level === 'medium' ? 'warning' : 'info'
+}
+async function respondRiskApproval(id: string, approved: boolean): Promise<void> {
+  riskResponding.value = id
+  try {
+    await api.riskApprovalRespond(id, approved, riskComments[id] || '')
+    message(approved ? t('已批准合入') : t('已拒绝合入，任务保持受阻'),
+            approved ? 'success' : 'warning')
+    delete riskComments[id]
+  } catch (e: any) { message(e.message, 'error') }
+  finally { riskResponding.value = '' }
+  void refresh(true)
+}
 const pVisible = computed({
   get: () => !!ui.projectDlg,
   set: (v: boolean) => { if (!v) ui.projectDlg = null },
@@ -949,6 +972,9 @@ function runEventLine(e: { type: string; data: Record<string, any> }): string {
     case 'model_call': return `${d.model || ''} ${d.prompt_tokens || 0}+${d.completion_tokens || 0} tokens`
     case 'review_verdict': return `${d.verdict || ''} ${d.summary || ''}`
     case 'review_start': return `model=${d.model || ''} round=${d.round || 0}`
+    case 'risk_assess': return `${d.level || ''} ${d.policy || ''} ${d.files || 0} files +${d.additions || 0}/-${d.deletions || 0} ${d.digest || ''}`.trim()
+    case 'risk_approval_request': return `${d.level || ''} digest=${d.digest || ''} timeout=${d.timeout_minutes || 0}m`
+    case 'risk_approval_decision': return `${d.verdict || ''} ${d.level || ''} ${d.by || ''}`.trim()
     case 'commit': return `${d.hash || ''} @ ${d.branch || ''}`
     case 'merge': return `${d.mode || ''} ${d.review_verdict || ''}`
     case 'run_end': return `${d.outcome || ''} / ${d.exit_reason || ''}`
@@ -2251,7 +2277,10 @@ async function newFolder(): Promise<void> {
       {{ t('Agent 按访问权限模式（变更前询问 / 自主模式）挂起了以下操作，等待你的决定；') }}
       {{ t('批准后任务继续执行。超过配置的时限无人响应将自动拒绝。') }}
     </div>
-    <div v-if="!approvals.length" class="appr-empty">
+    <div class="hint">
+      {{ t('风险合入审批由合入前风险策略触发，与工具访问权限无关；批准后才会合入，拒绝或超时保留任务分支。') }}
+    </div>
+    <div v-if="!approvals.length && !riskApprovals.length" class="appr-empty">
       {{ t('当前没有挂起的审批请求（已处理或超时的条目会自动消失）。') }}
     </div>
     <div v-for="a in approvals" :key="a.id" class="appr">
@@ -2270,6 +2299,36 @@ async function newFolder(): Promise<void> {
                    @click="respondApproval(a.id, false)">{{ t('拒绝') }}</NButton>
           <NButton size="small" type="primary" :loading="responding === a.id"
                    @click="respondApproval(a.id, true)">{{ t('批准') }}</NButton>
+        </div>
+      </div>
+    </div>
+    <div v-if="riskApprovals.length" class="appr-sec">
+      <div class="appr-sec-title">{{ t('风险合入审批') }}</div>
+      <div v-for="r in riskApprovals" :key="r.id" class="appr risk">
+        <div class="appr-head">
+          <NTag size="small" :bordered="false" :type="riskLevelType(r.risk_level)">
+            {{ riskLevelLabel(r.risk_level) }}
+          </NTag>
+          <NTag size="small" :bordered="false" type="info">{{ r.project }}</NTag>
+          <NTag size="small" :bordered="false">{{ r.task_id }}</NTag>
+          <span class="hint appr-wait">{{ t('已等待') }} {{ fmtWaited(r.waited_seconds) }}</span>
+        </div>
+        <div class="appr-title">{{ r.title }}</div>
+        <div class="risk-reasons">
+          <div v-for="(reason, ri) in r.reasons" :key="ri">• {{ reason }}</div>
+        </div>
+        <div class="hint">
+          {{ r.files.length }} {{ t('个文件') }} ·
+          <span class="risk-add">+{{ r.additions }}</span>/<span class="risk-del">-{{ r.deletions }}</span>
+          · {{ r.branch }}@{{ r.commit }}
+        </div>
+        <NInput v-model:value="riskComments[r.id]" type="textarea" :rows="2"
+                :placeholder="t('审批意见（可选）')" />
+        <div class="btnrow" style="justify-content:flex-end; margin-top:8px">
+          <NButton size="small" :disabled="riskResponding === r.id"
+                   @click="respondRiskApproval(r.id, false)">{{ t('拒绝合入') }}</NButton>
+          <NButton size="small" type="primary" :loading="riskResponding === r.id"
+                   @click="respondRiskApproval(r.id, true)">{{ t('批准合入') }}</NButton>
         </div>
       </div>
     </div>
@@ -2377,6 +2436,14 @@ label, .checkline { font-size: 12.5px; color: var(--dim); display: flex; gap: 8p
   overflow: auto; }
 .appr-ops { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .appr-empty { color: var(--faint); font-size: 13px; text-align: center; padding: 22px 0; }
+.appr-sec { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.appr-sec-title { font-weight: 600; font-size: 12.5px; margin-bottom: 8px; }
+.appr.risk { border-color: rgba(240, 90, 90, 0.35); }
+.appr-title { font-weight: 600; font-size: 13px; margin: 6px 0; }
+.risk-reasons { font-size: 12px; color: var(--dim); margin: 4px 0 8px;
+  max-height: 100px; overflow: auto; }
+.risk-add { color: #4caf50; }
+.risk-del { color: #e57373; }
 .geditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
 .keditor { font: 12.5px/1.7 Consolas, "Cascadia Mono", monospace; }
 .scan-group { margin-bottom: 10px; }

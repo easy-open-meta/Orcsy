@@ -219,6 +219,14 @@ masking:
 #   target: local             # 项目任务归档目标名；local = 内置本地
 #   include_runs: false       # 是否附带 runs/<项目> 运行台账（审计留痕）
 #   keep_last: 10
+# risk_approval:               # 合入前风险审批（Phase 1 单机单审批人；默认关闭）
+#   enabled: false
+#   policy:                    # low / medium / high → off | single
+#     low: off                 #   低风险：不加门
+#     medium: off              #   中风险：默认只记录风险事件
+#     high: single             #   高风险：合入前需看板人工批准
+#   timeout_minutes: 60        # 等待上限；超时即阻断
+#   extra_high_risk_paths: []  # 追加高风险 glob（如 ["src/billing/**"]）
 
 # agent_profiles:              # 全局 Agent 角色预设池（多模型项目小组使用，可选）：
 #   pm_default:                #   预设 ID
