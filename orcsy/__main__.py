@@ -235,12 +235,49 @@ masking:
 #   target: local             # 项目任务归档目标名；local = 内置本地
 #   include_runs: false       # 是否附带 runs/<项目> 运行台账（审计留痕）
 #   keep_last: 10
-# risk_approval:               # 合入前风险审批（Phase 1 单机单审批人；默认关闭）
+# approval_providers:          # 外部审批 Provider（Phase 2 quorum 用；默认无）
+#   gitlab:
+#     type: gitlab
+#     base_url: https://gitlab.example.com
+#     project_id: "123"
+#     token: ""
+#     callback_secret: ""
+#   github:
+#     type: github
+#     repo: owner/name
+#     token: ""
+#     callback_secret: ""
+#   feishu:
+#     type: feishu
+#     app_id: ""
+#     app_secret: ""
+#     approval_code: ""
+#     callback_secret: ""
+#   dingtalk:
+#     type: dingtalk
+#     app_key: ""
+#     app_secret: ""
+#     process_code: ""
+#     callback_secret: ""
+# approvers:                    # email ↔ Provider 身份（quorum 计数唯一口径）
+#   alice@example.com:
+#     gitlab: alice
+#     github: alice-gh
+#     feishu: ou_xxx
+#     dingtalk: userid_xxx
+# risk_approval:               # 合入前风险审批（默认关闭）
 #   enabled: false
-#   policy:                    # low / medium / high → off | single
+#   policy:                    # low / medium / high → off | single | quorum
 #     low: off                 #   低风险：不加门
 #     medium: off              #   中风险：默认只记录风险事件
-#     high: single             #   高风险：合入前需看板人工批准
+#     high: single             #   高风险：看板单人批准；quorum 走外部 Provider
+#   provider: gitlab           # policy=quorum 时必填（引用 approval_providers 名称）
+#   quorum:
+#     high: 2                  # quorum 等级至少 2 人
+#   allowed_approvers:
+#     high: [alice@example.com] # 必须与 quorum 人数匹配且在 approvers 注册
+#   callback_url: "https://<domain>/api/risk-approval/callback/{provider}"
+#   poll_interval_seconds: 20
 #   timeout_minutes: 60        # 等待上限；超时即阻断
 #   extra_high_risk_paths: []  # 追加高风险 glob（如 ["src/billing/**"]）
 

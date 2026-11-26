@@ -89,6 +89,8 @@ class Scheduler:
                          commit_and_merge=resolve_commit_and_merge(config.git, p),
                          git_author=resolve_git_author(config.git, p),
                          risk_approval_cfg=config.risk_approval,
+                         approval_providers=config.approval_providers,
+                         approvers=config.approvers,
                          agent_profiles=config.agent_profiles,
                          global_tools=config.tools)
             for p in config.projects
@@ -202,6 +204,8 @@ class Scheduler:
                          commit_and_merge=resolve_commit_and_merge(cfg.git, p),
                          git_author=resolve_git_author(cfg.git, p),
                          risk_approval_cfg=cfg.risk_approval,
+                         approval_providers=cfg.approval_providers,
+                         approvers=cfg.approvers,
                          agent_profiles=cfg.agent_profiles,
                          global_tools=cfg.tools)
             for p in cfg.projects

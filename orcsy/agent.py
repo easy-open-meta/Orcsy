@@ -157,13 +157,18 @@ class ProjectAgent:
                  commit_and_merge: bool = False,
                  git_author: tuple[str, str] | None = None,
                  risk_approval_cfg: RiskApprovalConfig | None = None,
+                 approval_providers: dict | None = None,
+                 approvers: dict | None = None,
                  *,
                  agent_profiles: dict[str, AgentProfileConfig] | None = None,
                  global_tools: ToolsConfig | None = None) -> None:
         self.project = project
         self.skills_base = skills_base  # 技能库根目录（配置目录/skills）；None 表示无技能
+        self.state_dir = Path(state_dir) if state_dir else claims_state_dir()
+        self.approval_providers = dict(approval_providers or {})
+        self.approvers = dict(approvers or {})
         # 任务指纹/租约（V1-R2）：默认与 config.yaml 同级 state/，测试可传临时目录
-        self.claims = ProjectClaims(project, state_dir or claims_state_dir())
+        self.claims = ProjectClaims(project, self.state_dir)
         try:
             self.claims.cleanup_expired()
         except Exception:  # noqa: BLE001 — 清理失败不阻断启动（TTL 仍会拦截）
@@ -211,6 +216,9 @@ class ProjectAgent:
                                      commit_and_merge=commit_and_merge,
                                      git_author=git_author,
                                      risk_approval_cfg=self.risk_approval_cfg,
+                                     approval_providers=self.approval_providers,
+                                     approvers=self.approvers,
+                                     risk_approval_state_dir=self.state_dir,
                                      skills_base=skills_base,
                                      claims=self.claims)
         self.log = get_logger(f"agent.{project.name}")
@@ -277,6 +285,9 @@ class ProjectAgent:
                     commit_and_merge=commit_and_merge,
                     git_author=git_author,
                     risk_approval_cfg=self.risk_approval_cfg,
+                    approval_providers=self.approval_providers,
+                    approvers=self.approvers,
+                    risk_approval_state_dir=self.state_dir,
                     worktree_isolation=True,
                     per_task_worktree=True,
                     produces_code=m["produces_code"],

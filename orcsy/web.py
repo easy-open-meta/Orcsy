@@ -123,6 +123,7 @@ from . import __version__, git_service, masking, notify, settings_service, updat
 from . import skills as skills_lib
 from .agent import ProjectAgent
 from .approvals import MUTATING_TOOLS, RISKY_TOOLS, get_manager
+from .quorum_approval import get_manager as get_quorum_manager
 from .risk_approval import get_manager as get_risk_approval_manager
 from .auth import verify_password
 from .concurrency import snapshot_pools
@@ -765,6 +766,19 @@ class AppState:
                 "风险审批请求不存在或已处理（可能已被响应、超时或任务已停止）")
         return {"ok": True}
 
+    def risk_approval_callback(self, provider_name: str,
+                               headers: dict[str, str], raw_body: bytes) -> str:
+        """外部 Provider 回调入口：按 Provider 配置验签并应用 quorum 决定。"""
+        name = str(provider_name or "").strip()
+        if not name:
+            raise ValueError("缺少 Provider 名称")
+        provider_cfg = self.config.approval_providers.get(name)
+        if provider_cfg is None:
+            raise ValueError(f"未知审批 Provider：{name}")
+        from .quorum_approval import get_manager as get_quorum_manager
+        manager = get_quorum_manager(claims_state_dir(self.config))
+        return manager.apply_callback(name, provider_cfg, headers, raw_body)
+
     # ---- 强制停止 ----
 
     def stop_task(self, data: dict) -> dict:
@@ -1112,14 +1126,39 @@ class AppState:
             },
             "approvals": get_manager().pending(),
             # 合入前风险审批：配置 + 当前挂起请求（看板 5s 轮询刷新）
+            "approval_providers": {
+                name: self._provider_public(p)
+                for name, p in self.config.approval_providers.items()
+            },
+            "approvers": {
+                email: dict(ids)
+                for email, ids in self.config.approvers.items()
+            },
             "risk_approval_cfg": {
                 "enabled": self.config.risk_approval.enabled,
                 "policy": dict(self.config.risk_approval.policy),
                 "timeout_minutes": self.config.risk_approval.timeout_minutes,
                 "extra_high_risk_paths": list(
                     self.config.risk_approval.extra_high_risk_paths),
+                "provider": self.config.risk_approval.provider,
+                "quorum": dict(self.config.risk_approval.quorum),
+                "allowed_approvers": {
+                    level: list(emails)
+                    for level, emails in
+                    self.config.risk_approval.allowed_approvers.items()
+                },
+                "callback_url": self.config.risk_approval.callback_url,
+                "poll_interval_seconds":
+                    self.config.risk_approval.poll_interval_seconds,
             },
-            "risk_approvals": get_risk_approval_manager().pending(),
+            "risk_approvals": [
+                {**item, "mode": "single"}
+                for item in get_risk_approval_manager().pending()
+            ] + [
+                {**item, "mode": "quorum"}
+                for item in get_quorum_manager(
+                    claims_state_dir(self.config)).pending()
+            ],
             # 命令白名单开关：全局生效 map + 默认白名单目录（逐命令 NSwitch 用）
             "commands_cfg": dict(self.config.commands.enabled),
             "commands_catalog": list(DEFAULT_ALLOWED_COMMANDS),
@@ -1157,6 +1196,27 @@ class AppState:
             # 摘要模式省略 60KB 日志尾部：手机轮询流量大头，桌面端保持全量
             "log_tail": "" if summary else read_log_tail(self.log_path or self.config.logging.file),
         }
+
+    @staticmethod
+    def _provider_public(p) -> dict:
+        """审批 Provider 的可外发形态：token/app_secret/callback_secret 只出掩码。"""
+        out = {
+            "type": p.type,
+            "base_url": p.base_url,
+            "project_id": p.project_id,
+            "repo": p.repo,
+            "app_id": p.app_id,
+            "approval_code": p.approval_code,
+            "app_key": p.app_key,
+            "process_code": p.process_code,
+            "verify_tls": p.verify_tls,
+            "timeout_seconds": p.timeout_seconds,
+        }
+        for field in ("token", "callback_secret", "app_secret"):
+            value = str(getattr(p, field) or "")
+            out[f"{field}_masked"] = mask_secret(value)
+            out[f"{field}_configured"] = bool(value)
+        return out
 
     @staticmethod
     def _project_llm_public(llm: dict | None) -> dict | None:
@@ -1852,6 +1912,8 @@ class AppState:
                                      commit_and_merge=resolve_commit_and_merge(cfg.git, p),
                                      git_author=resolve_git_author(cfg.git, p),
                                      risk_approval_cfg=cfg.risk_approval,
+                                     approval_providers=cfg.approval_providers,
+                                     approvers=cfg.approvers,
                                      agent_profiles=cfg.agent_profiles,
                                      global_tools=cfg.tools)
                 for p in cfg.projects}
@@ -2589,12 +2651,23 @@ class WebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def _read_body(self) -> dict:
+    def _read_raw_body(self) -> bytes:
+        cached = getattr(self, "_raw_body_bytes", None)
+        if cached is not None:
+            return cached
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > 1_000_000:
+            self._raw_body_bytes = b""
+            return b""
+        self._raw_body_bytes = self.rfile.read(length)
+        return self._raw_body_bytes
+
+    def _read_body(self) -> dict:
+        raw = self._read_raw_body()
+        if not raw:
             return {}
         try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            return json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return {}
 
@@ -2707,6 +2780,18 @@ class WebHandler(BaseHTTPRequestHandler):
     def _deny(self) -> None:
         self._json({"ok": False, "unauthorized": True,
                     "message": "未登录或会话已过期"}, 401)
+
+    def _handle_risk_callback(self, provider_name: str) -> None:
+        """外部 Provider 回调：免登录但必须验 HMAC；失败返回 JSON 而非跳登录。"""
+        from .approval_providers import ProviderError
+        try:
+            status = self.state.risk_approval_callback(
+                provider_name, dict(self.headers), self._read_raw_body())
+            self._json({"ok": True, "status": status})
+        except ProviderError as exc:
+            self._json({"ok": False, "message": str(exc)}, 401)
+        except ValueError as exc:
+            self._json({"ok": False, "message": str(exc)}, 400)
 
     def _handle_login(self, body: dict) -> None:
         # 限速锚定真实客户端 IP：直连 = 对端 IP；受信任反代（trusted_proxies）
@@ -2946,10 +3031,15 @@ class WebHandler(BaseHTTPRequestHandler):
             # 连接上的下一个请求会把残留字节当请求行解析（协议失步 → 连接重置）
             body = self._read_body()
             self._audit_actor = self._actor_identity()
-            # 鉴权守卫：仅登录接口放行（401 走 _json，keep-alive 的 Content-Length 不缺）
-            if path != "/api/login" and not self._authorized():
+            # 风险审批回调：免看板登录，但 handler 必须按 Provider 的 HMAC 验签
+            risk_callback = path.startswith("/api/risk-approval/callback/")
+            # 鉴权守卫：仅登录接口与风险回调放行（401 走 _json，keep-alive 的
+            # Content-Length 不缺）
+            if path != "/api/login" and not risk_callback and not self._authorized():
                 return self._deny()
-            if path == "/api/login":
+            if risk_callback:
+                self._handle_risk_callback(path.rsplit("/", 1)[-1])
+            elif path == "/api/login":
                 self._handle_login(body)
             elif path == "/api/logout":
                 clear = f"{AUTH_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"

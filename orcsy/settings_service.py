@@ -56,9 +56,12 @@ from .config import (
     _coerce_llm as _coerce_llm_cfg,
 )
 from .config import (
+    ApprovalProviderConfig,
     ArchiveConfig,
     BackupConfig,
     _parse_storage_target,
+    parse_approval_providers,
+    parse_approvers,
     parse_risk_approval_config,
     resolve_storage_target,
 )
@@ -665,7 +668,36 @@ def save_settings(state: AppState, data: dict) -> dict:
             keep_last=max(1, min(int(a_raw.get("keep_last", state.config.archive.keep_last)), 100)),
         )
 
-    # 风险审批：分块更新，缺省字段保持现值（策略按等级合并）
+    # 外部审批 Provider / approvers / quorum 三项一起校验，全部成功才写回，
+    # 避免「Provider 已删、quorum 复检失败」把配置留在半更新状态。
+    new_providers = state.config.approval_providers
+    new_approvers = state.config.approvers
+    providers_changed = False
+    if "approval_providers" in data:
+        raw_providers = data.get("approval_providers") or {}
+        if not isinstance(raw_providers, dict):
+            raise ValueError("approval_providers 配置必须是字典（名称: 配置）。")
+        merged: dict[str, dict] = {}
+        for pname, item in raw_providers.items():
+            if not isinstance(item, dict):
+                raise ValueError(f"approval_providers.{pname} 必须是字典。")
+            payload = dict(item)
+            existing = state.config.approval_providers.get(str(pname))
+            if existing is not None:
+                for field in ("token", "callback_secret", "app_secret"):
+                    if field not in payload:
+                        payload[field] = getattr(existing, field)
+            merged[str(pname)] = payload
+        new_providers = parse_approval_providers(merged)
+        providers_changed = True
+
+    # approvers：email → Provider 身份；无密钥，整体替换
+    if "approvers" in data:
+        new_approvers = parse_approvers(data.get("approvers"))
+        providers_changed = True
+
+    # 风险审批：分块更新，缺省字段保持现值（策略/人数/白名单按等级合并）
+    new_risk = state.config.risk_approval
     if "risk_approval" in data:
         r_raw = data.get("risk_approval") or {}
         if not isinstance(r_raw, dict):
@@ -676,13 +708,52 @@ def save_settings(state: AppState, data: dict) -> dict:
             if not isinstance(r_raw["policy"], dict):
                 raise ValueError("risk_approval.policy 必须是字典（low/medium/high）。")
             policy.update(r_raw["policy"])
-        state.config.risk_approval = parse_risk_approval_config({
+        quorum = dict(current.quorum)
+        if "quorum" in r_raw:
+            if not isinstance(r_raw["quorum"], dict):
+                raise ValueError("risk_approval.quorum 必须是字典（等级: 人数）。")
+            quorum.update(r_raw["quorum"])
+        allowed = {
+            level: list(emails)
+            for level, emails in current.allowed_approvers.items()
+        }
+        if "allowed_approvers" in r_raw:
+            if not isinstance(r_raw["allowed_approvers"], dict):
+                raise ValueError(
+                    "risk_approval.allowed_approvers 必须是字典（等级: email 列表）。")
+            allowed.update(r_raw["allowed_approvers"])
+        new_risk = parse_risk_approval_config({
             "enabled": r_raw.get("enabled", current.enabled),
             "policy": policy,
             "timeout_minutes": r_raw.get("timeout_minutes", current.timeout_minutes),
             "extra_high_risk_paths": r_raw.get(
                 "extra_high_risk_paths", current.extra_high_risk_paths),
-        })
+            "provider": r_raw.get("provider", current.provider),
+            "quorum": quorum,
+            "allowed_approvers": allowed,
+            "callback_url": r_raw.get("callback_url", current.callback_url),
+            "poll_interval_seconds": r_raw.get(
+                "poll_interval_seconds", current.poll_interval_seconds),
+        }, providers=new_providers, approvers=new_approvers)
+    elif providers_changed:
+        # 只改 Provider/approvers 时也要复检现有 quorum 配置，避免删掉被引用的
+        # Provider 或 email 后留下悬空配置。
+        current = state.config.risk_approval
+        new_risk = parse_risk_approval_config({
+            "enabled": current.enabled,
+            "policy": current.policy,
+            "timeout_minutes": current.timeout_minutes,
+            "extra_high_risk_paths": current.extra_high_risk_paths,
+            "provider": current.provider,
+            "quorum": current.quorum,
+            "allowed_approvers": current.allowed_approvers,
+            "callback_url": current.callback_url,
+            "poll_interval_seconds": current.poll_interval_seconds,
+        }, providers=new_providers, approvers=new_approvers)
+
+    state.config.approval_providers = new_providers
+    state.config.approvers = new_approvers
+    state.config.risk_approval = new_risk
 
     state.scheduler.reload_config(state.config)
     state._apply_config(state.config)

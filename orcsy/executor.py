@@ -23,6 +23,7 @@ from pathlib import Path
 from .approvals import args_preview, get_manager, requires_approval
 from .budget import BudgetExceeded, BudgetTracker, get_budget_config
 from .config import (
+    ApprovalProviderConfig,
     LLMConfig,
     LocalDebugConfig,
     ProjectConfig,
@@ -103,6 +104,9 @@ class TaskExecutor:
                  commit_and_merge: bool = False,
                  git_author: tuple[str, str] | None = None,
                  risk_approval_cfg: RiskApprovalConfig | None = None,
+                 approval_providers: dict[str, ApprovalProviderConfig] | None = None,
+                 approvers: dict[str, dict[str, str]] | None = None,
+                 risk_approval_state_dir: Path | None = None,
                  *,
                  worktree_isolation: bool | None = None,
                  per_task_worktree: bool = False,
@@ -123,6 +127,11 @@ class TaskExecutor:
         self.commit_and_merge = bool(commit_and_merge)
         self.git_author = git_author or None
         self.risk_approval_cfg = risk_approval_cfg
+        self.approval_providers = dict(approval_providers or {})
+        self.approvers = dict(approvers or {})
+        self.risk_approval_state_dir = (
+            Path(risk_approval_state_dir) if risk_approval_state_dir is not None
+            else Path(tempfile.mkdtemp(prefix="orcsy-risk-approval-")))
         # 冲突自愈（§3.3）：合入主工作区冲突时的续跑自愈尝试计数（按任务）
         self._merge_heal: dict[str, int] = {}
         # worktree_isolation：默认跟随 commit_and_merge（单兵模式保持历史语义）；
@@ -1096,6 +1105,9 @@ class TaskExecutor:
                         deletions=assessment.deletions,
                         digest=assessment.digest[:16],
                         reasons=assessment.reasons[:8])
+        if policy == "quorum":
+            return self._approve_risk_quorum(task, result, assessment, branch,
+                                             wt_path)
         if policy != "single":
             self._record_risk_artifact(assessment)
             return True
@@ -1191,6 +1203,115 @@ class TaskExecutor:
                         f"✅ 风险审批通过（{req.decided_by or '看板'}），开始合入")
         self._record_risk_artifact(assessment, result.merge_approval)
         return True
+
+    def _approve_risk_quorum(self, task: Task, result: TaskResult,
+                             assessment, branch: str, wt_path: Path) -> bool:
+        """Phase 2：外部 Provider 的 N 人会签（按 email 白名单计数）。"""
+        cfg = self.risk_approval_cfg
+        level = assessment.level
+        provider_name = str(cfg.provider or "")
+        provider_cfg = self.approval_providers.get(provider_name)
+        required = int((cfg.quorum or {}).get(level, 0))
+        allowed = list((cfg.allowed_approvers or {}).get(level, []))
+        if provider_cfg is None or required < 2 or not allowed:
+            msg = (f"风险审批配置不完整：provider={provider_name or '空'}，"
+                   f"quorum={required}，白名单={len(allowed)} 人")
+            result.block_reason = "risk_approval_provider_error"
+            result.notes = (result.notes + chr(10) if result.notes else "") + msg
+            self._rec_event("risk_approval_decision", verdict="config_error",
+                            level=level)
+            append_progress(task.path, f"⛔ {msg}")
+            return False
+
+        append_progress(
+            task.path,
+            f"⏸ 风险会签：{level}，{required} 人（{provider_name}）；"
+            f"等待 {len(allowed)} 个白名单 email 审批")
+        self._record_risk_artifact(assessment)
+        self._rec_event("risk_approval_request", level=level,
+                        provider=provider_name, required=required,
+                        digest=assessment.digest[:16])
+        from .quorum_approval import get_manager
+        manager = get_manager(self.risk_approval_state_dir)
+        outcome = manager.request(
+            project=self.project.name, task_id=task.id, title=task.title,
+            risk_level=level, reasons=assessment.reasons,
+            files=assessment.files, additions=assessment.additions,
+            deletions=assessment.deletions, branch=branch,
+            commit=result.wip_commit or branch, digest=assessment.digest,
+            provider_name=provider_name, provider_cfg=provider_cfg,
+            approver_map=self.approvers, allowed_approvers=allowed,
+            required=required,
+            requested_by=f"agent:{self.team_role or self.agent_name or 'agent'}",
+            timeout_seconds=max(60, int(cfg.timeout_minutes) * 60),
+            poll_interval_seconds=max(5, int(cfg.poll_interval_seconds)),
+            callback_url=cfg.callback_url,
+            stop_event=get_task_controls().event(self.project.name, task.id))
+        if outcome.cancelled:
+            raise TaskStopped("任务已停止，风险审批取消")
+
+        req = outcome.request
+        decided_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        result.merge_approval = {
+            "request_id": req.id,
+            "decision": req.status,
+            "level": level,
+            "commit": result.wip_commit or branch,
+            "digest": req.digest,
+            "by": ", ".join(sorted(req.approvers.keys())),
+            "comment": req.comment,
+            "at": decided_at,
+            "provider": provider_name,
+            "required": required,
+        }
+        from .risk import failed_assessment
+        from .runlog import redact_text
+        if outcome.approved:
+            try:
+                current = self._assess_merge_risk(result, branch, wt_path)
+            except (GitError, OSError) as exc:
+                current = failed_assessment(str(exc))
+            if current.digest != assessment.digest:
+                result.merge_approval["decision"] = "stale"
+                result.block_reason = "risk_approval_stale"
+                result.notes = (result.notes + chr(10) if result.notes else "") + (
+                    "会签通过后任务内容发生变化（digest 不一致），本次批准已作废")
+                self._rec_event("risk_approval_decision", verdict="stale",
+                                level=level, digest=req.digest[:16])
+                append_progress(task.path, "⛔ 会签后内容变化，批准作废并阻断合入")
+                self._record_risk_artifact(current, result.merge_approval)
+                return False
+            self._rec_event("risk_approval_decision", verdict="approved",
+                            level=level, digest=req.digest[:16],
+                            by=result.merge_approval["by"])
+            append_progress(
+                task.path,
+                f"✅ 风险会签通过（{req.approved_count}/{required}，"
+                f"{result.merge_approval['by'] or provider_name}），开始合入")
+            self._record_risk_artifact(assessment, result.merge_approval)
+            return True
+
+        mapping = {
+            "timeout": "risk_approval_timeout",
+            "rejected": "risk_approval_rejected",
+            "expired": "risk_approval_timeout",
+            "provider_error": "risk_approval_provider_error",
+        }
+        result.block_reason = mapping.get(req.status, "risk_approval_invalid")
+        comment = redact_text(req.comment, 500)
+        detail = f"；审批意见：{comment}" if comment else ""
+        result.notes = (result.notes + chr(10) if result.notes else "") + (
+            f"风险会签未通过（{req.status}）：{level}；"
+            f"{req.approved_count}/{required} 人批准{detail}")
+        self._rec_event("risk_approval_decision", verdict=req.status,
+                        level=level, digest=req.digest[:16],
+                        by=result.merge_approval["by"])
+        append_progress(
+            task.path,
+            f"⛔ 风险会签未通过（{req.status}，"
+            f"{req.approved_count}/{required}），合入已阻断")
+        self._record_risk_artifact(assessment, result.merge_approval)
+        return False
 
     def _merge_with_premerge(self, task: Task, result: TaskResult, branch: str,
                              wt_path: Path) -> bool | None:

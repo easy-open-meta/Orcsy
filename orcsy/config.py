@@ -34,7 +34,7 @@ _LLM_FIELDS = (
 # 旧世代配置逐步迁移到当前世代；save_config 恒写当前世代。迁移器只做无损变换
 # （补默认/重命名/搬位/登记），任何破坏性 schema 变更必须在此注册新迁移
 # （1→2、2→3 …）并附带旧样本回归用例，而不是悄悄改默认值。
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 
 def _migrate_v1_backup(raw: dict[str, Any]) -> dict[str, Any]:
@@ -77,11 +77,22 @@ def _migrate_v1_backup(raw: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def _migrate_v2_identity(raw: dict[str, Any]) -> dict[str, Any]:
+    """2→3 迁移：登记风险审批 Phase 2 的新增分区（无字段改写）。
+
+    v3 新增 approval_providers / approvers 与 risk_approval.quorum；旧配置
+    缺这些键时由 load_config 的默认值补齐，因此本步只做世代登记。
+    """
+    return raw
+
+
 _CONFIG_MIGRATIONS: dict[int, "Callable[[dict[str, Any]], dict[str, Any]]"] = {
     # 0 = 无版本号的 0.21~0.27 世代配置：schema 一直增量演进、无破坏性变更，
     # 0→1 仅登记版本号。1 = 扁平 backup 重塑为 storage_targets（见上）。
+    # 2 = 风险审批 Phase 2（Provider/approvers/quorum）登记，无字段改写。
     0: lambda raw: raw,
     1: _migrate_v1_backup,
+    2: _migrate_v2_identity,
 }
 
 
@@ -723,23 +734,196 @@ class ArchiveConfig:
     keep_last: int = 10
 
 
+APPROVAL_PROVIDER_TYPES = ("gitlab", "github", "feishu", "dingtalk", "fake")
+_PROVIDER_SECRET_FIELDS = ("token", "callback_secret", "app_secret")
+
+
+@dataclass
+class ApprovalProviderConfig:
+    """外部审批 Provider 的配置（一个具名实例对应一个审批系统）。"""
+
+    type: str = "gitlab"
+    base_url: str = ""
+    project_id: str = ""          # GitLab
+    repo: str = ""                # GitHub: owner/name
+    token: str = ""               # GitLab/GitHub 访问令牌
+    callback_secret: str = ""     # 回调 HMAC 共享密钥
+    app_id: str = ""              # 飞书
+    app_secret: str = ""          # 飞书 / 钉钉应用密钥
+    approval_code: str = ""       # 飞书审批定义码
+    app_key: str = ""             # 钉钉应用 key
+    process_code: str = ""        # 钉钉审批模板码
+    verify_tls: bool = True
+    timeout_seconds: int = 10
+
+
+def _provider_text(raw: dict, key: str, limit: int = 500) -> str:
+    value = raw.get(key, "")
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if len(text) > limit or "\x00" in text:
+        raise ValueError(f"approval_providers.{key} 必须是 {limit} 字符以内的字符串")
+    return text
+
+
+def parse_approval_providers(raw: Any) -> dict[str, ApprovalProviderConfig]:
+    """解析 approval_providers 注册表；敏感值只做类型/长度校验。"""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("approval_providers 配置必须是字典（名称: 配置）。")
+    if len(raw) > 20:
+        raise ValueError("approval_providers 最多 20 个 Provider")
+    out: dict[str, ApprovalProviderConfig] = {}
+    for name, item in raw.items():
+        key = str(name or "").strip()
+        if not key or len(key) > 64:
+            raise ValueError("approval_providers 的 Provider 名称必须是 1~64 字符")
+        if not isinstance(item, dict):
+            raise ValueError(f"approval_providers.{key} 必须是字典（键值对）。")
+        ptype = str(item.get("type") or "").strip().lower()
+        if ptype not in APPROVAL_PROVIDER_TYPES:
+            raise ValueError(
+                f"approval_providers.{key}.type 只能是 "
+                + " / ".join(APPROVAL_PROVIDER_TYPES))
+        timeout_raw = item.get("timeout_seconds", 10)
+        if isinstance(timeout_raw, bool) or not isinstance(timeout_raw, int):
+            raise ValueError(f"approval_providers.{key}.timeout_seconds 必须是整数")
+        if not 1 <= timeout_raw <= 60:
+            raise ValueError(
+                f"approval_providers.{key}.timeout_seconds 必须在 1~60 秒之间")
+        verify_tls = item.get("verify_tls", True)
+        if not isinstance(verify_tls, bool):
+            raise ValueError(f"approval_providers.{key}.verify_tls 必须是布尔值")
+        cfg = ApprovalProviderConfig(
+            type=ptype,
+            base_url=_provider_text(item, "base_url"),
+            project_id=_provider_text(item, "project_id"),
+            repo=_provider_text(item, "repo"),
+            token=_provider_text(item, "token"),
+            callback_secret=_provider_text(item, "callback_secret"),
+            app_id=_provider_text(item, "app_id"),
+            app_secret=_provider_text(item, "app_secret"),
+            approval_code=_provider_text(item, "approval_code"),
+            app_key=_provider_text(item, "app_key"),
+            process_code=_provider_text(item, "process_code"),
+            verify_tls=verify_tls,
+            timeout_seconds=int(timeout_raw),
+        )
+        missing: list[str] = []
+        if ptype == "gitlab":
+            missing = [f for f in ("project_id", "token") if not getattr(cfg, f)]
+        elif ptype == "github":
+            missing = [f for f in ("repo", "token") if not getattr(cfg, f)]
+            if cfg.repo and "/" not in cfg.repo:
+                raise ValueError(
+                    f"approval_providers.{key}.repo 必须是 owner/name 形式")
+        elif ptype == "feishu":
+            missing = [f for f in ("app_id", "app_secret", "approval_code")
+                       if not getattr(cfg, f)]
+        elif ptype == "dingtalk":
+            missing = [f for f in ("app_key", "app_secret", "process_code")
+                       if not getattr(cfg, f)]
+        if missing:
+            raise ValueError(
+                f"approval_providers.{key}（{ptype}）缺少字段："
+                + ", ".join(missing))
+        out[key] = cfg
+    return out
+
+
+def provider_to_yaml(provider: ApprovalProviderConfig) -> dict:
+    return {
+        "type": provider.type,
+        "base_url": provider.base_url,
+        "project_id": provider.project_id,
+        "repo": provider.repo,
+        "token": provider.token,
+        "callback_secret": provider.callback_secret,
+        "app_id": provider.app_id,
+        "app_secret": provider.app_secret,
+        "approval_code": provider.approval_code,
+        "app_key": provider.app_key,
+        "process_code": provider.process_code,
+        "verify_tls": provider.verify_tls,
+        "timeout_seconds": provider.timeout_seconds,
+    }
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def parse_approvers(raw: Any) -> dict[str, dict[str, str]]:
+    """解析 approvers 注册表：email → {provider: 身份}。
+
+    email 是 quorum 的唯一计数口径；同一 Provider 身份不得映射多个 email。
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("approvers 配置必须是字典（email: Provider 身份）。")
+    if len(raw) > 200:
+        raise ValueError("approvers 最多 200 个 email")
+    out: dict[str, dict[str, str]] = {}
+    seen_identity: dict[str, str] = {}
+    for raw_email, identities in raw.items():
+        email = str(raw_email or "").strip().lower()
+        if not _EMAIL_RE.match(email) or len(email) > 254:
+            raise ValueError(f"approvers 的 email 不合法：{raw_email!r}")
+        if email in out:
+            raise ValueError(f"approvers 存在重复 email：{email}")
+        if not isinstance(identities, dict):
+            raise ValueError(f"approvers.{email} 必须是 Provider 身份字典")
+        ids: dict[str, str] = {}
+        for provider, identity in identities.items():
+            pname = str(provider or "").strip().lower()
+            if pname not in APPROVAL_PROVIDER_TYPES:
+                raise ValueError(
+                    f"approvers.{email} 存在未知 Provider：{provider}")
+            value = str(identity or "").strip()
+            if not value or len(value) > 200 or "\x00" in value:
+                raise ValueError(
+                    f"approvers.{email}.{pname} 必须是 1~200 字符的非空身份")
+            map_key = f"{pname}:{value.casefold()}"
+            if map_key in seen_identity and seen_identity[map_key] != email:
+                raise ValueError(
+                    f"Provider 身份 {pname}:{value} 同时映射到 "
+                    f"{seen_identity[map_key]} 与 {email}")
+            seen_identity[map_key] = email
+            ids[pname] = value
+        if not ids:
+            raise ValueError(f"approvers.{email} 至少配置一个 Provider 身份")
+        out[email] = ids
+    return out
+
+
 @dataclass
 class RiskApprovalConfig:
-    """合入前风险审批（Phase 1）：高风险单人审批，其余等级可配置。"""
+    """合入前风险审批：Phase 1 单人 + Phase 2 外部 Provider 会签。"""
 
     enabled: bool = False
-    # low / medium / high → off | single。Phase 1 不支持多人会签（quorum）。
+    # low / medium / high → off | single | quorum
     policy: dict[str, str] = field(default_factory=lambda: {
         "low": "off", "medium": "off", "high": "single"})
     timeout_minutes: int = 60
     extra_high_risk_paths: list[str] = field(default_factory=list)
+    # Phase 2：quorum 使用的外部 Provider 与审批人白名单
+    provider: str = ""
+    quorum: dict[str, int] = field(default_factory=dict)
+    allowed_approvers: dict[str, list[str]] = field(default_factory=dict)
+    callback_url: str = ""
+    poll_interval_seconds: int = 20
 
 
 _RISK_LEVELS = ("low", "medium", "high")
-_RISK_POLICIES = ("off", "single")
+_RISK_POLICIES = ("off", "single", "quorum")
 
 
-def parse_risk_approval_config(raw: Any) -> RiskApprovalConfig:
+def parse_risk_approval_config(
+        raw: Any, *,
+        providers: dict[str, ApprovalProviderConfig] | None = None,
+        approvers: dict[str, dict[str, str]] | None = None) -> RiskApprovalConfig:
     """解析/校验全局 risk_approval 配置（load_config 与看板保存共用）。"""
     if raw is None:
         raw = {}
@@ -765,13 +949,12 @@ def parse_risk_approval_config(raw: Any) -> RiskApprovalConfig:
             value = str(raw_value or "").strip().lower()
         if value in _RISK_POLICIES:
             policy[level] = value
-        elif value in ("quorum", "two", "2"):
-            raise ValueError(
-                "risk_approval.policy 暂不支持多人会签（quorum）；"
-                "多人审批需要外部身份源，见 roadmap Phase 2")
+        elif value in ("two", "2"):
+            # 兼容旧文档的写法：2 人 → quorum（具体人数仍由 quorum 配置决定）
+            policy[level] = "quorum"
         else:
             raise ValueError(
-                f"risk_approval.policy.{level} 只能是 off / single")
+                f"risk_approval.policy.{level} 只能是 off / single / quorum")
     timeout_raw = raw.get("timeout_minutes", 60)
     if isinstance(timeout_raw, bool) or not isinstance(timeout_raw, int):
         raise ValueError("risk_approval.timeout_minutes 必须是整数")
@@ -791,9 +974,124 @@ def parse_risk_approval_config(raw: Any) -> RiskApprovalConfig:
                 "1~200 字符的非空路径 glob")
         if pattern not in extra:
             extra.append(pattern)
+
+    provider_name = str(raw.get("provider") or "").strip()
+    if provider_name and providers is not None and provider_name not in providers:
+        raise ValueError(f"risk_approval.provider 不存在：{provider_name}")
+    if provider_name and providers is None:
+        raise ValueError("risk_approval.provider 需要同时配置 approval_providers")
+
+    quorum_raw = raw.get("quorum") or {}
+    if not isinstance(quorum_raw, dict):
+        raise ValueError("risk_approval.quorum 必须是字典（等级: 人数）。")
+    unknown = sorted(set(quorum_raw) - set(_RISK_LEVELS))
+    if unknown:
+        raise ValueError(
+            f"risk_approval.quorum 存在未知等级：{', '.join(unknown)}")
+    quorum: dict[str, int] = {}
+    for level, value in quorum_raw.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"risk_approval.quorum.{level} 必须是整数")
+        if not 2 <= value <= 20:
+            raise ValueError(f"risk_approval.quorum.{level} 必须在 2~20 之间")
+        quorum[level] = value
+
+    allow_raw = raw.get("allowed_approvers") or {}
+    if not isinstance(allow_raw, dict):
+        raise ValueError(
+            "risk_approval.allowed_approvers 必须是字典（等级: email 列表）。")
+    unknown = sorted(set(allow_raw) - set(_RISK_LEVELS))
+    if unknown:
+        raise ValueError(
+            "risk_approval.allowed_approvers 存在未知等级："
+            + ", ".join(unknown))
+    allowed: dict[str, list[str]] = {}
+    for level, values in allow_raw.items():
+        if not isinstance(values, list):
+            raise ValueError(
+                f"risk_approval.allowed_approvers.{level} 必须是 email 列表")
+        if len(values) > 100:
+            raise ValueError(
+                f"risk_approval.allowed_approvers.{level} 最多 100 个 email")
+        emails: list[str] = []
+        for item in values:
+            email = str(item or "").strip().lower()
+            if not _EMAIL_RE.match(email) or len(email) > 254:
+                raise ValueError(
+                    f"risk_approval.allowed_approvers.{level} 存在非法 email："
+                    f"{item!r}")
+            if email not in emails:
+                emails.append(email)
+        allowed[level] = emails
+
+    callback_url = str(raw.get("callback_url") or "").strip()
+    if len(callback_url) > 500:
+        raise ValueError("risk_approval.callback_url 最多 500 字符")
+    if callback_url:
+        if "{provider}" not in callback_url:
+            raise ValueError(
+                "risk_approval.callback_url 必须包含 {provider} 占位符")
+        lower = callback_url.lower()
+        if not (lower.startswith("https://")
+                or lower.startswith("http://127.0.0.1")
+                or lower.startswith("http://localhost")):
+            raise ValueError(
+                "risk_approval.callback_url 必须是 https；"
+                "仅本地开发允许 http://127.0.0.1 或 http://localhost")
+
+    poll_raw = raw.get("poll_interval_seconds", 20)
+    if isinstance(poll_raw, bool) or not isinstance(poll_raw, int):
+        raise ValueError("risk_approval.poll_interval_seconds 必须是整数")
+    if not 5 <= poll_raw <= 300:
+        raise ValueError(
+            "risk_approval.poll_interval_seconds 必须在 5~300 秒之间")
+
+    selected = providers.get(provider_name) if providers else None
+    for level in _RISK_LEVELS:
+        if policy[level] != "quorum":
+            continue
+        if not provider_name:
+            raise ValueError(
+                f"risk_approval.policy.{level}=quorum 时必须配置 provider")
+        if providers is not None and provider_name not in providers:
+            raise ValueError(
+                f"risk_approval.provider 不存在：{provider_name}")
+        need = quorum.get(level)
+        if not need:
+            raise ValueError(
+                f"risk_approval.policy.{level}=quorum 时必须配置 "
+                f"quorum.{level}（>=2）")
+        emails = allowed.get(level) or []
+        if len(emails) < need:
+            raise ValueError(
+                f"risk_approval.allowed_approvers.{level} 至少需要 "
+                f"{need} 个不同 email")
+        if approvers is not None:
+            missing = [e for e in emails if e not in approvers]
+            if missing:
+                raise ValueError(
+                    f"risk_approval.allowed_approvers.{level} 中的 email "
+                    f"未在 approvers 注册：{', '.join(missing)}")
+            if selected is not None:
+                missing_ids = [
+                    e for e in emails
+                    if selected.type not in approvers.get(e, {})
+                ]
+                if missing_ids:
+                    raise ValueError(
+                        f"approvers 缺少 {selected.type} 身份："
+                        + ", ".join(missing_ids))
+        if callback_url and selected is not None and not selected.callback_secret:
+            raise ValueError(
+                f"配置了 callback_url 时 Provider {provider_name} 必须设置 "
+                "callback_secret")
+
     return RiskApprovalConfig(
         enabled=enabled, policy=policy,
-        timeout_minutes=int(timeout_raw), extra_high_risk_paths=extra)
+        timeout_minutes=int(timeout_raw), extra_high_risk_paths=extra,
+        provider=provider_name, quorum=quorum, allowed_approvers=allowed,
+        callback_url=callback_url,
+        poll_interval_seconds=int(poll_raw))
 
 
 def _parse_storage_target(name: str, raw: object) -> StorageTargetConfig:
@@ -969,6 +1267,8 @@ class AppConfig:
     git: GitConfig = field(default_factory=GitConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
     archive: ArchiveConfig = field(default_factory=ArchiveConfig)
+    approval_providers: dict[str, ApprovalProviderConfig] = field(default_factory=dict)
+    approvers: dict[str, dict[str, str]] = field(default_factory=dict)
     risk_approval: RiskApprovalConfig = field(default_factory=RiskApprovalConfig)
     storage_targets: dict[str, StorageTargetConfig] = field(default_factory=dict)
     agent_profiles: dict[str, AgentProfileConfig] = field(default_factory=dict)
@@ -2012,7 +2312,11 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
     resolve_storage_target(storage_targets, backup_cfg.target)
     resolve_storage_target(storage_targets, archive_cfg.target)
 
-    risk_approval_cfg = parse_risk_approval_config(raw.get("risk_approval"))
+    approval_providers = parse_approval_providers(raw.get("approval_providers"))
+    approvers = parse_approvers(raw.get("approvers"))
+    risk_approval_cfg = parse_risk_approval_config(
+        raw.get("risk_approval"), providers=approval_providers,
+        approvers=approvers)
 
     cfg = AppConfig(llm=llm, scheduler=scheduler, logging=logging_cfg,
                     runlog=runlog, budget=budget, resilience=resilience,
@@ -2023,6 +2327,7 @@ def load_config(path: Path, require_api_key: bool = True) -> AppConfig:
                     review=review_cfg, subagent=subagent_cfg,
                     local_debug=local_debug_cfg,
                     git=git_cfg, backup=backup_cfg, archive=archive_cfg,
+                    approval_providers=approval_providers, approvers=approvers,
                     risk_approval=risk_approval_cfg,
                     storage_targets=storage_targets, agent_profiles=agent_profiles,
                     projects=projects, source_path=path.resolve())
@@ -2249,12 +2554,27 @@ def save_config(cfg: AppConfig) -> None:
             "include_runs": cfg.archive.include_runs,
             "keep_last": cfg.archive.keep_last,
         },
+        # 外部审批 Provider 与 email↔Provider 身份映射（Phase 2）
+        "approval_providers": {
+            name: provider_to_yaml(p) for name, p in cfg.approval_providers.items()
+        },
+        "approvers": {
+            email: dict(ids) for email, ids in cfg.approvers.items()
+        },
         # 风险审批：整体写回（漏写会在看板任意保存时静默重置为默认关闭）
         "risk_approval": {
             "enabled": cfg.risk_approval.enabled,
             "policy": dict(cfg.risk_approval.policy),
             "timeout_minutes": cfg.risk_approval.timeout_minutes,
             "extra_high_risk_paths": list(cfg.risk_approval.extra_high_risk_paths),
+            "provider": cfg.risk_approval.provider,
+            "quorum": dict(cfg.risk_approval.quorum),
+            "allowed_approvers": {
+                level: list(emails)
+                for level, emails in cfg.risk_approval.allowed_approvers.items()
+            },
+            "callback_url": cfg.risk_approval.callback_url,
+            "poll_interval_seconds": cfg.risk_approval.poll_interval_seconds,
         },
         "agent_profiles": {
             pid: profile_to_yaml(prof) for pid, prof in cfg.agent_profiles.items()
@@ -2320,6 +2640,7 @@ __all__ = [
     "GitConfig",
     "BackupConfig",
     "ArchiveConfig",
+    "ApprovalProviderConfig",
     "RiskApprovalConfig",
     "StorageTargetConfig",
     "AgentProfileConfig",

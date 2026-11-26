@@ -1,0 +1,22 @@
+config_version: 3
+llm:
+  provider: openai
+  api_key: sk-test
+  base_url: https://api.example.com/v1
+  model: test-model
+approval_providers: {}
+approvers: {}
+risk_approval:
+  enabled: false
+  policy:
+    low: off
+    medium: off
+    high: single
+  timeout_minutes: 60
+  extra_high_risk_paths: []
+  provider: ""
+  quorum: {}
+  allowed_approvers: {}
+  callback_url: ""
+  poll_interval_seconds: 20
+projects: []
