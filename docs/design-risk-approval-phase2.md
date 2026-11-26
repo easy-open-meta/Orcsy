@@ -138,7 +138,7 @@ rejected/timeout/provider_error/stale → blocked（保留分支）
   "requested_by": "agent:backend",
   "created_at": "2026-11-26T10:00:00+08:00",
   "expires_at": "2026-11-26T14:00:00+08:00",
-  "callback_url": "https://<domain>/api/risk-approval/callback"
+  "callback_url": "https://<orcsy-domain>/api/risk-approval/callback/{provider}"
 }
 ```
 
@@ -264,7 +264,8 @@ risk_approval:
     high: [alice@corp.com, bob@corp.com]
   timeout_minutes: 240
   poll_interval_seconds: 20
-  callback_url: https://<domain>/api/risk-approval/callback
+  # 直接用 Orcsy 自己的域名；{provider} 由适配器替换
+  callback_url: https://<orcsy-domain>/api/risk-approval/callback/{provider}
 ```
 
 校验：
@@ -310,9 +311,14 @@ risk_approval:
 
 ### Web
 
-- `POST /api/risk-approval/callback`：**免看板登录，但必须 HMAC 校验**；
-  校验 timestamp（±5 分钟）、request_id、digest、quorum、email 白名单、去重；
-  成功 200，失败 400/401 并审计；重复回调幂等。
+- `POST /api/risk-approval/callback/{provider}`：**直接使用 Orcsy 自己的域名**，
+  不单独申请回调域名。免看板登录，但必须按 Provider 的 `callback_secret` 验
+  HMAC；校验 timestamp（±5 分钟）、request_id、digest、quorum、email 白名单、
+  去重；成功 200，失败 400/401 返回 JSON 并审计；重复回调幂等。不要 302 到
+  登录页。
+- 回调路径按 Provider 区分（`/callback/gitlab`、`/callback/github`、
+  `/callback/feishu`、`/callback/dingtalk`），避免多 Provider 共用密钥与
+  解析分支；`callback_url` 用配置值，不从 `Host` 头推导。
 - `GET /api/state`：`risk_approvals` 增加 `provider`、`required`、`approvers`
   （含解析后的 email/显示名）、`external_url`、`status`；quorum 请求不显示
   本地「批准/拒绝」按钮，只显示「打开审批」与「刷新」。
@@ -321,9 +327,22 @@ risk_approval:
 - 设置页：Provider 增删改（secret 三态）、选择 Provider、quorum/白名单/
   timeout、回调地址展示与复制、测试按钮；回调不可达时提示轮询兜底。
 
+### 9.1 反代与可达性
+
+- 反向代理把 `/api/risk-approval/callback/*` **原样 POST** 到 Orcsy web 端口，
+  保留原始 body（HMAC 基于原始字节）、启用 TLS、不缓存、不插入登录跳转/WAF
+  拦截；
+- Orcsy 的鉴权中间件对该路径放行，但 handler 必须验签——同域不等于信任；
+- 若 Orcsy 挂在路径前缀下（如 `https://domain/orcsy/`），`callback_url` 必须
+  显式包含该前缀，不能从 `Host` 头推导（可伪造）；
+- 自建 GitLab 只需内网可达；GitHub/飞书/钉钉 SaaS 需要公网可达；不可达时用
+  Provider API 轮询兜底，绝不降级为单人审批；
+- 回调失败/超时/验签失败一律 fail closed，并写审计。
+
 ## 10. 安全与威胁模型
 
 - 回调端点免登录但**必须**验签；无签名/签名错误/时间戳过期 → 401，审计；
+- 每个 Provider 独立 `callback_secret`，支持双密钥轮换；同域不等于信任；
 - HMAC 常量时间比较；`raw_body` 参与签名，避免 JSON 重排绕过；
 - 重放：timestamp 窗口 + request_id 幂等 + 去重缓存；
 - TLS 默认必须；只允许 `http://127.0.0.1` 用于本机桥接（显式配置）；
