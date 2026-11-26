@@ -164,7 +164,6 @@ class GitLabProvider:
             "POST", url, headers=self._headers(), body={
                 "title": _issue_title(manifest),
                 "description": _issue_body(manifest),
-                "labels": "orcsy-approval",
             }, verify=self.config.verify_tls,
             timeout=self.config.timeout_seconds)
         iid = data.get("iid")
@@ -270,7 +269,6 @@ class GitHubProvider:
             "POST", url, headers=self._headers(), body={
                 "title": _issue_title(manifest),
                 "body": _issue_body(manifest),
-                "labels": ["orcsy-approval"],
             }, verify=self.config.verify_tls,
             timeout=self.config.timeout_seconds)
         number = data.get("number")

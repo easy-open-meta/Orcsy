@@ -510,7 +510,7 @@ async function saveRiskApproval(): Promise<void> {
         return
       }
       const ids: Record<string, string> = {}
-      for (const provider of ['gitlab', 'github', 'feishu', 'dingtalk'] as const) {
+      for (const provider of ['gitlab', 'github', 'feishu', 'dingtalk', 'fake'] as const) {
         const value = row[provider].trim()
         if (value) ids[provider] = value
       }
@@ -575,6 +575,7 @@ interface RiskApproverDraft {
   github: string
   feishu: string
   dingtalk: string
+  fake: string
 }
 const riskDraft = reactive({
   enabled: false,
@@ -609,7 +610,8 @@ function useCurrentDomain(): void {
 }
 
 function addRiskApprover(): void {
-  riskApprovers.push({ email: '', gitlab: '', github: '', feishu: '', dingtalk: '' })
+  riskApprovers.push({ email: '', gitlab: '', github: '', feishu: '',
+                       dingtalk: '', fake: '' })
 }
 
 function removeRiskApprover(idx: number): void {
@@ -685,6 +687,7 @@ watch(() => store.state, (s) => {
       github: String((ids as Record<string, string>).github || ''),
       feishu: String((ids as Record<string, string>).feishu || ''),
       dingtalk: String((ids as Record<string, string>).dingtalk || ''),
+      fake: String((ids as Record<string, string>).fake || ''),
     })))
   const dbg = s.local_debug_cfg
   if (dbg) {

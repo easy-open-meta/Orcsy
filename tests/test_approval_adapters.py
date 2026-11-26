@@ -35,7 +35,6 @@ def check_gitlab() -> None:
         handle = provider.create(MANIFEST)
         assert handle.external_id == "7"
         assert "/projects/group%2Fproj/issues" in http.call_args.args[1]
-        assert http.call_args.kwargs["body"]["labels"] == "orcsy-approval"
 
         http.return_value = [
             {"system": True, "body": "/approve", "author": {"username": "bot"}},
@@ -78,7 +77,6 @@ def check_github() -> None:
         handle = provider.create(MANIFEST)
         assert handle.external_id == "12"
         assert "/repos/owner/name/issues" in http.call_args.args[1]
-        assert http.call_args.kwargs["body"]["labels"] == ["orcsy-approval"]
 
         http.return_value = [
             {"body": "/approve", "user": {"login": "alice", "name": "Alice"},
