@@ -16,8 +16,10 @@ Phase 1 只能做「单机单审批人」：一个共享密码、一个看板会
 1. **首批 Provider**：GitLab、GitHub、飞书、钉钉（建议按此顺序推进；Gitea/
    企业微信后续按需增加）。Orcsy 只负责生成审批清单、校验决定、绑定 digest；
    真实身份与审批动作交给这些系统。
-2. **回调优先，轮询兜底**：用户已有公网域名，回调地址固定为
-   `https://<domain>/api/risk-approval/callback`；无法回调或回调丢失时用
+2. **回调优先，轮询兜底**：部署后使用 Orcsy 自己的公网域名
+   `https://<orcsy-domain>/api/risk-approval/callback/{provider}`；开发期
+   localhost 无法被 GitHub/飞书/钉钉 SaaS 回调，`callback_url` 留空即走
+   `poll()`，或用本地假 Provider/临时隧道只验证回调契约。回调丢失时始终用
    `poll()` 兜底，不因为「回调失败」退化成假审批。
 3. **email 白名单是身份真值**：按人数会签，但只有配置中指定的 email 对应的
    GitLab/GitHub/飞书/钉钉用户才能计入批准；未登记用户的批准/拒绝一律忽略
@@ -264,7 +266,8 @@ risk_approval:
     high: [alice@corp.com, bob@corp.com]
   timeout_minutes: 240
   poll_interval_seconds: 20
-  # 直接用 Orcsy 自己的域名；{provider} 由适配器替换
+  # 生产：Orcsy 自己的公网域名；{provider} 由适配器替换
+  # 开发/无公网：留空 = 仅轮询（localhost 不能被 GitHub/飞书/钉钉 SaaS 回调）
   callback_url: https://<orcsy-domain>/api/risk-approval/callback/{provider}
 ```
 
@@ -339,13 +342,25 @@ risk_approval:
   Provider API 轮询兜底，绝不降级为单人审批；
 - 回调失败/超时/验签失败一律 fail closed，并写审计。
 
+**环境矩阵**：
+
+| 环境 | `callback_url` | 模式 | 说明 |
+| --- | --- | --- | --- |
+| 本地开发 | 空 | 仅轮询 | GitHub/飞书/钉钉 SaaS 无法回调 localhost；用假 Provider 测契约 |
+| 本地联调 | 临时隧道 `https://xxx` | 回调 + 轮询 | cloudflared/ngrok 等，仅开发环境使用 |
+| 生产 | `https://<orcsy-domain>/api/risk-approval/callback/{provider}` | 回调 + 轮询 | 公网可达 + TLS + 反代 |
+| 内网 GitLab | 空或内网 URL | 轮询为主 | 内网可达时可回调 |
+
+`callback_url` 留空即**仅轮询**；不要把 `http://127.0.0.1` 发给 SaaS Provider。
+
 ## 10. 安全与威胁模型
 
 - 回调端点免登录但**必须**验签；无签名/签名错误/时间戳过期 → 401，审计；
 - 每个 Provider 独立 `callback_secret`，支持双密钥轮换；同域不等于信任；
 - HMAC 常量时间比较；`raw_body` 参与签名，避免 JSON 重排绕过；
 - 重放：timestamp 窗口 + request_id 幂等 + 去重缓存；
-- TLS 默认必须；只允许 `http://127.0.0.1` 用于本机桥接（显式配置）；
+- TLS 默认必须；生产 `callback_url` 必须 https；仅本地开发/假 Provider 允许
+  `http://127.0.0.1`（显式配置），且不得把 localhost URL 发给 SaaS Provider；
 - Provider secret/token 只存配置、只回掩码；日志脱敏；
 - 清单不含 diff 正文/密钥；只含路径、行数、风险原因；
 - 外部 Provider 是身份真值源；Orcsy 不做「同人多账号」识别，文档明确；
