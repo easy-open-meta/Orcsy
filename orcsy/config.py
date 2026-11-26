@@ -753,6 +753,9 @@ class ApprovalProviderConfig:
     approval_code: str = ""       # 飞书审批定义码
     app_key: str = ""             # 钉钉应用 key
     process_code: str = ""        # 钉钉审批模板码
+    originator_user_id: str = ""  # 飞书 user_id / 钉钉发起人 userid
+    dept_id: int = -1             # 钉钉发起部门（-1 = 根部门）
+    form_widget_id: str = ""      # 飞书审批表单文本控件 ID（可选）
     verify_tls: bool = True
     timeout_seconds: int = 10
 
@@ -796,6 +799,9 @@ def parse_approval_providers(raw: Any) -> dict[str, ApprovalProviderConfig]:
         verify_tls = item.get("verify_tls", True)
         if not isinstance(verify_tls, bool):
             raise ValueError(f"approval_providers.{key}.verify_tls 必须是布尔值")
+        dept_raw = item.get("dept_id", -1)
+        if isinstance(dept_raw, bool) or not isinstance(dept_raw, int):
+            raise ValueError(f"approval_providers.{key}.dept_id 必须是整数")
         cfg = ApprovalProviderConfig(
             type=ptype,
             base_url=_provider_text(item, "base_url"),
@@ -808,6 +814,9 @@ def parse_approval_providers(raw: Any) -> dict[str, ApprovalProviderConfig]:
             approval_code=_provider_text(item, "approval_code"),
             app_key=_provider_text(item, "app_key"),
             process_code=_provider_text(item, "process_code"),
+            originator_user_id=_provider_text(item, "originator_user_id"),
+            dept_id=int(dept_raw),
+            form_widget_id=_provider_text(item, "form_widget_id"),
             verify_tls=verify_tls,
             timeout_seconds=int(timeout_raw),
         )
@@ -820,10 +829,12 @@ def parse_approval_providers(raw: Any) -> dict[str, ApprovalProviderConfig]:
                 raise ValueError(
                     f"approval_providers.{key}.repo 必须是 owner/name 形式")
         elif ptype == "feishu":
-            missing = [f for f in ("app_id", "app_secret", "approval_code")
+            missing = [f for f in ("app_id", "app_secret", "approval_code",
+                                   "originator_user_id")
                        if not getattr(cfg, f)]
         elif ptype == "dingtalk":
-            missing = [f for f in ("app_key", "app_secret", "process_code")
+            missing = [f for f in ("app_key", "app_secret", "process_code",
+                                   "originator_user_id")
                        if not getattr(cfg, f)]
         if missing:
             raise ValueError(
@@ -846,6 +857,9 @@ def provider_to_yaml(provider: ApprovalProviderConfig) -> dict:
         "approval_code": provider.approval_code,
         "app_key": provider.app_key,
         "process_code": provider.process_code,
+        "originator_user_id": provider.originator_user_id,
+        "dept_id": provider.dept_id,
+        "form_widget_id": provider.form_widget_id,
         "verify_tls": provider.verify_tls,
         "timeout_seconds": provider.timeout_seconds,
     }

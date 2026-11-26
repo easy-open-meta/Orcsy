@@ -1216,7 +1216,15 @@ In team stage mode, the main worktree may contain precisely the accepted stage d
 
 ### 10.23.2 Risk approval (global, before merge)
 
-Enable it in Settings, Runtime & Cost, Risk approval. Phase 1 is single-operator: only a dashboard login session can approve; API keys cannot approve, and multi-person quorum is not available yet. By default only high-risk merges are gated. A request shows the risk level, reasons, changed file count and diff stats, and is bound to the task commit plus a SHA-256 digest of the diff. Approve to continue; reject, timeout, or any content change blocks the merge and keeps the task branch. Requests and decisions go to logs/audit.jsonl, the run's risk.json, and a Risk approval section in the task body. High-risk rules cover self-update, authentication, masking, egress, billing, storage credentials, config migrations, dependency lockfiles, build and deploy; project-specific path globs can be added in settings. This gate does not replace the human commit gate or the CI gate. Do not enable it for headless runs with no reachable dashboard; a high-risk task will wait until the timeout and then block.
+Enable it in Settings, Runtime & Cost, Risk approval. Phase 1 single approval remains available: only a dashboard login session can approve, and API keys cannot approve. A request shows the risk level, reasons, changed file count and diff stats, and is bound to the task commit plus a SHA-256 digest of the diff. Approve to continue; reject, timeout, or any content change blocks the merge and keeps the task branch. Requests and decisions go to logs/audit.jsonl, the run's risk.json, and a Risk approval section in the task body.
+
+**Quorum (GitLab / GitHub / Feishu / DingTalk)**
+
+- Put provider credentials under `approval_providers` in `config.yaml`; then select the provider name in Settings, set the high-risk policy to `quorum`, enter a quorum size (at least 2), the allowed approver emails, the callback URL and the poll interval.
+- Map each allowed email to provider identities under `approvers` (GitLab username, GitHub login, Feishu user_id/open_id, DingTalk userid). **Email is the only counting key**; approvals from unregistered accounts are ignored.
+- GitLab/GitHub use approval issues: Orcsy creates an issue, approvers comment `/approve` or `/reject reason`, and Orcsy polls comments and counts distinct allowlisted emails. No code branch is pushed. Feishu/DingTalk create native approval instances and poll task/operation records; their Webhooks are not enabled yet, polling is used.
+- Callback: in production use `https://<domain>/api/risk-approval/callback/{provider}` behind TLS and a reverse proxy; the endpoint is unauthenticated but verifies each provider's signature. During localhost development leave it empty to use polling, because SaaS providers cannot call localhost.
+- Quorum is counted by distinct email; any allowlisted rejection vetoes; a digest change invalidates approvals; provider errors and timeouts block. The gate does not replace the human commit gate or the CI gate. Do not enable it for headless runs with no reachable dashboard; a high-risk task will wait until the timeout and then block.
 
 ### 10.24 Dependency graph visualization (DAG)
 

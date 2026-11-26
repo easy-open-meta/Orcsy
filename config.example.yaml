@@ -236,12 +236,16 @@ masking:
 #     app_id: ""
 #     app_secret: ""
 #     approval_code: ""
+#     originator_user_id: ""   # 发起审批的飞书 user_id
+#     form_widget_id: ""       # 可选：审批表单文本控件 ID
 #     callback_secret: ""
 #   dingtalk:
 #     type: dingtalk
 #     app_key: ""
 #     app_secret: ""
 #     process_code: ""
+#     originator_user_id: ""   # 发起审批的钉钉 userid
+#     dept_id: -1              # 发起部门（-1 = 根部门）
 #     callback_secret: ""
 # approvers:                    # email ↔ Provider 身份（quorum 计数唯一口径）
 #   alice@example.com:

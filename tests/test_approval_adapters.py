@@ -11,7 +11,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orcsy.approval_providers import (GitHubProvider, GitLabProvider,
+from orcsy.approval_providers import (DingTalkProvider, FeishuProvider,
+                                      GitHubProvider, GitLabProvider,
                                       ProviderError, build_provider)
 from orcsy.config import ApprovalProviderConfig
 
@@ -107,6 +108,74 @@ def check_github() -> None:
         pass
 
 
+def check_feishu() -> None:
+    cfg = ApprovalProviderConfig(
+        type="feishu", app_id="app", app_secret="sec", approval_code="code",
+        originator_user_id="ou_origin", form_widget_id="widget")
+    provider = FeishuProvider("fs", cfg)
+    calls: list[str] = []
+
+    def fake(method: str, url: str, **kwargs):
+        calls.append(url)
+        if "tenant_access_token" in url:
+            return {"tenant_access_token": "tok", "expire": 7200}
+        if url.endswith("/instances"):
+            assert kwargs["headers"]["Authorization"] == "Bearer tok"
+            assert kwargs["body"]["uuid"] == "req-1"
+            return {"data": {"instance_code": "inst-1"}}
+        return {"data": {"task_list": [
+            {"user_id": "ou_a", "status": "APPROVED"},
+            {"user_id": "ou_b", "status": "REJECTED"},
+            {"user_id": "ou_c", "status": "PENDING"},
+        ]}}
+
+    with mock.patch("orcsy.approval_providers._http_json", side_effect=fake):
+        handle = provider.create(MANIFEST)
+        assert handle.external_id == "inst-1"
+        decision = provider.poll(handle)
+    assert decision is not None and decision.digest == "digest-1"
+    assert [(a.id, a.decision) for a in decision.approvers] == [
+        ("ou_a", "approved"), ("ou_b", "rejected")]
+    assert len(calls) == 3
+    try:
+        provider.verify_callback({}, b"{}")
+        raise AssertionError("飞书回调应提示使用轮询")
+    except ProviderError as exc:
+        assert "轮询" in str(exc)
+
+
+def check_dingtalk() -> None:
+    cfg = ApprovalProviderConfig(
+        type="dingtalk", app_key="key", app_secret="sec", process_code="proc",
+        originator_user_id="user-1", dept_id=42)
+    provider = DingTalkProvider("dt", cfg)
+
+    def fake(method: str, url: str, **kwargs):
+        if "/gettoken" in url:
+            return {"access_token": "tok"}
+        if "/topapi/processinstance/create" in url:
+            assert kwargs["body"]["originator_user_id"] == "user-1"
+            assert kwargs["body"]["dept_id"] == 42
+            return {"process_instance_id": "pi-1"}
+        return {"process_instance": {"operation_records": [
+            {"userid": "u1", "result": "AGREE", "date": "2026-01-01"},
+            {"userid": "u2", "result": "REFUSE", "date": "2026-01-02"},
+        ]}}
+
+    with mock.patch("orcsy.approval_providers._http_json", side_effect=fake):
+        handle = provider.create(MANIFEST)
+        assert handle.external_id == "pi-1"
+        decision = provider.poll(handle)
+    assert decision is not None and decision.digest == "digest-1"
+    assert [(a.id, a.decision) for a in decision.approvers] == [
+        ("u1", "approved"), ("u2", "rejected")]
+    try:
+        provider.verify_callback({}, b"{}")
+        raise AssertionError("钉钉回调应提示使用轮询")
+    except ProviderError as exc:
+        assert "轮询" in str(exc)
+
+
 def check_build_provider() -> None:
     assert isinstance(build_provider("x", ApprovalProviderConfig(type="gitlab",
                                project_id="1", token="t")), GitLabProvider)
@@ -119,6 +188,8 @@ def check_build_provider() -> None:
 def main() -> None:
     check_gitlab()
     check_github()
+    check_feishu()
+    check_dingtalk()
     check_build_provider()
     print("test_approval_adapters: all checks passed")
 

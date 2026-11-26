@@ -1,6 +1,6 @@
 # 风险审批 Phase 2：真多人会签设计（定稿）
 
-> 状态：**Phase 2A 已实现（Provider 接口/持久化 quorum/HMAC 回调/设置面板 + fake Provider）；2B/2C 真实适配器待实施**｜2026-11-26
+> 状态：**Phase 2A/2B/2C 已实现（Provider 接口、持久化 quorum、GitLab/GitHub 工单、飞书/钉钉审批实例轮询、设置面板）；飞书/钉钉 Webhook 与 Provider 凭据可视化待补**｜2026-11-26
 > 关联：[`design-risk-approval.md`](design-risk-approval.md)（Phase 0+1）、
 > [`roadmap.md`](roadmap.md) §8、[`design-release-quality-gaps.md`](design-release-quality-gaps.md) 阶段②
 > 目标：在**不伪造身份**的前提下支持高风险合入的 N 人会签（quorum），并保持
@@ -382,8 +382,8 @@ risk_approval:
 | --- | --- | --- | --- | --- |
 | GitLab 审批工单 | GitLab 账号 | issue 评论 `/approve` 计数 | 回调 + API 轮询兜底 | **已实现**；username 映射 email，不推分支 |
 | GitHub 审批工单 | GitHub 账号 | issue 评论 `/approve` 计数 | 回调 + API 轮询兜底 | **已实现**；login 映射 email，不推分支 |
-| 飞书审批 | 飞书账号 | 原生会签 | 事件回调 + 审批实例轮询 | **首批**；open_id 映射 email |
-| 钉钉审批 | 钉钉账号 | 原生会签 | 事件回调 + 审批实例轮询 | **首批**；user_id 映射 email |
+| 飞书审批 | 飞书账号 | 原生会签 | 审批实例轮询 | **已实现（轮询）**；user_id/open_id 映射 email；Webhook 暂未启用 |
+| 钉钉审批 | 钉钉账号 | 原生会签 | 审批实例轮询 | **已实现（轮询）**；userid 映射 email；Webhook 暂未启用 |
 | Gitea protected branch reviews | Gitea 账号 | 取决于版本/保护规则 | API 轮询 | 后续按需，需核验实例能力 |
 | 企业微信审批 | 企业微信账号 | 原生会签 | 回调 + 轮询 | 后续按需 |
 | 内置账号 + RBAC | Orcsy 本地用户 | 自建 | 本地 | Phase 2C，排进 1.x |
@@ -451,7 +451,7 @@ Phase 1 的 `single` 仍是默认安全落点；Phase 2A/2B 完成前不把 quor
   （email↔Provider 身份）、`risk_approval.{provider,quorum,allowed_approvers,
   callback_url,poll_interval_seconds}`；
 - `orcsy/approval_providers.py`：统一 Provider 协议、HMAC 回调校验、`fake`
-  Provider（测试/本地自测），真实类型暂为 `UnimplementedProvider`（fail closed）；
+  测试 Provider，以及 GitLab/GitHub 工单、飞书/钉钉审批实例适配器；
 - `orcsy/quorum_approval.py`：持久化请求、轮询/回调、email 白名单去重、
   一票否决、超时/取消/Provider 故障 fail closed、重启复用；
 - executor quorum 分支与 `block_reason`；Web `POST /api/risk-approval/callback/{provider}`
@@ -464,5 +464,10 @@ Phase 1 的 `single` 仍是默认安全落点；Phase 2A/2B 完成前不把 quor
 `/approve` / `/reject`，支持 GitLab `X-Gitlab-Token` 与 GitHub
 `X-Hub-Signature-256` Webhook 验签；不推送代码分支。
 
-未落地：飞书/钉钉审批实例适配器（2C）。在接入前选择这些类型会 fail closed
-（`UnimplementedProvider` 明确报适配器未实现）。
+2C 已落地：**飞书/钉钉审批实例适配器**——获取 tenant/access token、创建审批
+实例、轮询 task_list/operation_records；飞书使用 tenant_access_token，
+钉钉使用 appkey/appsecret。两者当前**仅轮询**，Webhook 暂未启用（选择回调会在
+`verify_callback` 明确报「请使用轮询」），不影响 quorum 正确性。
+
+未落地：飞书/钉钉 Webhook 事件订阅（可选增强）；Provider 凭据的可视化编辑
+（当前通过 config.yaml 的 approval_providers 配置，设置页选择名称）。

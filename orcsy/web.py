@@ -1209,6 +1209,9 @@ class AppState:
             "approval_code": p.approval_code,
             "app_key": p.app_key,
             "process_code": p.process_code,
+            "originator_user_id": p.originator_user_id,
+            "dept_id": p.dept_id,
+            "form_widget_id": p.form_widget_id,
             "verify_tls": p.verify_tls,
             "timeout_seconds": p.timeout_seconds,
         }
