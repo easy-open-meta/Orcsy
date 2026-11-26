@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -76,6 +77,18 @@ def _call_with_retry(ctx, args, expect):
         _time.sleep(min(6.0, 0.5 * (attempt + 1)))
     return last
 
+
+def _call_avoiding_conn_flake(ctx, args):
+    """只对连接层失败重试；安全拦截等业务性结果立即返回，避免重试掩盖缺陷。"""
+    import time as _time
+    last = ""
+    for attempt in range(10):
+        last = tool_http_request(ctx, args)
+        if not last.startswith("错误：请求失败"):
+            return last
+        _time.sleep(min(6.0, 0.5 * (attempt + 1)))
+    return last
+
 def test_http_request_security_and_flow() -> None:
     # 启动一个本地测试 HTTP 服务
     server = HTTPServer(("127.0.0.1", 0), MockServerHandler)
@@ -89,11 +102,15 @@ def test_http_request_security_and_flow() -> None:
         effective_hosts=["localhost", "127.0.0.1"],
     )
     ctx = ToolContext(root=tmp_dir, session=session)
+    # 系统代理不得接管回环请求（否则 502/超时，重定向拦截断言失效）
+    old_no_proxy = os.environ.get("NO_PROXY")
+    os.environ["NO_PROXY"] = "127.0.0.1,localhost"
 
     try:
         # 1. 正常 GET 请求
-        out = tool_http_request(ctx, {"url": f"http://127.0.0.1:{port}/hello"})
-        assert "HTTP 200 OK" in out
+        out = _call_avoiding_conn_flake(
+            ctx, {"url": f"http://127.0.0.1:{port}/hello"})
+        assert "HTTP 200 OK" in out, out
         assert '"msg": "hello"' in out
         assert "Set-Cookie: session_id" in out  # 保护模式脱敏：只展示 cookie 名
 
@@ -127,8 +144,9 @@ def test_http_request_security_and_flow() -> None:
         assert "错误：白名单安全拦截" in out_meta
 
         # 6. 重定向跳到未授权外部域名应被拦截
-        out_redir_bad = tool_http_request(ctx, {"url": f"http://127.0.0.1:{port}/redirect-to-bad"})
-        assert "错误：白名单安全拦截" in out_redir_bad
+        out_redir_bad = _call_avoiding_conn_flake(
+            ctx, {"url": f"http://127.0.0.1:{port}/redirect-to-bad"})
+        assert "错误：白名单安全拦截" in out_redir_bad, out_redir_bad
         assert "不在允许的调试白名单中" in out_redir_bad
 
         # 7. 重定向跳到白名单内有效路径放行
@@ -139,6 +157,10 @@ def test_http_request_security_and_flow() -> None:
 
         print("tool_http_request 白名单防护、Cookie 保持与重定向安全核验 ✅")
     finally:
+        if old_no_proxy is None:
+            os.environ.pop("NO_PROXY", None)
+        else:
+            os.environ["NO_PROXY"] = old_no_proxy
         session.close()
         server.shutdown()
         server.server_close()
