@@ -4,7 +4,7 @@ English | [简体中文](用户指南.md)
 
 > For first-time, non-technical users: install Orcsy, connect a project, create tasks, and understand every part of the dashboard — without needing to write code.
 >
-> Version: **0.35.0**　|　Default dashboard: **http://127.0.0.1:5116**
+> Version: **0.36.0**　|　Default dashboard: **http://127.0.0.1:5116**
 >
 
 ---
@@ -155,7 +155,7 @@ When it works, it:
 
 #### Steps
 
-1. Download the installer for your architecture: `orcsy-setup-0.35.0-windows-amd64.exe`, or the native `orcsy-setup-0.35.0-windows-arm64.exe` on ARM64 machines (the amd64 build also installs and runs on ARM64 Windows 11 via emulation).
+1. Download the installer for your architecture: `orcsy-setup-0.36.0-windows-amd64.exe`, or the native `orcsy-setup-0.36.0-windows-arm64.exe` on ARM64 machines (the amd64 build also installs and runs on ARM64 Windows 11 via emulation).
    - Gitee: <https://gitee.com/java-and-net/Orcsy/releases>
    - GitHub: <https://github.com/easy-open-meta/Orcsy/releases>
 2. Double-click it. If Windows SmartScreen appears, click **More info** → **Run anyway**.

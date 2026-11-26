@@ -6,7 +6,7 @@
 
 > Orcsy 是一个接入任意大模型 API 的 Agent 任务编排系统：把任务写成 Markdown，定时调度器扫描每个受管项目的 `tasks/` 目录，按 P0 → P4 优先级派发给该项目专属 Agent，Agent 在独立 git worktree 里真实地读写代码、跑测试，完成后经**独立审查门**把关、增量落地主分支工作区，**最终提交由人工确认**——幂等派发、租约续跑、预算/熔断与任务级运行台账全程留痕，Web 看板可视化掌控的可信无人值守闭环。
 
-![version](https://img.shields.io/badge/version-0.35.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.36.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 
 ```
@@ -31,7 +31,7 @@
 ## ✨ 特性
 
 - **多模型 Agent 项目小组** —— PM / 后端 / 前端 / QA 自由编排：PM 只读摸底并拆解 DAG 子任务或直接转派；开发在任务隔离 worktree 中编码，上游接口契约自动注入；QA 拉起本地服务与浏览器端到端联调、提 Bug 并自动回归——单个需求一个周期闭环。
-- **可信无人值守流水线** —— 独立审查模型做合并前把关（不通过自动返工）、幂等派发 + TTL 租约与 stale-lease 校验、崩溃后续跑不重复提交、人工把关提交页、高风险合入前风险审批（单机单审批人）、token/成本硬闸、熔断停机与写操作审计。
+- **可信无人值守流水线** —— 独立审查模型做合并前把关（不通过自动返工）、幂等派发 + TTL 租约与 stale-lease 校验、崩溃后续跑不重复提交、人工把关提交页、高风险合入前风险审批（单人或 GitLab/GitHub/飞书/钉钉多人会签）、token/成本硬闸、熔断停机与写操作审计。
 - **🧠 项目记忆与上下文** —— `ARCHITECTURE.md` 架构黑板报 + `PROJECT_NOTES.md` 经验记忆（每任务注入，满额归档到 `LONG_TERM_MEMORY.md`）、批次共享剪贴板传递临时端口/凭证、摘要式上下文裁剪让早期事实不丢、只读 `delegate_explore` 并发子代理。
 - **任意大模型，Markdown 即任务** —— OpenAI 兼容与 Anthropic 协议均原生 function calling（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）；每任务一个 `.md`、每项目一份 `AGENT.md`，支持项目级专属模型。
 - **🛠️ 工具沙箱与三级审批** —— 文件工具禁锢在项目内、90+ 命令白名单（9 大生态）、三档权限 + 看板审批队列，缺工具链时按内置技能静默安装（国内自动切镜像直下）。

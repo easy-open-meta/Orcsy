@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 > Orcsy is an Agent task-orchestration system that plugs into any LLM API. Write tasks as Markdown, and a scheduler scans each managed project's `tasks/` directory, dispatching them by priority (P0 → P4) to that project's dedicated Agent. The Agent reads and writes real code and runs tests inside an isolated git worktree; on completion an **independent review gate** audits the work, changes land incrementally in the main working tree, and the **final commit is confirmed by a human** — a trusted unattended loop with idempotent dispatch, lease-based resume, budget/circuit-breaker guards and per-task run ledgers, all visible on the web dashboard.
 
-![version](https://img.shields.io/badge/version-0.35.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
+![version](https://img.shields.io/badge/version-0.36.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-green) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Docker-lightgrey) ![license](https://img.shields.io/badge/license-Apache--2.0-orange)
 
 
 ```
@@ -31,7 +31,7 @@ English | [简体中文](README.zh-CN.md)
 ## ✨ Features
 
 - **Multi-model Agent team** — PM / Backend / Frontend / QA crews: the PM decomposes DAG subtasks read-only or dispatches directly; developers code in task-isolated worktrees with upstream API contracts injected; QA drives local servers and browsers for E2E testing, files defects and auto-regresses — one requirement closes in a single cycle.
-- **Trusted unattended pipeline** — independent review model as a pre-merge gate (failures return for rework), idempotent dispatch with TTL leases and stale-lease checks, crash resume without duplicate commits, a human-gated commit/push page, high-risk pre-merge approval (single operator), token/cost hard gates, circuit breaker, and an append-only write audit log.
+- **Trusted unattended pipeline** — independent review model as a pre-merge gate (failures return for rework), idempotent dispatch with TTL leases and stale-lease checks, crash resume without duplicate commits, a human-gated commit/push page, high-risk pre-merge approval (single operator or a quorum via GitLab / GitHub / Feishu / DingTalk), token/cost hard gates, circuit breaker, and an append-only write audit log.
 - **🧠 Project memory & context** — `ARCHITECTURE.md` architecture blackboard plus `PROJECT_NOTES.md` lessons (injected into every task; archives to `LONG_TERM_MEMORY.md` when full), a requirement-batch clipboard for temporary ports/credentials, summary-based context trimming that keeps early facts alive, and read-only `delegate_explore` sub-agents.
 - **Any LLM, Markdown tasks** — OpenAI-compatible and Anthropic protocols with native function calling (DeepSeek / GLM / Kimi / Qwen / Ollama / vLLM…); one `.md` per task, one `AGENT.md` per project, optional per-project model binding.
 - **🛠️ Sandboxed tools & approvals** — file tools confined to the project, 90+ whitelisted commands across 9 ecosystems, three permission modes with a dashboard approval queue, and silent toolchain installation (China mirrors included).

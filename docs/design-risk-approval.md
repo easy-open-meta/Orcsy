@@ -1,6 +1,6 @@
 # 合入前风险分级审批（Phase 0+1）设计与落地
 
-> 状态：**Phase 0+1 已实现（全局 opt-in，单机单审批人）**｜2026-11-26
+> 状态：**Phase 0+1 已实现（全局 opt-in，单机单审批人）；Phase 2 多人会签随 0.36.0 交付，见 [`design-risk-approval-phase2.md`](design-risk-approval-phase2.md)**｜2026-11-27
 > 关联：[`roadmap.md`](roadmap.md) §8、[`design-release-quality-gaps.md`](design-release-quality-gaps.md) 阶段②、
 > [`design-review-agent.md`](design-review-agent.md)
 

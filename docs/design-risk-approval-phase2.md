@@ -1,6 +1,6 @@
 # 风险审批 Phase 2：真多人会签设计（定稿）
 
-> 状态：**Phase 2A/2B/2C 已实现（Provider 接口、持久化 quorum、GitLab/GitHub 工单、飞书/钉钉审批实例轮询、设置面板）；飞书/钉钉 Webhook 与 Provider 凭据可视化待补**｜2026-11-26
+> 状态：**Phase 2A/2B/2C 已实现并随 0.36.0 交付（Provider 接口、持久化 quorum、GitLab/GitHub 工单、飞书/钉钉审批实例轮询、设置面板）；飞书/钉钉 Webhook 与 Provider 凭据可视化待补**｜2026-11-27
 > 关联：[`design-risk-approval.md`](design-risk-approval.md)（Phase 0+1）、
 > [`roadmap.md`](roadmap.md) §8、[`design-release-quality-gaps.md`](design-release-quality-gaps.md) 阶段②
 > 目标：在**不伪造身份**的前提下支持高风险合入的 N 人会签（quorum），并保持
