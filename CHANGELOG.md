@@ -21,6 +21,7 @@
 
 ### 修复
 - 看板 keep-alive 连接上连续 POST 时，raw body 缓存未按请求重置，第二个请求会复用上一个 body，剩余字节被当成下一请求行（501 Unsupported method）。现于每个 POST 开始时重置，并新增 `test_web_keepalive_post.py` 回归。
+- 审批 Provider 访问回环地址（本机自托管 GitLab 等）时不再走系统代理：此前本机常驻代理会把 `127.0.0.1` 请求转发到上游，表现为 502/连接重置/超时；公网 Provider 仍遵循代理设置。
 
 ## [0.35.0] — 2026-11-26
 

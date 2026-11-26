@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -68,6 +69,16 @@ class ApprovalProvider(Protocol):
     def cancel(self, handle: ProviderHandle) -> None: ...
 
 
+def _is_loopback_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _http_json(method: str, url: str, *, headers: dict[str, str],
                body: dict | None = None, verify: bool = True,
                timeout: int = 10) -> Any:
@@ -77,9 +88,13 @@ def _http_json(method: str, url: str, *, headers: dict[str, str],
         egress.check(url, purpose="approval_provider")
     except Exception as exc:  # noqa: BLE001 — EgressDenied 等
         raise ProviderError(f"出网白名单拒绝：{exc}") from exc
+    # 回环 Provider（如本机自托管 GitLab）不能走系统代理：代理常驻时会把
+    # 127.0.0.1 的请求转给上游，表现为 502/RST/超时。公网地址仍遵循代理设置。
+    loopback = _is_loopback_url(url)
     try:
         with httpx.Client(verify=verify, timeout=timeout,
-                          follow_redirects=True) as client:
+                          follow_redirects=True,
+                          trust_env=not loopback) as client:
             resp = client.request(method, url, headers=headers, json=body)
     except httpx.HTTPError as exc:
         raise ProviderError(f"Provider 请求失败：{exc}") from exc

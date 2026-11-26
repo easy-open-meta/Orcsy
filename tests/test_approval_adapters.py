@@ -183,12 +183,53 @@ def check_build_provider() -> None:
     assert fake.type == "fake"
 
 
+def check_loopback_proxy_bypass() -> None:
+    """本机 Provider 不走系统代理，公网 Provider 仍走。"""
+    from orcsy.approval_providers import _http_json, _is_loopback_url
+
+    assert _is_loopback_url("http://127.0.0.1:8000/x")
+    assert _is_loopback_url("http://127.8.9.10/x")
+    assert _is_loopback_url("http://localhost:3000/x")
+    assert _is_loopback_url("http://[::1]:9000/x")
+    assert not _is_loopback_url("https://gitlab.com/x")
+    assert not _is_loopback_url("https://127.example.com/x")
+
+    seen: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, *args, **kwargs):
+            return FakeResponse()
+
+    with mock.patch("orcsy.approval_providers.httpx.Client", FakeClient), \
+            mock.patch("orcsy.egress.check"):
+        _http_json("GET", "http://127.0.0.1:9/x", headers={})
+        assert seen["trust_env"] is False
+        _http_json("GET", "https://gitlab.example/x", headers={})
+        assert seen["trust_env"] is True
+
+
 def main() -> None:
     check_gitlab()
     check_github()
     check_feishu()
     check_dingtalk()
     check_build_provider()
+    check_loopback_proxy_bypass()
     print("test_approval_adapters: all checks passed")
 
 
