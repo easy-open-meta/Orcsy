@@ -112,6 +112,7 @@ def check_feishu() -> None:
         originator_user_id="ou_origin", form_widget_id="widget")
     provider = FeishuProvider("fs", cfg)
     calls: list[str] = []
+    forms: list[str] = []
 
     def fake(method: str, url: str, **kwargs):
         calls.append(url)
@@ -120,6 +121,7 @@ def check_feishu() -> None:
         if url.endswith("/instances"):
             assert kwargs["headers"]["Authorization"] == "Bearer tok"
             assert kwargs["body"]["uuid"] == "req-1"
+            forms.append(kwargs["body"]["form"])
             return {"data": {"instance_code": "inst-1"}}
         return {"data": {"task_list": [
             {"user_id": "ou_a", "status": "APPROVED"},
@@ -135,6 +137,22 @@ def check_feishu() -> None:
     assert [(a.id, a.decision) for a in decision.approvers] == [
         ("ou_a", "approved"), ("ou_b", "rejected")]
     assert len(calls) == 3
+
+    # 真实飞书新版自定义审批要求 form 为“控件数组”的 JSON 字符串；
+    # 旧实现的 map / "{}" 会返回 1390001 表单格式不正确。
+    form = json.loads(forms[0])
+    assert isinstance(form, list) and form, form
+    assert form[0]["id"] == "widget" and form[0]["type"] == "input"
+    assert "p/t" in form[0]["value"] and "high" in form[0]["value"]
+
+    # 未配置控件 ID 时提交空数组，而不是旧实现的 "{}"
+    cfg_no_widget = ApprovalProviderConfig(
+        type="feishu", app_id="app", app_secret="sec", approval_code="code",
+        originator_user_id="ou_origin")
+    with mock.patch("orcsy.approval_providers._http_json", side_effect=fake):
+        FeishuProvider("fs2", cfg_no_widget).create(MANIFEST)
+    assert forms[1] == "[]"
+
     try:
         provider.verify_callback({}, b"{}")
         raise AssertionError("飞书回调应提示使用轮询")

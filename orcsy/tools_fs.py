@@ -202,7 +202,7 @@ def tool_list_dir(ctx: ToolContext, args: dict) -> str:
     ignores = {".git", ".worktree-arranger", "__pycache__", "node_modules", ".venv", "dist", "build"}
     lines: list[str] = []
     for p in sorted(base.rglob("*")):
-        if any(part in ignores for part in p.parts):
+        if any(part in ignores for part in p.relative_to(ctx.root).parts):
             continue
         rel_display = p.relative_to(ctx.root).as_posix()
         lines.append(("d " if p.is_dir() else "f ") + rel_display[:120])
@@ -224,7 +224,7 @@ def tool_find_files(ctx: ToolContext, args: dict) -> str:
     ignores = {".git", ".worktree-arranger", "__pycache__", "node_modules", ".venv", "dist", "build"}
     lines: list[str] = []
     for p in sorted(base.rglob(pattern)):
-        if any(part in ignores for part in p.parts):
+        if any(part in ignores for part in p.relative_to(ctx.root).parts):
             continue
         lines.append(("d " if p.is_dir() else "f ") + p.relative_to(ctx.root).as_posix()[:120])
         if len(lines) >= 200:
@@ -247,7 +247,7 @@ def tool_grep(ctx: ToolContext, args: dict) -> str:
     glob = str(args.get("glob", "*"))
     hits: list[str] = []
     for p in sorted(base.rglob(glob)):
-        if not p.is_file() or any(part in ignores for part in p.parts):
+        if not p.is_file() or any(part in ignores for part in p.relative_to(ctx.root).parts):
             continue
         try:
             text = p.read_text(encoding="utf-8", errors="replace")

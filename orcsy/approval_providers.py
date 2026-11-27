@@ -475,9 +475,13 @@ class FeishuProvider:
         summary = (f"{manifest.get('project')}/{manifest.get('task_id')} · "
                    f"{manifest.get('risk', {}).get('level')} · "
                    f"digest {manifest.get('digest', '')[:16]}")
-        form = "{}"
+        # 飞书新版自定义审批要求 form 为“控件数组”的 JSON 字符串：
+        #   [{"id": widget_id, "type": "input", "value": "..."}]
+        # 旧实现的 map / "{}" 在真实免费版租户会返回 1390001 表单格式不正确。
+        form = "[]"
         if self.config.form_widget_id:
-            form = json.dumps({self.config.form_widget_id: summary},
+            form = json.dumps([{"id": self.config.form_widget_id,
+                                "type": "input", "value": summary}],
                               ensure_ascii=False)
         data = _http_json(
             "POST", f"{self.base}/open-apis/approval/v4/instances",
