@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orcsy.config import (AppConfig, LLMConfig, ProjectConfig, ReviewConfig,
-                          load_config)
+                          UpdateConfig, load_config)
 from orcsy.scheduler import Scheduler
 from orcsy.web import AppState, mask_secret
 
@@ -33,6 +33,9 @@ def _make_state(tmp: Path, *, review_llm: LLMConfig | None = None,
         review=ReviewConfig(llm=review_llm),
         projects=[ProjectConfig(name="p1", path=root, llm=project_llm)],
         source_path=tmp / "config.yaml",
+        # 关闭启动自动更新检查：否则每个 AppState 都会起一个网络 daemon 线程，
+        # 进程退出时与 OpenSSL finalize 竞争，偶发 SIGSEGV（断言均通过）。
+        update=UpdateConfig(auto_check=False),
     )
     state = AppState(cfg, Scheduler(cfg), log_path=str(tmp / "orcsy.log"))
     state._tmp = tmp  # type: ignore[attr-defined]
