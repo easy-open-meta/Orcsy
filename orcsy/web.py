@@ -1212,6 +1212,7 @@ class AppState:
             "originator_user_id": p.originator_user_id,
             "dept_id": p.dept_id,
             "form_widget_id": p.form_widget_id,
+            "form_component_values": [dict(v) for v in p.form_component_values],
             "verify_tls": p.verify_tls,
             "timeout_seconds": p.timeout_seconds,
         }

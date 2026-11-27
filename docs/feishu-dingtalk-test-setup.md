@@ -116,8 +116,9 @@ risk_approval:
 
 在钉钉「OA 审批」后台创建模板：
 
-- **不要放必填表单控件**：Orcsy 当前创建实例时提交
-  `form_component_values: []`，模板有必填项会被厂商拒绝；
+- 记录每个表单控件的 **label**（如「单行输入框」）：钉钉创建实例要求按
+  label 提交 `form_component_values`，空表单会返回 `820001 找不到表单数据`。
+  可用 `topapi/process/form/get` 查看 `form_component_vos[].props.label`；
 - 审批流程设为**会签**，加入两个测试成员；
 - 记录模板的 `process_code`（通常形如 `PROC-XXXXXXXX`）。
 
@@ -142,6 +143,9 @@ approval_providers:
     process_code: PROC-XXXXXXXX
     originator_user_id: manager1234
     dept_id: 1                        # 以实际通讯录部门 ID 为准
+    form_component_values:            # 按模板控件 label 提交；空数组会 820001
+      - name: 单行输入框
+        value: Orcsy 风险审批
     callback_secret: ""               # 轮询模式可留空
 
 approvers:

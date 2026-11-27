@@ -163,7 +163,8 @@ def check_feishu() -> None:
 def check_dingtalk() -> None:
     cfg = ApprovalProviderConfig(
         type="dingtalk", app_key="key", app_secret="sec", process_code="proc",
-        originator_user_id="user-1", dept_id=42)
+        originator_user_id="user-1", dept_id=42,
+        form_component_values=[{"name": "单行输入框", "value": "审批测试"}])
     provider = DingTalkProvider("dt", cfg)
 
     def fake(method: str, url: str, **kwargs):
@@ -172,10 +173,15 @@ def check_dingtalk() -> None:
         if "/topapi/processinstance/create" in url:
             assert kwargs["body"]["originator_user_id"] == "user-1"
             assert kwargs["body"]["dept_id"] == 42
+            # 钉钉模板通常有表单控件，空数组会被 820001 拒绝
+            assert kwargs["body"]["form_component_values"] == [
+                {"name": "单行输入框", "value": "审批测试"}]
             return {"process_instance_id": "pi-1"}
         return {"process_instance": {"operation_records": [
-            {"userid": "u1", "result": "AGREE", "date": "2026-01-01"},
+            # 真实钉钉字段是 operation_result；result 为旧 mock 兼容路径
+            {"userid": "u1", "operation_result": "AGREE", "date": "2026-01-01"},
             {"userid": "u2", "result": "REFUSE", "date": "2026-01-02"},
+            {"userid": "u3", "operation_result": "AGREE", "date": "2026-01-03"},
         ]}}
 
     with mock.patch("orcsy.providers.dingtalk._http_json", side_effect=fake):
@@ -184,12 +190,39 @@ def check_dingtalk() -> None:
         decision = provider.poll(handle)
     assert decision is not None and decision.digest == "digest-1"
     assert [(a.id, a.decision) for a in decision.approvers] == [
-        ("u1", "approved"), ("u2", "rejected")]
+        ("u1", "approved"), ("u2", "rejected"), ("u3", "approved")]
     try:
         provider.verify_callback({}, b"{}")
         raise AssertionError("钉钉回调应提示使用轮询")
     except ProviderError as exc:
         assert "轮询" in str(exc)
+
+
+def check_provider_form_values() -> None:
+    from orcsy.config import parse_approval_providers, provider_to_yaml
+
+    raw = {"dt": {"type": "dingtalk", "app_key": "k", "app_secret": "s",
+                  "process_code": "p", "originator_user_id": "u",
+                  "form_component_values": [
+                      {"name": "单行输入框", "value": "v"}]}}
+    cfg = parse_approval_providers(raw)["dt"]
+    expected = [{"name": "单行输入框", "value": "v"}]
+    assert cfg.form_component_values == expected
+    assert provider_to_yaml(cfg)["form_component_values"] == expected
+    for bad in (
+        {"form_component_values": "x"},
+        {"form_component_values": [{"value": "v"}]},
+        {"form_component_values": [{"name": "n", "value": "x" * 2001}]},
+        {"form_component_values": [{"name": "n", "value": "v"}] * 51},
+    ):
+        payload = {"type": "dingtalk", "app_key": "k", "app_secret": "s",
+                   "process_code": "p", "originator_user_id": "u", **bad}
+        try:
+            parse_approval_providers({"dt": payload})
+            raise AssertionError(f"invalid form_component_values accepted: {bad}")
+        except ValueError:
+            pass
+    print("Provider form_component_values 解析与序列化 ✅")
 
 
 def check_build_provider() -> None:
@@ -260,6 +293,7 @@ def main() -> None:
     check_github()
     check_feishu()
     check_dingtalk()
+    check_provider_form_values()
     check_build_provider()
     check_loopback_proxy_bypass()
     print("test_approval_adapters: all checks passed")

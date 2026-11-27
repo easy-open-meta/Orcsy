@@ -46,7 +46,8 @@ class DingTalkProvider:
                 "process_code": self.config.process_code,
                 "originator_user_id": self.config.originator_user_id,
                 "dept_id": int(self.config.dept_id),
-                "form_component_values": [],
+                "form_component_values": [dict(v) for v in
+                                         self.config.form_component_values],
             }, verify=self.config.verify_tls,
             timeout=self.config.timeout_seconds)
         code = str(data.get("process_instance_id") or "")
@@ -70,7 +71,8 @@ class DingTalkProvider:
         records = inst.get("operation_records") or []
         approvers: list[ApproverDecision] = []
         for rec in records:
-            result = str(rec.get("result") or "").upper()
+            # 真实钉钉返回 operation_result；mock/旧数据用 result
+            result = str(rec.get("result") or rec.get("operation_result") or "").upper()
             if result not in ("AGREE", "REFUSE"):
                 continue
             uid = str(rec.get("userid") or rec.get("user_id") or "")

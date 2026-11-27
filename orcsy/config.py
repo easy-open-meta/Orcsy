@@ -756,6 +756,9 @@ class ApprovalProviderConfig:
     originator_user_id: str = ""  # 飞书 user_id / 钉钉发起人 userid
     dept_id: int = -1             # 钉钉发起部门（-1 = 根部门）
     form_widget_id: str = ""      # 飞书审批表单文本控件 ID（可选）
+    # 钉钉审批表单值：[{"name": "单行输入框", "value": "..."}]
+    # 真实模板通常至少有一个控件，表单为空会被钉钉以 820001 拒绝
+    form_component_values: list[dict[str, str]] = field(default_factory=list)
     verify_tls: bool = True
     timeout_seconds: int = 10
 
@@ -802,6 +805,30 @@ def parse_approval_providers(raw: Any) -> dict[str, ApprovalProviderConfig]:
         dept_raw = item.get("dept_id", -1)
         if isinstance(dept_raw, bool) or not isinstance(dept_raw, int):
             raise ValueError(f"approval_providers.{key}.dept_id 必须是整数")
+        form_values_raw = item.get("form_component_values") or []
+        if not isinstance(form_values_raw, list):
+            raise ValueError(
+                f"approval_providers.{key}.form_component_values 必须是数组")
+        if len(form_values_raw) > 50:
+            raise ValueError(
+                f"approval_providers.{key}.form_component_values 最多 50 项")
+        form_values: list[dict[str, str]] = []
+        for idx, entry in enumerate(form_values_raw):
+            if not isinstance(entry, dict):
+                raise ValueError(
+                    f"approval_providers.{key}.form_component_values "
+                    f"第 {idx + 1} 项必须是对象")
+            cname = str(entry.get("name") or "").strip()
+            cvalue = str(entry.get("value") or "")
+            if not cname or len(cname) > 200 or "\x00" in cname:
+                raise ValueError(
+                    f"approval_providers.{key}.form_component_values "
+                    f"第 {idx + 1} 项 name 必须是 1~200 字符")
+            if len(cvalue) > 2000 or "\x00" in cvalue:
+                raise ValueError(
+                    f"approval_providers.{key}.form_component_values "
+                    f"第 {idx + 1} 项 value 最多 2000 字符")
+            form_values.append({"name": cname, "value": cvalue})
         cfg = ApprovalProviderConfig(
             type=ptype,
             base_url=_provider_text(item, "base_url"),
@@ -817,6 +844,7 @@ def parse_approval_providers(raw: Any) -> dict[str, ApprovalProviderConfig]:
             originator_user_id=_provider_text(item, "originator_user_id"),
             dept_id=int(dept_raw),
             form_widget_id=_provider_text(item, "form_widget_id"),
+            form_component_values=form_values,
             verify_tls=verify_tls,
             timeout_seconds=int(timeout_raw),
         )
@@ -860,6 +888,7 @@ def provider_to_yaml(provider: ApprovalProviderConfig) -> dict:
         "originator_user_id": provider.originator_user_id,
         "dept_id": provider.dept_id,
         "form_widget_id": provider.form_widget_id,
+        "form_component_values": [dict(v) for v in provider.form_component_values],
         "verify_tls": provider.verify_tls,
         "timeout_seconds": provider.timeout_seconds,
     }
