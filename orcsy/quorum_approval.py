@@ -490,6 +490,15 @@ class QuorumApprovalManager:
                     continue
                 if item.decision == "rejected":
                     rejected = True
+                    # 记录拒绝人：执行器/看板用 approvers 的 key 生成 by，
+                    # 只写 comment 会让 risk.json 的 by 为空（真机测试发现）
+                    req.approvers[email] = {
+                        "provider": ptype,
+                        "id": item.id,
+                        "name": item.name,
+                        "decision": "rejected",
+                        "at": item.at or time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
                     req.comment = f"{email}: {decision.comment or 'rejected'}"
                     break
                 existing = req.approvers.get(email)

@@ -101,7 +101,12 @@ def check_quorum_and_allowlist() -> None:
                                         decision="rejected")],
             digest="digest-2", request_id=rid)) == "rejected"
         t.join(5)
-        assert box["outcome"].request.status == "rejected"
+        req = box["outcome"].request
+        assert req.status == "rejected"
+        # 拒绝人必须进入 approvers（否则 risk.json 的 by 为空）
+        assert req.approvers["alice@example.com"]["decision"] == "rejected"
+        assert req.approved_count == 0
+        assert ", ".join(sorted(req.approvers)) == "alice@example.com"
 
 
 def check_callback_hmac() -> None:
