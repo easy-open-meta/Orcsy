@@ -11,9 +11,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orcsy.approval_providers import (DingTalkProvider, FeishuProvider,
-                                      GitHubProvider, GitLabProvider,
-                                      ProviderError, build_provider)
+from orcsy.providers import (DingTalkProvider, FeishuProvider,
+                             GitHubProvider, GitLabProvider, ProviderError,
+                             build_provider)
 from orcsy.config import ApprovalProviderConfig
 
 MANIFEST = {
@@ -30,7 +30,7 @@ def check_gitlab() -> None:
         type="gitlab", base_url="https://gitlab.example", project_id="group/proj",
         token="t", callback_secret="s")
     provider = GitLabProvider("gl", cfg)
-    with mock.patch("orcsy.approval_providers._http_json") as http:
+    with mock.patch("orcsy.providers.gitlab._http_json") as http:
         http.return_value = {"iid": 7, "web_url": "https://gitlab.example/i/7"}
         handle = provider.create(MANIFEST)
         assert handle.external_id == "7"
@@ -72,7 +72,7 @@ def check_github() -> None:
     cfg = ApprovalProviderConfig(
         type="github", repo="owner/name", token="t", callback_secret="s")
     provider = GitHubProvider("gh", cfg)
-    with mock.patch("orcsy.approval_providers._http_json") as http:
+    with mock.patch("orcsy.providers.github._http_json") as http:
         http.return_value = {"number": 12, "html_url": "https://github.com/o/n/issues/12"}
         handle = provider.create(MANIFEST)
         assert handle.external_id == "12"
@@ -129,7 +129,7 @@ def check_feishu() -> None:
             {"user_id": "ou_c", "status": "PENDING"},
         ]}}
 
-    with mock.patch("orcsy.approval_providers._http_json", side_effect=fake):
+    with mock.patch("orcsy.providers.feishu._http_json", side_effect=fake):
         handle = provider.create(MANIFEST)
         assert handle.external_id == "inst-1"
         decision = provider.poll(handle)
@@ -149,7 +149,7 @@ def check_feishu() -> None:
     cfg_no_widget = ApprovalProviderConfig(
         type="feishu", app_id="app", app_secret="sec", approval_code="code",
         originator_user_id="ou_origin")
-    with mock.patch("orcsy.approval_providers._http_json", side_effect=fake):
+    with mock.patch("orcsy.providers.feishu._http_json", side_effect=fake):
         FeishuProvider("fs2", cfg_no_widget).create(MANIFEST)
     assert forms[1] == "[]"
 
@@ -178,7 +178,7 @@ def check_dingtalk() -> None:
             {"userid": "u2", "result": "REFUSE", "date": "2026-01-02"},
         ]}}
 
-    with mock.patch("orcsy.approval_providers._http_json", side_effect=fake):
+    with mock.patch("orcsy.providers.dingtalk._http_json", side_effect=fake):
         handle = provider.create(MANIFEST)
         assert handle.external_id == "pi-1"
         decision = provider.poll(handle)
@@ -200,10 +200,24 @@ def check_build_provider() -> None:
     fake = build_provider("x", ApprovalProviderConfig(type="fake"))
     assert fake.type == "fake"
 
+    # 注册表与 config 的合法类型清单必须一致（新增厂商只改一处会在此失败）
+    from orcsy.config import APPROVAL_PROVIDER_TYPES
+    from orcsy.providers import PROVIDER_TYPES
+    assert set(APPROVAL_PROVIDER_TYPES) == set(PROVIDER_TYPES)
+    for ptype in PROVIDER_TYPES:
+        cfg = ApprovalProviderConfig(type=ptype, project_id="1", token="t",
+                                     repo="o/n")
+        built = build_provider(f"p-{ptype}", cfg)
+        assert built.type == ptype, built.type
+
+    # 旧路径 shim 必须继续 re-export 同一个工厂（兼容外部导入）
+    import orcsy.approval_providers as legacy
+    assert legacy.build_provider is build_provider
+
 
 def check_loopback_proxy_bypass() -> None:
     """本机 Provider 不走系统代理，公网 Provider 仍走。"""
-    from orcsy.approval_providers import _http_json, _is_loopback_url
+    from orcsy.providers.base import _http_json, _is_loopback_url
 
     assert _is_loopback_url("http://127.0.0.1:8000/x")
     assert _is_loopback_url("http://127.8.9.10/x")
@@ -233,7 +247,7 @@ def check_loopback_proxy_bypass() -> None:
         def request(self, *args, **kwargs):
             return FakeResponse()
 
-    with mock.patch("orcsy.approval_providers.httpx.Client", FakeClient), \
+    with mock.patch("orcsy.providers.base.httpx.Client", FakeClient), \
             mock.patch("orcsy.egress.check"):
         _http_json("GET", "http://127.0.0.1:9/x", headers={})
         assert seen["trust_env"] is False

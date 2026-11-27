@@ -71,7 +71,7 @@ Orcsy 采用自顶向下的单向分层架构，各层职责明确，**严格禁
 | `orcsy/review.py` | 编排层 | 独立模型合并前只读审查 Agent |
 | `orcsy/risk.py` | 编排层 | 合入前风险分级：路径/内容规则、原因与 digest |
 | `orcsy/risk_approval.py` | 编排层 | 高风险合入前的看板人工审批（单机单审批人）与审计 |
-| `orcsy/approval_providers.py` | 编排层 | 外部审批 Provider 协议、HMAC 回调校验与 fake Provider |
+| `orcsy/providers/` | 编排层 | 外部审批 Provider 出口：`base` 协议与 HMAC 回调校验、`registry` 注册表、各厂商独立模块（gitlab/github/feishu/dingtalk/fake） |
 | `orcsy/quorum_approval.py` | 编排层 | 持久化 quorum 会签：email 白名单、轮询/回调、超时与恢复 |
 | `orcsy/runlog.py` | 可信层 | 运行台账：run 事件流、diff/测试/审查/用量工件、保留期清理与目录迁移 |
 | `orcsy/claims.py` | 可信层 | 任务指纹、TTL 租约（心跳/文件锁）、断点续跑标记与提交前二次校验 |

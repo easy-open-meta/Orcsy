@@ -2786,7 +2786,7 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def _handle_risk_callback(self, provider_name: str) -> None:
         """外部 Provider 回调：免登录但必须验 HMAC；失败返回 JSON 而非跳登录。"""
-        from .approval_providers import ProviderError
+        from .providers import ProviderError
         try:
             status = self.state.risk_approval_callback(
                 provider_name, dict(self.headers), self._read_raw_body())

@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orcsy.approval_providers import sign_callback
+from orcsy.providers import sign_callback
 from orcsy.audit import get_audit_log
 from orcsy.claims import claims_state_dir
 from orcsy.config import load_config

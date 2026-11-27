@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orcsy.approval_providers import (ApproverDecision, FakeProvider,
+from orcsy.providers import (ApproverDecision, FakeProvider,
                                       ProviderDecision, sign_callback)
 from orcsy.config import ApprovalProviderConfig
 from orcsy.quorum_approval import QuorumApprovalManager

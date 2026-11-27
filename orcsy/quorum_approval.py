@@ -6,7 +6,8 @@
 - 用 email 白名单 + 不同 email 去重计数，任何白名单内拒绝一票否决；
 - digest 变化、超时、Provider 不可达、回调非法 → fail closed。
 
-真实 Provider 适配器在 `approval_providers.py` 注册；测试用 `fake`。
+真实 Provider 适配器在 `providers/` 包内各自实现，经 `providers.build_provider`
+按类型注册；测试用 `fake`。
 """
 
 from __future__ import annotations
@@ -20,10 +21,9 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .approval_providers import (ApprovalProvider, ApproverDecision,
-                                 ProviderDecision, ProviderError,
-                                 ProviderHandle, build_provider,
-                                 resolve_email)
+from .providers import (ApprovalProvider, ApproverDecision,
+                        ProviderDecision, ProviderError, ProviderHandle,
+                        build_provider, resolve_email)
 from .audit import record as audit_record
 from .config import ApprovalProviderConfig
 from .logging_setup import get_logger

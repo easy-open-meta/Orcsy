@@ -452,8 +452,10 @@ Phase 1 的 `single` 仍是默认安全落点；Phase 2A/2B 完成前不把 quor
 - `CONFIG_VERSION=3`（2→3 恒等迁移）：`approval_providers`、`approvers`
   （email↔Provider 身份）、`risk_approval.{provider,quorum,allowed_approvers,
   callback_url,poll_interval_seconds}`；
-- `orcsy/approval_providers.py`：统一 Provider 协议、HMAC 回调校验、`fake`
-  测试 Provider，以及 GitLab/GitHub 工单、飞书/钉钉审批实例适配器；
+- `orcsy/providers/`：统一 Provider 出口——`base`（协议、数据类、HMAC 回调
+  校验）、`issue`（工单共用）、`registry`（类型→实现），以及 `gitlab` /
+  `github` / `feishu` / `dingtalk` / `fake` 各自独立模块；旧路径
+  `orcsy/approval_providers.py` 保留为兼容 shim；
 - `orcsy/quorum_approval.py`：持久化请求、轮询/回调、email 白名单去重、
   一票否决、超时/取消/Provider 故障 fail closed、重启复用；
 - executor quorum 分支与 `block_reason`；Web `POST /api/risk-approval/callback/{provider}`

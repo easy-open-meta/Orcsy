@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mock_vendor_server import (DINGTALK_APP, FEISHU_APP, GITHUB_TOKEN,
                                 GITLAB_TOKEN, start_server)
-from orcsy.approval_providers import (DingTalkProvider, FeishuProvider,
+from orcsy.providers import (DingTalkProvider, FeishuProvider,
                                       GitHubProvider, GitLabProvider,
                                       ProviderError)
 from orcsy.config import ApprovalProviderConfig
