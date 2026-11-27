@@ -60,6 +60,9 @@ def check_config_roundtrip() -> None:
         assert cfg_default.git.commit_and_merge is False, "未配置时默认 False"
 
         # Web 层 roundtrip
+        # 关闭启动自动更新检查：AppState 会起网络 daemon 线程，进程退出时
+        # 与 OpenSSL finalize 竞争，偶发 SIGSEGV（断言均通过）
+        cfg.update.auto_check = False
         state = AppState(cfg, Scheduler(cfg), log_path=str(tmp / "log.txt"))
         full = state.full_state()
         assert full["git_cfg"]["commit_and_merge"] is True
