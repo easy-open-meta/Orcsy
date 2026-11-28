@@ -7,6 +7,7 @@ import { cmpVersion, fmtTokens, fmtVer } from '../utils'
 import { miIcon } from '../mi'
 import { tNow as it, tFmt } from '../lang'
 import ProviderHelp from '../components/ProviderHelp.vue'
+import ProviderPermissionHelp from '../components/ProviderPermissionHelp.vue'
 
 const message = () => window.$message
 
@@ -2446,7 +2447,10 @@ const protocolOptions = computed(() => [
             <template #header>
               <div style="display:flex; align-items:center; gap:10px; flex:1; justify-content:space-between; flex-wrap:wrap;">
                 <span><i class="ms">key</i> {{ it('审批 Provider') }}</span>
-                <NButton size="small" type="primary" @click="openProvider()">{{ it('+ 添加 Provider') }}</NButton>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <ProviderPermissionHelp />
+                  <NButton size="small" type="primary" @click="openProvider()">{{ it('+ 添加 Provider') }}</NButton>
+                </div>
               </div>
             </template>
             <div class="hint">{{ it('配置 GitLab / GitHub / 飞书 / 钉钉等外部审批 Provider；密钥保存后只显示掩码。') }}</div>
