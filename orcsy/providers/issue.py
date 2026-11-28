@@ -18,6 +18,16 @@ def _parse_approval_command(body: str) -> tuple[str, str]:
         return "approved", comment
     if command in ("/reject", "/deny"):
         return "rejected", comment
+    # GitLab 会把 /approve、/lgtm 当 MR quick action 拒绝（issue 上无法应用），
+    # 因此提供无斜杠前缀的等价写法：``orcsy approve`` / ``orcsy reject``。
+    if command == "orcsy":
+        rest_parts = comment.split(maxsplit=1)
+        sub = rest_parts[0].lower() if rest_parts else ""
+        sub_comment = rest_parts[1].strip() if len(rest_parts) > 1 else ""
+        if sub in ("approve", "lgtm", "ok", "yes"):
+            return "approved", sub_comment
+        if sub in ("reject", "deny", "no"):
+            return "rejected", sub_comment
     return "", ""
 
 

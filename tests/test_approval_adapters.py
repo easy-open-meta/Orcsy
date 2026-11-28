@@ -44,12 +44,15 @@ def check_gitlab() -> None:
             {"system": False, "body": "/reject not now",
              "author": {"username": "bob", "name": "Bob"},
              "created_at": "2026-01-01T00:01:00Z"},
+            {"system": False, "body": "orcsy approve looks good",
+             "author": {"username": "carol", "name": "Carol"},
+             "created_at": "2026-01-01T00:02:00Z"},
         ]
         decision = provider.poll(handle)
         assert decision is not None
         assert decision.digest == "digest-1"
         assert [(a.id, a.decision) for a in decision.approvers] == [
-            ("alice", "approved"), ("bob", "rejected")]
+            ("alice", "approved"), ("bob", "rejected"), ("carol", "approved")]
 
     payload = {
         "object_kind": "note",
@@ -198,6 +201,21 @@ def check_dingtalk() -> None:
         assert "轮询" in str(exc)
 
 
+def check_approval_command() -> None:
+    from orcsy.providers.issue import _parse_approval_command
+
+    assert _parse_approval_command("/approve") == ("approved", "")
+    assert _parse_approval_command("/reject 太危险") == ("rejected", "太危险")
+    # GitLab：/approve 会被 quick action 拦截，使用无斜杠前缀
+    assert _parse_approval_command("orcsy approve looks good") == (
+        "approved", "looks good")
+    assert _parse_approval_command("Orcsy REJECT 不行") == (
+        "rejected", "不行")
+    assert _parse_approval_command("orcsy") == ("", "")
+    assert _parse_approval_command("orcsy maybe") == ("", "")
+    print("审批评论命令解析（含 GitLab 安全写法）✅")
+
+
 def check_provider_form_values() -> None:
     from orcsy.config import parse_approval_providers, provider_to_yaml
 
@@ -293,6 +311,7 @@ def main() -> None:
     check_github()
     check_feishu()
     check_dingtalk()
+    check_approval_command()
     check_provider_form_values()
     check_build_provider()
     check_loopback_proxy_bypass()
