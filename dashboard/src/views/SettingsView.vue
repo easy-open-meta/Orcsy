@@ -6,6 +6,7 @@ import { beginRestartWait, openDirBrowser, settingsSection, store } from '../sto
 import { cmpVersion, fmtTokens, fmtVer } from '../utils'
 import { miIcon } from '../mi'
 import { tNow as it, tFmt } from '../lang'
+import ProviderHelp from '../components/ProviderHelp.vue'
 
 const message = () => window.$message
 
@@ -2233,11 +2234,12 @@ const protocolOptions = computed(() => [
         </div>
         <div v-if="settingsSection === 'risk'">
           <NCard size="small" class="scard">
-            <template #header><i class="ms">verified_user</i> {{ it('风险审批（合入前）') }}</template>
+            <template #header><i class="ms">verified_user</i> {{ it('风险审批（合入前）') }}
+              <ProviderHelp /></template>
             <label class="checkline">
               <NSwitch v-model:value="riskDraft.enabled" />
               {{ it('启用合入前风险审批') }}
-              <span class="hint">{{ it('Phase 1 为单机单审批人；Phase 2 的 quorum 会签需配置外部 Provider（首批 GitLab/GitHub/飞书/钉钉适配器接入中）。') }}</span>
+              <span class="hint">{{ it('Phase 1 为单机单审批人；Phase 2 的 quorum 会签需配置外部 Provider（已支持 GitLab/GitHub/飞书/钉钉）。') }}</span>
             </label>
             <div class="hint">
               {{ it('建议同时设置看板登录密码；无密码看板只能防误操作，不能防本机恶意程序冒充审批。') }}
@@ -2286,7 +2288,7 @@ const protocolOptions = computed(() => [
               <NInput v-model:value="a.email" size="small" :placeholder="it('email')" style="width:200px" />
               <NInput v-model:value="a.gitlab" size="small" placeholder="GitLab username" style="width:140px" />
               <NInput v-model:value="a.github" size="small" placeholder="GitHub login" style="width:140px" />
-              <NInput v-model:value="a.feishu" size="small" placeholder="Feishu open_id" style="width:140px" />
+              <NInput v-model:value="a.feishu" size="small" placeholder="Feishu user_id" style="width:140px" />
               <NInput v-model:value="a.dingtalk" size="small" placeholder="DingTalk user_id" style="width:140px" />
               <NButton size="tiny" quaternary type="error" @click="removeRiskApprover(ai)">{{ it('删除') }}</NButton>
             </div>

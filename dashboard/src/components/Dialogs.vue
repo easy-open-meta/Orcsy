@@ -7,6 +7,7 @@ import { miIcon } from '../mi'
 import { beginRestartWait, navigateTo, openTaskView, refresh, ui, store } from '../store'
 import { tNow as t, tFmt } from '../lang'
 import ProjectFormSection from './project/ProjectFormSection.vue'
+import ProviderHelp from './ProviderHelp.vue'
 
 // 把 useMessage/useDialog 桥接到 window，供任意组件调用。
 // bridge 兼容两种用法：message('文本') 默认 info；message.success('文本') 等——
@@ -2329,7 +2330,10 @@ async function newFolder(): Promise<void> {
           <div v-if="r.approvers?.length" class="risk-reasons">
             <div v-for="a in r.approvers" :key="a.email">• {{ a.email }} · {{ a.name || a.id }}</div>
           </div>
-          <div class="hint">{{ t('会签由外部 Provider 完成；这里只查看进度，不在本页批准。') }}</div>
+          <div class="hint" style="display:flex; align-items:center; gap:6px;">
+            {{ t('会签由外部 Provider 完成；这里只查看进度，不在本页批准。') }}
+            <ProviderHelp />
+          </div>
           <div class="btnrow" style="justify-content:flex-end; margin-top:8px">
             <a v-if="r.external_url" :href="r.external_url" target="_blank" rel="noopener">
               <NButton size="small">{{ t('打开审批') }}</NButton>
