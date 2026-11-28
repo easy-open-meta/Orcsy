@@ -533,7 +533,11 @@ class AppState:
         # 上次升级结果（看护脚本写、启动时消费）；一次曝光后清空
         self.update_result: dict | None = None
         self._consume_update_result()
-        if config.update.auto_check and config.update.repo:
+        # ORCSY_SKIP_UPDATE_CHECK=1：跳过启动自动更新检查（测试进程/无外网
+        # 环境）。该线程是 daemon，进程退出时若仍在网络请求中，会与 OpenSSL
+        # finalize 竞争导致偶发 SIGSEGV（多个测试退出码 -11 的根因）。
+        if (config.update.auto_check and config.update.repo
+                and not os.environ.get("ORCSY_SKIP_UPDATE_CHECK")):
             threading.Thread(target=self._auto_update_check, daemon=True,
                              name="update-check").start()
 

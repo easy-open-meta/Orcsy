@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -19,6 +20,9 @@ from pathlib import Path
 
 
 def main() -> int:
+    # 测试进程不启动自动更新网络线程：AppState 的 daemon 线程会在退出时与
+    # OpenSSL finalize 竞争，导致断言通过后偶发 SIGSEGV（-11）。子进程继承环境。
+    os.environ.setdefault("ORCSY_SKIP_UPDATE_CHECK", "1")
     parser = argparse.ArgumentParser(description="Orcsy 批量回归测试套件")
     parser.add_argument("filter", nargs="?", default="", help="可选：过滤测试文件名子串")
     parser.add_argument("--unit-only", action="store_true", help="仅运行 test_*.py，跳过 e2e_*.py")
