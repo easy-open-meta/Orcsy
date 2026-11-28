@@ -427,11 +427,19 @@ class QuorumApprovalManager:
         decision = provider.verify_callback(headers, raw_body)
         target = decision.request_id
         if not target and decision.external_id:
+            # 只按同一 Provider 匹配：issue/工单编号在不同厂商间会撞号
+            # （例如 GitLab #3 与 GitHub #3 同时存在），只按 external_id
+            # 会把回调错投到另一家的请求上。优先 pending，避免命中旧终态。
             with self._lock:
-                for req in self._requests.values():
-                    if req.external_id == decision.external_id:
-                        target = req.id
-                        break
+                candidates = [
+                    req for req in self._requests.values()
+                    if req.external_id == decision.external_id
+                    and req.provider_name == provider_name
+                ]
+                pending = [req for req in candidates if req.status == "pending"]
+                match = (pending or candidates)
+                if match:
+                    target = match[0].id
         if not target:
             raise ProviderError("回调缺少 request_id/external_id")
         with self._lock:

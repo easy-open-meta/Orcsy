@@ -266,9 +266,69 @@ def check_executor_quorum() -> None:
             assert result.merge_approval["by"]
 
 
+def check_callback_provider_scoping() -> None:
+    """不同 Provider 的 issue 编号可能相同，回调必须按 Provider 隔离。"""
+    from orcsy.providers import ProviderHandle, sign_callback
+
+    class FixedProvider(FakeProvider):
+        def create(self, manifest):
+            return ProviderHandle(external_id="3")
+
+    with tempfile.TemporaryDirectory() as td:
+        fixed = FixedProvider("fixed", CFG)
+        mgr = QuorumApprovalManager(
+            Path(td), provider_factory=lambda n, c: fixed)
+        gl_box, gh_box = {}, {}
+        t_gl, p_gl = start_request(
+            mgr, gl_box, task_id="t-gl", digest="d-gl",
+            provider_name="gitlab-test", timeout_seconds=3)
+        t_gh, _ = start_request(
+            mgr, gh_box, task_id="t-gh", digest="d-gh",
+            provider_name="github-test", timeout_seconds=3)
+        # start_request 返回的是 pending[0]，两家同时挂起时会拿到对方；
+        # 按 task_id 重新定位各自的请求。
+        p_gl = next(x for x in mgr.pending() if x["task_id"] == "t-gl")
+        p_gh = next(x for x in mgr.pending() if x["task_id"] == "t-gh")
+        # provider.create 在 request() 内异步写回 external_id，等两家都就绪
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            gl = mgr.get(p_gl["id"])
+            gh = mgr.get(p_gh["id"])
+            if gl and gh and gl.external_id == "3" and gh.external_id == "3":
+                break
+            time.sleep(0.02)
+        assert gl is not None and gh is not None
+        assert gl.external_id == gh.external_id == "3"
+
+        def callback(provider: str) -> str:
+            body = json.dumps({
+                "decision": "approved",
+                "external_id": "3",
+                "approvers": [{"provider": "fake", "id": "alice",
+                               "decision": "approved"}],
+            }).encode()
+            headers, _ = sign_callback(SECRET, body)
+            return mgr.apply_callback(provider, CFG, headers, body)
+
+        assert callback("github-test") == "pending"
+        req_gh = mgr.get(p_gh["id"])
+        req_gl = mgr.get(p_gl["id"])
+        assert req_gh is not None and req_gl is not None
+        assert set(req_gh.approvers) == {"alice@example.com"}
+        assert req_gl.approvers == {}
+
+        assert callback("gitlab-test") == "pending"
+        assert set(mgr.get(p_gl["id"]).approvers) == {"alice@example.com"}
+        assert set(mgr.get(p_gh["id"]).approvers) == {"alice@example.com"}
+
+        t_gl.join(5)
+        t_gh.join(5)
+
+
 def main() -> None:
     check_quorum_and_allowlist()
     check_callback_hmac()
+    check_callback_provider_scoping()
     check_persistence_and_restart()
     check_timeout_and_stop()
     check_executor_quorum()

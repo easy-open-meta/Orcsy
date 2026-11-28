@@ -28,6 +28,7 @@
 - 飞书 Provider：审批实例 `form` 改为控件数组，修复真实模板 1390001 表单格式错误。
 - 审查门：新增任务级 `review_no_tests`（审查不跑测试）；提示词明确「未运行测试」与 pytest 退出码 5 不算失败。
 - 会签拒绝时记录拒绝人，`risk.json` 的 `by` 不再为空。
+- 会签回调只按 `external_id` 匹配请求；GitLab 与 GitHub 的 issue 编号可能相同（如都叫 #3），webhook 会错投到另一家的请求。现按 Provider 名称隔离并优先匹配 pending 请求，新增回归用例。
 
 ## [0.35.0] — 2026-11-26
 
