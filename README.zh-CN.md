@@ -31,7 +31,7 @@
 ## ✨ 特性
 
 - **多模型 Agent 项目小组** —— PM / 后端 / 前端 / QA 自由编排：PM 只读摸底并拆解 DAG 子任务或直接转派；开发在任务隔离 worktree 中编码，上游接口契约自动注入；QA 拉起本地服务与浏览器端到端联调、提 Bug 并自动回归——单个需求一个周期闭环。
-- **可信无人值守流水线** —— 独立审查模型做合并前把关（不通过自动返工）、幂等派发 + TTL 租约与 stale-lease 校验、崩溃后续跑不重复提交、人工把关提交页、高风险合入前风险审批（单人或 GitLab/GitHub/飞书/钉钉多人会签）、token/成本硬闸、熔断停机与写操作审计。
+- **可信无人值守流水线** —— 独立审查模型做合并前把关（不通过自动返工）、幂等派发 + TTL 租约与 stale-lease 校验、崩溃后续跑不重复提交、人工把关提交页、高风险合入前风险审批（单人或 GitLab/GitHub/飞书/钉钉多人会签，看板可视化配置 Provider 并提供权限提示）、token/成本硬闸、熔断停机与写操作审计。
 - **🧠 项目记忆与上下文** —— `ARCHITECTURE.md` 架构黑板报 + `PROJECT_NOTES.md` 经验记忆（每任务注入，满额归档到 `LONG_TERM_MEMORY.md`）、批次共享剪贴板传递临时端口/凭证、摘要式上下文裁剪让早期事实不丢、只读 `delegate_explore` 并发子代理。
 - **任意大模型，Markdown 即任务** —— OpenAI 兼容与 Anthropic 协议均原生 function calling（DeepSeek / GLM / Kimi / 通义 / Ollama / vLLM…）；每任务一个 `.md`、每项目一份 `AGENT.md`，支持项目级专属模型。
 - **🛠️ 工具沙箱与三级审批** —— 文件工具禁锢在项目内、90+ 命令白名单（9 大生态）、三档权限 + 看板审批队列，缺工具链时按内置技能静默安装（国内自动切镜像直下）。
@@ -341,6 +341,7 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意设置登录密�
 | `tools` / `commands` | 全局工具开关与命令白名单开关（`{名: bool}`，未列出默认启用/放行；`finish` 不可禁用） |
 | `env.vars` | 注入 Agent 子进程的环境变量：国内拉依赖失败时配 `GOPROXY` / `HTTP_PROXY` / `PIP_INDEX_URL` 等（不允许覆盖 PATH 等系统变量） |
 | `permissions.mode` / `timeout_minutes` | 访问权限模式（ask_on_change / autonomous / full_access）/ 审批超时分钟（默认 30） |
+| `approval_providers` / `approvers` / `risk_approval` | 高风险合入前审批：Provider 凭据（GitLab/GitHub/飞书/钉钉/fake）、email↔身份映射、策略/会签/超时；可在「设置 → 运行与成本 → 审批 Provider」可视化编辑（密钥只显示掩码，留空保持原值） |
 | `review.*` | 任务审查（Review Agent）：`llm` 绑定审查模型（**必须与任务模型不同**，默认 `~` = 审查未启用）、`max_turns` 审查轮数、`max_review_rounds` 返工次数（默认 2）、`allow_test_commands` 跑测试验证、`squash_merge` 返工通过后收敛提交；项目级 `review_enabled` / `review_llm` / `review_max_rounds` 可覆盖 |
 | `masking.*` | 数据脱敏：`enabled`（默认开）/ `enhanced_rules` 键值对增强规则（默认关）/ `custom_patterns` 自定义正则，详见「看板登录鉴权」章节的数据脱敏小节 |
 | `notify.sound` / `system` | 任务结束提醒：内置提示音 / 托盘气泡通知（默认全开，手动停止不提醒） |
@@ -353,6 +354,7 @@ orcsy web --host 0.0.0.0       # 允许局域网访问（注意设置登录密�
 | `update.*` | 自更新源仓库（默认官方 Gitee 源）/ 私有令牌 / 启动自动检查 |
 | frontmatter `order` | 拖拽排序序号（优先级内决定看板显示与领取顺序；删除该行回到自动排序） |
 | frontmatter `requeue_seq` / `review_pending` / `review_round` | 系统自动维护，无需手填：重入队优先领取 / 待审查状态 / 累计返工轮数 |
+| frontmatter `review_no_tests` | 任务声明不需要测试：审查 Agent 不获得 `run_command`，不会因未运行测试判失败 |
 
 ## 📊 日志与观测
 

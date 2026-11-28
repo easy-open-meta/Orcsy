@@ -154,6 +154,7 @@ projects:
 - **`review.llm` 不隐式继承全局 `llm`**：审查模型必须显式配置。隐式继承在单模型用户处必然撞上 R4 冲突，等于永远生成非法配置——宁可语义干净：「没配 = 审查未启用」。
 - 生效审查开关 = `项目 review_enabled ?? 全局 review.enabled`。
 - `allow_test_commands` / `squash_merge` 为全局级，不提供项目覆盖（如需可后续扩展）。
+- 任务级 `review_no_tests: true`（0.36.0）：该任务审查强制 `allow_test_commands=false`，只做代码/diff 核对；适合文档/配置类任务或项目本身无测试，避免 pytest 退出码 5（未收集到测试）被误判为失败。提示词同时明确「未运行测试」不作为失败依据。
 
 **生效组合矩阵**：
 

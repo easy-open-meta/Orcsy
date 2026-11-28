@@ -31,7 +31,7 @@ English | [简体中文](README.zh-CN.md)
 ## ✨ Features
 
 - **Multi-model Agent team** — PM / Backend / Frontend / QA crews: the PM decomposes DAG subtasks read-only or dispatches directly; developers code in task-isolated worktrees with upstream API contracts injected; QA drives local servers and browsers for E2E testing, files defects and auto-regresses — one requirement closes in a single cycle.
-- **Trusted unattended pipeline** — independent review model as a pre-merge gate (failures return for rework), idempotent dispatch with TTL leases and stale-lease checks, crash resume without duplicate commits, a human-gated commit/push page, high-risk pre-merge approval (single operator or a quorum via GitLab / GitHub / Feishu / DingTalk), token/cost hard gates, circuit breaker, and an append-only write audit log.
+- **Trusted unattended pipeline** — independent review model as a pre-merge gate (failures return for rework), idempotent dispatch with TTL leases and stale-lease checks, crash resume without duplicate commits, a human-gated commit/push page, high-risk pre-merge approval (single operator or a quorum via GitLab / GitHub / Feishu / DingTalk, with visual provider setup and per-vendor permission hints), token/cost hard gates, circuit breaker, and an append-only write audit log.
 - **🧠 Project memory & context** — `ARCHITECTURE.md` architecture blackboard plus `PROJECT_NOTES.md` lessons (injected into every task; archives to `LONG_TERM_MEMORY.md` when full), a requirement-batch clipboard for temporary ports/credentials, summary-based context trimming that keeps early facts alive, and read-only `delegate_explore` sub-agents.
 - **Any LLM, Markdown tasks** — OpenAI-compatible and Anthropic protocols with native function calling (DeepSeek / GLM / Kimi / Qwen / Ollama / vLLM…); one `.md` per task, one `AGENT.md` per project, optional per-project model binding.
 - **🛠️ Sandboxed tools & approvals** — file tools confined to the project, 90+ whitelisted commands across 9 ecosystems, three permission modes with a dashboard approval queue, and silent toolchain installation (China mirrors included).
@@ -343,6 +343,7 @@ See `config.example.yaml` at the repo root for the full annotated config (kept i
 | `tools` / `commands` | Global tool toggles and command-whitelist toggles (`{name: bool}`; unlisted stay enabled/allowed; `finish` cannot be disabled) |
 | `env.vars` | Env vars injected into Agent subprocesses: configure `GOPROXY` / `HTTP_PROXY` / `PIP_INDEX_URL` etc. when dependency downloads fail in mainland China (overriding PATH and other system vars is rejected) |
 | `permissions.mode` / `timeout_minutes` | Permission mode (ask_on_change / autonomous / full_access) / approval timeout in minutes (default 30) |
+| `approval_providers` / `approvers` / `risk_approval` | High-risk pre-merge approval: provider credentials (GitLab/GitHub/Feishu/DingTalk/fake), email↔identity mapping, policy/quorum/timeout; editable under Settings → Runtime & Cost → Approval providers (secrets masked, blank = keep) |
 | `review.*` | Task review (Review Agent): `llm` binds the review model (**must differ from the task model**, default `~` = review off), `max_turns` review rounds, `max_review_rounds` rework limit (default 2), `allow_test_commands` real test runs, `squash_merge` collapse rework commits; per-project `review_enabled` / `review_llm` / `review_max_rounds` override |
 | `masking.*` | Data masking: `enabled` (default on) / `enhanced_rules` key-value rules (default off) / `custom_patterns` custom regex — see the data-masking section under Dashboard Login Auth |
 | `notify.sound` / `system` | Task-end alerts: bundled sound / tray-balloon notification (both on by default; manual stops stay silent) |
@@ -355,6 +356,7 @@ See `config.example.yaml` at the repo root for the full annotated config (kept i
 | `update.*` | Self-update source repo (official Gitee source by default) / private token / auto-check on startup |
 | frontmatter `order` | Drag-and-drop sequence (breaks ties within a priority for display and claiming; delete the line to return to automatic ordering) |
 | frontmatter `requeue_seq` / `review_pending` / `review_round` | Auto-maintained, never hand-edited: requeue priority / pending-review state / cumulative rework rounds |
+| frontmatter `review_no_tests` | Task declares tests are not required: the reviewer gets no `run_command` and must not fail solely for not running tests |
 
 ## 📊 Logging & Observability
 

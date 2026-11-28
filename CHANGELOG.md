@@ -17,11 +17,17 @@
 - 看板支持 Provider 选择、高风险会签人数、email 白名单、callback_url（含「使用当前访问域名」）、轮询间隔与审批人映射；待审批弹窗显示会签进度/审批人/外部链接。
 - **风险审批 Phase 2B（GitLab/GitHub 审批工单）**：Provider 创建 issue，审批人评论 `/approve` 或 `/reject 原因`，Orcsy 轮询计数；不推送代码分支。支持 GitLab `X-Gitlab-Token` 与 GitHub `X-Hub-Signature-256` Webhook 验签。
 - **风险审批 Phase 2C（飞书/钉钉审批实例）**：飞书用 tenant_access_token 创建审批实例并轮询 task_list；钉钉用 gettoken 创建 processinstance 并轮询 operation_records；按 Provider 账号映射 email 计数。两者当前仅轮询，Webhook 暂未启用。
-- 说明：Provider 凭据仍在 config.yaml 的 `approval_providers` 配置，设置页选择名称并配置 quorum/白名单/回调。
+- **审批 Provider 可视化配置**：看板「设置 → 运行与成本 → 审批 Provider」支持 GitLab/GitHub/飞书/钉钉/fake 的添加、编辑与删除；密钥只显示掩码、留空保持原值；「+ 添加 Provider」旁的 ? 列出各家最小权限。
+- 说明：Provider 凭据可在看板可视化配置；也可继续手改 config.yaml 的 `approval_providers`（适合自动化/CI），设置页选择名称并配置 quorum/白名单/回调。
 
 ### 修复
 - 看板 keep-alive 连接上连续 POST 时，raw body 缓存未按请求重置，第二个请求会复用上一个 body，剩余字节被当成下一请求行（501 Unsupported method）。现于每个 POST 开始时重置，并新增 `test_web_keepalive_post.py` 回归。
 - 审批 Provider 访问回环地址（本机自托管 GitLab 等）时不再走系统代理：此前本机常驻代理会把 `127.0.0.1` 请求转发到上游，表现为 502/连接重置/超时；公网 Provider 仍遵循代理设置。
+- GitLab 审批工单：`/approve`、`/lgtm` 是 MR 保留 quick action，issue 上无法使用且不会产生 note；新增 `orcsy approve` / `orcsy reject 原因` 无斜杠写法。
+- 钉钉 Provider：支持 `form_component_values`（按控件 label 提交）并兼容真实 `operation_result` 字段，修复空表单 820001 与会签永远 0/N。
+- 飞书 Provider：审批实例 `form` 改为控件数组，修复真实模板 1390001 表单格式错误。
+- 审查门：新增任务级 `review_no_tests`（审查不跑测试）；提示词明确「未运行测试」与 pytest 退出码 5 不算失败。
+- 会签拒绝时记录拒绝人，`risk.json` 的 `by` 不再为空。
 
 ## [0.35.0] — 2026-11-26
 

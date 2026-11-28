@@ -1616,6 +1616,7 @@ Agent）：第二个模型把关</h3>
 <p>Orcsy 支持在任务完成后、合并归档前，由一个<strong>独立的审查
 Agent</strong>（与执行任务的 Agent
 <strong>不是同一个模型</strong>）检查任务成果：对照需求与验收标准抽查实现、（可选）实际跑测试验证。审查通过才合并主分支并归档；不通过则带着问题清单自动返工。</p>
+<p><strong>任务明确不需要测试时</strong>（文档/配置类改动），可在任务 frontmatter 写 <code>review_no_tests: true</code>：审查 Agent 不再获得 <code>run_command</code> 权限，只做代码/diff 核对；提示词同时明确「未运行测试」不作为失败依据，<code>pytest</code> 退出码 5（未收集到测试）也不算失败。</p>
 <p><strong>默认状态：审查未启用。</strong>
 没配置审查模型时一切照旧（任务完成即合并归档）。想开启，只需要给系统配置<strong>第二个模型</strong>（可以是便宜的小模型）：</p>
 <ol type="1">
@@ -2090,17 +2091,25 @@ commit 与 diff 的 SHA-256
 logs/audit.jsonl、运行目录 risk.json，任务正文增加「风险审批」节。</p>
 <p><strong>多人会签（GitLab / GitHub / 飞书 / 钉钉）</strong></p>
 <ul>
-<li>先在 <code>config.yaml</code> 的
-<code>approval_providers</code> 配置
-Provider 凭据；然后在设置页选择 Provider
+<li>在「设置 → 运行与成本 → 审批 Provider」可视化添加/编辑/删除
+Provider（密钥只显示掩码，留空保持原值）；点「+ 添加
+Provider」旁的 ? 查看各家所需权限。然后在「风险审批」选择 Provider
 名称，把高风险策略设为 <code>quorum</code>，填写会签人数（至少
 2）、允许审批的 email、回调地址与轮询间隔。</li>
+<li>最小权限：GitLab 细粒度 <code>Work Item: Create</code> +
+<code>Work Item: Read</code>（或经典 <code>api</code>）；GitHub
+<code>Issues: Read and write</code>（或经典 <code>repo</code> /
+<code>public_repo</code>）；飞书 <code>approval:approval</code>（可选
+<code>contact:contact.base:readonly</code> +
+<code>contact:user.email:readonly</code>）；钉钉审批实例创建/读取（可选通讯录读取）。</li>
 <li>在 <code>approvers</code> 中把每个 email 映射到 Provider
 身份（GitLab username、GitHub login、飞书 user_id/open_id、钉钉
 userid）。<strong>email 是唯一计数口径</strong>，未登记账号的批准/拒绝会被忽略。</li>
 <li>GitLab/GitHub 使用审批工单：Orcsy 创建
 issue，审批人评论 <code>/approve</code> 或
-<code>/reject 原因</code>，Orcsy
+<code>/reject 原因</code>（GitLab 上 <code>/approve</code>、<code>/lgtm</code>
+是 MR 保留 quick action，issue 里请改用 <code>orcsy approve</code> /
+<code>orcsy reject 原因</code>），Orcsy
 轮询评论并按不同 email 计数；不推送代码分支。飞书/钉钉创建原生审批实例并轮询
 task/operation records；两者的 Webhook 暂未启用，使用轮询。</li>
 <li>回调：生产环境使用

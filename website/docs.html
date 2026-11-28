@@ -322,7 +322,8 @@ depends_on: [P1-api]    <span class="c"># 前置依赖任务 ID 列表（全部�
         <tr><td>web.*</td><td>看板监听地址/端口（默认 127.0.0.1:5116）、自动开浏览器、<b>auth_password 登录鉴权</b>（外网部署务必设置）</td></tr>
         <tr><td>tools / permissions</td><td>全局工具开关（未列出默认启用）；全局访问权限模式与审批超时</td></tr>
         <tr><td>agent_profiles.*</td><td>全局 Agent 角色预设池（PM / 后端 / 前端 / 测试 / 自定义专职角色的专属模型与工具预设，可供任意项目小组选用）</td></tr>
-        <tr><td>review.*</td><td>任务审查（Review Agent）：合并前独立模型把关、支持测试验证、返工次数与 squash 收敛</td></tr>
+        <tr><td>review.*</td><td>任务审查（Review Agent）：合并前独立模型把关、支持测试验证、返工次数与 squash 收敛；任务 frontmatter <code>review_no_tests: true</code> 可声明该任务不跑测试（审查只做代码/diff 核对）</td></tr>
+        <tr><td>approval_providers / approvers / risk_approval</td><td>高风险合入前审批：Provider 凭据（GitLab/GitHub/飞书/钉钉/fake）、email↔身份映射、策略/会签/超时；看板「设置 → 运行与成本 → 审批 Provider」可视化配置（密钥只显示掩码，留空保持原值）</td></tr>
         <tr><td>local_debug.*</td><td>本地 Chromium 浏览器（Chrome/Edge）调试引擎与后台开发服务参数</td></tr>
         <tr><td>git.*</td><td>Git 自动化工作流配置：commit_and_merge（单兵模式是否自动提交合并；项目小组模式下强制沙盒隔离且默认不自动提交，由人把关）</td></tr>
         <tr><td>env / mirrors</td><td>Agent 子进程环境变量注入（GOPROXY / HTTP_PROXY / PIP_INDEX_URL 等，国内拉依赖兜底，不允许覆盖 PATH）；镜像源管理：7 类内置 + 自定义源、逐个禁用，测速选源</td></tr>

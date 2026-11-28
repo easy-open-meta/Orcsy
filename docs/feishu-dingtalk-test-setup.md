@@ -9,6 +9,8 @@ Orcsy 的飞书/钉钉适配器当前使用**审批实例轮询**，不依赖 We
 不需要公网域名或反向代理：`risk_approval.callback_url` 留空即可。SaaS 厂商无法
 回调 `localhost`，这是预期行为，不是配置失败。
 
+> **0.36+**：也可在「设置 → 运行与成本 → 审批 Provider」可视化添加 Provider（密钥只显示掩码，留空保持原值）；「+ 添加 Provider」旁的 ? 列出所需权限。下面的 YAML 示例仍适用于自动化/CI 或手写配置。
+
 ## 0. 先确认边界
 
 - 免费团队/企业足够完成开发测试；是否需要企业认证、更高 API 配额或付费版，
@@ -34,7 +36,7 @@ Orcsy 的飞书/钉钉适配器当前使用**审批实例轮询**，不依赖 We
 
 1. 打开 [飞书开发者后台](https://open.feishu.cn/app)；
 2. 创建**企业自建应用**，记录 `App ID` / `App Secret`；
-3. 在权限管理中开通审批相关权限（搜索 `approval`），按控制台提示发布应用版本；
+3. 在权限管理中开通审批相关权限（搜索 `approval`，至少 `approval:approval`；如需按邮箱查 user_id，再加 `contact:contact.base:readonly` 与 `contact:user.email:readonly`），按控制台提示发布应用版本；
 4. 因为你是测试企业管理员，审核可由自己立即通过。
 
 官方流程：[自建应用开发流程](https://open.feishu.cn/document/home/introduction-to-custom-app-development/self-built-application-development-process)
@@ -110,7 +112,7 @@ risk_approval:
 1. 打开 [钉钉开放平台](https://open.dingtalk.com/)；
 2. 创建**企业内部应用**（不是第三方 ISV 应用）；
 3. 记录 `AppKey` / `AppSecret`；
-4. 开通审批相关接口权限，发布应用版本；组织管理员审核（即你自己）。
+4. 开通审批实例创建/读取权限（控制台里搜索「审批」），如需按手机号查 userid 再开通通讯录读取；发布应用版本，组织管理员审核（即你自己）。
 
 ### 2.3 创建最小审批模板
 
