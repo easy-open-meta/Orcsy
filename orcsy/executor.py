@@ -733,6 +733,11 @@ class TaskExecutor:
                 return ""
         return self.git.run("diff", f"{base}...{branch}")
 
+    def _review_allow_test_commands(self, task: Task) -> bool:
+        """审查是否可跑测试：全局开关且任务未声明 review_no_tests。"""
+        return bool(self.review_cfg.allow_test_commands) and not bool(
+            getattr(task, "review_no_tests", False))
+
     def _run_review(self, task: Task, review_pending_path: Path | None,
                     wt_path: Path | None = None,
                     base_branch: str | None = None,
@@ -754,7 +759,7 @@ class TaskExecutor:
                 allowed_commands=self.allowed_commands,
                 approval_gate=gate,
                 max_turns=(-1 if self.review_cfg.max_turns == -1 else max(1, self.review_cfg.max_turns)),
-                allow_test_commands=self.review_cfg.allow_test_commands,
+                allow_test_commands=self._review_allow_test_commands(task),
                 extra_env=self.extra_env,
                 run_recorder=self._rec(),
                 budget_tracker=getattr(self, "_budget_tracker", None))
@@ -1618,7 +1623,7 @@ class TaskExecutor:
             allowed_commands=self.allowed_commands,
             approval_gate=self._make_approval_gate(task),
             max_turns=(-1 if self.review_cfg.max_turns == -1 else max(1, self.review_cfg.max_turns)),
-            allow_test_commands=self.review_cfg.allow_test_commands,
+            allow_test_commands=self._review_allow_test_commands(task),
             extra_env=self.extra_env)
 
     def _merge_and_push(self, task: Task, result: TaskResult,

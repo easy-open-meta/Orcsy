@@ -946,6 +946,8 @@ Behavior:
 
 After a task finishes and before its changes are merged and archived, Orcsy can have an **independent review Agent** (**a different model** from the one that executed the task) inspect the result: it checks the implementation against the requirements and acceptance criteria, optionally running tests for real verification. Only a passed review gets merged into the main branch and archived; a failed review sends the task back for automatic rework with the issue list attached.
 
+**Tasks that explicitly don't need tests** (docs/config-only changes) can set `review_no_tests: true` in the task frontmatter. The reviewer then runs without `run_command` and only checks the diff/code; it is also instructed not to fail a task merely because tests were not run, and `pytest` exit code 5 (no tests collected) is not treated as a failure.
+
 **Default state: review is off.** Without a review model configured, everything works as before (tasks are merged and archived on completion). To enable it, just give the system a **second model** (a cheap small model works fine):
 
 1. Open the **🔍 Task review (Review Agent)** card on the settings page;

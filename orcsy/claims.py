@@ -41,7 +41,8 @@ DEFAULT_HEARTBEAT = 30.0     # 心跳间隔
 # frontmatter 中由系统维护、不参与指纹的字段
 _SYSTEM_KEYS = frozenset({
     "status", "order", "requeue_seq", "review_pending", "review_round",
-    "qa_round", "created_by", "resume_run", "budget", "error",
+    "qa_round", "created_by", "resume_run", "review_no_tests", "budget",
+    "error",
 })
 
 # 正文里由系统追加的节：指纹只取这些节之前的内容

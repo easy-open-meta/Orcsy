@@ -126,6 +126,9 @@ def create_or_update_task(agents: dict, data: dict) -> dict:
     old = parse_task_file(path) if path.exists() else None
     if old is not None and old.error:
         old = None
+    review_no_tests = bool(
+        data.get("review_no_tests",
+                 old.review_no_tests if old is not None else False))
 
     # 前置依赖：请求带 depends_on 键则以请求为准（空列表=清除），否则沿用原值
     if "depends_on" in data:
@@ -179,6 +182,8 @@ def create_or_update_task(agents: dict, data: dict) -> dict:
         fm.append(f"assignee: {assignee}")
     if depends_on:
         fm.append("depends_on: [" + ", ".join(depends_on) + "]")
+    if review_no_tests:
+        fm.append("review_no_tests: true")
     if old is not None:
         if old.parent_id:
             fm.append(f"parent_id: {old.parent_id}")

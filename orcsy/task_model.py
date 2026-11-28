@@ -74,6 +74,10 @@ class Task:
     # 续跑标记（frontmatter resume_run: true）：上次进程在 WIP 提交/审查阶段
     # 被强杀，worktree 与提交仍在；重新认领时保留成果继续，而不是从头重跑
     resume_run: bool = False
+    # 审查阶段不运行测试/构建（frontmatter review_no_tests: true）：适合文档/
+    # 配置类任务或项目本身没有测试；审查只做代码级核对，避免 pytest 无测试
+    # 收集（退出码 5）被误判为失败
+    review_no_tests: bool = False
     # 受阻原因（frontmatter block_reason）：budget_exceeded / stale_lease 等
     block_reason: str = ""
     # 项目小组协同与 DAG 依赖字段（均可选，老任务缺省取默认值）
@@ -160,6 +164,7 @@ def parse_task_file(path: Path) -> Task:
 
     # 续跑标记：缺失/非法按 false（旧任务文件天然兼容）
     resume_run = bool(meta.get("resume_run", False))
+    review_no_tests = bool(meta.get("review_no_tests", False))
     block_reason = str(meta.get("block_reason") or "").strip()
 
     # 前置依赖任务 ID 列表：支持列表或逗号分隔字符串，去重保序
@@ -218,6 +223,7 @@ def parse_task_file(path: Path) -> Task:
         review_pending=review_pending,
         review_round=review_round,
         resume_run=resume_run,
+        review_no_tests=review_no_tests,
         block_reason=block_reason,
         depends_on=depends_on,
         parent_id=parent_id,

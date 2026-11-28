@@ -520,7 +520,9 @@ def build_review_system_prompt(project: ProjectConfig, work_root: Path,
         f"（commit/merge/push 由系统在审查通过后统一处理）。\n"
         f"- 你通过工具完成一切工作：{tools_line}。\n"
         f"- 上下文成本控制：大文件先 grep 定位，再用 read_file 的 offset/limit 读区段，"
-        f"不要整读大文件，不要重复读取。\n\n"
+        f"不要整读大文件，不要重复读取。\n"
+        f"- **测试不是必须项**：任务明确说明不需要测试、或项目本身没有可运行测试时，"
+        f"以 diff 与代码核对为准；不要因为没有运行测试而判不通过。\n\n"
         f"{_REVIEW_FINISH_PROTOCOL}"
     )
 
@@ -532,10 +534,19 @@ def build_review_prompt(task: Task, agent_summary: str, agent_notes: str,
     diff = (diff_text or "").strip()
     if len(diff) > diff_max_chars:
         diff = diff[:diff_max_chars] + "\n\n（diff 过长已截断；请用 read_file 自行查看可疑文件全文）"
-    verify_line = (
-        "- 若任务声称验证通过：**必须实际运行相应测试/构建命令**复核，不能只信自述。"
-        if allow_test_commands else
-        "- 你没有命令执行权限：重点做代码级核对（实现是否存在、逻辑是否对应需求）。")
+    no_tests = bool(getattr(task, "review_no_tests", False))
+    if allow_test_commands:
+        verify_line = (
+            "- 若任务声称验证通过：**必须实际运行相应测试/构建命令**复核，不能只信自述。\n"
+            "- 若任务明确说明不需要测试，或 pytest 退出码 5（未收集到测试），"
+            "不要把「未运行测试」视为缺陷。")
+    else:
+        verify_line = (
+            "- 你没有命令执行权限：重点做代码级核对（实现是否存在、逻辑是否对应需求）。")
+    if no_tests:
+        verify_line += (
+            "\n- 本任务声明 `review_no_tests`：审查阶段不运行测试/构建命令，"
+            "请按 diff 与验收标准核对。")
     return (
         f"# 待审查任务\n\n"
         f"- 任务 ID：{task.id}\n"
