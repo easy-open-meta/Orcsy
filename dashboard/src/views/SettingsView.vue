@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NCard, NDynamicTags, NInput, NInputNumber, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane, NTooltip } from 'naive-ui'
+import { NButton, NCard, NDynamicTags, NInput, NInputNumber, NModal, NProgress, NSelect, NSwitch, NTag, NTabs, NTabPane, NTooltip } from 'naive-ui'
 import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { api, type AuditEntryT, type MirrorRowT, type ModelInfo } from '../api'
 import { beginRestartWait, openDirBrowser, settingsSection, store } from '../store'
@@ -38,6 +38,8 @@ const SETTING_GROUPS: SettingGroup[] = [
         desc: '限制真正打给厂商的在途请求数；撞 429 自动对半降并发，成功后逐步爬回。保存后立即生效。' },
       { key: 'resilience', label: '熔断与恢复', icon: 'health_and_safety',
         desc: '连续失败或窗口失败率超阈值时暂停项目领取新任务；默认人工在看板恢复。' },
+      { key: 'providers', label: '审批 Provider', icon: 'key',
+        desc: '可视化配置 GitLab / GitHub / 飞书 / 钉钉等外部审批 Provider；密钥只显示掩码。' },
       { key: 'risk', label: '风险审批', icon: 'verified_user',
         desc: '高风险合入前需看板人工批准；Phase 1 为单机单审批人，API Key 不可代批。' },
     ],
@@ -603,6 +605,213 @@ const riskPolicyOptionsFull = computed(() => [
 ])
 const riskProviderOptions = computed(() =>
   Object.keys(store.state?.approval_providers || {}).map(k => ({ label: k, value: k })))
+
+// ---- 审批 Provider 可视化配置 ----
+type ProviderType = 'gitlab' | 'github' | 'feishu' | 'dingtalk' | 'fake'
+const providerModal = ref(false)
+const providerSaving = shallowRef(false)
+const providerEditing = ref('')          // 原名称；空 = 新增（名称编辑时禁用重命名）
+const providerTypeOptions = computed(() => [
+  { label: 'GitLab', value: 'gitlab' },
+  { label: 'GitHub', value: 'github' },
+  { label: it('飞书'), value: 'feishu' },
+  { label: it('钉钉'), value: 'dingtalk' },
+  { label: it('fake（测试用）'), value: 'fake' },
+])
+const providerDraft = reactive({
+  name: '',
+  type: 'gitlab' as ProviderType,
+  base_url: '',
+  project_id: '',
+  repo: '',
+  token: '',
+  app_id: '',
+  app_secret: '',
+  approval_code: '',
+  app_key: '',
+  process_code: '',
+  originator_user_id: '',
+  dept_id: 1,
+  form_widget_id: '',
+  form_component_values: '[]',
+  callback_secret: '',
+  verify_tls: true,
+  timeout_seconds: 10,
+})
+const providerRows = computed(() =>
+  Object.entries(store.state?.approval_providers || {})
+    .map(([name, p]) => ({ name, ...(p as any) })))
+const providerBasePlaceholder = computed(() => {
+  switch (providerDraft.type) {
+    case 'gitlab': return 'https://gitlab.com 或自建地址'
+    case 'github': return 'https://api.github.com'
+    case 'feishu': return 'https://open.feishu.cn'
+    case 'dingtalk': return 'https://oapi.dingtalk.com'
+    default: return ''
+  }
+})
+
+function providerSummary(p: any): string {
+  const bits = [p.repo, p.project_id, p.app_id || p.app_key,
+                p.approval_code || p.process_code].filter(Boolean)
+  return bits.join(' · ')
+}
+
+function providerSecretPlaceholder(field: 'token' | 'app_secret' | 'callback_secret'): string {
+  const p = store.state?.approval_providers?.[providerEditing.value] as any
+  if (p?.[`${field}_configured`]) return it('已配置，留空保持不变')
+  return field === 'callback_secret' ? it('可选') : it('必填')
+}
+
+function openProvider(name?: string): void {
+  providerEditing.value = name || ''
+  const p = name ? (store.state?.approval_providers?.[name] as any) : null
+  providerDraft.name = name || ''
+  providerDraft.type = (p?.type || 'gitlab') as ProviderType
+  providerDraft.base_url = p?.base_url || ''
+  providerDraft.project_id = p?.project_id || ''
+  providerDraft.repo = p?.repo || ''
+  providerDraft.app_id = p?.app_id || ''
+  providerDraft.approval_code = p?.approval_code || ''
+  providerDraft.app_key = p?.app_key || ''
+  providerDraft.process_code = p?.process_code || ''
+  providerDraft.originator_user_id = p?.originator_user_id || ''
+  providerDraft.dept_id = typeof p?.dept_id === 'number' ? p.dept_id : 1
+  providerDraft.form_widget_id = p?.form_widget_id || ''
+  providerDraft.form_component_values = JSON.stringify(p?.form_component_values || [], null, 2)
+  providerDraft.verify_tls = p?.verify_tls !== false
+  providerDraft.timeout_seconds = p?.timeout_seconds || 10
+  // 密钥不回显：留空 = 保持既有值
+  providerDraft.token = ''
+  providerDraft.app_secret = ''
+  providerDraft.callback_secret = ''
+  providerModal.value = true
+}
+
+/** 从 /api/state 的公开 Provider 还原可回写的配置（不含密钥，后端会保留原值）。 */
+function providerConfigFromState(p: any): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    type: p.type,
+    verify_tls: p.verify_tls !== false,
+    timeout_seconds: p.timeout_seconds || 10,
+  }
+  for (const k of ['base_url', 'project_id', 'repo', 'app_id', 'approval_code',
+                   'app_key', 'process_code', 'originator_user_id',
+                   'form_widget_id']) {
+    if (p[k]) out[k] = p[k]
+  }
+  if (typeof p.dept_id === 'number') out.dept_id = p.dept_id
+  if (Array.isArray(p.form_component_values) && p.form_component_values.length) {
+    out.form_component_values = p.form_component_values
+  }
+  return out
+}
+
+async function saveProvider(): Promise<void> {
+  const name = providerDraft.name.trim()
+  if (!name) {
+    message()?.(it('Provider 名称不能为空'), 'error')
+    return
+  }
+  if (!providerEditing.value && store.state?.approval_providers?.[name]) {
+    message()?.(it('Provider 名称已存在'), 'error')
+    return
+  }
+  const registry: Record<string, unknown> = {}
+  for (const [n, p] of Object.entries(store.state?.approval_providers || {})) {
+    if (n !== providerEditing.value) registry[n] = providerConfigFromState(p)
+  }
+  const cfg: Record<string, unknown> = {
+    type: providerDraft.type,
+    verify_tls: providerDraft.verify_tls,
+    timeout_seconds: providerDraft.timeout_seconds,
+  }
+  const base = providerDraft.base_url.trim()
+  if (base) cfg.base_url = base
+  if (providerDraft.type === 'gitlab') {
+    if (providerDraft.project_id.trim()) cfg.project_id = providerDraft.project_id.trim()
+    if (providerDraft.token.trim()) cfg.token = providerDraft.token.trim()
+  } else if (providerDraft.type === 'github') {
+    if (providerDraft.repo.trim()) cfg.repo = providerDraft.repo.trim()
+    if (providerDraft.token.trim()) cfg.token = providerDraft.token.trim()
+  } else if (providerDraft.type === 'feishu') {
+    for (const [k, v] of [['app_id', providerDraft.app_id],
+                          ['approval_code', providerDraft.approval_code],
+                          ['originator_user_id', providerDraft.originator_user_id],
+                          ['form_widget_id', providerDraft.form_widget_id]] as const) {
+      if (v.trim()) cfg[k] = v.trim()
+    }
+    if (providerDraft.app_secret.trim()) cfg.app_secret = providerDraft.app_secret.trim()
+  } else if (providerDraft.type === 'dingtalk') {
+    for (const [k, v] of [['app_key', providerDraft.app_key],
+                          ['process_code', providerDraft.process_code],
+                          ['originator_user_id', providerDraft.originator_user_id]] as const) {
+      if (v.trim()) cfg[k] = v.trim()
+    }
+    cfg.dept_id = Number(providerDraft.dept_id) || 1
+    if (providerDraft.app_secret.trim()) cfg.app_secret = providerDraft.app_secret.trim()
+    try {
+      const arr = JSON.parse(providerDraft.form_component_values || '[]')
+      if (!Array.isArray(arr)) throw new Error('not array')
+      cfg.form_component_values = arr.map((x: any) => ({
+        name: String(x?.name || '').trim(),
+        value: String(x?.value || ''),
+      })).filter((x: any) => x.name)
+    } catch {
+      message()?.(it('钉钉表单值必须是 JSON 数组'), 'error')
+      return
+    }
+  }
+  if (providerDraft.callback_secret.trim()) {
+    cfg.callback_secret = providerDraft.callback_secret.trim()
+  }
+  registry[name] = cfg
+  providerSaving.value = true
+  try {
+    await api.config({ approval_providers: registry })
+    message()?.(it('Provider 已保存'), 'success')
+    providerModal.value = false
+    await import('../store').then(m => m.refresh(true))
+  } catch (e: any) {
+    message()?.(e.message, 'error')
+  } finally {
+    providerSaving.value = false
+  }
+}
+
+function deleteProvider(name: string): void {
+  const doDelete = async (): Promise<void> => {
+    const registry: Record<string, unknown> = {}
+    for (const [n, p] of Object.entries(store.state?.approval_providers || {})) {
+      if (n !== name) registry[n] = providerConfigFromState(p)
+    }
+    const payload: Record<string, unknown> = { approval_providers: registry }
+    if (store.state?.risk_approval_cfg?.provider === name) {
+      payload.risk_approval = { provider: '' }
+      riskDraft.provider = ''
+    }
+    try {
+      await api.config(payload)
+      message()?.(it('Provider 已删除'), 'success')
+      await import('../store').then(m => m.refresh(true))
+    } catch (e: any) {
+      message()?.(e.message, 'error')
+    }
+  }
+  const dialog = (window as any).$dialog
+  if (dialog) {
+    dialog.warning({
+      title: it('删除 Provider'),
+      content: tFmt('确定删除 {p0}？', { p0: name }),
+      positiveText: it('删除'),
+      negativeText: it('取消'),
+      onPositiveClick: doDelete,
+    })
+  } else {
+    void doDelete()
+  }
+}
+
 
 function useCurrentDomain(): void {
   const path = window.location.pathname.replace(/\/+$/, '')
@@ -2231,6 +2440,115 @@ const protocolOptions = computed(() => [
             </div>
             <div class="sfoot"><NButton type="primary" :loading="resilienceSaving" @click="saveResilience">{{ it('保存熔断设置') }}</NButton></div>
           </NCard>
+        </div>
+        <div v-if="settingsSection === 'providers'">
+          <NCard size="small" class="scard">
+            <template #header>
+              <div style="display:flex; align-items:center; gap:10px; flex:1; justify-content:space-between; flex-wrap:wrap;">
+                <span><i class="ms">key</i> {{ it('审批 Provider') }}</span>
+                <NButton size="small" type="primary" @click="openProvider()">{{ it('+ 添加 Provider') }}</NButton>
+              </div>
+            </template>
+            <div class="hint">{{ it('配置 GitLab / GitHub / 飞书 / 钉钉等外部审批 Provider；密钥保存后只显示掩码。') }}</div>
+            <div v-for="p in providerRows" :key="p.name"
+                 style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);">
+              <div style="min-width:0;">
+                <b>{{ p.name }}</b>
+                <NTag size="small" style="margin-left:8px;">{{ p.type }}</NTag>
+                <span class="hint" style="margin-left:8px;">{{ providerSummary(p) }}</span>
+              </div>
+              <div class="btnrow">
+                <NButton size="tiny" @click="openProvider(p.name)">{{ it('编辑') }}</NButton>
+                <NButton size="tiny" quaternary type="error" @click="deleteProvider(p.name)">{{ it('删除') }}</NButton>
+              </div>
+            </div>
+            <div v-if="!providerRows.length" class="hint" style="margin-top:8px;">{{ it('尚未配置 Provider') }}</div>
+            <div class="hint" style="margin-top:10px;">
+              {{ it('审批人 email ↔ Provider 身份映射与 quorum 策略在「风险审批」分区配置。') }}
+            </div>
+          </NCard>
+
+          <NModal v-model:show="providerModal" preset="card" style="width:640px; max-width:94vw;"
+                  :title="providerEditing ? it('编辑 Provider') : it('添加 Provider')">
+            <div class="frow">
+              <div class="f1"><label>{{ it('名称') }}</label>
+                <NInput v-model:value="providerDraft.name" :disabled="!!providerEditing" placeholder="gitlab-test" /></div>
+              <div class="f1"><label>{{ it('类型') }}</label>
+                <NSelect v-model:value="providerDraft.type" :options="providerTypeOptions" :disabled="!!providerEditing" /></div>
+            </div>
+            <div class="frow" v-if="providerDraft.type !== 'fake'">
+              <div class="f1"><label>Base URL（{{ it('可选') }}）</label>
+                <NInput v-model:value="providerDraft.base_url" :placeholder="providerBasePlaceholder" /></div>
+              <div class="f1"><label>{{ it('请求超时（秒）') }}</label>
+                <NInputNumber v-model:value="providerDraft.timeout_seconds" :min="1" :max="60" /></div>
+            </div>
+            <template v-if="providerDraft.type === 'gitlab'">
+              <div class="frow">
+                <div class="f1"><label>Project ID / path</label>
+                  <NInput v-model:value="providerDraft.project_id" placeholder="group/project 或数字 ID" /></div>
+                <div class="f1"><label>Access Token</label>
+                  <NInput v-model:value="providerDraft.token" type="password" show-password-on="click"
+                          :placeholder="providerSecretPlaceholder('token')" /></div>
+              </div>
+            </template>
+            <template v-if="providerDraft.type === 'github'">
+              <div class="frow">
+                <div class="f1"><label>Repository</label>
+                  <NInput v-model:value="providerDraft.repo" placeholder="owner/name" /></div>
+                <div class="f1"><label>Access Token</label>
+                  <NInput v-model:value="providerDraft.token" type="password" show-password-on="click"
+                          :placeholder="providerSecretPlaceholder('token')" /></div>
+              </div>
+            </template>
+            <template v-if="providerDraft.type === 'feishu'">
+              <div class="frow">
+                <div class="f1"><label>App ID</label><NInput v-model:value="providerDraft.app_id" /></div>
+                <div class="f1"><label>App Secret</label>
+                  <NInput v-model:value="providerDraft.app_secret" type="password" show-password-on="click"
+                          :placeholder="providerSecretPlaceholder('app_secret')" /></div>
+              </div>
+              <div class="frow">
+                <div class="f1"><label>Approval Code</label><NInput v-model:value="providerDraft.approval_code" /></div>
+                <div class="f1"><label>Originator user_id</label><NInput v-model:value="providerDraft.originator_user_id" /></div>
+              </div>
+              <div class="frow">
+                <div class="f1"><label>Form widget ID（{{ it('可选') }}）</label><NInput v-model:value="providerDraft.form_widget_id" /></div>
+              </div>
+            </template>
+            <template v-if="providerDraft.type === 'dingtalk'">
+              <div class="frow">
+                <div class="f1"><label>AppKey</label><NInput v-model:value="providerDraft.app_key" /></div>
+                <div class="f1"><label>AppSecret</label>
+                  <NInput v-model:value="providerDraft.app_secret" type="password" show-password-on="click"
+                          :placeholder="providerSecretPlaceholder('app_secret')" /></div>
+              </div>
+              <div class="frow">
+                <div class="f1"><label>Process Code</label><NInput v-model:value="providerDraft.process_code" placeholder="PROC-..." /></div>
+                <div class="f1"><label>Originator user_id</label><NInput v-model:value="providerDraft.originator_user_id" /></div>
+              </div>
+              <div class="frow">
+                <div class="f1"><label>Dept ID</label><NInputNumber v-model:value="providerDraft.dept_id" :min="1" /></div>
+              </div>
+              <label>{{ it('钉钉表单值（JSON 数组，按控件 label）') }}</label>
+              <NInput v-model:value="providerDraft.form_component_values" type="textarea"
+                      :autosize="{ minRows: 3, maxRows: 8 }"
+                      placeholder='[{"name":"单行输入框","value":"Orcsy 风险审批"}]' />
+            </template>
+            <div class="frow">
+              <div class="f1"><label>Callback Secret（{{ it('可选') }}）</label>
+                <NInput v-model:value="providerDraft.callback_secret" type="password" show-password-on="click"
+                        :placeholder="providerSecretPlaceholder('callback_secret')" /></div>
+              <div class="f1"><label>{{ it('校验 TLS 证书') }}</label>
+                <NSwitch v-model:value="providerDraft.verify_tls" /></div>
+            </div>
+            <div class="hint">{{ it('密钥留空表示保持原值；新增 Provider 时必填。') }}</div>
+            <template #footer>
+              <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <NButton @click="providerModal = false">{{ it('取消') }}</NButton>
+                <NButton type="primary" :loading="providerSaving" @click="saveProvider">{{ it('保存 Provider') }}</NButton>
+              </div>
+            </template>
+          </NModal>
         </div>
         <div v-if="settingsSection === 'risk'">
           <NCard size="small" class="scard">

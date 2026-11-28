@@ -332,6 +332,10 @@ export interface ApprovalProviderT {
   approval_code?: string
   app_key?: string
   process_code?: string
+  originator_user_id?: string
+  dept_id?: number
+  form_widget_id?: string
+  form_component_values?: { name: string; value: string }[]
   verify_tls?: boolean
   timeout_seconds?: number
   token_masked?: string
