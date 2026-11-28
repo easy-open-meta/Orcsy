@@ -2578,9 +2578,9 @@ const protocolOptions = computed(() => [
               <div class="f1"><label>{{ it('外部审批 Provider（quorum 用）') }}</label>
                 <NSelect :value="riskDraft.provider || null"
                          :options="riskProviderOptions" clearable
-                         :placeholder="it('未配置（先在 config.yaml 添加 approval_providers）')"
+                         :placeholder="it('未配置（先在「审批 Provider」里添加）')"
                          @update:value="(v: string | null) => { riskDraft.provider = v || '' }" />
-                <div class="hint">{{ it('Provider 凭据在 config.yaml 的 approval_providers 配置；这里选择名称。') }}</div>
+                <div class="hint">{{ it('Provider 凭据在「审批 Provider」分区配置；这里选择名称。') }}</div>
               </div>
               <div class="f1"><label>{{ it('高风险会签人数（quorum）') }}</label>
                 <NInputNumber v-model:value="riskDraft.quorum_high" :min="2" :max="20" /></div>
