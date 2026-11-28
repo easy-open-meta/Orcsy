@@ -478,11 +478,19 @@ onUnmounted(() => { window.clearInterval(timer); pendingWatch?.() })
   --text:#e5eaf6; --dim:#94a2be; --faint:#64748f;
   /* 用量热力图色阶（蓝系，与主色同源） */
   --hm0:rgba(128,140,180,.14); --hm1:#16305c; --hm2:#1e4a97; --hm3:#3568d4; --hm4:#5b8cff;
+  /* 亚克力浮层 */
+  --orcsy-tip-bg:rgba(19,26,42,.72); --orcsy-tip-border:rgba(120,150,220,.28);
+  --orcsy-tip-shadow:0 12px 32px rgba(0,0,0,.45);
+  --orcsy-pop-bg:rgba(19,26,42,.84); --orcsy-pop-border:rgba(120,150,220,.30);
 }
 :root[data-theme="light"]{
   --bg:#f2f4f9; --panel:#ffffff; --card:#f7f8fc; --line:#e4e9f3; --line2:#cbd5ea;
   --text:#1d2637; --dim:#5c6b85; --faint:#8e9bb3;
   --hm0:rgba(29,38,55,.08); --hm1:#cfe0ff; --hm2:#9dc0fb; --hm3:#5f93f7; --hm4:#2f6bff;
+  /* 亚克力浮层 */
+  --orcsy-tip-bg:rgba(255,255,255,.72); --orcsy-tip-border:rgba(203,213,234,.9);
+  --orcsy-tip-shadow:0 12px 32px rgba(29,38,55,.16);
+  --orcsy-pop-bg:rgba(255,255,255,.84); --orcsy-pop-border:rgba(203,213,234,.9);
 }
 html { background: var(--bg); scrollbar-color: rgba(128, 128, 160, 0.4) transparent; }
 body {
@@ -688,4 +696,28 @@ details[open] > summary::before {
 .menu-item .ms, .pick-name .ms { margin-right: 6px; }
 .n-button .ms, .n-tag .ms { margin-right: 4px; font-size: 16px; }
 
+
+/* 统一亚克力浮层：tooltip / popover / select 下拉 / dropdown 菜单。
+   颜色走上方双主题变量，避免默认黑色 tooltip 与全局主题割裂。 */
+.n-tooltip {
+  background: var(--orcsy-tip-bg) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--orcsy-tip-border);
+  border-radius: 10px;
+  box-shadow: var(--orcsy-tip-shadow);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+}
+.n-tooltip .n-tooltip__arrow { display: none; }
+.n-popover,
+.n-base-select-menu,
+.n-dropdown-menu {
+  background: var(--orcsy-pop-bg) !important;
+  border: 1px solid var(--orcsy-pop-border);
+  border-radius: 10px;
+  box-shadow: var(--orcsy-tip-shadow);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+.n-popover .n-popover__arrow { display: none; }
 </style>

@@ -5,21 +5,9 @@
 import { NTooltip } from 'naive-ui'
 import { tNow as t } from '../lang'
 
-// 亚克力提示框：半透明背景 + backdrop-filter 模糊，颜色由全局双主题变量驱动
-const tipStyle = {
-  maxWidth: '460px',
-  background: 'var(--orcsy-tip-bg)',
-  border: '1px solid var(--orcsy-tip-border)',
-  borderRadius: '10px',
-  boxShadow: 'var(--orcsy-tip-shadow)',
-  backdropFilter: 'blur(16px) saturate(160%)',
-  WebkitBackdropFilter: 'blur(16px) saturate(160%)',
-}
-const contentStyle = {
-  color: 'var(--text)',
-  padding: '10px 12px',
-  fontSize: '13px',
-}
+// 尺寸与内边距；背景/边框/阴影/模糊由 App.vue 的全局浮层样式统一接管
+const tipStyle = { maxWidth: '460px' }
+const contentStyle = { padding: '10px 12px', fontSize: '13px' }
 </script>
 
 <template>
@@ -37,17 +25,3 @@ const contentStyle = {
     </div>
   </NTooltip>
 </template>
-
-<style>
-/* 双主题亚克力色：浅色=半透明白，深色=半透明深蓝；跟随 html[data-theme] */
-:root[data-theme="light"] {
-  --orcsy-tip-bg: rgba(255, 255, 255, 0.72);
-  --orcsy-tip-border: rgba(203, 213, 234, 0.9);
-  --orcsy-tip-shadow: 0 12px 32px rgba(29, 38, 55, 0.16);
-}
-:root[data-theme="dark"] {
-  --orcsy-tip-bg: rgba(19, 26, 42, 0.72);
-  --orcsy-tip-border: rgba(120, 150, 220, 0.28);
-  --orcsy-tip-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-}
-</style>
